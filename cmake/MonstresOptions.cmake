@@ -2,6 +2,9 @@
 
 function(monstres_set_options target)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow)
+  # No fused multiply-add: keeps float results identical natively and in
+  # WebAssembly, so game replays give bit-identical states everywhere.
+  target_compile_options(${target} PRIVATE -ffp-contract=off)
   if(MONSTRES_WERROR)
     target_compile_options(${target} PRIVATE -Werror)
   endif()

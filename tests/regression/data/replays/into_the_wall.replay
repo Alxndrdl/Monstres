@@ -1,0 +1,3 @@
+# Marche longtemps dans une direction : objets puis bord du monde.
+seed 123
+walk 40 127 30 1500

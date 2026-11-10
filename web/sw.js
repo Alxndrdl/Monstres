@@ -3,12 +3,13 @@
 // Strategy: network first, cache as fallback. Online, players always get the
 // latest build (no stale .wasm after a deploy); offline, the last copy is used.
 
-const CACHE = 'monstres-v1';
+const CACHE = 'monstres-v2';
 const CORE_FILES = [
   './',
   'index.html',
   'index.js',
   'index.wasm',
+  'controls.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

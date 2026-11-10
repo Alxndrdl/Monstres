@@ -6,16 +6,17 @@ using namespace monstres;
 namespace {
 World some_game() {
   World w = new_game(2024);
-  for (int i = 0; i < 300; ++i) step(w, static_cast<Action>(i % 6));
+  for (int i = 0; i < 300; ++i) {
+    step(w, move(static_cast<int8_t>(i % 255 - 127), 100, static_cast<Angle16>(i * 300), i % 50 == 0));
+  }
   return w;
 }
 }  // namespace
 
 TEST_CASE("a world survives serialize + deserialize unchanged") {
   const World w = some_game();
-  const auto bytes = serialize(w);
   LoadError error = LoadError::Corrupt;
-  const auto loaded = deserialize(bytes, &error);
+  const auto loaded = deserialize(serialize(w), &error);
   REQUIRE(loaded.has_value());
   CHECK(error == LoadError::None);
   CHECK(*loaded == w);
@@ -25,8 +26,9 @@ TEST_CASE("a loaded world continues exactly like the original") {
   World original = some_game();
   World copy = *deserialize(serialize(original));
   for (int i = 0; i < 500; ++i) {
-    step(original, Action::Attack);
-    step(copy, Action::Attack);
+    const Input in = move(50, 127, static_cast<Angle16>(i * 97), i % 40 == 0);
+    step(original, in);
+    step(copy, in);
   }
   CHECK(copy == original);
 }
@@ -43,6 +45,11 @@ TEST_CASE("invalid saves are rejected with the right error") {
     bytes[0] = 'X';
     CHECK_FALSE(deserialize(bytes, &error));
     CHECK(error == LoadError::BadMagic);
+  }
+  SUBCASE("old version 1 (2D prototype)") {
+    bytes[4] = 1;
+    CHECK_FALSE(deserialize(bytes, &error));
+    CHECK(error == LoadError::UnsupportedVersion);
   }
   SUBCASE("future version") {
     bytes[4] = 99;
@@ -64,12 +71,17 @@ TEST_CASE("invalid saves are rejected with the right error") {
     CHECK_FALSE(deserialize(bytes, &error));
     CHECK(error == LoadError::Corrupt);
   }
+  SUBCASE("not a number in a position") {
+    // Player x is right after magic, version, tick and the RNG (4+4+8+8+8 bytes).
+    bytes[32] = 0xff; bytes[33] = 0xff; bytes[34] = 0xff; bytes[35] = 0x7f;
+    CHECK_FALSE(deserialize(bytes, &error));
+    CHECK(error == LoadError::Corrupt);
+  }
 }
 
-TEST_CASE("a save with a position outside the map is rejected") {
+TEST_CASE("a save with the player outside the world is rejected") {
   World w = empty_world();
-  add_monster(w, {3, 3});
-  w.monsters[0].pos = {rules::kWidth, 0};
+  w.player.pos.x = rules::kWorldHalfSize + 10;
   LoadError error = LoadError::None;
   CHECK_FALSE(deserialize(serialize(w), &error));
   CHECK(error == LoadError::Corrupt);
@@ -79,6 +91,6 @@ TEST_CASE("state_hash tells worlds apart") {
   const World a = some_game();
   World b = a;
   CHECK(state_hash(a) == state_hash(b));
-  b.player.score += 1;
+  b.player.pos.x += 0.001f;
   CHECK(state_hash(a) != state_hash(b));
 }

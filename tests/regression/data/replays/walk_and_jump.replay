@@ -1,0 +1,9 @@
+# Marche tout droit, saute, tourne la caméra et repart.
+seed 42
+walk 0 127 0 90
+jump 0 127 0
+walk 0 127 0 60
+walk 127 0 0 40
+walk 0 127 90 120
+jump
+idle 60

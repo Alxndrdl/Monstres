@@ -1,5 +1,6 @@
 #pragma once
 
+#include "monstres/core/math.hpp"
 #include "monstres/core/rng.hpp"
 
 #include <cstdint>
@@ -7,43 +8,47 @@
 
 namespace monstres {
 
-// Game rules use integers only (grid positions, hit points). Floating point
-// results can differ between native and WebAssembly builds, integers cannot,
-// so a replay gives the exact same state everywhere.
-
-struct Vec2i {
-  int32_t x = 0;
-  int32_t y = 0;
-  bool operator==(const Vec2i&) const = default;
-};
-
-enum class Action : uint8_t { None = 0, Up, Down, Left, Right, Attack };
+// Coordinates: meters. Y is up, the ground is the plane y = 0.
+// With a camera yaw of 0, "forward" is -Z and "right" is +X.
 
 namespace rules {
-inline constexpr int32_t kWidth = 16;
-inline constexpr int32_t kHeight = 12;
-inline constexpr int32_t kTicksPerSecond = 10;
-inline constexpr int32_t kPlayerMaxHp = 10;
-inline constexpr int32_t kMonsterMaxHp = 3;
-inline constexpr uint32_t kKillScore = 10;
-inline constexpr uint64_t kMonsterMoveEvery = 8;   // ticks
-inline constexpr uint64_t kSpawnEvery = 40;        // ticks
-inline constexpr uint32_t kInitialMonsters = 3;
-inline constexpr uint32_t kMaxMonsters = 8;
-inline constexpr int32_t kMinSpawnDistance = 4;    // from the player
+inline constexpr int32_t kTicksPerSecond = 60;
+inline constexpr float kDt = 1.0f / kTicksPerSecond;
+inline constexpr float kWorldHalfSize = 30.0f;  // the ground spans [-30, 30] on X and Z
+inline constexpr float kPlayerHalfWidth = 0.4f; // the player is a 0.8 m cube
+inline constexpr float kPlayerHeight = 0.8f;
+inline constexpr float kWalkSpeed = 5.0f;       // m/s
+inline constexpr float kJumpSpeed = 7.0f;       // m/s, jumps ~1.2 m high
+inline constexpr float kGravity = 20.0f;        // m/s²
+inline constexpr float kMaxFallSpeed = 30.0f;
+inline constexpr uint32_t kObjectCount = 40;
+inline constexpr float kSpawnClearRadius = 4.0f;
 }  // namespace rules
 
-struct Monster {
-  uint32_t id = 0;
-  Vec2i pos;
-  int32_t hp = 0;
-  bool operator==(const Monster&) const = default;
+// What the player does during one tick. Integers, so that replays and saved
+// inputs reproduce exactly.
+struct Input {
+  int8_t move_x = 0;   // joystick right (+127) / left (-127)
+  int8_t move_y = 0;   // joystick forward (+127) / back (-127)
+  Angle16 yaw = 0;     // camera direction: movement is relative to it
+  bool jump = false;   // jump this tick (if on the ground)
+  bool operator==(const Input&) const = default;
+};
+
+// A fixed, axis-aligned box resting on the ground.
+struct Object {
+  Vec3 center;
+  Vec3 half;           // half extents
+  uint8_t color = 0;   // index in the render palette
+  bool operator==(const Object&) const = default;
 };
 
 struct Player {
-  Vec2i pos;
-  int32_t hp = 0;
-  uint32_t score = 0;
+  Vec3 pos;            // center of the bottom face (feet)
+  float velocity_y = 0;
+  bool on_ground = true;
+  float facing_x = 0;  // unit vector of the last movement direction
+  float facing_z = -1;
   bool operator==(const Player&) const = default;
 };
 
@@ -51,21 +56,21 @@ struct World {
   uint64_t tick = 0;
   Rng rng;
   Player player;
-  std::vector<Monster> monsters;
-  uint32_t next_monster_id = 1;
-
-  bool game_over() const { return player.hp <= 0; }
+  std::vector<Object> objects;
   bool operator==(const World&) const = default;
 };
 
 World new_game(uint64_t seed);
 
-// Advances the world by exactly one fixed tick. Same world + same action
-// always gives the same result.
-void step(World& world, Action action);
+// Advances the world by exactly one fixed tick (1/60 s). Same world + same
+// input always gives the same result, on every platform.
+void step(World& world, const Input& input);
 
-bool inside(Vec2i p);
-int32_t manhattan(Vec2i a, Vec2i b);
-const Monster* monster_at(const World& world, Vec2i p);
+struct Box {
+  Vec3 min, max;
+};
+Box player_box(const Player& p);
+Box object_box(const Object& o);
+bool overlaps(const Box& a, const Box& b);  // strict: touching is not overlapping
 
 }  // namespace monstres

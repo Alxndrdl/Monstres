@@ -1,3 +1,3 @@
-# Une longue partie aux entrées aléatoires (couvre spawns, combats, défaite).
+# Longue partie aux entrées aléatoires : déplacements, sauts, collisions.
 seed 7
-random 1234 5000
+random 1234 6000

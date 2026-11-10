@@ -1,61 +1,57 @@
-// Functional tests: whole game scenarios driven by player actions, checked
-// through the outcome a player would see.
+// Functional tests: whole game situations driven by player inputs, checked
+// through what the player would see.
 
 #include "monstres/core/save.hpp"
 #include "replay.hpp"
 #include "test_helpers.hpp"
 
-#include <sstream>
-
 using namespace monstres;
 using namespace monstres::test;
+using doctest::Approx;
 
-namespace {
-Replay replay_from(const std::string& text) {
-  std::istringstream in(text);
-  return parse_replay(in);
-}
-}  // namespace
-
-TEST_CASE("walking right stops at the edge of the map") {
-  const World w = play(replay_from("seed 3\nactions right*30"));
-  // Either the edge or a monster in the way stops the player.
-  const bool at_edge = w.player.pos.x == rules::kWidth - 1;
-  const bool blocked = monster_at(w, {w.player.pos.x + 1, w.player.pos.y}) != nullptr;
-  CHECK((at_edge || blocked));
+TEST_CASE("walking around an object: blocked, side-step, then past it") {
+  World w = empty_world();
+  add_box(w, {0, 0, -4}, {1, 1.5f, 1});            // too high to jump over
+  run(w, forward(), rules::kTicksPerSecond);       // walk into it
+  CHECK(w.player.pos.z == Approx(-3 + rules::kPlayerHalfWidth));
+  run(w, move(127, 0), rules::kTicksPerSecond / 2);  // side-step 2.5 m to the right
+  run(w, forward(), rules::kTicksPerSecond);       // now nothing in the way
+  CHECK(w.player.pos.z < -5.0f);
+  check_invariants(w);
 }
 
-TEST_CASE("the player hunts down a monster") {
-  World w = empty_world({2, 2});
-  add_monster(w, {6, 2}, rules::kMonsterMaxHp);
-  // Walk next to it (ticks 1-3), then attack (ticks 4-6): each hit does 1 or 2
-  // damage, so 3 hits always kill it before monsters first act on tick 8.
-  step(w, Action::Right);
-  step(w, Action::Right);
-  step(w, Action::Right);
-  for (int i = 0; i < 3; ++i) step(w, Action::Attack);
-  CHECK(w.monsters.empty());
-  CHECK(w.player.score == rules::kKillScore);
+TEST_CASE("climbing a staircase of boxes by jumping") {
+  World w = empty_world();
+  add_box(w, {0, 0, -3}, {1, 0.4f, 1});            // step 1: top at 0.8 m
+  add_box(w, {0, 0, -7}, {1, 0.8f, 3});            // step 2: top at 1.6 m, long
+  // Keep walking and press jump twice a second (presses in the air are ignored).
+  for (int i = 0; i < 4; ++i) {
+    step(w, move(0, 127, 0, true));
+    run(w, forward(), 24);
+  }
+  run(w, move(0, 0), rules::kTicksPerSecond);      // stop and let the player land
+  CHECK(w.player.on_ground);
+  CHECK(w.player.pos.y == Approx(1.6f));
   check_invariants(w);
 }
 
 TEST_CASE("the same seed and inputs always give the same game") {
-  const Replay r = replay_from("seed 99\nrandom 5 3000");
+  const Replay r = parse_replay("seed 99\nrandom 5 3000");
   CHECK(play(r) == play(r));
 }
 
 TEST_CASE("saving and loading in the middle of a game changes nothing") {
-  const Replay r = replay_from("seed 11\nrandom 77 2000");
+  const Replay r = parse_replay("seed 11\nrandom 77 3000");
   const World uninterrupted = play(r);
 
   World w = new_game(r.seed);
-  for (size_t i = 0; i < r.actions.size(); ++i) {
+  for (size_t i = 0; i < r.inputs.size(); ++i) {
     if (i % 250 == 0) {
       auto loaded = deserialize(serialize(w));
       REQUIRE(loaded.has_value());
       w = std::move(*loaded);
     }
-    step(w, r.actions[i]);
+    step(w, r.inputs[i]);
   }
   CHECK(w == uninterrupted);
 }
@@ -64,18 +60,10 @@ TEST_CASE("game rules hold during long random games") {
   for (uint64_t seed = 1; seed <= 20; ++seed) {
     CAPTURE(seed);
     World w = new_game(seed);
-    Rng inputs(seed * 31);
-    for (int t = 0; t < 2000 && !w.game_over(); ++t) {
-      step(w, static_cast<Action>(inputs.below(6)));
+    const Replay r = parse_replay("random " + std::to_string(seed * 31) + " 4000");
+    for (const Input& in : r.inputs) {
+      step(w, in);
       check_invariants(w);
     }
   }
-}
-
-TEST_CASE("an idle player eventually loses") {
-  // Monsters wander randomly; standing still for long enough is fatal.
-  World w = new_game(1);
-  for (int t = 0; t < 200000 && !w.game_over(); ++t) step(w, Action::None);
-  CHECK(w.game_over());
-  CHECK(w.player.hp == 0);
 }

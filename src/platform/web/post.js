@@ -28,17 +28,12 @@ function monstresSync() {
 Module.monstresSync = monstresSync;
 
 // ---- Page hooks called from C++ ----
-Module.monstresHud = (hp, maxHp, score, gameOver) => {
-  const hud = document.getElementById('hud');
-  if (!hud) return;
-  hud.textContent = gameOver
-    ? `Perdu ! Score : ${score}. Appuyez sur Entrée pour rejouer.`
-    : `PV ${hp}/${maxHp} · Score ${score}`;
-};
-
 Module.monstresFatal = (message) => {
-  const hud = document.getElementById('hud');
-  if (hud) hud.textContent = message;
+  const box = document.getElementById('message');
+  if (box) {
+    box.textContent = message;
+    box.hidden = false;
+  }
   console.error(message);
 };
 
@@ -87,20 +82,36 @@ async function monstresImportSave(file) {
   return !!ok;
 }
 
-// ---- Public API (buttons in index.html and Playwright tests) ----
-const MONSTRES_ACTIONS = ['none', 'up', 'down', 'left', 'right', 'attack'];
-
+// ---- Public API (web/controls.js, buttons in index.html, Playwright tests) ----
+let monstresReadyResolve;
 window.monstres = {
   // Resolved by main() once the game is loaded and the first frame is scheduled.
   ready: new Promise((resolve) => {
-    Module.monstresReady = resolve;
+    monstresReadyResolve = resolve;
   }),
+  isReady: false,
+
+  // Controls. move: x right / y forward in -1..1. look: radians.
+  input: {
+    move: (x, y) => _monstres_set_move(x, y),
+    look: (deltaYaw, deltaPitch) => _monstres_look(deltaYaw, deltaPitch),
+    jump: () => _monstres_jump(),
+  },
+  setCamera: (yaw, pitch) => _monstres_set_camera(yaw, pitch),
+
   state: () => JSON.parse(UTF8ToString(_monstres_state_json())),
-  step: (action = 'none') => _monstres_debug_step(MONSTRES_ACTIONS.indexOf(action)),
+  // Runs ticks with the current input; useful with ?frozen in tests.
+  step: (ticks = 1) => _monstres_debug_step(ticks),
   saveNow: () => {
     _monstres_save_now();
     return monstresSync();
   },
   exportSave: monstresExportSave,
   importSave: monstresImportSave,
+};
+
+Module.monstresReady = () => {
+  window.monstres.isReady = true;
+  monstresReadyResolve();
+  window.dispatchEvent(new Event('monstres-ready'));
 };

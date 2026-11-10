@@ -30,9 +30,12 @@ target_link_options(monstres_web PRIVATE
 )
 
 # PWA files next to the game.
-add_custom_command(TARGET monstres_web POST_BUILD
+# Runs on every build, so editing one of these files is enough to update the site.
+add_custom_target(monstres_web_files ALL
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${SITE_DIR}"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${WEB_DIR}/sw.js" "${WEB_DIR}/manifest.webmanifest" "${SITE_DIR}/"
+          "${WEB_DIR}/sw.js" "${WEB_DIR}/manifest.webmanifest" "${WEB_DIR}/controls.js" "${SITE_DIR}/"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${WEB_DIR}/icons" "${SITE_DIR}/icons"
   VERBATIM
 )
+add_dependencies(monstres_web monstres_web_files)

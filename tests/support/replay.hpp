@@ -1,14 +1,15 @@
 #pragma once
 
-// Replays: a seed plus a list of actions, played tick by tick.
+// Replays: a seed plus a list of inputs, played tick by tick.
 //
 // File format (tests/regression/data/replays/*.replay), one command per line:
 //   # comment
-//   seed 42                  start a new game with this seed (first line)
-//   actions right*3 attack   actions, "name*count" repeats one
-//   random 1234 500          500 actions drawn from Rng(1234)
+//   seed 42                    start a new game with this seed (first line)
+//   walk <x> <y> <yaw°> <ticks>  joystick x/y in -127..127, camera yaw in degrees
+//   jump [<x> <y> <yaw°>]      one tick with a jump press (optionally while moving)
+//   idle <ticks>               no input
+//   random <seed> <ticks>      random inputs: segments of 10-60 ticks, some jumps
 
-#include "monstres/core/debug.hpp"
 #include "monstres/core/rng.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/world.hpp"
@@ -26,21 +27,34 @@ namespace monstres::test {
 
 struct Replay {
   uint64_t seed = 0;
-  std::vector<Action> actions;
+  std::vector<Input> inputs;
 };
 
-inline void append_actions(Replay& r, const std::string& token) {
-  const auto star = token.find('*');
-  const std::string name = token.substr(0, star);
-  const int count = star == std::string::npos ? 1 : std::stoi(token.substr(star + 1));
-  const auto action = parse_action(name);
-  if (!action) throw std::runtime_error("unknown action: " + name);
-  r.actions.insert(r.actions.end(), static_cast<size_t>(count), *action);
+inline Angle16 yaw_from_degrees(int degrees) {
+  const int64_t d = ((degrees % 360) + 360) % 360;
+  return static_cast<Angle16>((d * 65536 + 180) / 360);
 }
 
-inline void append_random(Replay& r, uint64_t seed, int count) {
+inline int8_t axis(int v) {
+  if (v < -127 || v > 127) throw std::runtime_error("joystick value out of -127..127");
+  return static_cast<int8_t>(v);
+}
+
+inline void append_random(Replay& r, uint64_t seed, int ticks) {
   Rng rng(seed);
-  for (int i = 0; i < count; ++i) r.actions.push_back(static_cast<Action>(rng.below(6)));
+  int produced = 0;
+  while (produced < ticks) {
+    const int length = 10 + static_cast<int>(rng.below(51));
+    Input in;
+    in.move_x = static_cast<int8_t>(static_cast<int>(rng.below(255)) - 127);
+    in.move_y = static_cast<int8_t>(static_cast<int>(rng.below(255)) - 127);
+    in.yaw = static_cast<Angle16>(rng.below(65536));
+    const bool jump = rng.below(4) == 0;
+    for (int i = 0; i < length && produced < ticks; ++i, ++produced) {
+      in.jump = jump && i == 0;
+      r.inputs.push_back(in);
+    }
+  }
 }
 
 inline Replay parse_replay(std::istream& in) {
@@ -53,18 +67,33 @@ inline Replay parse_replay(std::istream& in) {
     if (!(words >> command)) continue;
     if (command == "seed") {
       words >> r.seed;
-    } else if (command == "actions") {
-      for (std::string token; words >> token;) append_actions(r, token);
+    } else if (command == "walk") {
+      int x = 0, y = 0, yaw = 0, ticks = 0;
+      if (!(words >> x >> y >> yaw >> ticks)) throw std::runtime_error("walk needs: x y yaw ticks");
+      r.inputs.insert(r.inputs.end(), static_cast<size_t>(ticks), Input{axis(x), axis(y), yaw_from_degrees(yaw), false});
+    } else if (command == "jump") {
+      int x = 0, y = 0, yaw = 0;
+      words >> x >> y >> yaw;  // optional
+      r.inputs.push_back({axis(x), axis(y), yaw_from_degrees(yaw), true});
+    } else if (command == "idle") {
+      int ticks = 0;
+      words >> ticks;
+      r.inputs.insert(r.inputs.end(), static_cast<size_t>(ticks), Input{});
     } else if (command == "random") {
       uint64_t seed = 0;
-      int count = 0;
-      words >> seed >> count;
-      append_random(r, seed, count);
+      int ticks = 0;
+      words >> seed >> ticks;
+      append_random(r, seed, ticks);
     } else {
       throw std::runtime_error("unknown replay command: " + command);
     }
   }
   return r;
+}
+
+inline Replay parse_replay(const std::string& text) {
+  std::istringstream in(text);
+  return parse_replay(in);
 }
 
 inline Replay load_replay(const std::string& path) {
@@ -75,22 +104,21 @@ inline Replay load_replay(const std::string& path) {
 
 inline World play(const Replay& r) {
   World w = new_game(r.seed);
-  for (Action a : r.actions) step(w, a);
+  for (const Input& in : r.inputs) step(w, in);
   return w;
 }
 
 // Short human-readable summary, stored in the golden .expected files so a
 // failing diff says what changed, not only that the hash changed.
 inline std::string summary(const World& w) {
-  char hash[17];
-  std::snprintf(hash, sizeof hash, "%016llx", static_cast<unsigned long long>(state_hash(w)));
-  std::ostringstream out;
-  out << "hash " << hash << '\n'
-      << "tick " << w.tick << '\n'
-      << "player " << w.player.pos.x << ' ' << w.player.pos.y << " hp " << w.player.hp
-      << " score " << w.player.score << '\n'
-      << "monsters " << w.monsters.size() << '\n';
-  return out.str();
+  char buf[256];
+  std::snprintf(buf, sizeof buf,
+                "hash %016llx\ntick %llu\nplayer %.4f %.4f %.4f %s\nobjects %zu\n",
+                static_cast<unsigned long long>(state_hash(w)),
+                static_cast<unsigned long long>(w.tick), static_cast<double>(w.player.pos.x),
+                static_cast<double>(w.player.pos.y), static_cast<double>(w.player.pos.z),
+                w.player.on_ground ? "on-ground" : "in-air", w.objects.size());
+  return buf;
 }
 
 inline bool update_golden() {

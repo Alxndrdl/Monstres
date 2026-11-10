@@ -8,16 +8,34 @@
 namespace monstres {
 
 namespace palette {
-inline constexpr Color kBackground{0.06f, 0.05f, 0.09f, 1};
-inline constexpr Color kTileA{0.16f, 0.15f, 0.22f, 1};
-inline constexpr Color kTileB{0.19f, 0.18f, 0.26f, 1};
-inline constexpr Color kPlayer{0.35f, 0.80f, 0.95f, 1};
-inline constexpr Color kMonster{0.90f, 0.35f, 0.45f, 1};
-inline constexpr Color kHpBar{0.40f, 0.90f, 0.45f, 1};
-inline constexpr Color kDead{0.35f, 0.35f, 0.40f, 1};
+inline constexpr Color kSky{0.62f, 0.78f, 0.92f, 1};
+inline constexpr Color kGround{0.42f, 0.62f, 0.38f, 1};
+inline constexpr Color kPlayer{0.95f, 0.55f, 0.20f, 1};
+inline constexpr Color kPlayerNose{0.25f, 0.20f, 0.30f, 1};
+inline constexpr Color kObjects[] = {
+    {0.80f, 0.36f, 0.42f, 1}, {0.36f, 0.56f, 0.82f, 1}, {0.93f, 0.80f, 0.36f, 1},
+    {0.55f, 0.42f, 0.75f, 1}, {0.86f, 0.86f, 0.88f, 1}, {0.45f, 0.72f, 0.68f, 1},
+};
 }  // namespace palette
 
-// Fills `out` (cleared first) with every quad needed to draw `world`.
-void build_scene(const World& world, std::vector<QuadInstance>& out);
+// Third-person camera orbiting around the player.
+struct Camera {
+  float yaw = 0;        // radians; 0 looks towards -Z
+  float pitch = 0.35f;  // radians above the horizon (looking down at the player)
+  float distance = 6.0f;
+};
+
+inline constexpr float kMinPitch = -0.15f;
+inline constexpr float kMaxPitch = 1.35f;
+
+Mat4 multiply(const Mat4& a, const Mat4& b);
+Mat4 perspective(float fov_y_radians, float aspect, float near_z, float far_z);
+Mat4 look_at(float eye_x, float eye_y, float eye_z, float target_x, float target_y, float target_z);
+
+// Fills `cubes` (cleared first) with the ground, the objects and the player.
+void build_scene(const World& world, std::vector<CubeInstance>& cubes);
+
+// Camera matrices and lighting for one frame.
+View build_view(const World& world, const Camera& camera, float aspect);
 
 }  // namespace monstres

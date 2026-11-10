@@ -1,5 +1,6 @@
 // Non-regression of the save format: save files written by every past version
-// of the game (data/saves/v<version>_*.sav) must still load.
+// of the game (data/saves/v<version>_*.sav) must still load to the same state,
+// or be refused cleanly when that version is not supported anymore.
 //
 // MONSTRES_UPDATE_GOLDEN=1 creates the reference file for the current version
 // if it does not exist yet. Files of older versions are never rewritten.
@@ -24,8 +25,7 @@ std::vector<uint8_t> read_bytes(const fs::path& path) {
 }
 
 World reference_game() {
-  std::istringstream in("seed 2026\nactions right*3 attack*3 down*2\nrandom 8 700");
-  return play(parse_replay(in));
+  return play(parse_replay("seed 2026\nwalk 0 127 45 60\njump 0 127 45\nrandom 8 700"));
 }
 
 }  // namespace
@@ -51,14 +51,17 @@ TEST_CASE("every past save still loads to the same state") {
     if (entry.path().extension() != ".sav") continue;
     CAPTURE(entry.path().filename().string());
 
-    LoadError error = LoadError::None;
-    const auto world = deserialize(read_bytes(entry.path()), &error);
-    REQUIRE_MESSAGE(world.has_value(), "load error ", static_cast<int>(error));
-
     fs::path expected_path = entry.path();
     expected_path.replace_extension(".expected");
     const auto expected = read_text(expected_path.string());
     REQUIRE(expected.has_value());
-    CHECK(summary(*world) == *expected);
+
+    // The .expected file holds either the state summary, or
+    // "rejected <error>" for saves that must be refused cleanly.
+    LoadError error = LoadError::None;
+    const auto world = deserialize(read_bytes(entry.path()), &error);
+    const std::string actual =
+        world ? summary(*world) : std::string("rejected ") + load_error_name(error) + "\n";
+    CHECK(actual == *expected);
   }
 }
