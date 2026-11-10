@@ -1,0 +1,13 @@
+{
+  "name": "monstres-e2e",
+  "private": true,
+  "description": "Tests de bout en bout de Monstres dans de vrais navigateurs (Playwright).",
+  "scripts": {
+    "test": "playwright test",
+    "test:update": "playwright test --update-snapshots",
+    "install-browsers": "playwright install chromium firefox webkit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

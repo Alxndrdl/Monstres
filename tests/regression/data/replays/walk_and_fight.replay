@@ -1,0 +1,3 @@
+# Le joueur se déplace, attaque, puis attend.
+seed 42
+actions right*3 attack*4 down*2 attack*2 none*40 left*6 up*3 attack*3
