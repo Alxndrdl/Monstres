@@ -4,7 +4,10 @@ Petit jeu en C++ compilé en WebAssembly avec Emscripten, rendu WebGL2
 (OpenGL ES 3.0), installable en PWA et jouable hors ligne.
 
 Le joueur (un cube orange) se déplace dans un monde plat en 3D parsemé
-d'objets fixes (des cubes), sur lesquels il peut sauter.
+d'objets fixes : arbres, sapins, rochers, troncs couchés, souches, buissons et
+caisses. On peut sauter sur les rochers, troncs, souches, buissons et caisses ;
+les arbres ne bloquent qu'au niveau du tronc. Les modèles sont générés par le
+code, en style low-poly (`src/render/meshes.cpp`), sans fichier d'asset.
 
 Contrôles :
 - joystick en bas à gauche, ou ZQSD / flèches : se déplacer (par rapport à la caméra) ;
@@ -13,6 +16,9 @@ Contrôles :
 
 Sur ordinateur, les touches sont rappelées sous le joystick et le bouton ;
 elles s'adaptent à la disposition du clavier quand le navigateur le permet.
+
+Sur téléphone et tablette, on joue en mode paysage : l'application installée
+s'ouvre en paysage, et en portrait un message demande de tourner l'appareil.
 
 ## Organisation
 

@@ -1,6 +1,6 @@
 # monstres_render: turns the world into lists of things to draw. No OpenGL here,
 # so it is testable natively.
-add_library(monstres_render STATIC scene.cpp)
+add_library(monstres_render STATIC scene.cpp meshes.cpp)
 target_include_directories(monstres_render PUBLIC include)
 target_link_libraries(monstres_render PUBLIC monstres_core)
 monstres_set_options(monstres_render)

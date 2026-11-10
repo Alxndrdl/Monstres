@@ -8,7 +8,7 @@ test('the game starts in a 3D world', async ({ page }) => {
   const s = await state(page);
   expect(s.tick).toBe(0);
   expect(s.player).toMatchObject({ x: 0, y: 0, z: 0, onGround: true });
-  expect(s.objects).toBe(40);
+  expect(s.objects).toBe(80);
   await expect(page.locator('#message')).toBeHidden();
 });
 
@@ -96,15 +96,16 @@ test.describe('on-screen controls', () => {
   });
 });
 
-test.describe('on a touch screen', () => {
-  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+test.describe('on a phone in landscape', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 844, height: 390 } });
   test.skip(({ browserName }) => browserName === 'firefox', 'Firefox has no mobile emulation');
 
-  test('keyboard hints are hidden', async ({ page }) => {
+  test('the controls are shown, keyboard hints are not', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     await expect(page.locator('#joystick')).toBeVisible();
     await expect(page.locator('#jump')).toBeVisible();
     await expect(page.locator('#move-hint')).toBeHidden();
+    await expect(page.locator('#rotate')).toBeHidden();
   });
 
   test('tapping the jump button jumps', async ({ page }) => {
@@ -112,6 +113,23 @@ test.describe('on a touch screen', () => {
     await page.locator('#jump').tap();
     await expect.poll(async () => (await state(page)).player.y).toBeGreaterThan(0.3);
   });
+});
+
+test.describe('on a phone in portrait', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test.skip(({ browserName }) => browserName === 'firefox', 'Firefox has no mobile emulation');
+
+  test('asks to turn the phone', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await expect(page.locator('#rotate')).toBeVisible();
+    await expect(page.locator('#rotate')).toContainText('Tournez votre téléphone');
+  });
+});
+
+test('a computer with a tall window is not asked to turn', async ({ page }) => {
+  await page.setViewportSize({ width: 500, height: 800 });
+  await openGame(page, '?seed=42&new&frozen');
+  await expect(page.locator('#rotate')).toBeHidden();
 });
 
 test.describe('saves', () => {
@@ -166,6 +184,6 @@ test('the game still starts offline once installed', async ({ page, context, bro
 
   await context.setOffline(true);
   await openGame(page, '?frozen');
-  expect((await state(page)).objects).toBe(40);
+  expect((await state(page)).objects).toBe(80);
   await expect(page.locator('#joystick')).toBeVisible();  // controls.js came from the cache too
 });

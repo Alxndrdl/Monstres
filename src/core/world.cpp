@@ -2,12 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace monstres {
 
 namespace {
-
-constexpr uint8_t kPaletteSize = 6;
 
 // Random value in [lo, hi] with a 1 cm step: integers from the RNG converted
 // exactly, so the layout is identical on every platform.
@@ -16,26 +15,102 @@ float random_range(Rng& rng, float lo, float hi) {
   return lo + static_cast<float>(rng.below(steps + 1)) / 100.0f;
 }
 
+Angle16 any_yaw(Rng& rng) { return static_cast<Angle16>(rng.below(65536)); }
+Angle16 quarter_yaw(Rng& rng) { return static_cast<Angle16>(rng.below(4) << 14); }
+
+ObjectKind pick_kind(Rng& rng) {
+  const uint32_t r = rng.below(100);
+  if (r < 30) return ObjectKind::Tree;
+  if (r < 45) return ObjectKind::Pine;
+  if (r < 68) return ObjectKind::Rock;
+  if (r < 78) return ObjectKind::Log;
+  if (r < 88) return ObjectKind::Stump;
+  if (r < 96) return ObjectKind::Bush;
+  return ObjectKind::Crate;
+}
+
+Object random_object(Rng& rng, float x, float z) {
+  Object o;
+  o.kind = pick_kind(rng);
+  o.pos = {x, 0, z};
+  switch (o.kind) {
+    case ObjectKind::Tree: {
+      const float s = random_range(rng, 0.8f, 1.4f);
+      o.size = {s, s, s};
+      o.yaw = any_yaw(rng);
+      break;
+    }
+    case ObjectKind::Pine: {
+      const float s = random_range(rng, 0.8f, 1.5f);
+      o.size = {s, s, s};
+      o.yaw = any_yaw(rng);
+      break;
+    }
+    case ObjectKind::Rock:
+      o.size = {random_range(rng, 0.4f, 1.6f), random_range(rng, 0.3f, 1.4f), random_range(rng, 0.4f, 1.6f)};
+      o.yaw = quarter_yaw(rng);
+      break;
+    case ObjectKind::Log:
+      o.size = {random_range(rng, 1.0f, 2.0f), random_range(rng, 0.25f, 0.4f), 0};
+      o.yaw = quarter_yaw(rng);
+      break;
+    case ObjectKind::Stump:
+      o.size = {random_range(rng, 0.3f, 0.5f), random_range(rng, 0.3f, 0.7f), 0};
+      o.yaw = any_yaw(rng);
+      break;
+    case ObjectKind::Bush:
+      o.size = {random_range(rng, 0.5f, 0.9f), random_range(rng, 0.5f, 0.9f), 0};
+      o.yaw = any_yaw(rng);
+      break;
+    case ObjectKind::Crate:
+    case ObjectKind::Count: {
+      o.kind = ObjectKind::Crate;
+      const float h = random_range(rng, 0.4f, 0.7f);
+      o.size = {h, h, h};
+      o.yaw = quarter_yaw(rng);
+      break;
+    }
+  }
+  o.variant = static_cast<uint8_t>(rng.below(256));
+  return o;
+}
+
+// Space an object takes for placement: its collision box, widened to the
+// foliage for trees so that crowns do not grow into each other.
+Box footprint(const Object& o) {
+  Box b = object_box(o);
+  float r = 0;
+  if (o.kind == ObjectKind::Tree) r = 1.2f * o.size.x;
+  if (o.kind == ObjectKind::Pine) r = 1.0f * o.size.x;
+  if (r > 0) {
+    b.min.x = o.pos.x - r;
+    b.max.x = o.pos.x + r;
+    b.min.z = o.pos.z - r;
+    b.max.z = o.pos.z + r;
+  }
+  return b;
+}
+
 void generate_objects(World& w) {
   const float limit = rules::kWorldHalfSize - 3.0f;
-  while (w.objects.size() < rules::kObjectCount) {
-    Object o;
-    o.half = {random_range(w.rng, 0.4f, 2.0f), random_range(w.rng, 0.2f, 1.6f),
-              random_range(w.rng, 0.4f, 2.0f)};
-    o.center = {random_range(w.rng, -limit, limit), o.half.y, random_range(w.rng, -limit, limit)};
-    o.color = static_cast<uint8_t>(w.rng.below(kPaletteSize));
+  const float gap = rules::kObjectGap;
+  for (int attempt = 0; attempt < 20000 && w.objects.size() < rules::kObjectCount; ++attempt) {
+    const float x = random_range(w.rng, -limit, limit);
+    const float z = random_range(w.rng, -limit, limit);
+    const Object o = random_object(w.rng, x, z);
 
     // Keep the spawn area clear.
-    const float dx = std::max(std::fabs(o.center.x) - o.half.x, 0.0f);
-    const float dz = std::max(std::fabs(o.center.z) - o.half.z, 0.0f);
+    const Box b = footprint(o);
+    const float dx = std::max({b.min.x, -b.max.x, 0.0f});
+    const float dz = std::max({b.min.z, -b.max.z, 0.0f});
     if (dx * dx + dz * dz < rules::kSpawnClearRadius * rules::kSpawnClearRadius) continue;
 
-    // No two objects inside each other (a small gap so the player never gets stuck).
-    Box b = object_box(o);
-    b.min = b.min - Vec3{0.5f, 0, 0.5f};
-    b.max = b.max + Vec3{0.5f, 0, 0.5f};
+    // Keep a gap between objects so the player can always walk between them.
+    Box wide = b;
+    wide.min = wide.min - Vec3{gap, 0, gap};
+    wide.max = wide.max + Vec3{gap, 0, gap};
     const bool collides = std::any_of(w.objects.begin(), w.objects.end(),
-                                      [&](const Object& other) { return overlaps(b, object_box(other)); });
+                                      [&](const Object& other) { return overlaps(wide, footprint(other)); });
     if (!collides) w.objects.push_back(o);
   }
 }
@@ -87,7 +162,27 @@ Box player_box(const Player& p) {
           {p.pos.x + h, p.pos.y + rules::kPlayerHeight, p.pos.z + h}};
 }
 
-Box object_box(const Object& o) { return {o.center - o.half, o.center + o.half}; }
+bool is_round(ObjectKind kind) {
+  return kind == ObjectKind::Tree || kind == ObjectKind::Pine || kind == ObjectKind::Stump ||
+         kind == ObjectKind::Bush;
+}
+
+Box object_box(const Object& o) {
+  const Vec3 s = o.size;
+  Vec3 half;
+  switch (o.kind) {
+    case ObjectKind::Tree:  half = {0.28f * s.x, 1.6f * s.x, 0.28f * s.x}; break;  // trunk only
+    case ObjectKind::Pine:  half = {0.25f * s.x, 1.6f * s.x, 0.25f * s.x}; break;
+    case ObjectKind::Rock:  half = {0.85f * s.x, 0.5f * s.y, 0.85f * s.z}; break;
+    case ObjectKind::Log:   half = {s.x, s.y, s.y}; break;
+    case ObjectKind::Stump: half = {s.x, 0.5f * s.y, s.x}; break;
+    case ObjectKind::Bush:  half = {0.8f * s.x, 0.5f * s.y, 0.8f * s.x}; break;
+    default:                half = s; break;  // Crate
+  }
+  if (!is_round(o.kind) && ((o.yaw >> 14) & 1)) std::swap(half.x, half.z);  // turned 90° or 270°
+  const Vec3 center = o.pos + Vec3{0, half.y, 0};
+  return {center - half, center + half};
+}
 
 bool overlaps(const Box& a, const Box& b) {
   return a.min.x < b.max.x && a.max.x > b.min.x && a.min.y < b.max.y && a.max.y > b.min.y &&

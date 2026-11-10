@@ -14,15 +14,74 @@ TEST_CASE("new_game builds a valid world") {
     REQUIRE(w.objects.size() == rules::kObjectCount);
     for (size_t i = 0; i < w.objects.size(); ++i) {
       const Object& o = w.objects[i];
-      CHECK(o.center.y == o.half.y);  // resting on the ground
-      CHECK(std::fabs(o.center.x) + o.half.x <= rules::kWorldHalfSize);
-      CHECK(std::fabs(o.center.z) + o.half.z <= rules::kWorldHalfSize);
+      const Box b = object_box(o);
+      CHECK(o.kind < ObjectKind::Count);
+      CHECK(o.pos.y == 0.0f);   // resting on the ground
+      CHECK(b.min.y == 0.0f);
+      CHECK(b.max.x <= rules::kWorldHalfSize);
+      CHECK(b.min.x >= -rules::kWorldHalfSize);
+      if (!is_round(o.kind)) CHECK((o.yaw & 0x3FFF) == 0);  // boxy objects turn by quarters
       for (size_t j = i + 1; j < w.objects.size(); ++j) {
-        CHECK_FALSE(overlaps(object_box(o), object_box(w.objects[j])));
+        CHECK_FALSE(overlaps(b, object_box(w.objects[j])));
       }
     }
     check_invariants(w);
   }
+}
+
+TEST_CASE("the world has every kind of object") {
+  int counts[static_cast<int>(ObjectKind::Count)] = {};
+  for (uint64_t seed = 0; seed < 10; ++seed) {
+    for (const Object& o : new_game(seed).objects) ++counts[static_cast<int>(o.kind)];
+  }
+  for (int count : counts) CHECK(count > 0);
+  // Trees are the most common.
+  CHECK(counts[static_cast<int>(ObjectKind::Tree)] > counts[static_cast<int>(ObjectKind::Crate)]);
+}
+
+TEST_CASE("collision boxes follow each kind of object") {
+  SUBCASE("a tree blocks only at its trunk, too high to jump over") {
+    const Box b = object_box(make_object(ObjectKind::Tree, {2, 0, 3}, {1, 1, 1}));
+    CHECK(b.max.x - b.min.x == Approx(0.56f));
+    CHECK(b.max.y > rules::kPlayerHeight + 1.3f);
+  }
+  SUBCASE("a rock is as high as its size") {
+    const Box b = object_box(make_object(ObjectKind::Rock, {0, 0, 0}, {1, 0.7f, 0.5f}));
+    CHECK(b.max.y == Approx(0.7f));
+    CHECK(b.max.x == Approx(0.85f));
+    CHECK(b.max.z == Approx(0.425f));
+  }
+  SUBCASE("a log lies along X, or along Z when turned a quarter") {
+    const Box along_x = object_box(make_object(ObjectKind::Log, {0, 0, 0}, {2, 0.3f, 0}));
+    CHECK(along_x.max.x == Approx(2));
+    CHECK(along_x.max.z == Approx(0.3f));
+    CHECK(along_x.max.y == Approx(0.6f));
+    const Box along_z = object_box(make_object(ObjectKind::Log, {0, 0, 0}, {2, 0.3f, 0}, 16384));
+    CHECK(along_z.max.x == Approx(0.3f));
+    CHECK(along_z.max.z == Approx(2));
+  }
+  SUBCASE("a crate box is its size, from its base") {
+    const Box b = object_box(make_object(ObjectKind::Crate, {1, 0.5f, 1}, {0.5f, 0.5f, 0.5f}));
+    CHECK(b.min.y == Approx(0.5f));
+    CHECK(b.max.y == Approx(1.5f));
+  }
+}
+
+TEST_CASE("the player can jump onto a fallen log") {
+  World w = empty_world();
+  w.objects.push_back(make_object(ObjectKind::Log, {0, 0, -2}, {3, 0.35f, 0}));  // top at 0.7 m
+  step(w, move(0, 127, 0, true));
+  run(w, forward(), 23);       // 0.4 s forward: above the log
+  run(w, move(0, 0), 60);      // stop and land
+  CHECK(w.player.on_ground);
+  CHECK(w.player.pos.y == Approx(0.7f));
+}
+
+TEST_CASE("the player cannot walk through a tree trunk") {
+  World w = empty_world();
+  w.objects.push_back(make_object(ObjectKind::Tree, {0, 0, -3}, {1, 1, 1}));
+  run(w, forward(), rules::kTicksPerSecond);
+  CHECK(w.player.pos.z == Approx(-3 + 0.28f + rules::kPlayerHalfWidth));
 }
 
 TEST_CASE("new_game is deterministic") {

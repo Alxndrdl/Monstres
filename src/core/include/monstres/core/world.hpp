@@ -21,8 +21,9 @@ inline constexpr float kWalkSpeed = 5.0f;       // m/s
 inline constexpr float kJumpSpeed = 7.0f;       // m/s, jumps ~1.2 m high
 inline constexpr float kGravity = 20.0f;        // m/s²
 inline constexpr float kMaxFallSpeed = 30.0f;
-inline constexpr uint32_t kObjectCount = 40;
+inline constexpr uint32_t kObjectCount = 80;
 inline constexpr float kSpawnClearRadius = 4.0f;
+inline constexpr float kObjectGap = 0.6f;       // free space kept between objects
 }  // namespace rules
 
 // What the player does during one tick. Integers, so that replays and saved
@@ -35,11 +36,26 @@ struct Input {
   bool operator==(const Input&) const = default;
 };
 
-// A fixed, axis-aligned box resting on the ground.
+enum class ObjectKind : uint8_t {
+  Tree,   // leafy tree. size.x = scale
+  Pine,   // conifer. size.x = scale
+  Rock,   // size = half width, height, half depth
+  Log,    // fallen trunk lying along its yaw. size.x = half length, size.y = radius
+  Stump,  // size.x = radius, size.y = height
+  Bush,   // size.x = radius, size.y = height
+  Crate,  // plain box. size = half extents (also handy in tests)
+  Count
+};
+
+// A fixed object of the world. Its collision box is derived from these
+// values by object_box(): a narrow box for tree trunks, the full shape for
+// rocks, logs, stumps, bushes and crates.
 struct Object {
-  Vec3 center;
-  Vec3 half;           // half extents
-  uint8_t color = 0;   // index in the render palette
+  ObjectKind kind = ObjectKind::Crate;
+  Vec3 pos;            // center of the base
+  Vec3 size;           // meaning depends on the kind (see ObjectKind)
+  Angle16 yaw = 0;     // multiples of 90° for non-round kinds (rocks, logs, crates)
+  uint8_t variant = 0; // picks a shape and a color variation, visual only
   bool operator==(const Object&) const = default;
 };
 
@@ -72,5 +88,6 @@ struct Box {
 Box player_box(const Player& p);
 Box object_box(const Object& o);
 bool overlaps(const Box& a, const Box& b);  // strict: touching is not overlapping
+bool is_round(ObjectKind kind);             // any yaw allowed
 
 }  // namespace monstres

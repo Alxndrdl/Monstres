@@ -75,6 +75,18 @@
       border: 1px solid rgba(255, 255, 255, 0.7); background: rgba(0, 0, 0, 0.2);
     }
 
+    /* The game is played in landscape on phones and tablets. */
+    #rotate {
+      display: none; position: fixed; inset: 0; z-index: 10;
+      flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+      background: #2b3550; font-size: 18px; text-align: center; padding: 24px;
+    }
+    #rotate svg { width: 72px; height: 72px; animation: rotate-hint 2s ease-in-out infinite; }
+    @keyframes rotate-hint { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+    @media (orientation: portrait) and (pointer: coarse) {
+      #rotate { display: flex; }
+    }
+
     #message {
       position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); max-width: 80vw;
       padding: 12px 18px; border-radius: 8px; background: rgba(20, 24, 40, 0.8); text-align: center;
@@ -84,6 +96,13 @@
 <body>
   <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
   <div id="message" hidden></div>
+  <div id="rotate" role="alert">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>
+    </svg>
+    <div>Tournez votre téléphone pour jouer.</div>
+  </div>
 
   <div class="topbar">
     <button id="export" type="button">Exporter</button>

@@ -18,11 +18,22 @@ test('after walking and turning the camera', async ({ page }) => {
 });
 
 test.describe('phone', () => {
-  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
   test.skip(({ browserName }) => browserName === 'firefox', 'Firefox has no mobile emulation');
 
-  test('start view on a phone', async ({ page }) => {
-    await openGame(page, '?seed=42&new&frozen');
-    await expect(page).toHaveScreenshot('start-seed42-phone.png');
+  test.describe('landscape', () => {
+    test.use({ hasTouch: true, isMobile: true, viewport: { width: 844, height: 390 } });
+    test('start view on a phone', async ({ page }) => {
+      await openGame(page, '?seed=42&new&frozen');
+      await expect(page).toHaveScreenshot('start-seed42-phone-landscape.png');
+    });
+  });
+
+  test.describe('portrait', () => {
+    test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+    test('asks to turn the phone', async ({ page }) => {
+      await openGame(page, '?seed=42&new&frozen');
+      await page.evaluate(() => document.getAnimations().forEach((a) => a.pause()));
+      await expect(page).toHaveScreenshot('rotate-phone-portrait.png');
+    });
   });
 });

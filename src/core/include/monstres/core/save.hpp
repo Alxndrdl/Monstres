@@ -17,8 +17,9 @@ namespace monstres {
 // Version history:
 //   1  grid prototype (2D). Not readable anymore: the game was redesigned
 //      before any release, so these saves are refused and a new game starts.
-//   2  3D world: player + fixed objects.
-inline constexpr uint32_t kSaveVersion = 2;
+//   2  3D world: player + fixed boxes. Not readable anymore (pre-release).
+//   3  objects have a kind: trees, pines, rocks, logs, stumps, bushes, crates.
+inline constexpr uint32_t kSaveVersion = 3;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };
 

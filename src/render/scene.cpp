@@ -48,24 +48,64 @@ Mat4 look_at(float ex, float ey, float ez, float tx, float ty, float tz) {
   return r;
 }
 
-void build_scene(const World& w, std::vector<CubeInstance>& out) {
-  out.clear();
-  const float g = rules::kWorldHalfSize;
-  out.push_back({0, -0.05f, 0, 0, g, 0.05f, g, 1, palette::kGround});
+MeshId mesh_for(const Object& o) {
+  switch (o.kind) {
+    case ObjectKind::Tree:  return MeshId::Tree;
+    case ObjectKind::Pine:  return MeshId::Pine;
+    case ObjectKind::Rock:  return static_cast<MeshId>(static_cast<size_t>(MeshId::Rock0) + o.variant % kRockVariants);
+    case ObjectKind::Log:   return MeshId::Log;
+    case ObjectKind::Stump: return MeshId::Stump;
+    case ObjectKind::Bush:  return MeshId::Bush;
+    default:                return MeshId::Crate;
+  }
+}
 
-  constexpr size_t kColors = sizeof palette::kObjects / sizeof palette::kObjects[0];
+namespace {
+
+// Mesh scale for an object, matching the sizes documented in meshes.hpp
+// and the collision boxes of world.cpp.
+void scale_for(const Object& o, Instance& in) {
+  const Vec3 s = o.size;
+  switch (o.kind) {
+    case ObjectKind::Tree:
+    case ObjectKind::Pine:  in.sx = in.sy = in.sz = s.x; break;
+    case ObjectKind::Rock:  in.sx = s.x; in.sy = s.y; in.sz = s.z; break;
+    case ObjectKind::Log:   in.sx = s.x; in.sy = s.y; in.sz = s.y; break;
+    case ObjectKind::Stump:
+    case ObjectKind::Bush:  in.sx = s.x; in.sy = s.y; in.sz = s.x; break;
+    default:                in.sx = s.x; in.sy = s.y; in.sz = s.z; in.y += s.y; break;  // centered cube
+  }
+}
+
+}  // namespace
+
+void build_scene(const World& w, DrawList& list) {
+  list.batches.resize(kMeshCount);
+  for (auto& batch : list.batches) batch.clear();
+  auto& cubes = list.batches[static_cast<size_t>(MeshId::Cube)];
+
+  const float g = rules::kWorldHalfSize;
+  cubes.push_back({0, -0.05f, 0, 0, g, 0.05f, g, 1, palette::kGround});
+
   for (const Object& o : w.objects) {
-    out.push_back({o.center.x, o.center.y, o.center.z, 0, o.half.x, o.half.y, o.half.z, 0,
-                   palette::kObjects[o.color % kColors]});
+    Instance in;
+    in.x = o.pos.x;
+    in.y = o.pos.y;
+    in.z = o.pos.z;
+    in.yaw = static_cast<float>(radians_from_angle16(o.yaw));
+    scale_for(o, in);
+    const float k = 0.88f + 0.24f * static_cast<float>(o.variant) / 255.0f;  // slight color variation
+    in.tint = {k, k, k, 1};
+    list.batches[static_cast<size_t>(mesh_for(o))].push_back(in);
   }
 
   const Player& p = w.player;
   const float h = rules::kPlayerHalfWidth;
   const float yaw = std::atan2(-p.facing_x, -p.facing_z);
-  out.push_back({p.pos.x, p.pos.y + h, p.pos.z, yaw, h, h, h, 0, palette::kPlayer});
+  cubes.push_back({p.pos.x, p.pos.y + h, p.pos.z, yaw, h, h, h, 0, palette::kPlayer});
   // A small "nose" on the front face shows where the player is facing.
-  out.push_back({p.pos.x + p.facing_x * h, p.pos.y + h * 1.3f, p.pos.z + p.facing_z * h, yaw,
-                 0.12f, 0.08f, 0.06f, 0, palette::kPlayerNose});
+  cubes.push_back({p.pos.x + p.facing_x * h, p.pos.y + h * 1.3f, p.pos.z + p.facing_z * h, yaw,
+                   0.12f, 0.08f, 0.06f, 0, palette::kPlayerNose});
 }
 
 View build_view(const World& w, const Camera& cam, float aspect) {

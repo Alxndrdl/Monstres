@@ -9,11 +9,16 @@ namespace {
 
 constexpr uint8_t kMagic[4] = {'M', 'N', 'S', 'T'};
 constexpr uint32_t kMaxObjectsInSave = 100000;
-constexpr size_t kObjectBytes = 7 * 4;
+constexpr size_t kObjectBytes = 1 + 3 * 4 + 3 * 4 + 2 + 1;
+constexpr float kMaxObjectSize = 20.0f;
 
 class Writer {
 public:
   void u8(uint8_t v) { out_.push_back(v); }
+  void u16(uint16_t v) {
+    out_.push_back(static_cast<uint8_t>(v));
+    out_.push_back(static_cast<uint8_t>(v >> 8));
+  }
   void u32(uint32_t v) {
     for (int i = 0; i < 4; ++i) out_.push_back(static_cast<uint8_t>(v >> (8 * i)));
   }
@@ -36,6 +41,12 @@ public:
   bool u8(uint8_t& v) {
     if (remaining() < 1) return false;
     v = in_[pos_++];
+    return true;
+  }
+  bool u16(uint16_t& v) {
+    if (remaining() < 2) return false;
+    v = static_cast<uint16_t>(in_[pos_] | (in_[pos_ + 1] << 8));
+    pos_ += 2;
     return true;
   }
   bool u32(uint32_t& v) {
@@ -101,9 +112,11 @@ std::vector<uint8_t> serialize(const World& w) {
   out.f32(w.player.facing_z);
   out.u32(static_cast<uint32_t>(w.objects.size()));
   for (const Object& o : w.objects) {
-    out.vec3(o.center);
-    out.vec3(o.half);
-    out.u32(o.color);
+    out.u8(static_cast<uint8_t>(o.kind));
+    out.vec3(o.pos);
+    out.vec3(o.size);
+    out.u16(o.yaw);
+    out.u8(o.variant);
   }
   return out.take();
 }
@@ -138,13 +151,15 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   if (!inside_world(w.player.pos)) return fail(error, LoadError::Corrupt);
 
   w.objects.resize(count);
+  const auto valid_size = [](float v) { return v >= 0 && v <= kMaxObjectSize; };
   for (Object& o : w.objects) {
-    uint32_t color = 0;
-    if (!(in.vec3(o.center) && in.vec3(o.half) && in.u32(color)) || color > 255 ||
-        !inside_world(o.center) || o.half.x <= 0 || o.half.y <= 0 || o.half.z <= 0) {
+    uint8_t kind = 0;
+    if (!(in.u8(kind) && in.vec3(o.pos) && in.vec3(o.size) && in.u16(o.yaw) && in.u8(o.variant)) ||
+        kind >= static_cast<uint8_t>(ObjectKind::Count) || !inside_world(o.pos) ||
+        !valid_size(o.size.x) || !valid_size(o.size.y) || !valid_size(o.size.z)) {
       return fail(error, LoadError::Corrupt);
     }
-    o.color = static_cast<uint8_t>(color);
+    o.kind = static_cast<ObjectKind>(kind);
   }
   return w;
 }

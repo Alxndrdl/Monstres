@@ -21,9 +21,22 @@ inline World empty_world() {
   return w;
 }
 
-// Adds a box resting on the ground (or floating, with `bottom` > 0).
+// Adds a crate (a plain box) resting on the ground, or floating with `bottom` > 0.
 inline void add_box(World& w, Vec3 center_xz, Vec3 half, float bottom = 0) {
-  w.objects.push_back({{center_xz.x, bottom + half.y, center_xz.z}, half, 0});
+  Object o;
+  o.kind = ObjectKind::Crate;
+  o.pos = {center_xz.x, bottom, center_xz.z};
+  o.size = half;
+  w.objects.push_back(o);
+}
+
+inline Object make_object(ObjectKind kind, Vec3 pos, Vec3 size, Angle16 yaw = 0) {
+  Object o;
+  o.kind = kind;
+  o.pos = pos;
+  o.size = size;
+  o.yaw = yaw;
+  return o;
 }
 
 inline Input move(int8_t x, int8_t y, Angle16 yaw = 0, bool jump = false) {
@@ -48,7 +61,7 @@ inline void check_invariants(const World& w) {
   CHECK(std::fabs(p.pos.z) <= limit);
   CHECK(std::fabs(p.facing_x * p.facing_x + p.facing_z * p.facing_z - 1.0f) < 1e-4f);
   for (const Object& o : w.objects) {
-    CHECK_MESSAGE(!overlaps(player_box(p), object_box(o)), "player inside the object at ", o.center);
+    CHECK_MESSAGE(!overlaps(player_box(p), object_box(o)), "player inside the object at ", o.pos);
   }
 }
 

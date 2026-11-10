@@ -40,6 +40,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_save.cpp
   unit/test_debug.cpp
   unit/test_scene.cpp
+  unit/test_meshes.cpp
 )
 
 monstres_add_tests(monstres_functional_tests functional

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <span>
+#include <vector>
 
 namespace monstres {
 
@@ -13,15 +14,29 @@ struct Mat4 {
   float m[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 };
 
-// One box to draw. All boxes are drawn with a single instanced draw call.
-struct CubeInstance {
-  float x = 0, y = 0, z = 0;         // center
-  float yaw = 0;                     // rotation around Y, radians
-  float hx = 0.5f, hy = 0.5f, hz = 0.5f;  // half extents
-  float pattern = 0;                 // 0 = plain, 1 = checkerboard (ground)
-  Color color;
+// A mesh: flat-shaded triangles, 9 floats per vertex
+// (position xyz, normal xyz, color rgb). Built once at startup.
+struct MeshData {
+  std::vector<float> vertices;
+  static constexpr int kFloatsPerVertex = 9;
+  size_t vertex_count() const { return vertices.size() / kFloatsPerVertex; }
 };
-static_assert(sizeof(CubeInstance) == 12 * sizeof(float), "uploaded as-is to the GPU");
+
+// One copy of a mesh in the world. All copies of a mesh are drawn with a
+// single instanced draw call.
+struct Instance {
+  float x = 0, y = 0, z = 0;              // position of the mesh origin
+  float yaw = 0;                          // rotation around Y, radians
+  float sx = 1, sy = 1, sz = 1;           // scale
+  float pattern = 0;                      // 0 = plain, 1 = checkerboard (ground)
+  Color tint{1, 1, 1, 1};                 // multiplies the mesh colors
+};
+static_assert(sizeof(Instance) == 12 * sizeof(float), "uploaded as-is to the GPU");
+
+// What to draw this frame: batches[i] holds the instances of mesh i.
+struct DrawList {
+  std::vector<std::vector<Instance>> batches;
+};
 
 struct View {
   Mat4 view_projection;
@@ -41,7 +56,7 @@ class Renderer {
 public:
   virtual ~Renderer() = default;
   virtual void begin_frame(const Frame& frame) = 0;
-  virtual void draw_cubes(const View& view, std::span<const CubeInstance> cubes) = 0;
+  virtual void draw(const View& view, const DrawList& list) = 0;
   virtual void end_frame() = 0;
 };
 

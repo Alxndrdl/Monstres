@@ -9,6 +9,7 @@
 #include "monstres/core/debug.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/world.hpp"
+#include "monstres/render/meshes.hpp"
 #include "monstres/render/scene.hpp"
 
 #include <emscripten.h>
@@ -37,7 +38,7 @@ constexpr int kMaxTicksPerFrame = 10;
 struct App {
   World world;
   std::unique_ptr<Renderer> renderer;
-  std::vector<CubeInstance> cubes;
+  DrawList draw_list;
   Camera camera;
   float move_x = 0, move_y = 0;  // -1..1, set by JavaScript
   int jump_buffer = 0;           // ticks left during which a jump press is pending
@@ -133,10 +134,10 @@ void frame(void* user) {
   const int ph = std::max(1, static_cast<int>(css_h * dpr));
   emscripten_set_canvas_element_size("#canvas", pw, ph);
 
-  build_scene(app.world, app.cubes);
+  build_scene(app.world, app.draw_list);
   const View view = build_view(app.world, app.camera, static_cast<float>(pw) / static_cast<float>(ph));
   app.renderer->begin_frame({pw, ph, palette::kSky});
-  app.renderer->draw_cubes(view, app.cubes);
+  app.renderer->draw(view, app.draw_list);
   app.renderer->end_frame();
 }
 
@@ -237,7 +238,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   emscripten_webgl_make_context_current(ctx);
-  app.renderer = make_gles3_renderer();
+  app.renderer = make_gles3_renderer(build_meshes());
   if (!app.renderer) {
     js_fatal("Impossible d'initialiser le rendu (shaders).");
     return 1;

@@ -46,10 +46,19 @@ TEST_CASE("invalid saves are rejected with the right error") {
     CHECK_FALSE(deserialize(bytes, &error));
     CHECK(error == LoadError::BadMagic);
   }
-  SUBCASE("old version 1 (2D prototype)") {
-    bytes[4] = 1;
+  SUBCASE("old versions 1 (2D prototype) and 2 (boxes only)") {
+    for (uint8_t old : {1, 2}) {
+      bytes[4] = old;
+      CHECK_FALSE(deserialize(bytes, &error));
+      CHECK(error == LoadError::UnsupportedVersion);
+    }
+  }
+  SUBCASE("unknown object kind") {
+    // First object: after magic, version, tick, RNG, player (12 + 4 + 1 + 8) and count.
+    constexpr size_t first_object = 4 + 4 + 8 + 8 + 8 + 12 + 4 + 1 + 8 + 4;
+    bytes[first_object] = 200;
     CHECK_FALSE(deserialize(bytes, &error));
-    CHECK(error == LoadError::UnsupportedVersion);
+    CHECK(error == LoadError::Corrupt);
   }
   SUBCASE("future version") {
     bytes[4] = 99;
