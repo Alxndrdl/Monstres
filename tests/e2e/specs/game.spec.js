@@ -8,8 +8,32 @@ test('the game starts in a 3D world', async ({ page }) => {
   const s = await state(page);
   expect(s.tick).toBe(0);
   expect(s.player).toMatchObject({ x: 0, y: 0, z: 0, onGround: true });
-  expect(s.objects).toBe(80);
+  expect(s.objects).toBeGreaterThan(150);  // nature + village
+  expect(s.creatures[0].species).toBe('companion');
+  const bySpecies = {};
+  for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
+  expect(bySpecies).toMatchObject({ companion: 1, villager: 8, crow: 5, fish: 4 });
+  expect(bySpecies.slime + bySpecies.mushroom + bySpecies.bird).toBe(16);
   await expect(page.locator('#message')).toBeHidden();
+});
+
+test('the companion follows the player', async ({ page }) => {
+  await openGame(page, '?seed=42&new&frozen');
+  await walk(page, 0.3, 1, 120);  // about 10 m
+  await page.evaluate(() => window.monstres.step(120));  // then wait 2 s
+  const { player, creatures } = await state(page);
+  const companion = creatures[0];
+  expect(Math.hypot(companion.x - player.x, companion.z - player.z)).toBeLessThan(2.5);
+});
+
+test('wild monsters move around on their own', async ({ page }) => {
+  await openGame(page, '?seed=42&new&frozen');
+  const wild = (s) => s.creatures.filter((c) => ['slime', 'mushroom', 'bird'].includes(c.species));
+  const before = wild(await state(page));
+  await page.evaluate(() => window.monstres.step(600));  // 10 s
+  const after = wild(await state(page));
+  const moved = after.filter((c, i) => Math.hypot(c.x - before[i].x, c.z - before[i].z) > 0.5);
+  expect(moved.length).toBeGreaterThan(8);
 });
 
 test.describe('keyboard', () => {
@@ -184,6 +208,6 @@ test('the game still starts offline once installed', async ({ page, context, bro
 
   await context.setOffline(true);
   await openGame(page, '?frozen');
-  expect((await state(page)).objects).toBe(80);
+  expect((await state(page)).objects).toBeGreaterThan(150);
   await expect(page.locator('#joystick')).toBeVisible();  // controls.js came from the cache too
 });

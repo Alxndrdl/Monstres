@@ -4,62 +4,116 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <unordered_map>
 #include <vector>
 
 namespace monstres {
 
 namespace {
 
-constexpr const char* kVertexShader = R"(#version 300 es
+// ---- Meshes -------------------------------------------------------------------
+
+constexpr const char* kMeshVertexShader = R"(#version 300 es
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
-layout(location = 2) in vec3 aColor;
-layout(location = 3) in vec4 iPosYaw;        // per instance
-layout(location = 4) in vec4 iScalePattern;
-layout(location = 5) in vec4 iTint;
+layout(location = 2) in vec4 aColor;
+layout(location = 3) in vec4 iPosWind;    // per instance: position, wind
+layout(location = 4) in vec4 iRotation;   // quaternion
+layout(location = 5) in vec4 iScale;
+layout(location = 6) in vec4 iTint;
 uniform mat4 uViewProjection;
+uniform float uTime;
 out vec3 vNormal;
 out vec3 vWorld;
-out vec3 vColor;
-out float vPattern;
+out vec4 vColor;
+out float vWater;
+vec3 rotate(vec4 q, vec3 v) {
+  return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
 void main() {
-  float c = cos(iPosYaw.w), s = sin(iPosYaw.w);
-  vec3 p = aPos * iScalePattern.xyz;
-  p = vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
+  vec3 local = aPos * iScale.xyz;
   // Normals of a non-uniformly scaled mesh: divide by the scale.
-  vec3 n = aNormal / iScalePattern.xyz;
-  vNormal = vec3(c * n.x + s * n.z, n.y, -s * n.x + c * n.z);
-  vWorld = p + iPosYaw.xyz;
-  vColor = aColor * iTint.rgb;
-  vPattern = iScalePattern.w;
-  gl_Position = uViewProjection * vec4(vWorld, 1.0);
+  vNormal = rotate(iRotation, aNormal / iScale.xyz);
+  vec3 world = rotate(iRotation, local) + iPosWind.xyz;
+  // Wind: the higher the vertex, the more it sways.
+  if (iPosWind.w > 0.0) {
+    float phase = uTime * 1.7 + iPosWind.x * 0.35 + iPosWind.z * 0.25;
+    float sway = sin(phase) * 0.7 + sin(phase * 2.3 + 1.3) * 0.3;
+    world.xz += vec2(1.0, 0.45) * sway * iPosWind.w * 0.12 * max(local.y, 0.0);
+  }
+  vWorld = world;
+  vColor = aColor * iTint;
+  vWater = iScale.w;
+  gl_Position = uViewProjection * vec4(world, 1.0);
 }
 )";
 
-constexpr const char* kFragmentShader = R"(#version 300 es
+constexpr const char* kMeshFragmentShader = R"(#version 300 es
 precision mediump float;
 in vec3 vNormal;
 in vec3 vWorld;
-in vec3 vColor;
-in float vPattern;
+in vec4 vColor;
+in float vWater;
 uniform vec3 uCamera;
 uniform vec3 uLight;
+uniform float uTimeFs;
 uniform vec3 uFog;
 uniform vec2 uFogRange;
 out vec4 outColor;
 void main() {
-  vec3 color = vColor;
-  if (vPattern > 0.5) {  // ground: 1 m checkerboard
-    float checker = mod(floor(vWorld.x) + floor(vWorld.z), 2.0);
-    color *= mix(0.94, 1.04, checker);
-  }
   vec3 n = normalize(vNormal);
+  if (!gl_FrontFacing) n = -n;  // double-sided meshes
   float diffuse = max(dot(n, uLight), 0.0);
   // Ambient light: bluish from the sky, greenish bounced from the ground.
-  vec3 ambient = mix(vec3(0.38, 0.40, 0.34), vec3(0.50, 0.56, 0.66), n.y * 0.5 + 0.5);
-  color *= ambient + vec3(1.0, 0.96, 0.88) * 0.62 * diffuse;
+  vec3 ambient = mix(vec3(0.36, 0.40, 0.32), vec3(0.52, 0.58, 0.70), n.y * 0.5 + 0.5);
+  vec3 color = vColor.rgb * (ambient + vec3(1.0, 0.95, 0.85) * 0.62 * diffuse);
+  float alpha = vColor.a;
+  if (vWater > 0.5) {
+    // Small moving waves: sky reflection at grazing angles and sun glints.
+    vec3 wave = normalize(vec3(sin(vWorld.x * 1.7 + uTimeFs * 1.3) * 0.06 + sin(vWorld.z * 2.3 - uTimeFs) * 0.04,
+                               1.0,
+                               cos(vWorld.z * 1.5 + uTimeFs * 1.1) * 0.06 + cos(vWorld.x * 2.1 + uTimeFs * 0.7) * 0.04));
+    vec3 view = normalize(uCamera - vWorld);
+    float fresnel = pow(1.0 - max(dot(view, wave), 0.0), 3.0);
+    color = mix(color, uFog * 1.05, fresnel * 0.7);
+    float glint = pow(max(dot(reflect(-uLight, wave), view), 0.0), 80.0);
+    color += vec3(1.0, 0.95, 0.85) * glint * 0.8;
+    alpha = max(alpha, fresnel * 0.9 * step(0.01, vColor.a));
+  }
   float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uCamera));
-  outColor = vec4(mix(color, uFog, fog), 1.0);
+  outColor = vec4(mix(color, uFog, fog), alpha);
+}
+)";
+
+// ---- Sky: one full-screen triangle, gradient + sun -----------------------------
+
+constexpr const char* kSkyVertexShader = R"(#version 300 es
+out vec2 vNdc;
+void main() {
+  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+  vNdc = p;
+  gl_Position = vec4(p, 1.0, 1.0);
+}
+)";
+
+constexpr const char* kSkyFragmentShader = R"(#version 300 es
+precision highp float;
+in vec2 vNdc;
+uniform mat4 uInverseViewProjection;
+uniform vec3 uCamera;
+uniform vec3 uSun;
+uniform vec3 uZenith;
+uniform vec3 uHorizon;
+out vec4 outColor;
+void main() {
+  vec4 far = uInverseViewProjection * vec4(vNdc, 1.0, 1.0);
+  vec3 dir = normalize(far.xyz / far.w - uCamera);
+  float up = max(dir.y, 0.0);
+  vec3 sky = mix(uHorizon, uZenith, pow(up, 0.55));
+  float sun = max(dot(dir, uSun), 0.0);
+  sky += vec3(1.0, 0.85, 0.6) * (pow(sun, 8.0) * 0.25 + pow(sun, 64.0) * 0.35);  // glow
+  sky = mix(sky, vec3(1.0, 0.98, 0.9), smoothstep(0.9993, 0.9996, sun));      // disc
+  outColor = vec4(sky, 1.0);
 }
 )";
 
@@ -107,100 +161,195 @@ struct GpuMesh {
   GLuint vao = 0;
   GLuint vbo = 0;
   GLsizei vertex_count = 0;
+  bool transparent = false;
+  bool double_sided = false;
 };
 
 class Gles3Renderer final : public Renderer {
 public:
   bool init(std::span<const MeshData> meshes) {
-    program_ = link(kVertexShader, kFragmentShader);
-    if (!program_) return false;
-    u_view_projection_ = glGetUniformLocation(program_, "uViewProjection");
-    u_camera_ = glGetUniformLocation(program_, "uCamera");
-    u_light_ = glGetUniformLocation(program_, "uLight");
-    u_fog_ = glGetUniformLocation(program_, "uFog");
-    u_fog_range_ = glGetUniformLocation(program_, "uFogRange");
+    mesh_program_ = link(kMeshVertexShader, kMeshFragmentShader);
+    sky_program_ = link(kSkyVertexShader, kSkyFragmentShader);
+    if (!mesh_program_ || !sky_program_) return false;
+    u_view_projection_ = glGetUniformLocation(mesh_program_, "uViewProjection");
+    u_time_ = glGetUniformLocation(mesh_program_, "uTime");
+    u_time_fs_ = glGetUniformLocation(mesh_program_, "uTimeFs");
+    u_camera_ = glGetUniformLocation(mesh_program_, "uCamera");
+    u_light_ = glGetUniformLocation(mesh_program_, "uLight");
+    u_fog_ = glGetUniformLocation(mesh_program_, "uFog");
+    u_fog_range_ = glGetUniformLocation(mesh_program_, "uFogRange");
+    u_sky_inverse_ = glGetUniformLocation(sky_program_, "uInverseViewProjection");
+    u_sky_camera_ = glGetUniformLocation(sky_program_, "uCamera");
+    u_sky_sun_ = glGetUniformLocation(sky_program_, "uSun");
+    u_sky_zenith_ = glGetUniformLocation(sky_program_, "uZenith");
+    u_sky_horizon_ = glGetUniformLocation(sky_program_, "uHorizon");
+    glGenVertexArrays(1, &sky_vao_);
 
     glGenBuffers(1, &instance_vbo_);
-    for (const MeshData& data : meshes) meshes_.push_back(upload(data));
+    meshes_.resize(meshes.size());
+    for (size_t i = 0; i < meshes.size(); ++i) set_mesh(i, meshes[i]);
 
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
+    glCullFace(GL_BACK);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     return true;
   }
 
   ~Gles3Renderer() override {
-    for (GpuMesh& m : meshes_) {
-      glDeleteBuffers(1, &m.vbo);
-      glDeleteVertexArrays(1, &m.vao);
-    }
+    for (GpuMesh& m : meshes_) release(m);
+    for (auto& [list, c] : cache_) glDeleteBuffers(static_cast<GLsizei>(c.buffers.size()), c.buffers.data());
     glDeleteBuffers(1, &instance_vbo_);
-    glDeleteProgram(program_);
+    glDeleteVertexArrays(1, &sky_vao_);
+    glDeleteProgram(mesh_program_);
+    glDeleteProgram(sky_program_);
   }
 
-  void begin_frame(const Frame& frame) override {
-    glViewport(0, 0, frame.pixel_width, frame.pixel_height);
-    glClearColor(frame.clear.r, frame.clear.g, frame.clear.b, frame.clear.a);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  }
-
-  void draw(const View& view, const DrawList& list) override {
-    glUseProgram(program_);
-    glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.view_projection.m);
-    glUniform3f(u_camera_, view.camera_x, view.camera_y, view.camera_z);
-    glUniform3f(u_light_, view.light_x, view.light_y, view.light_z);
-    glUniform3f(u_fog_, view.fog.r, view.fog.g, view.fog.b);
-    glUniform2f(u_fog_range_, view.fog_start, view.fog_end);
-
-    glBindBuffer(GL_ARRAY_BUFFER, instance_vbo_);
-    for (size_t i = 0; i < list.batches.size() && i < meshes_.size(); ++i) {
-      const auto& instances = list.batches[i];
-      if (instances.empty() || meshes_[i].vertex_count == 0) continue;
-      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)),
-                   instances.data(), GL_STREAM_DRAW);
-      glBindVertexArray(meshes_[i].vao);
-      glDrawArraysInstanced(GL_TRIANGLES, 0, meshes_[i].vertex_count, static_cast<GLsizei>(instances.size()));
-    }
-    glBindVertexArray(0);
-  }
-
-  void end_frame() override {}
-
-private:
-  GpuMesh upload(const MeshData& data) {
-    GpuMesh m;
+  void set_mesh(size_t index, const MeshData& data) override {
+    if (index >= meshes_.size()) meshes_.resize(index + 1);
+    GpuMesh& m = meshes_[index];
+    release(m);
     m.vertex_count = static_cast<GLsizei>(data.vertex_count());
+    m.transparent = data.transparent;
+    m.double_sided = data.double_sided;
+    if (m.vertex_count == 0) return;
+
     glGenVertexArrays(1, &m.vao);
     glBindVertexArray(m.vao);
-
     glGenBuffers(1, &m.vbo);
     glBindBuffer(GL_ARRAY_BUFFER, m.vbo);
     glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(data.vertices.size() * sizeof(float)),
                  data.vertices.data(), GL_STATIC_DRAW);
     constexpr GLsizei vertex_stride = MeshData::kFloatsPerVertex * sizeof(float);
-    for (GLuint a = 0; a < 3; ++a) {
-      glEnableVertexAttribArray(a);
-      glVertexAttribPointer(a, 3, GL_FLOAT, GL_FALSE, vertex_stride, offset(a * 3 * sizeof(float)));
-    }
-
-    // Per-instance attributes, read from the shared instance buffer.
-    glBindBuffer(GL_ARRAY_BUFFER, instance_vbo_);
-    constexpr GLsizei stride = sizeof(Instance);
-    const size_t attribute_offsets[] = {offsetof(Instance, x), offsetof(Instance, sx), offsetof(Instance, tint)};
-    for (GLuint i = 0; i < 3; ++i) {
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertex_stride, offset(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, vertex_stride, offset(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, vertex_stride, offset(6 * sizeof(float)));
+    // Per-instance attributes: pointed at an instance buffer just before each draw.
+    for (GLuint i = 0; i < 4; ++i) {
       glEnableVertexAttribArray(3 + i);
-      glVertexAttribPointer(3 + i, 4, GL_FLOAT, GL_FALSE, stride, offset(attribute_offsets[i]));
       glVertexAttribDivisor(3 + i, 1);
     }
     glBindVertexArray(0);
-    return m;
   }
 
-  GLuint program_ = 0;
-  GLint u_view_projection_ = -1, u_camera_ = -1, u_light_ = -1, u_fog_ = -1, u_fog_range_ = -1;
+  void begin_frame(const Frame& frame) override {
+    glViewport(0, 0, frame.pixel_width, frame.pixel_height);
+    glDepthMask(GL_TRUE);
+    glClear(GL_DEPTH_BUFFER_BIT);
+  }
+
+  void draw(const View& view, std::span<const DrawList* const> lists) override {
+    draw_sky(view);
+
+    glUseProgram(mesh_program_);
+    glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.view_projection.m);
+    glUniform1f(u_time_, view.time);
+    glUniform1f(u_time_fs_, view.time);
+    glUniform3f(u_camera_, view.camera_x, view.camera_y, view.camera_z);
+    glUniform3f(u_light_, view.light_x, view.light_y, view.light_z);
+    glUniform3f(u_fog_, view.fog.r, view.fog.g, view.fog.b);
+    glUniform2f(u_fog_range_, view.fog_start, view.fog_end);
+    glEnable(GL_DEPTH_TEST);
+    for (const DrawList* list : lists) {
+      if (list->cached) update_cache(*list);
+    }
+
+    // Opaque first (depth writes on), then transparent (blended, no depth writes).
+    for (bool transparent : {false, true}) {
+      glDepthMask(transparent ? GL_FALSE : GL_TRUE);
+      if (transparent) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+      for (size_t i = 0; i < meshes_.size(); ++i) {
+        const GpuMesh& m = meshes_[i];
+        if (m.vertex_count == 0 || m.transparent != transparent) continue;
+        if (m.double_sided) glDisable(GL_CULL_FACE); else glEnable(GL_CULL_FACE);
+        glBindVertexArray(m.vao);
+        for (const DrawList* list : lists) {
+          if (i >= list->batches.size() || list->batches[i].empty()) continue;
+          const auto& instances = list->batches[i];
+          if (list->cached) {
+            glBindBuffer(GL_ARRAY_BUFFER, cache_[list].buffers[i]);
+          } else {
+            glBindBuffer(GL_ARRAY_BUFFER, instance_vbo_);
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)),
+                         instances.data(), GL_STREAM_DRAW);
+          }
+          point_instance_attributes();
+          glDrawArraysInstanced(GL_TRIANGLES, 0, m.vertex_count, static_cast<GLsizei>(instances.size()));
+        }
+      }
+    }
+    glBindVertexArray(0);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+  }
+
+  void end_frame() override {}
+
+private:
+  void draw_sky(const View& view) {
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glUseProgram(sky_program_);
+    glUniformMatrix4fv(u_sky_inverse_, 1, GL_FALSE, view.inverse_view_projection.m);
+    glUniform3f(u_sky_camera_, view.camera_x, view.camera_y, view.camera_z);
+    glUniform3f(u_sky_sun_, view.sun_x, view.sun_y, view.sun_z);
+    glUniform3f(u_sky_zenith_, view.sky_zenith.r, view.sky_zenith.g, view.sky_zenith.b);
+    glUniform3f(u_sky_horizon_, view.sky_horizon.r, view.sky_horizon.g, view.sky_horizon.b);
+    glBindVertexArray(sky_vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+  }
+
+  // Instance attributes read from the buffer bound to GL_ARRAY_BUFFER.
+  static void point_instance_attributes() {
+    constexpr GLsizei stride = sizeof(Instance);
+    const size_t offsets[] = {offsetof(Instance, x), offsetof(Instance, rotation), offsetof(Instance, sx),
+                              offsetof(Instance, tint)};
+    for (GLuint i = 0; i < 4; ++i) {
+      glVertexAttribPointer(3 + i, 4, GL_FLOAT, GL_FALSE, stride, offset(offsets[i]));
+    }
+  }
+
+  // Uploads a cached list once per version, one buffer per batch.
+  void update_cache(const DrawList& list) {
+    Cache& c = cache_[&list];
+    if (c.valid && c.version == list.version) return;
+    if (c.buffers.size() < list.batches.size()) {
+      const size_t old = c.buffers.size();
+      c.buffers.resize(list.batches.size());
+      glGenBuffers(static_cast<GLsizei>(c.buffers.size() - old), c.buffers.data() + old);
+    }
+    for (size_t i = 0; i < list.batches.size(); ++i) {
+      glBindBuffer(GL_ARRAY_BUFFER, c.buffers[i]);
+      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(list.batches[i].size() * sizeof(Instance)),
+                   list.batches[i].data(), GL_STATIC_DRAW);
+    }
+    c.version = list.version;
+    c.valid = true;
+  }
+
+  static void release(GpuMesh& m) {
+    if (m.vbo) glDeleteBuffers(1, &m.vbo);
+    if (m.vao) glDeleteVertexArrays(1, &m.vao);
+    m.vbo = m.vao = 0;
+  }
+
+  GLuint mesh_program_ = 0, sky_program_ = 0;
+  GLint u_time_fs_ = -1;
+  GLint u_view_projection_ = -1, u_time_ = -1, u_camera_ = -1, u_light_ = -1, u_fog_ = -1, u_fog_range_ = -1;
+  GLint u_sky_inverse_ = -1, u_sky_camera_ = -1, u_sky_sun_ = -1, u_sky_zenith_ = -1, u_sky_horizon_ = -1;
+  GLuint sky_vao_ = 0;
   GLuint instance_vbo_ = 0;
   std::vector<GpuMesh> meshes_;
+  struct Cache {
+    bool valid = false;
+    uint32_t version = 0;
+    std::vector<GLuint> buffers;
+  };
+  std::unordered_map<const DrawList*, Cache> cache_;
 };
 
 }  // namespace

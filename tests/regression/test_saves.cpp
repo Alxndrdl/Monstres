@@ -2,8 +2,9 @@
 // of the game (data/saves/v<version>_*.sav) must still load to the same state,
 // or be refused cleanly when that version is not supported anymore.
 //
-// MONSTRES_UPDATE_GOLDEN=1 creates the reference file for the current version
-// if it does not exist yet. Files of older versions are never rewritten.
+// MONSTRES_UPDATE_GOLDEN=1 creates the reference save of the current version
+// if it does not exist yet, and rewrites every .expected file. Save files of
+// older versions are never rewritten.
 
 #include "replay.hpp"
 
@@ -53,8 +54,6 @@ TEST_CASE("every past save still loads to the same state") {
 
     fs::path expected_path = entry.path();
     expected_path.replace_extension(".expected");
-    const auto expected = read_text(expected_path.string());
-    REQUIRE(expected.has_value());
 
     // The .expected file holds either the state summary, or
     // "rejected <error>" for saves that must be refused cleanly.
@@ -62,6 +61,12 @@ TEST_CASE("every past save still loads to the same state") {
     const auto world = deserialize(read_bytes(entry.path()), &error);
     const std::string actual =
         world ? summary(*world) : std::string("rejected ") + load_error_name(error) + "\n";
+    if (update_golden()) {  // the .sav files themselves are never rewritten
+      write_text(expected_path.string(), actual);
+      continue;
+    }
+    const auto expected = read_text(expected_path.string());
+    REQUIRE(expected.has_value());
     CHECK(actual == *expected);
   }
 }

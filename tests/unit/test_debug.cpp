@@ -10,5 +10,5 @@ TEST_CASE("to_json describes the world") {
   w.player.on_ground = false;
   CHECK(to_json(w) ==
         "{\"tick\":0,\"player\":{\"x\":1.5000,\"y\":0.2500,\"z\":-2.0000,\"onGround\":false,"
-        "\"facingX\":0.0000,\"facingZ\":-1.0000},\"objects\":1}");
+        "\"facingX\":0.0000,\"facingZ\":-1.0000},\"objects\":1,\"creatures\":[]}");
 }

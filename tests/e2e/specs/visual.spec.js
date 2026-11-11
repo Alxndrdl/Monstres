@@ -17,6 +17,16 @@ test('after walking and turning the camera', async ({ page }) => {
   await expect(page).toHaveScreenshot('walked-seed42.png');
 });
 
+test('the village', async ({ page }) => {
+  await openGame(page, '?seed=42&new&frozen');
+  await walk(page, 0, 1, 130);  // north along the path
+  await page.evaluate(() => {
+    window.monstres.step(60);
+    window.monstres.setCamera(0.3, 0.32);
+  });
+  await expect(page).toHaveScreenshot('village-seed42.png');
+});
+
 test.describe('phone', () => {
   test.skip(({ browserName }) => browserName === 'firefox', 'Firefox has no mobile emulation');
 

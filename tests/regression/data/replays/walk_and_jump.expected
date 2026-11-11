@@ -1,4 +1,6 @@
-hash 6724f3f64983c473
+hash dbf14cad87d5e2fb
 tick 372
-player -6.6667 0.0000 -8.8260 on-ground
-objects 80
+player -6.6667 0.0000 -12.3500 on-ground
+objects 173
+creatures 34
+companion -4.7680 0.0000 -12.3493

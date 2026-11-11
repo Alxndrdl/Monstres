@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 #include <utility>
 
 namespace monstres {
@@ -62,8 +63,7 @@ Object random_object(Rng& rng, float x, float z) {
       o.size = {random_range(rng, 0.5f, 0.9f), random_range(rng, 0.5f, 0.9f), 0};
       o.yaw = any_yaw(rng);
       break;
-    case ObjectKind::Crate:
-    case ObjectKind::Count: {
+    default: {  // Crate
       o.kind = ObjectKind::Crate;
       const float h = random_range(rng, 0.4f, 0.7f);
       o.size = {h, h, h};
@@ -94,7 +94,8 @@ Box footprint(const Object& o) {
 void generate_objects(World& w) {
   const float limit = rules::kWorldHalfSize - 3.0f;
   const float gap = rules::kObjectGap;
-  for (int attempt = 0; attempt < 20000 && w.objects.size() < rules::kObjectCount; ++attempt) {
+  uint32_t nature = 0;  // the village is already there
+  for (int attempt = 0; attempt < 50000 && nature < rules::kObjectCount; ++attempt) {
     const float x = random_range(w.rng, -limit, limit);
     const float z = random_range(w.rng, -limit, limit);
     const Object o = random_object(w.rng, x, z);
@@ -105,66 +106,676 @@ void generate_objects(World& w) {
     const float dz = std::max({b.min.z, -b.max.z, 0.0f});
     if (dx * dx + dz * dz < rules::kSpawnClearRadius * rules::kSpawnClearRadius) continue;
 
+    // Keep the village and the lake clear.
+    if (in_village(w.village, o.pos.x, o.pos.z, 2.0f) || in_lake(w.village.lake, o.pos.x, o.pos.z, 2.5f)) continue;
+
+    // Keep the path clear.
+    const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
+    if (distance_to_path(w.path, o.pos.x, o.pos.z) < rules::kPathHalfWidth + reach + 0.3f) continue;
+
     // Keep a gap between objects so the player can always walk between them.
     Box wide = b;
     wide.min = wide.min - Vec3{gap, 0, gap};
     wide.max = wide.max + Vec3{gap, 0, gap};
     const bool collides = std::any_of(w.objects.begin(), w.objects.end(),
                                       [&](const Object& other) { return overlaps(wide, footprint(other)); });
-    if (!collides) w.objects.push_back(o);
+    if (!collides) {
+      w.objects.push_back(o);
+      ++nature;
+    }
   }
 }
 
-// Moves the player along one axis, then pushes it out of any object it entered.
-void move_axis(World& w, int axis, float delta) {
-  Player& p = w.player;
-  float* coord = axis == 0 ? &p.pos.x : &p.pos.z;
+// What bodies collide with during a tick: object boxes (computed once per
+// tick) and the lake, which walkers cannot enter and swimmers cannot leave.
+struct Surroundings {
+  std::span<const Box> boxes;
+  const Lake& lake;
+  // Broad phase: box indices per cell of a grid over the world, so that a
+  // body only tests the objects around it.
+  static constexpr float kCell = 6.0f;
+  static constexpr int kCells = static_cast<int>(2 * rules::kWorldHalfSize / kCell) + 2;
+  std::vector<std::vector<uint16_t>> grid;
+
+  static int cell_of(float v) {
+    return std::clamp(static_cast<int>((v + rules::kWorldHalfSize) / kCell), 0, kCells - 1);
+  }
+
+  void build() {
+    grid.assign(static_cast<size_t>(kCells * kCells), {});
+    for (size_t i = 0; i < boxes.size(); ++i) {
+      const Box& b = boxes[i];
+      for (int cx = cell_of(b.min.x); cx <= cell_of(b.max.x); ++cx) {
+        for (int cz = cell_of(b.min.z); cz <= cell_of(b.max.z); ++cz) {
+          grid[static_cast<size_t>(cx * kCells + cz)].push_back(static_cast<uint16_t>(i));
+        }
+      }
+    }
+  }
+
+  // Calls f(box) for every object box that may touch `area` (a box may be
+  // visited more than once; callers do not mind).
+  template <typename F>
+  void near(const Box& area, F f) const {
+    for (int cx = cell_of(area.min.x); cx <= cell_of(area.max.x); ++cx) {
+      for (int cz = cell_of(area.min.z); cz <= cell_of(area.max.z); ++cz) {
+        for (uint16_t i : grid[static_cast<size_t>(cx * kCells + cz)]) f(boxes[i]);
+      }
+    }
+  }
+
+  bool any_overlap(const Box& area) const {
+    bool hit = false;
+    near(area, [&](const Box& b) { hit = hit || overlaps(area, b); });
+    return hit;
+  }
+};
+
+enum class Medium { Land, Water };
+
+bool wrong_medium(const Surroundings& s, const Body& b, const BodyShape& shape, Medium medium) {
+  if (medium == Medium::Water) return !in_lake(s.lake, b.pos.x, b.pos.z, -(shape.half_width + 0.6f));
+  return in_lake(s.lake, b.pos.x, b.pos.z, shape.half_width * 0.5f);
+}
+
+// Moves a body along one axis, then pushes it out of any object it entered.
+void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis, float delta,
+               Medium medium = Medium::Land) {
+  if (delta == 0) return;  // not moving: nothing to resolve
+  float* coord = axis == 0 ? &b.pos.x : &b.pos.z;
+  const float start = *coord;
   *coord += delta;
-  const float h = rules::kPlayerHalfWidth;
-  for (const Object& o : w.objects) {
-    const Box ob = object_box(o);
-    if (!overlaps(player_box(p), ob)) continue;
+  const float h = shape.half_width;
+  Box area = body_box(b, shape);
+  area.min.x = std::min(area.min.x, area.min.x - (axis == 0 ? delta : 0));
+  area.max.x = std::max(area.max.x, area.max.x - (axis == 0 ? delta : 0));
+  area.min.z = std::min(area.min.z, area.min.z - (axis == 2 ? delta : 0));
+  area.max.z = std::max(area.max.z, area.max.z - (axis == 2 ? delta : 0));
+  s.near(area, [&](const Box& ob) {
+    if (!overlaps(body_box(b, shape), ob)) return;
     const float lo = axis == 0 ? ob.min.x : ob.min.z;
     const float hi = axis == 0 ? ob.max.x : ob.max.z;
     *coord = delta > 0 ? lo - h : hi + h;
-  }
+  });
   const float limit = rules::kWorldHalfSize - h;
   *coord = std::clamp(*coord, -limit, limit);
+  // Pushed out of one object into another (a gap narrower than the body):
+  // do not move along this axis at all.
+  if (s.any_overlap(body_box(b, shape)) || wrong_medium(s, b, shape, medium)) *coord = start;
 }
 
-void move_vertical(World& w) {
-  Player& p = w.player;
-  p.pos.y += p.velocity_y * rules::kDt;
-  p.on_ground = false;
-  if (p.pos.y <= 0) {
-    p.pos.y = 0;
-    p.velocity_y = 0;
-    p.on_ground = true;
+void move_vertical(const Surroundings& s, Body& b, const BodyShape& shape) {  // walkers only
+  const float previous_y = b.pos.y;
+  b.pos.y += b.velocity_y * rules::kDt;
+  b.on_ground = false;
+  if (b.pos.y <= 0) {
+    b.pos.y = 0;
+    b.velocity_y = 0;
+    b.on_ground = true;
   }
-  for (const Object& o : w.objects) {
-    const Box ob = object_box(o);
-    if (!overlaps(player_box(p), ob)) continue;
-    if (p.velocity_y <= 0) {  // landing on top
-      p.pos.y = ob.max.y;
-      p.on_ground = true;
-    } else {                  // head hits the underside
-      p.pos.y = ob.min.y - rules::kPlayerHeight;
+  constexpr float kEpsilon = 1e-4f;
+  s.near(body_box(b, shape), [&](const Box& ob) {
+    if (!overlaps(body_box(b, shape), ob)) return;
+    if (previous_y >= ob.max.y - kEpsilon) {                    // landing on top
+      b.pos.y = ob.max.y;
+      b.on_ground = true;
+    } else if (previous_y + shape.height <= ob.min.y + kEpsilon) {  // head hits the underside
+      b.pos.y = ob.min.y - shape.height;
+    } else {
+      // Already touching it from the side (squeezed between two objects):
+      // stay at the same height rather than being pushed through anything.
+      b.pos.y = previous_y;
+      b.on_ground = b.on_ground || previous_y == 0;
     }
-    p.velocity_y = 0;
+    b.velocity_y = 0;
+  });
+}
+
+// One tick of walking and jumping. (dir_x, dir_z) has a length of at most 1.
+void move_body(const Surroundings& s, Body& b, const BodyShape& shape, float dir_x, float dir_z,
+               float speed, bool jump, float jump_speed) {
+  const float len2 = dir_x * dir_x + dir_z * dir_z;
+  if (len2 > 0.0f) {
+    const float len = std::sqrt(len2);
+    b.facing_x = dir_x / len;
+    b.facing_z = dir_z / len;
+  }
+  if (jump && b.on_ground) b.velocity_y = jump_speed;
+  b.velocity_y = std::max(b.velocity_y - rules::kGravity * rules::kDt, -rules::kMaxFallSpeed);
+
+  const float x0 = b.pos.x, z0 = b.pos.z;
+  move_axis(s, b, shape, 0, dir_x * speed * rules::kDt);
+  move_axis(s, b, shape, 2, dir_z * speed * rules::kDt);
+  move_vertical(s, b, shape);
+  const float dx = b.pos.x - x0, dz = b.pos.z - z0;
+  b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
+}
+
+// ---- Creatures ---------------------------------------------------------------
+
+// Shapes match the drawn size (rig scale in src/render/characters.cpp).
+constexpr SpeciesInfo kSpecies[] = {
+    {{0.23f, 0.58f}, 4.0f, 6.5f, 6.5f},  // Companion
+    {{0.45f, 0.72f}, 2.6f, 2.6f, 4.8f},  // Slime: moves only while hopping
+    {{0.36f, 0.92f}, 1.5f, 1.5f, 4.2f},  // Mushroom
+    {{0.28f, 0.70f}, 2.3f, 6.0f, 4.2f},  // Bird
+    {{0.25f, 1.10f}, 1.4f, 1.4f, 0.0f},  // Villager
+    {{0.18f, 0.40f}, 0.0f, 6.0f, 0.0f},  // Crow: flies at run_speed
+    {{0.30f, 0.30f}, 1.3f, 1.3f, 5.0f},  // Fish: swims, jumps out of the water
+};
+
+Vec2 clamp_to_world(Vec2 p, float margin) {
+  const float limit = rules::kWorldHalfSize - margin;
+  return {std::clamp(p.x, -limit, limit), std::clamp(p.z, -limit, limit)};
+}
+
+bool inside_any_object(const World& w, const Body& b, const BodyShape& shape) {
+  return std::any_of(w.objects.begin(), w.objects.end(),
+                     [&](const Object& o) { return overlaps(body_box(b, shape), object_box(o)); });
+}
+
+// Unit direction from (x, z) towards the target, and the distance to it.
+float direction_to(float x, float z, Vec2 target, float& dir_x, float& dir_z) {
+  const float dx = target.x - x, dz = target.z - z;
+  const float d = std::sqrt(dx * dx + dz * dz);
+  dir_x = d > 0 ? dx / d : 0;
+  dir_z = d > 0 ? dz / d : 0;
+  return d;
+}
+
+void step_companion(World& w, const Surroundings& boxes, Creature& c) {
+  const SpeciesInfo& info = species_info(c.species);
+  Body& b = c.body;
+  const Body& p = w.player;
+
+  float to_player_x, to_player_z;
+  const float player_distance = direction_to(b.pos.x, b.pos.z, {p.pos.x, p.pos.z}, to_player_x, to_player_z);
+  if (player_distance > rules::kCompanionTeleportDistance) {
+    // Lost behind: catch up instantly, just behind the player.
+    b.pos = {p.pos.x - p.facing_x * rules::kCompanionFollowDistance, p.pos.y,
+             p.pos.z - p.facing_z * rules::kCompanionFollowDistance};
+    if (inside_any_object(w, b, info.shape)) b.pos = p.pos;
+    b.velocity_y = 0;
+    c.timer = 0;
+  }
+
+  // Follow a point behind the player.
+  c.target = clamp_to_world({p.pos.x - p.facing_x * rules::kCompanionFollowDistance,
+                             p.pos.z - p.facing_z * rules::kCompanionFollowDistance}, info.shape.half_width);
+  float dir_x, dir_z;
+  const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
+  float speed = 0;
+  if (d > 0.6f) {
+    c.mind = Mind::Follow;
+    speed = d > 4.0f ? info.run_speed : info.walk_speed;
+  } else {
+    c.mind = Mind::Idle;
+    dir_x = dir_z = 0;
+    if (player_distance > 0.1f) {  // look at the player
+      b.facing_x = to_player_x;
+      b.facing_z = to_player_z;
+    }
+  }
+  // Jump when stuck against something, or to follow the player up.
+  const bool jump = b.on_ground && (c.timer >= 8 || (p.pos.y > b.pos.y + 0.4f && player_distance < 2.5f));
+  if (jump) c.timer = 0;
+  move_body(boxes, b, info.shape, dir_x, dir_z, speed, jump, info.jump_speed);
+  c.timer = (speed > 0 && b.on_ground && b.speed < 0.3f * speed) ? static_cast<uint16_t>(c.timer + 1) : 0;
+}
+
+void step_wild(World& w, const Surroundings& boxes, Creature& c) {
+  const SpeciesInfo& info = species_info(c.species);
+  Body& b = c.body;
+  const Body& p = w.player;
+
+  float away_x, away_z;
+  const float player_distance = direction_to(p.pos.x, p.pos.z, {b.pos.x, b.pos.z}, away_x, away_z);
+  if (c.species == Species::Bird && player_distance < rules::kBirdFleeDistance && c.mind != Mind::Flee) {
+    c.mind = Mind::Flee;
+    c.timer = 2 * rules::kTicksPerSecond;
+    c.target = clamp_to_world({b.pos.x + away_x * 6, b.pos.z + away_z * 6}, 1.0f);
+  }
+
+  float dir_x = 0, dir_z = 0, speed = 0;
+  bool jump = false;
+  if (c.mind == Mind::Idle) {
+    if (c.timer > 0) {
+      --c.timer;
+      // Birds hop on the spot from time to time.
+      if (c.species == Species::Bird && b.on_ground && w.rng.below(200) == 0) jump = true;
+    } else {
+      c.mind = Mind::Wander;
+      c.timer = 8 * rules::kTicksPerSecond;  // give up after 8 s
+      c.target = clamp_to_world({c.home.x + random_range(w.rng, -rules::kWanderRadius, rules::kWanderRadius),
+                                 c.home.z + random_range(w.rng, -rules::kWanderRadius, rules::kWanderRadius)},
+                                1.0f);
+    }
+  } else {
+    const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
+    if (d < 0.4f || c.timer == 0) {
+      c.mind = Mind::Idle;
+      c.timer = static_cast<uint16_t>(rules::kTicksPerSecond + w.rng.below(3 * rules::kTicksPerSecond));
+      dir_x = dir_z = 0;
+    } else {
+      --c.timer;
+      speed = c.mind == Mind::Flee ? info.run_speed : info.walk_speed;
+    }
+  }
+
+  if (c.species == Species::Slime && speed > 0) {
+    // Slimes hop: they jump as soon as they land and only move in the air.
+    jump = b.on_ground;
+    if (b.on_ground) speed = 0;
+  }
+  move_body(boxes, b, info.shape, dir_x, dir_z, speed, jump, info.jump_speed);
+  if (speed > 0 && b.speed > 0) {  // keep facing the way it goes
+    b.facing_x = dir_x;
+    b.facing_z = dir_z;
+  }
+}
+
+void step_villager(World& w, const Surroundings& s, Creature& c) {
+  const SpeciesInfo& info = species_info(c.species);
+  Body& b = c.body;
+  const Body& p = w.player;
+  float to_x, to_z;
+  const float player_distance = direction_to(b.pos.x, b.pos.z, {p.pos.x, p.pos.z}, to_x, to_z);
+
+  float dir_x = 0, dir_z = 0, speed = 0;
+  if (player_distance < rules::kVillagerGreetDistance && std::fabs(p.pos.y - b.pos.y) < 1.5f) {
+    // Stop, turn to the player and wave.
+    c.mind = Mind::Greet;
+    b.facing_x = to_x;
+    b.facing_z = to_z;
+    c.timer = static_cast<uint16_t>(rules::kTicksPerSecond / 2);
+  } else if (c.mind == Mind::Greet || c.mind == Mind::Idle) {
+    if (c.timer > 0) {
+      --c.timer;
+    } else {
+      c.mind = Mind::Wander;
+      c.timer = 10 * rules::kTicksPerSecond;
+      const float r = rules::kVillageRadius - 4.0f;
+      c.target = {c.home.x + random_range(w.rng, -r, r), c.home.z + random_range(w.rng, -r, r)};
+    }
+  } else {
+    const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
+    if (d < 0.4f || c.timer == 0) {
+      c.mind = Mind::Idle;
+      c.timer = static_cast<uint16_t>(2 * rules::kTicksPerSecond + w.rng.below(4 * rules::kTicksPerSecond));
+      dir_x = dir_z = 0;
+    } else {
+      --c.timer;
+      speed = info.walk_speed;
+    }
+  }
+  move_body(s, b, info.shape, dir_x, dir_z, speed, false, info.jump_speed);
+}
+
+void step_crow(World& w, const std::vector<Vec3>& perches, Creature& c) {
+  const SpeciesInfo& info = species_info(c.species);
+  Body& b = c.body;
+  const Body& p = w.player;
+  const float dx = p.pos.x - b.pos.x, dz = p.pos.z - b.pos.z;
+  const bool player_near = dx * dx + dz * dz < rules::kCrowFleeDistance * rules::kCrowFleeDistance &&
+                           std::fabs(p.pos.y - b.pos.y) < 7.0f;
+
+  auto take_off = [&](bool flee) {
+    if (perches.size() < 2) return;
+    // Another perch; when fleeing, one far from the player.
+    for (int attempt = 0; attempt < 8; ++attempt) {
+      const Vec3 t = perches[w.rng.below(static_cast<uint32_t>(perches.size()))];
+      const float tx = t.x - p.pos.x, tz = t.z - p.pos.z;
+      const float mx = t.x - b.pos.x, mz = t.z - b.pos.z;
+      if (mx * mx + mz * mz < 1.0f) continue;  // the same perch
+      if (flee && tx * tx + tz * tz < 64.0f && attempt < 7) continue;
+      c.target = {t.x, t.z};
+      c.target_y = t.y;
+      c.mind = Mind::Fly;
+      b.on_ground = false;
+      return;
+    }
+  };
+
+  b.speed = 0;
+  if (c.mind != Mind::Fly) {
+    if (player_near) {
+      take_off(true);
+    } else if (c.timer > 0) {
+      --c.timer;
+    } else {
+      take_off(false);
+    }
+    if (c.mind != Mind::Fly) return;
+  }
+
+  // Flying: cruise above the target, then glide down onto it.
+  float dir_x, dir_z;
+  const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
+  const float step = info.run_speed * rules::kDt;
+  const float horizontal = std::min(step, d);
+  b.pos.x += dir_x * horizontal;
+  b.pos.z += dir_z * horizontal;
+  const float wanted_y = d > 2.5f ? c.target_y + 3.0f : c.target_y;
+  const float climb = 3.0f * rules::kDt;
+  b.pos.y += std::clamp(wanted_y - b.pos.y, -climb, climb);
+  if (d > 0) {
+    b.facing_x = dir_x;
+    b.facing_z = dir_z;
+  }
+  b.speed = horizontal / rules::kDt;
+  if (d < 0.05f && std::fabs(b.pos.y - c.target_y) < 0.05f) {  // landed
+    b.pos = {c.target.x, c.target_y, c.target.z};
+    b.on_ground = true;
+    c.mind = Mind::Idle;
+    c.timer = static_cast<uint16_t>(4 * rules::kTicksPerSecond + w.rng.below(8 * rules::kTicksPerSecond));
+  }
+}
+
+void step_fish(World& w, const Surroundings& s, Creature& c) {
+  const SpeciesInfo& info = species_info(c.species);
+  Body& b = c.body;
+  float dir_x = 0, dir_z = 0, speed = 0;
+  if (c.mind == Mind::Idle) {
+    if (c.timer > 0) {
+      --c.timer;
+    } else {
+      c.mind = Mind::Wander;
+      c.timer = 8 * rules::kTicksPerSecond;
+      for (int attempt = 0; attempt < 8; ++attempt) {
+        const Lake& l = s.lake;
+        c.target = {l.center.x + random_range(w.rng, -l.radius_x, l.radius_x),
+                    l.center.z + random_range(w.rng, -l.radius_z, l.radius_z)};
+        if (in_lake(l, c.target.x, c.target.z, -1.5f)) break;
+      }
+    }
+  } else {
+    const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
+    if (d < 0.4f || c.timer == 0) {
+      c.mind = Mind::Idle;
+      c.timer = static_cast<uint16_t>(rules::kTicksPerSecond + w.rng.below(3 * rules::kTicksPerSecond));
+    } else {
+      --c.timer;
+      speed = info.walk_speed;
+    }
+  }
+  // Swim on the surface; now and then, jump out of the water.
+  if (b.on_ground && w.rng.below(500) == 0) {
+    b.velocity_y = info.jump_speed;
+    b.on_ground = false;
+  }
+  if (speed > 0) {
+    b.facing_x = dir_x;
+    b.facing_z = dir_z;
+  }
+  const float x0 = b.pos.x, z0 = b.pos.z;
+  move_axis(s, b, info.shape, 0, dir_x * speed * rules::kDt, Medium::Water);
+  move_axis(s, b, info.shape, 2, dir_z * speed * rules::kDt, Medium::Water);
+  const float mx = b.pos.x - x0, mz = b.pos.z - z0;
+  b.speed = std::sqrt(mx * mx + mz * mz) / rules::kDt;
+  if (!b.on_ground) {
+    b.velocity_y -= rules::kGravity * rules::kDt;
+    b.pos.y += b.velocity_y * rules::kDt;
+    if (b.pos.y <= rules::kSwimLevel) {
+      b.pos.y = rules::kSwimLevel;
+      b.velocity_y = 0;
+      b.on_ground = true;  // back in the water
+    }
   }
 }
 
 }  // namespace
 
-Box player_box(const Player& p) {
-  const float h = rules::kPlayerHalfWidth;
-  return {{p.pos.x - h, p.pos.y, p.pos.z - h},
-          {p.pos.x + h, p.pos.y + rules::kPlayerHeight, p.pos.z + h}};
+Box body_box(const Body& b, const BodyShape& shape) {
+  const float h = shape.half_width;
+  return {{b.pos.x - h, b.pos.y, b.pos.z - h}, {b.pos.x + h, b.pos.y + shape.height, b.pos.z + h}};
+}
+
+Box player_box(const Player& p) { return body_box(p, kPlayerShape); }
+
+const SpeciesInfo& species_info(Species species) {
+  const auto i = static_cast<size_t>(species);
+  return kSpecies[i < static_cast<size_t>(Species::Count) ? i : 0];
+}
+
+void spawn_creatures(World& w) {
+  Rng rng(w.seed ^ 0x4352454154555245ULL, 11);  // own stream: objects stay the same
+  w.creatures.clear();
+
+  Creature companion;
+  companion.species = Species::Companion;
+  companion.body.pos = {0.8f, 0, 1.2f};  // just behind the player, on the right
+  companion.home = {0.8f, 1.2f};
+  w.creatures.push_back(companion);
+
+  const float limit = rules::kWorldHalfSize - 3.0f;
+  for (int attempt = 0; attempt < 5000 && w.creatures.size() < 1 + rules::kWildMonsters; ++attempt) {
+    Creature c;
+    c.species = static_cast<Species>(1 + rng.below(3));
+    c.body.pos = {random_range(rng, -limit, limit), 0, random_range(rng, -limit, limit)};
+    c.variant = static_cast<uint8_t>(rng.below(256));
+    const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
+    c.body.facing_x = sc.sin;
+    c.body.facing_z = sc.cos;
+    const float d2 = c.body.pos.x * c.body.pos.x + c.body.pos.z * c.body.pos.z;
+    if (d2 < rules::kMonsterSpawnMinDistance * rules::kMonsterSpawnMinDistance) continue;
+    if (inside_any_object(w, c.body, species_info(c.species).shape)) continue;
+    if (in_village(w.village, c.body.pos.x, c.body.pos.z, 2.0f) ||
+        in_lake(w.village.lake, c.body.pos.x, c.body.pos.z, 2.0f)) {
+      continue;
+    }
+    c.home = {c.body.pos.x, c.body.pos.z};
+    c.timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
+    w.creatures.push_back(c);
+  }
+
+  const bool has_village = w.village.lake.radius_x > 0;
+  if (!has_village) return;
+
+  // Villagers, around the village square.
+  const Vec2 center = w.village.center;
+  for (uint32_t n = 0, attempt = 0; n < rules::kVillagers && attempt < 2000; ++attempt) {
+    Creature c;
+    c.species = Species::Villager;
+    const float r = rules::kVillageRadius - 4.0f;
+    c.body.pos = {center.x + random_range(rng, -r, r), 0, center.z + random_range(rng, -r, r)};
+    c.variant = static_cast<uint8_t>(rng.below(256));
+    c.home = center;
+    c.timer = static_cast<uint16_t>(rng.below(4 * rules::kTicksPerSecond));
+    if (inside_any_object(w, c.body, species_info(c.species).shape)) continue;
+    if (in_lake(w.village.lake, c.body.pos.x, c.body.pos.z, 1.0f)) continue;
+    w.creatures.push_back(c);
+    ++n;
+  }
+
+  // Crows, perched on roofs.
+  const std::vector<Vec3> perches = crow_perches(w);
+  for (uint32_t n = 0; n < rules::kCrows && n < perches.size(); ++n) {
+    Creature c;
+    c.species = Species::Crow;
+    const Vec3 perch = perches[(n * 3 + rng.below(3)) % perches.size()];
+    c.body.pos = perch;
+    c.target = {perch.x, perch.z};
+    c.target_y = perch.y;
+    c.variant = static_cast<uint8_t>(rng.below(256));
+    c.timer = static_cast<uint16_t>(3 * rules::kTicksPerSecond + rng.below(8 * rules::kTicksPerSecond));
+    w.creatures.push_back(c);
+  }
+
+  // Fish, in the lake.
+  const Lake& lake = w.village.lake;
+  for (uint32_t n = 0, attempt = 0; n < rules::kFish && attempt < 1000; ++attempt) {
+    Creature c;
+    c.species = Species::Fish;
+    c.body.pos = {lake.center.x + random_range(rng, -lake.radius_x, lake.radius_x), rules::kSwimLevel,
+                  lake.center.z + random_range(rng, -lake.radius_z, lake.radius_z)};
+    if (!in_lake(lake, c.body.pos.x, c.body.pos.z, -1.5f)) continue;
+    c.home = {c.body.pos.x, c.body.pos.z};
+    c.variant = static_cast<uint8_t>(rng.below(256));
+    c.timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
+    w.creatures.push_back(c);
+    ++n;
+  }
+}
+
+namespace {
+
+Vec2 local_to_world(const Object& o, float lx, float lz) {
+  // Same rotation as the renderer: yaw turns +X towards -Z.
+  const SinCos sc = sincos16(o.yaw);
+  return {o.pos.x + lx * sc.cos + lz * sc.sin, o.pos.z - lx * sc.sin + lz * sc.cos};
+}
+
+// Front direction (where the door is) of a quarter yaw: local -Z.
+Vec2 front_of(Angle16 yaw) {
+  const SinCos sc = sincos16(yaw);
+  return {-sc.sin, -sc.cos};
+}
+
+bool can_place(const World& w, const Object& o, float gap, bool keep_off_path) {
+  Box b = object_box(o);
+  for (float x : {b.min.x, b.max.x}) {
+    for (float z : {b.min.z, b.max.z}) {
+      if (in_lake(w.village.lake, x, z, 1.0f)) return false;
+      if (std::fabs(x) > rules::kWorldHalfSize - 1 || std::fabs(z) > rules::kWorldHalfSize - 1) return false;
+    }
+  }
+  if (keep_off_path) {
+    const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
+    if (distance_to_path(w.path, o.pos.x, o.pos.z) < rules::kPathHalfWidth + reach + 0.4f) return false;
+  }
+  b.min = b.min - Vec3{gap, 0, gap};
+  b.max = b.max + Vec3{gap, 0, gap};
+  return std::none_of(w.objects.begin(), w.objects.end(),
+                      [&](const Object& other) { return overlaps(b, object_box(other)); });
+}
+
+Object village_object(ObjectKind kind, Vec2 pos, Angle16 yaw, uint8_t variant = 0) {
+  Object o;
+  o.kind = kind;
+  o.pos = {pos.x, 0, pos.z};
+  o.size = {1, 1, 1};
+  o.yaw = yaw;
+  o.variant = variant;
+  return o;
+}
+
+}  // namespace
+
+void build_village(World& w) {
+  const VillageLayout& v = w.village;
+  if (v.lake.radius_x <= 0) return;
+  Rng rng(w.seed ^ 0x56494C4C41474521ULL, 13);  // own stream
+  std::erase_if(w.objects, [&](const Object& o) {
+    return in_village(v, o.pos.x, o.pos.z, 2.0f) || in_lake(v.lake, o.pos.x, o.pos.z, 2.5f);
+  });
+  const Vec2 c = v.center;
+  const float lake_side = v.lake.center.x > c.x ? 1.0f : -1.0f;
+
+  // The well, on the square, away from the lake.
+  w.objects.push_back(village_object(ObjectKind::Well, {c.x - lake_side * 4.0f, c.z}, 0));
+
+  // Six houses around the square, doors towards it.
+  ObjectKind types[] = {ObjectKind::HouseCottage, ObjectKind::HouseChimney, ObjectKind::HouseHut,
+                        ObjectKind::HouseCottage, ObjectKind::HouseChimney, ObjectKind::HouseHut};
+  for (int i = 5; i > 0; --i) std::swap(types[i], types[rng.below(static_cast<uint32_t>(i + 1))]);
+  std::vector<Object> houses;
+  // Candidate places around the square, away from the path, which runs
+  // north-south through the middle (angles in degrees from +X towards +Z).
+  constexpr int kSlots[] = {0, 40, 140, 180, 220, 320, 20, 160, 200, 340, 60, 120, 240, 300};
+  int next_type = 0;
+  for (int degrees : kSlots) {
+    if (houses.size() == 6) break;
+    const auto angle = static_cast<Angle16>((degrees * 65536 / 360 + static_cast<int>(rng.below(2185)) - 1092) & 0xFFFF);
+    const SinCos sc = sincos16(angle);
+    for (float radius : {9.5f + random_range(rng, 0, 1.5f), 12.5f}) {
+      const Vec2 pos{c.x + sc.cos * radius, c.z + sc.sin * radius};
+      // The quarter turn whose door faces the square best.
+      Angle16 best = 0;
+      float best_dot = -2;
+      for (Angle16 yaw : {Angle16{0}, Angle16{16384}, Angle16{32768}, Angle16{49152}}) {
+        const Vec2 f = front_of(yaw);
+        const float d = f.x * (c.x - pos.x) + f.z * (c.z - pos.z);
+        if (d > best_dot) {
+          best_dot = d;
+          best = yaw;
+        }
+      }
+      const Object house = village_object(types[next_type], pos, best, static_cast<uint8_t>(rng.below(256)));
+      if (can_place(w, house, 1.0f, true)) {
+        w.objects.push_back(house);
+        houses.push_back(house);
+        ++next_type;
+        break;
+      }
+    }
+  }
+
+  // A fenced yard behind the cottages and chimney houses, a barrel by some doors.
+  for (const Object& h : houses) {
+    const Box b = object_box(h);
+    const float depth = (h.yaw >> 14) & 1 ? (b.max.x - b.min.x) / 2 : (b.max.z - b.min.z) / 2;
+    if (h.kind != ObjectKind::HouseHut) {
+      for (float along : {-2.0f, 0.0f, 2.0f}) {
+        const Vec2 pos = local_to_world(h, along, depth + 2.2f);  // behind: local +Z
+        const Object fence = village_object(ObjectKind::Fence, pos, h.yaw);
+        if (can_place(w, fence, 0.05f, true)) w.objects.push_back(fence);
+      }
+    }
+    if (rng.below(2) == 0) {
+      const Vec2 pos = local_to_world(h, 1.6f, -(depth + 0.8f));  // beside the door
+      const Object barrel = village_object(ObjectKind::Barrel, pos, static_cast<Angle16>(rng.below(65536)));
+      if (can_place(w, barrel, 0.3f, true)) w.objects.push_back(barrel);
+    }
+  }
+
+  // Lanterns along the path through the village, a signpost at each end.
+  int lamp = 0;
+  for (size_t i = 1; i + 1 < w.path.points.size(); i += 8) {
+    const Vec2 p = w.path.points[i];
+    if (std::fabs(p.z - c.z) > rules::kVillageRadius - 2) continue;
+    const Vec2 q = w.path.points[i + 1];
+    float tx = q.x - p.x, tz = q.z - p.z;
+    const float len = std::sqrt(tx * tx + tz * tz);
+    tx /= len;
+    tz /= len;
+    const float side = (lamp++ % 2) ? 1.0f : -1.0f;
+    const float offset = rules::kPathHalfWidth + 0.8f;
+    const Object o = village_object(ObjectKind::Lamp, {p.x - tz * offset * side, p.z + tx * offset * side}, 0);
+    if (can_place(w, o, 0.3f, false)) w.objects.push_back(o);
+  }
+  for (float dz : {rules::kVillageRadius + 1.0f, -(rules::kVillageRadius + 1.0f)}) {
+    const Vec2* nearest = &w.path.points.front();
+    for (const Vec2& p : w.path.points) {
+      if (std::fabs(p.z - (c.z + dz)) < std::fabs(nearest->z - (c.z + dz))) nearest = &p;
+    }
+    const Object sign = village_object(ObjectKind::Sign, {nearest->x + rules::kPathHalfWidth + 0.9f, nearest->z},
+                                       dz > 0 ? Angle16{32768} : Angle16{0});
+    if (can_place(w, sign, 0.3f, false)) w.objects.push_back(sign);
+  }
+}
+
+std::vector<Vec3> crow_perches(const World& w) {
+  std::vector<Vec3> perches;
+  auto add = [&](const Object& o, float lx, float y, float lz) {
+    const Vec2 p = local_to_world(o, lx, lz);
+    perches.push_back({p.x, o.pos.y + y, p.z});
+  };
+  for (const Object& o : w.objects) {
+    switch (o.kind) {
+      case ObjectKind::HouseCottage: add(o, -1.6f, 4.33f, 0); add(o, 1.6f, 4.33f, 0); break;
+      case ObjectKind::HouseChimney: add(o, -1.1f, 5.63f, 0); add(o, 0.4f, 5.63f, 0); break;
+      case ObjectKind::HouseHut: add(o, 0, 4.22f, 0); break;
+      case ObjectKind::Well: add(o, 0, 2.45f, 0); break;
+      default: break;
+    }
+  }
+  return perches;
 }
 
 bool is_round(ObjectKind kind) {
   return kind == ObjectKind::Tree || kind == ObjectKind::Pine || kind == ObjectKind::Stump ||
-         kind == ObjectKind::Bush;
+         kind == ObjectKind::Bush || kind == ObjectKind::HouseHut || kind == ObjectKind::Well ||
+         kind == ObjectKind::Barrel || kind == ObjectKind::Lamp;
 }
 
 Box object_box(const Object& o) {
@@ -177,6 +788,15 @@ Box object_box(const Object& o) {
     case ObjectKind::Log:   half = {s.x, s.y, s.y}; break;
     case ObjectKind::Stump: half = {s.x, 0.5f * s.y, s.x}; break;
     case ObjectKind::Bush:  half = {0.8f * s.x, 0.5f * s.y, 0.8f * s.x}; break;
+    // Village: fixed sizes, matching the models of tools/make_models.py.
+    case ObjectKind::HouseCottage: half = {2.5f, 2.15f, 2.0f}; break;
+    case ObjectKind::HouseChimney: half = {2.25f, 2.8f, 2.25f}; break;
+    case ObjectKind::HouseHut:     half = {2.0f, 2.1f, 2.0f}; break;
+    case ObjectKind::Fence:        half = {1.0f, 0.45f, 0.07f}; break;
+    case ObjectKind::Sign:         half = {0.12f, 0.9f, 0.12f}; break;
+    case ObjectKind::Well:         half = {0.85f, 0.45f, 0.85f}; break;
+    case ObjectKind::Barrel:       half = {0.35f, 0.45f, 0.35f}; break;
+    case ObjectKind::Lamp:         half = {0.1f, 1.25f, 0.1f}; break;
     default:                half = s; break;  // Crate
   }
   if (!is_round(o.kind) && ((o.yaw >> 14) & 1)) std::swap(half.x, half.z);  // turned 90° or 270°
@@ -191,14 +811,18 @@ bool overlaps(const Box& a, const Box& b) {
 
 World new_game(uint64_t seed) {
   World w;
+  w.seed = seed;
   w.rng = Rng(seed);
+  w.path = make_path(seed);
+  w.village = make_village_layout(seed, w.path);
+  build_village(w);
   generate_objects(w);
+  spawn_creatures(w);
   return w;
 }
 
 void step(World& w, const Input& in) {
   ++w.tick;
-  Player& p = w.player;
 
   // Joystick -> direction on the ground, relative to the camera.
   float mx = static_cast<float>(std::max<int>(in.move_x, -127)) / 127.0f;
@@ -213,19 +837,26 @@ void step(World& w, const Input& in) {
   // forward = (-sin, 0, -cos), right = (cos, 0, -sin)
   const float dir_x = mx * sc.cos - my * sc.sin;
   const float dir_z = -mx * sc.sin - my * sc.cos;
+  std::vector<Box> boxes;
+  boxes.reserve(w.objects.size());
+  for (const Object& o : w.objects) boxes.push_back(object_box(o));
+  Surroundings s{boxes, w.village.lake, {}};
+  s.build();
 
-  if (len2 > 0.0f) {
-    const float len = std::sqrt(dir_x * dir_x + dir_z * dir_z);
-    p.facing_x = dir_x / len;
-    p.facing_z = dir_z / len;
+  move_body(s, w.player, kPlayerShape, dir_x, dir_z, rules::kWalkSpeed, in.jump, rules::kJumpSpeed);
+  std::vector<Vec3> perches;
+  for (Creature& c : w.creatures) {
+    switch (c.species) {
+      case Species::Companion: step_companion(w, s, c); break;
+      case Species::Villager: step_villager(w, s, c); break;
+      case Species::Crow:
+        if (perches.empty()) perches = crow_perches(w);
+        step_crow(w, perches, c);
+        break;
+      case Species::Fish: step_fish(w, s, c); break;
+      default: step_wild(w, s, c); break;
+    }
   }
-
-  if (in.jump && p.on_ground) p.velocity_y = rules::kJumpSpeed;
-  p.velocity_y = std::max(p.velocity_y - rules::kGravity * rules::kDt, -rules::kMaxFallSpeed);
-
-  move_axis(w, 0, dir_x * rules::kWalkSpeed * rules::kDt);
-  move_axis(w, 2, dir_z * rules::kWalkSpeed * rules::kDt);
-  move_vertical(w);
 }
 
 }  // namespace monstres

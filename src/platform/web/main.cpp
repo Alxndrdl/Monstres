@@ -9,7 +9,8 @@
 #include "monstres/core/debug.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/world.hpp"
-#include "monstres/render/meshes.hpp"
+#include "monstres/render/models.hpp"
+#include "monstres/render/terrain_mesh.hpp"
 #include "monstres/render/scene.hpp"
 
 #include <emscripten.h>
@@ -28,6 +29,7 @@ using namespace monstres;
 
 namespace {
 
+constexpr const char* kModelsDir = "/models";  // preloaded from assets/models
 constexpr const char* kSavePath = "/save/game.sav";
 constexpr const char* kSaveTmpPath = "/save/game.sav.tmp";
 constexpr double kTickMs = 1000.0 / rules::kTicksPerSecond;
@@ -38,11 +40,14 @@ constexpr int kMaxTicksPerFrame = 10;
 struct App {
   World world;
   std::unique_ptr<Renderer> renderer;
-  DrawList draw_list;
+  DrawList landscape;   // what never moves, rebuilt when the world changes
+  DrawList dynamic;     // player, clouds: rebuilt every frame
   Camera camera;
   float move_x = 0, move_y = 0;  // -1..1, set by JavaScript
   int jump_buffer = 0;           // ticks left during which a jump press is pending
   bool frozen = false;           // ?frozen: no automatic ticks (tests, screenshots)
+  bool redraw = true;            // frozen mode only redraws when something changed
+  int canvas_w = 0, canvas_h = 0;
   double last_time = 0;
   double accumulator = 0;
   uint64_t last_saved_tick = 0;
@@ -79,6 +84,15 @@ void tick(App& app, const Input& in) {
   step(app.world, in);
   if (in.jump && was_on_ground) app.jump_buffer = 0;  // the jump happened
   if (app.jump_buffer > 0) --app.jump_buffer;
+}
+
+// Call whenever app.world is replaced (new game, loaded or imported save).
+void world_changed(App& app) {
+  app.redraw = true;
+  build_landscape(app.world, app.landscape);
+  app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), build_ground_mesh(app.world));
+  app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), build_path_mesh(app.world));
+  app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), build_water_mesh(app.world));
 }
 
 void write_save(App& app) {
@@ -132,12 +146,23 @@ void frame(void* user) {
   const double dpr = emscripten_get_device_pixel_ratio();
   const int pw = std::max(1, static_cast<int>(css_w * dpr));
   const int ph = std::max(1, static_cast<int>(css_h * dpr));
-  emscripten_set_canvas_element_size("#canvas", pw, ph);
+  if (pw != app.canvas_w || ph != app.canvas_h) {
+    // Setting the canvas size clears it, even to the same value: only on change.
+    emscripten_set_canvas_element_size("#canvas", pw, ph);
+    app.canvas_w = pw;
+    app.canvas_h = ph;
+    app.redraw = true;
+  }
+  if (app.frozen && !app.redraw) return;  // nothing moved: keep the last image
+  app.redraw = false;
 
-  build_scene(app.world, app.draw_list);
-  const View view = build_view(app.world, app.camera, static_cast<float>(pw) / static_cast<float>(ph));
-  app.renderer->begin_frame({pw, ph, palette::kSky});
-  app.renderer->draw(view, app.draw_list);
+  // Time follows the simulation, so ?frozen screenshots are reproducible.
+  const float time = static_cast<float>(app.world.tick) / rules::kTicksPerSecond;
+  build_dynamic(app.world, time, app.dynamic);
+  const View view = build_view(app.world, app.camera, static_cast<float>(pw) / static_cast<float>(ph), time);
+  const DrawList* lists[] = {&app.landscape, &app.dynamic};
+  app.renderer->begin_frame({pw, ph});
+  app.renderer->draw(view, lists);
   app.renderer->end_frame();
 }
 
@@ -156,11 +181,13 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_move(float x, float y) {
 // Rotates the camera by an angle in radians (screen drag or tests).
 EMSCRIPTEN_KEEPALIVE void monstres_look(float delta_yaw, float delta_pitch) {
   Camera& c = g_app->camera;
+  g_app->redraw = true;
   c.yaw = std::remainder(c.yaw + delta_yaw, static_cast<float>(2 * kPi));
   c.pitch = std::clamp(c.pitch + delta_pitch, kMinPitch, kMaxPitch);
 }
 
 EMSCRIPTEN_KEEPALIVE void monstres_set_camera(float yaw, float pitch) {
+  g_app->redraw = true;
   g_app->camera.yaw = yaw;
   g_app->camera.pitch = std::clamp(pitch, kMinPitch, kMaxPitch);
 }
@@ -181,6 +208,7 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_state_json() {
 // Runs `ticks` ticks with the current joystick/camera input (tests, ?frozen).
 EMSCRIPTEN_KEEPALIVE double monstres_debug_step(int ticks) {
   for (int i = 0; i < ticks; ++i) tick(*g_app, current_input(*g_app));
+  g_app->redraw = true;
   return static_cast<double>(g_app->world.tick);
 }
 
@@ -198,6 +226,7 @@ EMSCRIPTEN_KEEPALIVE int monstres_import_save(const uint8_t* data, int size) {
   auto world = deserialize({data, static_cast<size_t>(size)});
   if (!world) return 0;
   g_app->world = std::move(*world);
+  world_changed(*g_app);
   write_save(*g_app);
   return 1;
 }
@@ -238,7 +267,13 @@ int main(int argc, char** argv) {
     return 1;
   }
   emscripten_webgl_make_context_current(ctx);
-  app.renderer = make_gles3_renderer(build_meshes());
+  std::vector<MeshData> meshes;
+  std::string error;
+  if (!load_models(kModelsDir, meshes, &error)) {
+    js_fatal(("Impossible de charger les modèles : " + error).c_str());
+    return 1;
+  }
+  app.renderer = make_gles3_renderer(meshes);
   if (!app.renderer) {
     js_fatal("Impossible d'initialiser le rendu (shaders).");
     return 1;
@@ -250,6 +285,7 @@ int main(int argc, char** argv) {
     write_save(app);
   }
   app.last_saved_tick = app.world.tick;
+  world_changed(app);
 
   app.last_time = emscripten_get_now();
   emscripten_set_main_loop_arg(frame, &app, 0, false);

@@ -12,6 +12,9 @@ option(MONSTRES_SANITIZERS  "Native only: ASan + UBSan"   OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(MonstresOptions)
+include(Dependencies)
+
+set(MONSTRES_ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 
 add_subdirectory(src/core)
 add_subdirectory(src/render)

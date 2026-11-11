@@ -19,7 +19,15 @@ namespace monstres {
 //      before any release, so these saves are refused and a new game starts.
 //   2  3D world: player + fixed boxes. Not readable anymore (pre-release).
 //   3  objects have a kind: trees, pines, rocks, logs, stumps, bushes, crates.
-inline constexpr uint32_t kSaveVersion = 3;
+//      Not readable anymore (pre-release).
+//   4  the world seed is saved (path and decoration are rebuilt from it).
+//      Still readable: loading one adds the companion and the wild monsters.
+//   5  the companion and the wild monsters, and the speed of every body.
+//   6  the village (objects), villagers, crows and fish; flying height.
+//      Versions 4 and 5 still load: the village is built (removing what was
+//      in its way) and the creatures appear anew from the seed.
+inline constexpr uint32_t kSaveVersion = 6;
+inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };
 

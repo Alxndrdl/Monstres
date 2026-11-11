@@ -111,13 +111,18 @@ inline World play(const Replay& r) {
 // Short human-readable summary, stored in the golden .expected files so a
 // failing diff says what changed, not only that the hash changed.
 inline std::string summary(const World& w) {
-  char buf[256];
-  std::snprintf(buf, sizeof buf,
-                "hash %016llx\ntick %llu\nplayer %.4f %.4f %.4f %s\nobjects %zu\n",
-                static_cast<unsigned long long>(state_hash(w)),
-                static_cast<unsigned long long>(w.tick), static_cast<double>(w.player.pos.x),
-                static_cast<double>(w.player.pos.y), static_cast<double>(w.player.pos.z),
-                w.player.on_ground ? "on-ground" : "in-air", w.objects.size());
+  char buf[512];
+  int n = std::snprintf(buf, sizeof buf,
+                        "hash %016llx\ntick %llu\nplayer %.4f %.4f %.4f %s\nobjects %zu\ncreatures %zu\n",
+                        static_cast<unsigned long long>(state_hash(w)),
+                        static_cast<unsigned long long>(w.tick), static_cast<double>(w.player.pos.x),
+                        static_cast<double>(w.player.pos.y), static_cast<double>(w.player.pos.z),
+                        w.player.on_ground ? "on-ground" : "in-air", w.objects.size(), w.creatures.size());
+  if (!w.creatures.empty() && n > 0 && static_cast<size_t>(n) < sizeof buf) {
+    const Body& c = w.creatures[0].body;
+    std::snprintf(buf + n, sizeof buf - static_cast<size_t>(n), "companion %.4f %.4f %.4f\n",
+                  static_cast<double>(c.pos.x), static_cast<double>(c.pos.y), static_cast<double>(c.pos.z));
+  }
   return buf;
 }
 

@@ -3,11 +3,20 @@
 Petit jeu en C++ compilé en WebAssembly avec Emscripten, rendu WebGL2
 (OpenGL ES 3.0), installable en PWA et jouable hors ligne.
 
-Le joueur (un cube orange) se déplace dans un monde plat en 3D parsemé
-d'objets fixes : arbres, sapins, rochers, troncs couchés, souches, buissons et
-caisses. On peut sauter sur les rochers, troncs, souches, buissons et caisses ;
-les arbres ne bloquent qu'au niveau du tronc. Les modèles sont générés par le
-code, en style low-poly (`src/render/meshes.cpp`), sans fichier d'asset.
+Le joueur, un petit explorateur, se déplace avec son compagnon Pompon (un
+renard rond qui le suit et saute derrière lui) dans une prairie en 3D peuplée
+de monstres sauvages : Gloubi la gelée sauteuse, Champi le champignon qui se
+dandine et Piou l'oiseau qui s'enfuit quand on approche. Au nord, le sentier
+mène à un village : chaumières, maisons à cheminée qui fume, huttes rondes,
+puits, barrières, panneaux, tonneaux et lanternes, des villageois variés qui
+se promènent et saluent de la main, des corbeaux (Croa) perchés sur les toits
+qui s'envolent quand on approche, et un lac où nagent des poissons (Bloup)
+qui sautent hors de l'eau. La prairie est traversée par un
+sentier de terre, parsemée d'arbres, sapins, rochers, troncs couchés, souches,
+buissons et caisses. On peut sauter sur les rochers, troncs, souches, buissons
+et caisses ; les arbres ne bloquent qu'au niveau du tronc. Autour : herbes
+courtes et hautes qui ondulent au vent, fleurs, plaques de terre, ombres
+douces, forêt au-delà des bords, montagnes enneigées, nuages, ciel et soleil.
 
 Contrôles :
 - joystick en bas à gauche, ou ZQSD / flèches : se déplacer (par rapport à la caméra) ;
@@ -26,17 +35,19 @@ s'ouvre en paysage, et en portrait un message demande de tourner l'appareil.
 CMakeLists.txt, CMakePresets.json   build natif et web
 cmake/                              options de compilation communes
 src/core/        monstres_core      règles du jeu, sauvegarde : C++ pur, sans navigateur
-src/render/      monstres_render    monde -> liste de cubes + caméra (testable en natif)
+src/render/      monstres_render    monde -> instances à dessiner, caméra, modèles,
+                                    personnages animés par parties (characters.cpp)
   gles3/         monstres_render_gles3   backend OpenGL ES 3.0 / WebGL2
 src/platform/web/                   main(), boucle, caméra, IndexedDB, API JS (pre.js, post.js)
 web/                                index.html (gabarit Emscripten), controls.js (joystick,
                                     saut, regard, clavier), sw.js, manifeste, icônes
-assets/                             meshes et textures sources (à venir)
+assets/models/                      modèles 3D .glb chargés par le jeu (générés par
+                                    tools/make_models.py, remplaçables par des exports Blender)
 tests/unit/                         tests unitaires (doctest)
 tests/functional/                   scénarios de jeu complets
 tests/regression/                   rejeux + anciennes sauvegardes comparés à des références
 tests/e2e/                          tests navigateurs Playwright (Chromium, Firefox, WebKit)
-tools/                              outils (génération des icônes, plus tard conversion d'assets)
+tools/                              make_models.py (modèles), make_icons.py (icônes PWA)
 scripts/test.sh                     lance tous les tests
 ```
 
@@ -45,6 +56,35 @@ générateur aléatoire PCG32 à graine, sinus/cosinus maison
 (`src/core/include/monstres/core/math.hpp`) et `-ffp-contract=off`. Une même
 partie donne exactement le même état en natif et en WebAssembly ; les tests de
 régression le vérifient.
+
+## Modèles 3D
+
+Les modèles sont des fichiers glTF binaires (`assets/models/*.glb`) : le jeu
+les charge au démarrage (bibliothèque cgltf) et n'en contient aucune
+géométrie. Ils sont générés par un script Python sans dépendance :
+
+```bash
+python3 tools/make_models.py           # régénère assets/models/
+python3 tools/make_models.py --check   # vérifie qu'ils sont à jour (aussi lancé par ctest)
+```
+
+Les conventions (origine, taille, couleurs par sommet, transparence) sont
+décrites en tête du script. Un modèle peut être remplacé par un export Blender
+en `.glb` qui les respecte ; il faut alors le retirer du script, sinon
+`--check` le signalera. Le sol et le sentier dépendent de la graine du monde et
+sont construits par le jeu (`src/render/terrain_mesh.cpp`).
+
+## Personnages et animations
+
+Chaque personnage est un assemblage de pièces rigides (fichiers `player_*`,
+`companion_*`, `slime_*`, `mushroom_*`, `bird_*`, `eye` dans `assets/models/`),
+chacune avec son origine à l'articulation. `src/render/characters.cpp` décrit
+les squelettes (quelle pièce est attachée où) et les anime par le code à partir
+de l'état du corps : vitesse, au sol ou en l'air, temps (marche, trot, sauts
+avec étirement et écrasement, battements d'ailes, queue qui remue,
+clignements des yeux). L'animation est purement visuelle ; les déplacements et
+comportements des créatures, eux, font partie de la simulation
+(`src/core/world.cpp`) et de la sauvegarde.
 
 ## Compiler et lancer
 

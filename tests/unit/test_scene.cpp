@@ -21,9 +21,17 @@ const std::vector<Instance>& batch(const DrawList& list, MeshId id) {
   return list.batches[static_cast<size_t>(id)];
 }
 
+size_t count_inside_play_area(const std::vector<Instance>& instances) {
+  size_t n = 0;
+  for (const Instance& in : instances) {
+    if (std::fabs(in.x) <= rules::kWorldHalfSize && std::fabs(in.z) <= rules::kWorldHalfSize) ++n;
+  }
+  return n;
+}
+
 }  // namespace
 
-TEST_CASE("each object is drawn with the mesh of its kind") {
+TEST_CASE("each object is drawn with the mesh of its kind, with a shadow") {
   World w = empty_world();
   w.objects.push_back(make_object(ObjectKind::Tree, {5, 0, 5}, {1.2f, 1.2f, 1.2f}));
   w.objects.push_back(make_object(ObjectKind::Pine, {-5, 0, 5}, {1, 1, 1}));
@@ -33,52 +41,117 @@ TEST_CASE("each object is drawn with the mesh of its kind") {
   add_box(w, {-8, 0, 0}, {0.5f, 0.5f, 0.5f});
 
   DrawList list;
-  list.batches.assign(kMeshCount, std::vector<Instance>(3));  // also checks it is cleared first
-  build_scene(w, list);
+  build_landscape(w, list);
   REQUIRE(list.batches.size() == kMeshCount);
 
-  CHECK(batch(list, MeshId::Cube).size() == 3);  // ground + player body and nose
-  CHECK(batch(list, MeshId::Tree).size() == 1);
-  CHECK(batch(list, MeshId::Pine).size() == 1);
+  CHECK(count_inside_play_area(batch(list, MeshId::Tree)) == 1);
+  CHECK(count_inside_play_area(batch(list, MeshId::Pine)) == 1);
   CHECK(batch(list, MeshId::Log).size() == 1);
-  CHECK(batch(list, MeshId::Rock2).size() == 1);
+  CHECK(count_inside_play_area(batch(list, MeshId::Rock2)) == 1);
   CHECK(batch(list, MeshId::Crate).size() == 1);
-  CHECK(batch(list, MeshId::Bush).empty());
-
-  const Instance& tree = batch(list, MeshId::Tree)[0];
-  CHECK(tree.sy == Approx(1.2f));
-  CHECK(tree.y == 0.0f);
+  CHECK(count_inside_play_area(batch(list, MeshId::Shadow)) == 5);
+  CHECK(batch(list, MeshId::Ground).size() == 1);
+  CHECK(batch(list, MeshId::Path).size() == 1);
 
   const Instance& log = batch(list, MeshId::Log)[0];
-  CHECK(log.yaw == Approx(kPi / 2));
+  CHECK(log.rotation.y == Approx(std::sin(kPi / 4)));  // turned 90° around Y
+  CHECK(log.rotation.w == Approx(std::cos(kPi / 4)));
   CHECK(log.sx == Approx(2));
   CHECK(log.sy == Approx(0.3f));
-
-  const Instance& crate = batch(list, MeshId::Crate)[0];
-  CHECK(crate.y == Approx(0.5f));  // the crate mesh is centered
+  CHECK(batch(list, MeshId::Crate)[0].y == Approx(0.5f));  // the crate mesh is centered
 }
 
-TEST_CASE("the ground and the player are cubes") {
-  World w = empty_world();
+TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mountains") {
+  const World w = new_game(42);
   DrawList list;
-  build_scene(w, list);
-  const auto& cubes = batch(list, MeshId::Cube);
-  REQUIRE(cubes.size() == 3);
-  CHECK(cubes[0].pattern == 1.0f);  // checkerboard ground
-  CHECK(cubes[0].y + cubes[0].sy == Approx(0));
-  CHECK(cubes[1].y == Approx(rules::kPlayerHalfWidth));
-  CHECK(cubes[1].yaw == Approx(0));  // facing -Z
+  build_landscape(w, list);
+
+  const auto& short_grass = batch(list, MeshId::GrassShort);
+  const auto& tall_grass = batch(list, MeshId::GrassTall);
+  CHECK(short_grass.size() > 2000);
+  CHECK(tall_grass.size() > 300);
+  CHECK(batch(list, MeshId::Flower).size() > 100);
+
+  // No grass in the middle of the path or inside an object.
+  for (const auto* grass : {&short_grass, &tall_grass}) {
+    for (const Instance& g : *grass) {
+      REQUIRE(distance_to_path(w.path, g.x, g.z) >= 0.75f * rules::kPathHalfWidth);
+      for (const Object& o : w.objects) {
+        const Box b = object_box(o);
+        REQUIRE_FALSE((g.x > b.min.x && g.x < b.max.x && g.z > b.min.z && g.z < b.max.z));
+      }
+    }
+  }
+
+  // Extra trees only outside the playable area.
+  size_t world_trees = 0;
+  for (const Object& o : w.objects) world_trees += o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine;
+  size_t border_trees = 0;
+  for (MeshId id : {MeshId::Tree, MeshId::Pine}) {
+    for (const Instance& t : batch(list, id)) {
+      if (std::max(std::fabs(t.x), std::fabs(t.z)) > rules::kWorldHalfSize + 1) ++border_trees;
+    }
+  }
+  CHECK(border_trees > 60);
+  CHECK(batch(list, MeshId::Tree).size() + batch(list, MeshId::Pine).size() == world_trees + border_trees);
+
+  size_t mountains = 0;
+  for (size_t i = 0; i < kMountainVariants; ++i) {
+    for (const Instance& m : batch(list, mesh_offset(MeshId::Mountain0, i))) {
+      CHECK(std::sqrt(m.x * m.x + m.z * m.z) > 190.0f);
+      ++mountains;
+    }
+  }
+  CHECK(mountains == 18);
 }
 
-TEST_CASE("the player cube turns to face its direction") {
+TEST_CASE("the landscape depends on the world only") {
+  const World w = new_game(9);
+  DrawList a, b;
+  build_landscape(w, a);
+  build_landscape(w, b);
+  for (size_t i = 0; i < kMeshCount; ++i) {
+    REQUIRE(a.batches[i].size() == b.batches[i].size());
+    for (size_t j = 0; j < a.batches[i].size(); ++j) CHECK(a.batches[i][j].x == b.batches[i][j].x);
+  }
+}
+
+TEST_CASE("the player's shadow shrinks while jumping and falls on what is below") {
   World w = empty_world();
-  w.player.facing_x = -1;
-  w.player.facing_z = 0;
+  add_box(w, {0, 0, 0}, {1, 0.5f, 1});
+  w.player.pos.y = 1.0f;  // standing on the crate, 1 m high
   DrawList list;
-  build_scene(w, list);
-  const auto& cubes = batch(list, MeshId::Cube);
-  CHECK(cubes[2].x < w.player.pos.x);  // the nose is on the -X side
-  CHECK(cubes[1].yaw == Approx(kPi / 2));
+  build_dynamic(w, 0, list);
+  const Instance on_crate = batch(list, MeshId::Shadow)[0];
+  CHECK(on_crate.y > 1.0f);
+
+  w.player.pos.y = 2.5f;  // in the air above it
+  build_dynamic(w, 0, list);
+  const Instance jumping = batch(list, MeshId::Shadow)[0];
+  CHECK(jumping.y == Approx(on_crate.y));
+  CHECK(jumping.sx < on_crate.sx);
+  CHECK(jumping.tint.a < on_crate.tint.a);
+}
+
+TEST_CASE("clouds drift with time and stay in the sky") {
+  const World w = new_game(1);
+  DrawList at0, at10;
+  build_dynamic(w, 0, at0);
+  build_dynamic(w, 10, at10);
+  size_t clouds = 0;
+  for (size_t v = 0; v < kCloudVariants; ++v) {
+    const auto& a = batch(at0, mesh_offset(MeshId::Cloud0, v));
+    const auto& b = batch(at10, mesh_offset(MeshId::Cloud0, v));
+    REQUIRE(a.size() == b.size());
+    for (size_t i = 0; i < a.size(); ++i) {
+      CHECK(a[i].y > 30.0f);
+      CHECK(a[i].x != b[i].x);
+      CHECK(a[i].z == b[i].z);
+      CHECK(std::fabs(b[i].x) <= 220.0f);
+      ++clouds;
+    }
+  }
+  CHECK(clouds == 16);
 }
 
 TEST_CASE("the camera looks at the player from behind") {
@@ -88,14 +161,41 @@ TEST_CASE("the camera looks at the player from behind") {
     CAPTURE(yaw);
     Camera cam;
     cam.yaw = yaw;
-    const View v = build_view(w, cam, 16.0f / 9.0f);
-    // The point the camera aims at is in the middle of the screen...
+    const View v = build_view(w, cam, 16.0f / 9.0f, 0);
     const Vec3 center = project(v.view_projection, {3, 1, -4});
     CHECK(center.x == Approx(0).epsilon(1e-4));
     CHECK(center.y == Approx(0).epsilon(1e-4));
-    // ...and a point ahead of the player (in the camera direction) is further away.
     const Vec3 ahead = project(v.view_projection, {3 - std::sin(yaw) * 5, 1, -4 - std::cos(yaw) * 5});
     CHECK(ahead.z > center.z);
     CHECK(v.camera_y > 0.1f);
   }
+}
+
+TEST_CASE("the inverse view-projection undoes the view-projection") {
+  World w = empty_world();
+  const View v = build_view(w, Camera{}, 1.5f, 0);
+  const Mat4 id = multiply(v.inverse_view_projection, v.view_projection);
+  for (int i = 0; i < 16; ++i) CHECK(id.m[i] == Approx(i % 5 == 0 ? 1.0f : 0.0f).epsilon(1e-3));
+}
+
+TEST_CASE("the sun is above the horizon, the light comes from above") {
+  const View v = build_view(empty_world(), Camera{}, 1.5f, 0);
+  CHECK(v.sun_y > 0.1f);
+  CHECK(v.light_y > v.sun_y);
+  CHECK(std::sqrt(v.sun_x * v.sun_x + v.sun_y * v.sun_y + v.sun_z * v.sun_z) == Approx(1));
+}
+
+TEST_CASE("the camera comes closer when an object is between it and the player") {
+  World w = empty_world();
+  Camera cam;  // behind the player: towards +Z
+  const View free = build_view(w, cam, 1.5f, 0);
+  CHECK(free.camera_z > 5.0f);
+
+  w.objects.push_back(make_object(ObjectKind::Tree, {0, 0, 3}, {1, 1, 1}));  // trunk 3 m behind
+  const View blocked = build_view(w, cam, 1.5f, 0);
+  CHECK(blocked.camera_z < 3.0f - 0.28f);
+  CHECK(blocked.camera_z > 1.0f);
+
+  CHECK(camera_distance(w, 0, 1, 0, 0, 0, 1, 6) < 3.0f);
+  CHECK(camera_distance(w, 0, 1, 0, 0, 0, -1, 6) == Approx(6));  // nothing in front
 }

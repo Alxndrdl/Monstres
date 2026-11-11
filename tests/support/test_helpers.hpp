@@ -60,8 +60,26 @@ inline void check_invariants(const World& w) {
   CHECK(std::fabs(p.pos.x) <= limit);
   CHECK(std::fabs(p.pos.z) <= limit);
   CHECK(std::fabs(p.facing_x * p.facing_x + p.facing_z * p.facing_z - 1.0f) < 1e-4f);
+  // Plain loops, and an assertion only on failure: these run very often.
   for (const Object& o : w.objects) {
-    CHECK_MESSAGE(!overlaps(player_box(p), object_box(o)), "player inside the object at ", o.pos);
+    if (overlaps(player_box(p), object_box(o))) FAIL_CHECK("player inside the object at " << o.pos);
+  }
+  for (const Creature& c : w.creatures) {
+    const BodyShape& shape = species_info(c.species).shape;
+    CHECK(c.species < Species::Count);
+    CHECK(std::fabs(c.body.pos.x) <= rules::kWorldHalfSize - shape.half_width + 1e-4f);
+    CHECK(std::fabs(c.body.pos.z) <= rules::kWorldHalfSize - shape.half_width + 1e-4f);
+    if (c.species == Species::Fish) {  // in the lake, at the surface or jumping
+      CHECK(c.body.pos.y >= rules::kSwimLevel);
+      CHECK(in_lake(w.village.lake, c.body.pos.x, c.body.pos.z));
+      continue;
+    }
+    CHECK(c.body.pos.y >= 0.0f);
+    if (c.species == Species::Crow) continue;  // flies over everything
+    CHECK_FALSE(in_lake(w.village.lake, c.body.pos.x, c.body.pos.z));
+    for (const Object& o : w.objects) {
+      if (overlaps(body_box(c.body, shape), object_box(o))) FAIL_CHECK("creature inside the object at " << o.pos);
+    }
   }
 }
 

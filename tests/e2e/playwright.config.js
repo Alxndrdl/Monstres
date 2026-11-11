@@ -9,12 +9,15 @@ const port = Number(process.env.MONSTRES_PORT || 8090);
 
 module.exports = defineConfig({
   testDir: './specs',
-  timeout: 30_000,
+  timeout: 60_000,
   fullyParallel: true,
+  // The browsers render on the CPU (no GPU in headless mode): a few at a time.
+  workers: 3,
   reporter: [['list'], ['html', { open: 'never' }]],
   expect: {
     // Software GPUs differ a little between machines: allow tiny differences.
-    toHaveScreenshot: { maxDiffPixelRatio: 0.01 },
+    toHaveScreenshot: { maxDiffPixelRatio: 0.01, timeout: 20_000 },
+    timeout: 15_000,
   },
   use: {
     baseURL: `http://127.0.0.1:${port}/`,

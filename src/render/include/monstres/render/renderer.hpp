@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <span>
 #include <vector>
 
@@ -14,49 +17,115 @@ struct Mat4 {
   float m[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 };
 
-// A mesh: flat-shaded triangles, 9 floats per vertex
-// (position xyz, normal xyz, color rgb). Built once at startup.
+// A mesh: triangles, 10 floats per vertex
+// (position xyz, normal xyz, color rgba).
 struct MeshData {
   std::vector<float> vertices;
-  static constexpr int kFloatsPerVertex = 9;
+  bool transparent = false;   // alpha-blended, drawn after the opaque meshes
+  bool double_sided = false;  // no back-face culling (grass blades, flowers)
+  static constexpr size_t kFloatsPerVertex = 10;
   size_t vertex_count() const { return vertices.size() / kFloatsPerVertex; }
 };
 
-// One copy of a mesh in the world. All copies of a mesh are drawn with a
-// single instanced draw call.
-struct Instance {
-  float x = 0, y = 0, z = 0;              // position of the mesh origin
-  float yaw = 0;                          // rotation around Y, radians
-  float sx = 1, sy = 1, sz = 1;           // scale
-  float pattern = 0;                      // 0 = plain, 1 = checkerboard (ground)
-  Color tint{1, 1, 1, 1};                 // multiplies the mesh colors
+// Rotation as a unit quaternion.
+struct Quat {
+  float x = 0, y = 0, z = 0, w = 1;
 };
-static_assert(sizeof(Instance) == 12 * sizeof(float), "uploaded as-is to the GPU");
 
-// What to draw this frame: batches[i] holds the instances of mesh i.
+// Rotation around one axis (radians). Around X, a positive angle swings a
+// hanging limb forward (towards -Z); around Z, it tilts +Y towards -X.
+inline Quat quat_axis(float ax, float ay, float az, float angle) {
+  const float s = std::sin(angle / 2);
+  return {ax * s, ay * s, az * s, std::cos(angle / 2)};
+}
+inline Quat quat_yaw(float angle) { return quat_axis(0, 1, 0, angle); }
+inline Quat quat_x(float angle) { return quat_axis(1, 0, 0, angle); }
+inline Quat quat_z(float angle) { return quat_axis(0, 0, 1, angle); }
+
+// a * b: rotate by b, then by a.
+inline Quat operator*(const Quat& a, const Quat& b) {
+  return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+          a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+}
+
+// Rotates the vector (x, y, z) in place.
+inline void rotate(const Quat& q, float& x, float& y, float& z) {
+  // v + 2 * cross(q.xyz, cross(q.xyz, v) + w * v)
+  const float cx = q.y * z - q.z * y + q.w * x;
+  const float cy = q.z * x - q.x * z + q.w * y;
+  const float cz = q.x * y - q.y * x + q.w * z;
+  const float rx = x + 2 * (q.y * cz - q.z * cy);
+  const float ry = y + 2 * (q.z * cx - q.x * cz);
+  const float rz = z + 2 * (q.x * cy - q.y * cx);
+  x = rx;
+  y = ry;
+  z = rz;
+}
+
+// One copy of a mesh in the world: scaled, then rotated, then moved. All
+// copies of a mesh are drawn with a single instanced draw call.
+struct Instance {
+  float x = 0, y = 0, z = 0;     // position of the mesh origin
+  float wind = 0;                // how much the wind sways it (0 = rigid)
+  Quat rotation;
+  float sx = 1, sy = 1, sz = 1;  // scale
+  float unused = 0;
+  Color tint{1, 1, 1, 1};        // multiplies the mesh colors (alpha too)
+};
+static_assert(sizeof(Instance) == 16 * sizeof(float), "uploaded as-is to the GPU");
+
+// The usual case: turned around the vertical axis only.
+inline Instance make_instance(float x, float y, float z, float yaw, float sx, float sy, float sz,
+                              Color tint = {1, 1, 1, 1}, float wind = 0) {
+  Instance in;
+  in.x = x;
+  in.y = y;
+  in.z = z;
+  in.rotation = quat_yaw(yaw);
+  in.sx = sx;
+  in.sy = sy;
+  in.sz = sz;
+  in.tint = tint;
+  in.wind = wind;
+  return in;
+}
+
+// What to draw: batches[i] holds the instances of mesh i. Opaque meshes are
+// drawn first, then transparent ones, in index order.
 struct DrawList {
   std::vector<std::vector<Instance>> batches;
+  // A list marked `cached` is uploaded to the GPU once and reused until its
+  // version changes (for the landscape, which never moves).
+  bool cached = false;
+  uint32_t version = 0;
 };
 
 struct View {
   Mat4 view_projection;
+  Mat4 inverse_view_projection;  // for the sky
   float camera_x = 0, camera_y = 0, camera_z = 0;
-  float light_x = 0, light_y = 1, light_z = 0;  // direction towards the light, normalized
+  float sun_x = 0, sun_y = 1, sun_z = 0;  // direction towards the sun disc, normalized
+  float light_x = 0, light_y = 1, light_z = 0;  // direction of the light used for shading
+  Color sky_zenith;
+  Color sky_horizon;
   Color fog;
-  float fog_start = 30, fog_end = 70;
+  float fog_start = 45, fog_end = 320;
+  float time = 0;  // seconds, drives the wind
 };
 
 struct Frame {
   int pixel_width = 0;
   int pixel_height = 0;
-  Color clear;
 };
 
 class Renderer {
 public:
   virtual ~Renderer() = default;
+  // Replaces mesh `index` (used for meshes built at runtime, like the ground).
+  virtual void set_mesh(size_t index, const MeshData& mesh) = 0;
   virtual void begin_frame(const Frame& frame) = 0;
-  virtual void draw(const View& view, const DrawList& list) = 0;
+  // Draws the sky, then every list (all opaque batches, then all transparent ones).
+  virtual void draw(const View& view, std::span<const DrawList* const> lists) = 0;
   virtual void end_frame() = 0;
 };
 

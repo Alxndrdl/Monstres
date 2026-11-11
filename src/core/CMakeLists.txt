@@ -2,6 +2,8 @@
 # Everything here must build and be testable natively and in WebAssembly.
 add_library(monstres_core STATIC
   world.cpp
+  terrain.cpp
+  village.cpp
   save.cpp
   debug.cpp
 )

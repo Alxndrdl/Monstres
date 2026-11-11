@@ -6,12 +6,14 @@ monstres_set_options(monstres_web)
 
 set(SITE_DIR "${CMAKE_BINARY_DIR}/site")
 set(WEB_DIR  "${PROJECT_SOURCE_DIR}/web")
+# Model files are packed into index.data and mounted at /models.
+file(GLOB MODEL_FILES CONFIGURE_DEPENDS "${MONSTRES_ASSETS_DIR}/models/*.glb")
 
 set_target_properties(monstres_web PROPERTIES
   OUTPUT_NAME index
   SUFFIX ".html"
   RUNTIME_OUTPUT_DIRECTORY "${SITE_DIR}"
-  LINK_DEPENDS "${WEB_DIR}/index.html;${CMAKE_CURRENT_SOURCE_DIR}/pre.js;${CMAKE_CURRENT_SOURCE_DIR}/post.js"
+  LINK_DEPENDS "${WEB_DIR}/index.html;${CMAKE_CURRENT_SOURCE_DIR}/pre.js;${CMAKE_CURRENT_SOURCE_DIR}/post.js;${MODEL_FILES}"
 )
 
 target_link_options(monstres_web PRIVATE
@@ -23,6 +25,7 @@ target_link_options(monstres_web PRIVATE
   -sEXPORTED_RUNTIME_METHODS=UTF8ToString,FS
   -lidbfs.js
   -sMINIFY_HTML=0   # Debian's emscripten package lacks html-minifier-terser
+  "--preload-file=${MONSTRES_ASSETS_DIR}/models@/models"
   "--shell-file=${WEB_DIR}/index.html"
   "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/pre.js"
   "--post-js=${CMAKE_CURRENT_SOURCE_DIR}/post.js"
