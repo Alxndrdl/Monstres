@@ -98,7 +98,7 @@ TEST_CASE("a battle starts only against a wild monster on the ground, not too fa
   World w = arena();
   CHECK(can_engage(w, 0) == EngageCheck::NotMonster);  // the companion
   CHECK(can_engage(w, 2) == EngageCheck::NotMonster);  // a villager
-  CHECK(can_engage(w, 3) == EngageCheck::Unreachable); // a crow
+  CHECK(can_engage(w, 3) == EngageCheck::Ok);          // a crow: from afar
   CHECK(can_engage(w, 99) == EngageCheck::NotMonster);
   CHECK(can_engage(w, 1) == EngageCheck::Ok);
   w.creatures[1].body.pos = {0, 0, -30};
@@ -448,4 +448,75 @@ TEST_CASE("a captured monster leaves a trace for the runes; the companion out is
   loaded = deserialize(serialize(g));
   REQUIRE(loaded.has_value());
   CHECK(loaded->active == -1);
+}
+
+TEST_CASE("a crow on a roof: out of reach of a bite, not of a throw; it stays there and throws back") {
+  World w = arena();
+  add_box(w, {-6, 0, 0}, {1, 2, 1});  // a "roof" 4 m high
+  Creature& crow = w.creatures[3];
+  crow.body.pos = {-6, 4, 0};
+  crow.body.on_ground = true;
+  w.creatures[0].body.pos = {-5.2f, 0, 0};  // right below it
+  REQUIRE(can_engage(w, 3) == EngageCheck::Ok);
+  engage(w, 3);
+  const uint16_t hp = w.battle.enemy_hp;
+  step(w, attack_input(1));
+  CHECK(w.battle.enemy_hp == hp);  // a bite does not reach that high
+  w.creatures[0].body.pos = {-1, 0, 0};
+  step(w, attack_input(2));
+  REQUIRE(w.battle.projectiles.size() == 1);
+  CHECK(w.battle.projectiles[0].dir_y > 0.3f);  // aimed up at it
+  for (int i = 0; i < 60 && !w.battle.projectiles.empty(); ++i) step(w, Input{});
+  CHECK(w.battle.enemy_hp < hp);  // the roof did not stop it
+  // It does not come down, and it throws at the companion.
+  w.battle.foe.cooldown = {};
+  const uint16_t mine = w.team[0].hp;
+  for (int i = 0; i < 300 && w.team[0].hp == mine; ++i) step(w, Input{});
+  CHECK(w.team[0].hp < mine);
+  CHECK(w.creatures[3].body.pos == Vec3{-6, 4, 0});
+  // Beaten, it flies away.
+  w.battle.enemy_hp = 1;
+  w.battle.ally.cooldown = {};
+  step(w, attack_input(2));
+  for (int i = 0; i < 60 && w.battle.phase == BattlePhase::Fight; ++i) step(w, Input{});
+  CHECK(w.battle.outcome == BattleOutcome::Victory);
+  step(w, Input{});
+  CHECK(w.creatures[3].mind != Mind::Battle);
+}
+
+TEST_CASE("a fish can be fought from the shore: it stays in the water") {
+  World w = arena();
+  Creature fish;
+  fish.species = Species::Fish;
+  fish.level = 2;
+  fish.body.pos = {4, 0, -4};
+  fish.home = {4, -4};
+  w.creatures.push_back(fish);
+  const auto index = static_cast<uint16_t>(w.creatures.size() - 1);
+  engage(w, index);
+  const uint16_t hp = w.battle.enemy_hp;
+  step(w, attack_input(2));
+  for (int i = 0; i < 60 && !w.battle.projectiles.empty(); ++i) step(w, Input{});
+  CHECK(w.battle.enemy_hp < hp);
+  run(w, Input{}, 120);
+  CHECK(w.creatures[index].body.pos == Vec3{4, 0, -4});
+}
+
+TEST_CASE("a crow companion flies at the magician's side, a fish swims in the air") {
+  World w = arena();
+  w.team.push_back({Species::Crow, {}, 2, 0, 20});
+  w.team.push_back({Species::Fish, {}, 2, 0, 20});
+  step(w, command(Command::Summon, 1));
+  run(w, forward(), 2 * rules::kTicksPerSecond);
+  const Body& crow = w.creatures[0].body;
+  CHECK(crow.pos.y == doctest::Approx(companion_hover(Species::Crow)).epsilon(0.05));
+  CHECK_FALSE(crow.on_ground);  // it flaps its wings
+  CHECK(std::hypot(crow.pos.x - w.player.pos.x, crow.pos.z - w.player.pos.z) < 6.0f);
+  step(w, command(Command::Summon, 2));
+  run(w, Input{}, rules::kTicksPerSecond);
+  CHECK(w.creatures[0].body.pos.y == doctest::Approx(companion_hover(Species::Fish)).epsilon(0.05));
+  // It fights flying too.
+  engage(w);
+  run(w, move(0, 127), 30);
+  CHECK(w.creatures[0].body.pos.y == doctest::Approx(companion_hover(Species::Fish)).epsilon(0.05));
 }

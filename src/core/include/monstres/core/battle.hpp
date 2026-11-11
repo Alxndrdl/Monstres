@@ -74,7 +74,6 @@ void assign_levels(World& world);
 enum class EngageCheck : uint8_t {
   Ok,
   NotMonster,   // villagers, the companion itself
-  Unreachable,  // flying crows, fish in the lake
   TooFar,
   InBattle,
   NoCompanion,  // no monster out of the crystal
@@ -94,6 +93,10 @@ struct Steer {
   float speed = 0;
   bool jump = false;
 };
+
+// Wild crows and fish do not move during a battle (up on their perch or in
+// the air, in the lake): they bite only what comes close, and throw.
+bool holds_its_place(Species species);
 
 // Summon team[slot] out of the staff's crystal, where the companion was (it
 // goes back in), or next to the player. If it is the one out: recalled

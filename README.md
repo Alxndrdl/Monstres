@@ -161,7 +161,8 @@ couleur de l'élément du monstre relie le cristal au monstre, qui apparaît ou
 disparaît dans la lumière (0,4 s). Un monstre capturé est d'abord retenu par
 un cercle de runes (0,3 s), puis rejoint le cristal de la même façon
 (`add_crystal_effects`, `src/render/characters.cpp` ; modèle `rune_circle`).
-Les espèces lentes suivent quand même le magicien (au moins 6 m/s en courant).
+Les espèces lentes suivent quand même le magicien (au moins 6 m/s en courant). Un Croa compagnon
+vole à hauteur d'épaule, un Bloup nage dans l'air, aussi pendant les combats.
 
 ## Jour et nuit
 
@@ -182,8 +183,12 @@ personnages gardent leur éclat la nuit (`kGlowing`).
 
 Règles dans `src/core/battle.hpp` / `battle.cpp`, interface dans
 `web/battle.js`. Depuis le menu contextuel, « Combattre » lance un combat entre
-le compagnon et le monstre visé (à moins de 15 m du joueur ; ni les Croa
-perchés ni les Bloup du lac pour l'instant). La caméra se place alors derrière
+le compagnon et le monstre visé (à moins de 15 m du joueur). Les Croa
+(perchés ou en vol) et les Bloup du lac restent à leur place pendant le combat :
+on les atteint avec les attaques à distance (projectiles visés en hauteur,
+qui traversent le toit où se tient le corbeau) ou l'onde si on est assez près,
+pas avec une morsure ; eux mordent ce qui s'approche et lancent leurs
+projectiles. La caméra se place alors derrière
 le compagnon, tournée vers l'ennemi : le joystick déplace le compagnon (en
 avant : vers l'ennemi, sur les côtés : on tourne autour), le magicien attend.
 

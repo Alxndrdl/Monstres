@@ -145,6 +145,10 @@ struct SpeciesInfo {
 };
 const SpeciesInfo& species_info(Species species);
 
+// How high a companion of this species flies above the ground (0: it walks).
+// A crow flies at the magician's side, a fish swims in the air.
+float companion_hover(Species species);
+
 // What makes one monster differ from the others of its species (variants,
 // see variants.hpp): one allele per gene of its species (colors, shapes),
 // and two very rare forms. Visual only, except the elemental form, which
@@ -259,7 +263,7 @@ struct Fighter {
 
 struct Projectile {
   Vec3 pos;            // center
-  float dir_x = 0, dir_z = 0;
+  float dir_x = 0, dir_y = 0, dir_z = 0;  // unit vector: aimed at the target, up or down too
   uint16_t ticks = 0;  // left before it fades
   bool from_ally = true;
   uint8_t move = 0;    // attack of the thrower (1: its first special attack)

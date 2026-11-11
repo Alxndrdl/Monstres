@@ -303,6 +303,29 @@ constexpr SpeciesInfo kSpecies[] = {
     {{0.30f, 0.30f}, 1.3f, 1.3f, 5.0f},  // Fish: swims, jumps out of the water
 };
 
+// A companion that flies: it moves like a walker (objects and the lake stop
+// it) but stays `hover` meters above the ground, rising and sinking smoothly.
+void move_flyer(const Surroundings& s, Body& b, const BodyShape& shape, float dir_x, float dir_z, float speed,
+                float hover) {
+  const float len2 = dir_x * dir_x + dir_z * dir_z;
+  if (len2 > 0.0f) {
+    const float len = std::sqrt(len2);
+    b.facing_x = dir_x / len;
+    b.facing_z = dir_z / len;
+  }
+  const float x0 = b.pos.x, z0 = b.pos.z;
+  move_axis(s, b, shape, 0, dir_x * speed * rules::kDt);
+  move_axis(s, b, shape, 2, dir_z * speed * rules::kDt);
+  const float wanted = s.ground.height(b.pos.x, b.pos.z) + hover;
+  const float climb = 4.0f * rules::kDt;
+  b.pos.y += std::clamp(wanted - b.pos.y, -climb, climb);
+  b.pos.y = std::max(b.pos.y, s.ground.height(b.pos.x, b.pos.z));
+  b.velocity_y = 0;
+  b.on_ground = false;
+  const float dx = b.pos.x - x0, dz = b.pos.z - z0;
+  b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
+}
+
 Vec2 clamp_to_world(Vec2 p, float margin) {
   const float limit = rules::kWorldHalfSize - margin;
   return {std::clamp(p.x, -limit, limit), std::clamp(p.z, -limit, limit)};
@@ -362,6 +385,10 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
   const float own_up = b.pos.y - w.ground.height(b.pos.x, b.pos.z);
   bool jump = b.on_ground && (c.timer >= 8 || (player_up > own_up + 0.4f && player_distance < 2.5f));
   if (jump) c.timer = 0;
+  if (const float hover = companion_hover(c.species); hover > 0) {
+    move_flyer(boxes, b, info.shape, dir_x, dir_z, speed, hover);
+    return;
+  }
   if (c.species == Species::Slime && speed > 0) {  // a slime follows by hopping
     jump = jump || b.on_ground;
     if (b.on_ground) speed = 0;
@@ -578,6 +605,14 @@ Box body_box(const Body& b, const BodyShape& shape) {
 }
 
 Box player_box(const Player& p) { return body_box(p, kPlayerShape); }
+
+float companion_hover(Species species) {
+  switch (species) {
+    case Species::Crow: return 1.3f;
+    case Species::Fish: return 0.7f;
+    default: return 0;
+  }
+}
 
 const SpeciesInfo& species_info(Species species) {
   const auto i = static_cast<size_t>(species);
@@ -1064,7 +1099,12 @@ void step(World& w, const Input& in) {
     if (phase == BattlePhase::Fight && (i == 0 || i == w.battle.enemy)) {
       const Steer st = i == 0 ? battle_ally(w, in, dir_x, dir_z) : battle_foe(w);
       const SpeciesInfo& info = species_info(c.species);
-      move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
+      if (i != 0 && holds_its_place(c.species)) continue;  // on its perch, in the air or in the lake
+      if (const float hover = i == 0 ? companion_hover(c.species) : 0.0f; hover > 0) {
+        move_flyer(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, hover);
+      } else {
+        move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
+      }
       continue;
     }
     if (i == 0) {

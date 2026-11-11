@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <iterator>
 
 namespace monstres {
@@ -48,6 +49,44 @@ float flat_distance(const Body& a, const Body& b, float& dx, float& dz) {
 }
 
 Creature& companion(World& w) { return w.creatures[0]; }
+
+// Height between two bodies (0 if they overlap vertically): a bite needs both
+// at the same height; a crow on a roof is out of reach.
+float vertical_gap(const Creature& a, const Creature& b) {
+  const float a0 = a.body.pos.y, a1 = a0 + species_info(a.species).shape.height;
+  const float b0 = b.body.pos.y, b1 = b0 + species_info(b.species).shape.height;
+  return std::max({0.0f, b0 - a1, a0 - b1});
+}
+
+// From the middle of one body to the middle of the other (unit vector), and the distance.
+float aim(const Creature& from, const Creature& to, float& x, float& y, float& z) {
+  x = to.body.pos.x - from.body.pos.x;
+  y = to.body.pos.y + species_info(to.species).shape.height * 0.5f -
+      (from.body.pos.y + species_info(from.species).shape.height * 0.5f);
+  z = to.body.pos.z - from.body.pos.z;
+  const float d = std::sqrt(x * x + y * y + z * z);
+  if (d > 1e-4f) {
+    x /= d;
+    y /= d;
+    z /= d;
+  }
+  return d;
+}
+
+// The object a creature stands on (a roof, a rock...), or SIZE_MAX.
+size_t standing_on(const World& w, const Creature& c) {
+  constexpr float kNear = 0.3f;
+  for (size_t k = 0; k < w.objects.size(); ++k) {
+    const Box b = object_box(w.objects[k]);
+    if (std::fabs(c.body.pos.y - b.max.y) < kNear && c.body.pos.x > b.min.x - kNear && c.body.pos.x < b.max.x + kNear &&
+        c.body.pos.z > b.min.z - kNear && c.body.pos.z < b.max.z + kNear) {
+      return k;
+    }
+  }
+  return SIZE_MAX;
+}
+
+constexpr float kMeleeHeight = 0.6f;  // highest gap a bite still reaches
 Monster& ally(World& w) { return *active_monster(w); }  // in a battle, there is one
 Creature& enemy(World& w) { return w.creatures[w.battle.enemy]; }
 
@@ -143,19 +182,23 @@ void attack(World& w, bool by_ally, uint8_t slot) {
   const float other_w = species_info(other.species).shape.half_width;
   float dx, dz;
   const float d = flat_distance(self.body, other.body, dx, dz);
+  float ax, ay, az;
+  const float d3 = aim(self, other, ax, ay, az);
   switch (m.shape) {
     case Melee:
-      if (d <= self_w + other_w + m.range) hit(w, !by_ally, damage, true);
+      if (d <= self_w + other_w + m.range && vertical_gap(self, other) <= kMeleeHeight) hit(w, !by_ally, damage, true);
       break;
     case Burst:
-      if (d <= m.range + other_w) hit(w, !by_ally, damage, false);
+      if (d3 <= m.range + other_w) hit(w, !by_ally, damage, false);
       break;
     case Projectile: {
+      // Thrown at the middle of the target, even up on a roof or down in the water.
       monstres::Projectile p;
       p.pos = {self.body.pos.x + dx * self_w, self.body.pos.y + species_info(self.species).shape.height * 0.5f,
                self.body.pos.z + dz * self_w};
-      p.dir_x = dx;
-      p.dir_z = dz;
+      p.dir_x = ax;
+      p.dir_y = ay;
+      p.dir_z = az;
       p.ticks = static_cast<uint16_t>(m.range / rules::kProjectileSpeed * rules::kTicksPerSecond);
       p.from_ally = by_ally;
       p.move = slot;
@@ -212,6 +255,8 @@ void summon(World& w, size_t slot) {
   if (fighting) w.battle.ally = {};  // a fresh fighter
 }
 
+bool holds_its_place(Species species) { return species == Species::Crow || species == Species::Fish; }
+
 const Moves& species_moves(Species species) {
   const auto i = static_cast<size_t>(species);
   return kMoves[i < kSpeciesCount ? i : 0];
@@ -260,14 +305,13 @@ EngageCheck can_engage(const World& w, size_t index) {
   if (!monster_stats(c.species).is_monster) return EngageCheck::NotMonster;
   if (w.battle.phase != BattlePhase::None) return EngageCheck::InBattle;
   if (!active_monster(w)) return EngageCheck::NoCompanion;
-  if (c.species == Species::Crow || c.species == Species::Fish) return EngageCheck::Unreachable;
   const float dx = c.body.pos.x - w.player.pos.x, dz = c.body.pos.z - w.player.pos.z;
   if (dx * dx + dz * dz > rules::kEngageDistance * rules::kEngageDistance) return EngageCheck::TooFar;
   return EngageCheck::Ok;
 }
 
 const char* engage_check_name(EngageCheck check) {
-  static const char* kNames[] = {"ok", "notMonster", "unreachable", "tooFar", "inBattle", "noCompanion"};
+  static const char* kNames[] = {"ok", "notMonster", "tooFar", "inBattle", "noCompanion"};
   const auto i = static_cast<size_t>(check);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
@@ -389,7 +433,11 @@ Steer battle_foe(World& w) {
   const Moves& moves = species_moves(e.species);
   float dx, dz;
   const float d = flat_distance(e.body, companion(w).body, dx, dz);
+  float ax, ay, az;
+  const float d3 = aim(e, companion(w), ax, ay, az);
   const float reach = info.shape.half_width + species_info(companion(w).species).shape.half_width + moves[0].range;
+  const bool bite = d <= reach && vertical_gap(e, companion(w)) <= kMeleeHeight;
+  const bool stays = holds_its_place(e.species);  // a crow up there, a fish in the lake
 
   Steer s;
   switch (f.state) {
@@ -407,13 +455,13 @@ Steer battle_foe(World& w) {
     f.move = slot;
     f.state_ticks = kFoeWindup[slot];
   };
-  if (d <= reach && f.cooldown[0] == 0) {
+  if (bite && f.cooldown[0] == 0) {
     windup(0);
-  } else if (d <= moves[2].range && f.cooldown[2] == 0) {
+  } else if (d3 <= moves[2].range && f.cooldown[2] == 0) {
     windup(2);
-  } else if (d > 3.0f && d < moves[1].range && f.cooldown[1] == 0) {
+  } else if ((d > 3.0f || stays) && d3 < moves[1].range && f.cooldown[1] == 0) {
     windup(1);
-  } else if (d > reach * 0.8f) {
+  } else if (!stays && d > reach * 0.8f) {
     s.dir_x = dx;
     s.dir_z = dz;
     s.speed = std::max(info.walk_speed, info.run_speed * 0.6f);
@@ -437,9 +485,11 @@ void battle_resolve(World& w) {
   }
 
   // Projectiles fly straight, and stop on what they hit.
+  const size_t ally_perch = standing_on(w, ally), foe_perch = standing_on(w, enemy(w));
   for (size_t i = 0; i < b.projectiles.size();) {
     monstres::Projectile& p = b.projectiles[i];
     p.pos.x += p.dir_x * rules::kProjectileSpeed * rules::kDt;
+    p.pos.y += p.dir_y * rules::kProjectileSpeed * rules::kDt;
     p.pos.z += p.dir_z * rules::kProjectileSpeed * rules::kDt;
     bool gone = p.ticks == 0 || --p.ticks == 0 || p.pos.y < w.ground.height(p.pos.x, p.pos.z);
     const Creature& target = p.from_ally ? enemy(w) : ally;
@@ -454,9 +504,12 @@ void battle_resolve(World& w) {
         gone = true;
       }
     }
+    // Objects stop it, but not what either fighter stands on (the roof of a crow).
     if (!gone) {
       const Box box{{p.pos.x - 0.1f, p.pos.y - 0.1f, p.pos.z - 0.1f}, {p.pos.x + 0.1f, p.pos.y + 0.1f, p.pos.z + 0.1f}};
-      gone = std::any_of(w.objects.begin(), w.objects.end(), [&](const Object& o) { return overlaps(box, object_box(o)); });
+      for (size_t k = 0; k < w.objects.size() && !gone; ++k) {
+        gone = k != ally_perch && k != foe_perch && overlaps(box, object_box(w.objects[k]));
+      }
     }
     if (gone) b.projectiles.erase(b.projectiles.begin() + static_cast<std::ptrdiff_t>(i));
     else ++i;
@@ -476,9 +529,14 @@ void battle_resolve(World& w) {
   }
 
   if (b.enemy_hp == 0) {
-    foe.mind = Mind::Flee;  // beaten, it runs home
-    foe.target = foe.home;
-    foe.timer = 4 * rules::kTicksPerSecond;
+    if (foe.species == Species::Crow) {  // beaten, it flies away
+      foe.mind = Mind::Idle;
+      foe.timer = 0;
+    } else {  // beaten, it runs (or swims) home
+      foe.mind = Mind::Flee;
+      foe.target = foe.home;
+      foe.timer = 4 * rules::kTicksPerSecond;
+    }
     end_battle(w, BattleOutcome::Victory, reward(w));
   } else if (monstres::ally(w).hp == 0) {
     foe.mind = Mind::Idle;

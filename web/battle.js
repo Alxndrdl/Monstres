@@ -93,7 +93,6 @@
 
   const ENGAGE_NOTES = {
     tooFar: 'Trop loin : approche-toi à moins de 15 m.',
-    unreachable: 'Hors de portée : ton compagnon ne peut pas l’atteindre.',
     inBattle: 'Un combat est déjà en cours.',
     noCompanion: 'Invoque d’abord un monstre de ton équipe (à gauche).',
   };
