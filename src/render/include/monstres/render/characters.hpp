@@ -53,6 +53,7 @@ struct CreatureLook {
   bool aura = false;
   Color aura_color;
   float extra_height = 0;  // drawn higher than usual (unit size, before the species' scale)
+  float size = 1;          // females are drawn smaller than males
 
   std::span<const RigPart> rig() const { return {parts.data(), count}; }
   int add(const RigPart& part) {
@@ -61,6 +62,9 @@ struct CreatureLook {
   }
 };
 CreatureLook creature_look(Species species, const Genes& genes);
+
+// Color of the sparks of an element (above 1: glowing).
+Color element_glow(Element element);
 
 // A villager's look, derived from its variant.
 struct VillagerLook {

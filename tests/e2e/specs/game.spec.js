@@ -259,9 +259,9 @@ test.describe('creature info', () => {
     await page.mouse.click(at.x, at.y);
     await expect(panel).toBeVisible();
     await expect(panel.locator('.name')).toHaveText('Pompon');
-    await expect(panel.locator('.facts')).toHaveText(/^T’attend · à 1 m$/);  // just behind the player
+    await expect(panel.locator('.facts')).toHaveText(/^Niveau 3 · T’attend · à 1 m$/);  // just behind the player
     await expect(panel.locator('.tags .badge')).toHaveText(['Bête', 'Feu']);
-    await expect(panel.locator('.variants')).toHaveText('Variantes : Pelage de braise · Oreilles pointues · Une queue');
+    await expect(panel.locator('.variants')).toHaveText('Variantes : Mâle · Pelage de braise · Oreilles pointues · Une queue');
     expect((await page.evaluate(() => window.monstres.selected())).index).toBe(0);
 
     await page.mouse.click(220, 300);  // grass, no creature there
@@ -296,7 +296,7 @@ test.describe('grimoire', () => {
     await expect(menu).toBeHidden();
     await page.locator('#menu-button').click();
     await expect(menu).toBeVisible();
-    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Bestiaire', 'Carte']);
+    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Bestiaire', 'Carte']);
     const tick = (await state(page)).tick;
     await page.waitForTimeout(500);
     expect((await state(page)).tick).toBe(tick);  // paused
@@ -357,7 +357,7 @@ test.describe('grimoire', () => {
     const bestiary = await page.evaluate(() => window.monstres.bestiary());
     const companion = bestiary.find((e) => e.species === 'companion');
     expect(companion.variants.filter((v) => v.status === 'captured').map((v) => v.id))
-      .toEqual(['fur.ember', 'ears.pointed', 'tails.one']);
+      .toEqual(['sex.male', 'fur.ember', 'ears.pointed', 'tails.one']);
     // A species with seen variants, but none captured.
     const seenSpecies = bestiary.find((e) => e.species !== 'companion' && e.variants.some((v) => v.status === 'seen'));
     expect(seenSpecies).toBeTruthy();
@@ -384,10 +384,15 @@ test.describe('grimoire', () => {
     // The companion's are captured: shown as they are.
     await page.locator('.bestiary-entry[data-species="companion"]').click();
     const mine = page.locator('.variant-cell[data-status="captured"]');
-    await expect(mine).toHaveCount(3);
+    await expect(mine).toHaveCount(4);
     await expect(mine.first().locator('img')).toHaveCSS('filter', 'none');
     await mine.first().click();
-    await expect(page.locator('#variant-info h3')).toHaveText('Pelage de braise');
+    await expect(page.locator('#variant-info h3')).toHaveText('Mâle');  // the sex comes first
+    // The chosen variant is shown beside the grid, not below it.
+    const grid = await page.locator('.dna-groups').boundingBox();
+    const info = await page.locator('#variant-info').boundingBox();
+    expect(info.x).toBeGreaterThanOrEqual(grid.x + grid.width);
+    expect(info.y).toBeLessThan(grid.y + 40);
     await expect(page.locator('#variant-info .status')).toHaveText('Capturée');
     await page.locator('.dna-back').click();
     await expect(page.locator('#bestiary-detail h2')).toHaveText('Pompon');
@@ -411,5 +416,90 @@ test.describe('grimoire', () => {
     expect(await painted()).toBeGreaterThan(20);
     await page.keyboard.press('m');
     await expect(page.locator('#game-menu')).toBeHidden();
+  });
+});
+
+test.describe('battles', () => {
+  // Seed 42: a bird (creature 3) pecks about 10 m from the start.
+  const BIRD = 3;
+  async function lookAtBird(page) {
+    await page.evaluate((i) => {
+      const s = window.monstres.state();
+      const c = s.creatures[i];
+      window.monstres.setCamera(Math.atan2(-(c.x - s.player.x), -(c.z - s.player.z)), 0.35);
+    }, BIRD);
+  }
+
+  test('the context menu starts a battle; the battle buttons replace the jump', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await expect(page.locator('#context')).toBeHidden();
+    await lookAtBird(page);
+    const at = await page.evaluate((i) => window.monstres.creatureOnScreen(i), BIRD);
+    await page.mouse.click(at.x, at.y);
+    await expect(page.locator('#context')).toBeVisible();
+    await expect(page.locator('#context .context-title')).toContainText('Piou');
+    await expect(page.locator('#attack-1')).toBeHidden();
+    await page.locator('#action-fight').click();
+
+    await expect(page.locator('.fighter.enemy')).toBeVisible();  // (#battle-hud itself has no size)
+    await expect(page.locator('.fighter.enemy strong')).toHaveText('Piou');
+    await expect(page.locator('.fighter.ally strong')).toHaveText('Pompon');
+    for (const id of ['#attack-1', '#attack-2', '#attack-3', '#parry']) await expect(page.locator(id)).toBeVisible();
+    await expect(page.locator('#jump')).toHaveAttribute('aria-label', 'Esquiver');
+    await expect(page.locator('#action-capture')).toBeDisabled();  // not weakened yet
+    const battle = await page.evaluate(() => window.monstres.battle());
+    expect(battle.phase).toBe('fight');
+    expect(battle.enemy.index).toBe(BIRD);
+
+    // A special attack: a projectile, and the button waits for its cooldown.
+    await page.locator('#attack-2').dispatchEvent('pointerdown');
+    await page.evaluate(() => window.monstres.step(40));
+    const after = await page.evaluate(() => window.monstres.battle());
+    expect(after.enemy.hp).toBeLessThan(battle.enemy.hp);
+    expect(after.ally.fighter.cooldowns[1]).toBeGreaterThan(0);
+    await expect(page.locator('#attack-2')).toHaveClass(/waiting/);
+
+    // Fleeing: Pompon comes back to the player, the battle ends.
+    await page.locator('#action-flee').click();
+    await page.evaluate(() => window.monstres.step(400));
+    await expect(page.locator('.fighter.enemy')).toBeHidden();
+    await expect(page.locator('#attack-1')).toBeHidden();
+    await expect(page.locator('#jump')).toHaveAttribute('aria-label', 'Sauter');
+    expect((await page.evaluate(() => window.monstres.battle())).outcome.result).toBe('fled');
+  });
+
+  test('a weakened monster is captured and joins the team', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await page.evaluate((i) => window.monstres.engage(i), BIRD);
+    // Fight until it is weak enough (or beaten: then try again).
+    const result = await page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 0; i < 400; i++) {
+        const b = m.battle();
+        if (b.phase !== 'fight') return b.outcome.result;
+        if (b.capture === 'ok') return 'weak';
+        m.input.move(0, b.enemy.hp * 4 > b.enemy.maxHp ? 1 : 0);
+        if (b.enemy.hp * 3 > b.enemy.maxHp) m.input.attack(1);
+        m.step(4);
+      }
+      return 'timeout';
+    });
+    expect(result).toBe('weak');
+    await expect(page.locator('#action-capture')).toBeEnabled();
+    await page.locator('#action-capture').click();
+    await expect(page.locator('#battle-banner')).toContainText('Piou capturé');
+    await expect(page.locator('.fighter.enemy')).toBeHidden();
+
+    await page.keyboard.press('e');  // the team, in the grimoire
+    await expect(page.getByRole('tab', { name: 'Équipe' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#team-list li')).toHaveCount(2);
+    await page.locator('#team-list li').nth(1).locator('button').click();
+    await expect(page.locator('#team-detail h2')).toHaveText('Piou');
+    await expect(page.locator('#team-detail .move')).toHaveCount(3);
+    await expect(page.locator('#team-detail .move').first()).toContainText('Coup de bec');
+    await page.locator('#team-list li').first().locator('button').click();
+    await expect(page.locator('#team-detail h2')).toHaveText('Pompon');
+    await expect(page.locator('#team-detail')).toContainText('Boule de braise');
+    await expect(page.locator('#team-detail')).toContainText('Niveau 3');
   });
 });

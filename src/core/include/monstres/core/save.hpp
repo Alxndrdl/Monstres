@@ -38,7 +38,16 @@ namespace monstres {
 //      count, u8 variants per species, then one u8 Discovery each). Version 8
 //      still loads: the monsters get their genes from the seed, nothing is
 //      discovered but the companion.
-inline constexpr uint32_t kSaveVersion = 9;
+//  10  the sex is the first gene of every monster (one more u8 per creature,
+//      first) and its two variants come first in the bestiary. Version 9
+//      still loads: monsters get a sex from the seed, the discoveries move
+//      after the sex's variants.
+//  11  battles: after each creature's genes its level (u8); after the
+//      bestiary the team (u8 size, then per monster: u8 species, u8 per
+//      allele, u8 forms, u16 level, u32 xp, u16 hit points). Battles are
+//      not saved. Versions 8 to 10 still load: the monsters get a level from
+//      the seed, the team is the companion alone.
+inline constexpr uint32_t kSaveVersion = 11;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

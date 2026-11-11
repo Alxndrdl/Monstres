@@ -146,6 +146,35 @@ window.MonstresLore = {
     veryRare: { name: 'Très rare', color: '#f2c94c' },
   },
 
+  // Attacks of the monsters (species_moves in src/core/battle.cpp). byElement:
+  // the name when the attack is of another element (elemental forms).
+  moves: {
+    bite: { name: 'Morsure', description: 'Un petit coup de dents rapide. On peut l’enchaîner.' },
+    ember: {
+      name: 'Boule de braise', byElement: { electric: 'Boule d’orage' },
+      description: 'Il crache une boule de son élément, qui file droit sur l’ennemi.',
+    },
+    blaze: {
+      name: 'Tourbillon de flammes', byElement: { electric: 'Tourbillon d’éclairs' },
+      description: 'Il tourne sur lui-même et brûle tout ce qui est autour de lui.',
+    },
+    bounce: { name: 'Rebond', description: 'Il rebondit sur son adversaire.' },
+    splash: { name: 'Jet de gelée', description: 'Une boule de gelée lancée de loin.' },
+    flood: { name: 'Raz-de-gelée', description: 'Il s’écrase au sol : la gelée gicle tout autour.' },
+    headbutt: { name: 'Coup de chapeau', description: 'Un coup de tête avec son grand chapeau.' },
+    spores: { name: 'Spores', description: 'Un nuage de spores serré, soufflé vers l’ennemi.' },
+    spore_cloud: { name: 'Nuage de spores', description: 'Il secoue son chapeau : des spores partout autour de lui.' },
+    peck: { name: 'Coup de bec', description: 'Un coup de bec vif et précis.' },
+    feather: { name: 'Plume tranchante', description: 'Il lance une plume dure comme une lame.' },
+    gust: { name: 'Bourrasque', description: 'Il bat des ailes de toutes ses forces : le vent repousse tout.' },
+    shade: { name: 'Ombre', description: 'Une boule d’ombre qui glace ce qu’elle touche.' },
+    flock: { name: 'Nuée', description: 'Des plumes noires tourbillonnent autour de lui.' },
+    tail_slap: { name: 'Coup de queue', description: 'Une gifle avec sa queue mouillée.' },
+    bubble: { name: 'Bulle', description: 'Une grosse bulle qui éclate au visage.' },
+    wave: { name: 'Vague', description: 'Il fait jaillir une vague autour de lui.' },
+  },
+  moveShapes: { melee: 'Corps à corps', projectile: 'À distance', burst: 'Tout autour' },
+
   zones: {
     meadow: 'Prairie',
     village: 'Village',
@@ -153,3 +182,15 @@ window.MonstresLore = {
     ruins: 'Ruines de la Tour',
   },
 };
+
+// Every monster is a male or a female (first gene): the same texts for all.
+for (const id of window.MonstresLore.speciesOrder) {
+  const species = window.MonstresLore.species[id];
+  if (!species.variants) continue;
+  species.genes = { sex: 'Sexe', ...species.genes };
+  species.variants = {
+    'sex.male': { name: 'Mâle', description: 'Les mâles sont plus grands et plus costauds que les femelles.' },
+    'sex.female': { name: 'Femelle', description: 'Les femelles sont plus petites et plus fines que les mâles.' },
+    ...species.variants,
+  };
+}

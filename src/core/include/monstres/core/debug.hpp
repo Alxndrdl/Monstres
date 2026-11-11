@@ -39,4 +39,14 @@ std::string bestiary_json(const World& world);
 // during a game.
 std::string map_json(const World& world);
 
+// The player's team: per monster its level, experience, hit points,
+// characteristics at its level, family, elements, look, variants and its
+// three attacks (identifier, shape, element, power, cooldown in seconds).
+std::string team_json(const World& world);
+
+// The battle going on ("phase": "fight", "flee" or "none"), with both sides
+// (hit points, state, cooldowns left in seconds, last hits) and whether the
+// enemy can be captured; and how the last battle ended ("outcome").
+std::string battle_json(const World& world);
+
 }  // namespace monstres

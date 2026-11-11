@@ -30,20 +30,25 @@ Contrôles :
 - glisser sur l'écran (doigt ou souris) : regarder autour de soi ;
 - bouton en bas à droite, ou Espace : sauter.
 - toucher ou cliquer sur un monstre (ou un villageois) : sa fiche s'affiche en
-  haut à gauche (nom, famille, éléments, description, ses variantes, ce qu'il
-  fait, distance) et un anneau doré le marque au sol ; toucher ailleurs ou × la
-  ferme ;
-- livre en haut à gauche (ou touches C, B, M) : le grimoire, qui met le jeu en
-  pause, avec trois onglets :
+  haut à gauche (nom, famille, éléments, description, ses variantes, niveau,
+  ce qu'il fait, distance) et un anneau doré le marque au sol ; toucher
+  ailleurs ou × la ferme. Le menu contextuel, à droite, propose ce qu'on peut
+  faire avec lui : « Combattre » un monstre (voir Combats) ;
+- livre en haut à gauche (ou touches C, E, B, M) : le grimoire, qui met le jeu en
+  pause, avec quatre onglets :
   - Personnage : portrait du magicien, nom (modifiable, enregistré dans la
     sauvegarde), niveau, expérience, caractéristiques, où l'on se trouve ;
+  - Équipe : les monstres de l'équipe (le compagnon d'abord, 6 au plus) ;
+    toucher l'un d'eux affiche sa fiche complète : niveau, expérience, points
+    de vie, caractéristiques à son niveau, famille, éléments, variantes et ses
+    trois attaques ;
   - Bestiaire : tous les monstres, avec pour chacun un portrait, la famille,
     le ou les éléments, une description, l'habitat, la taille, la vitesse, les
     caractéristiques et combien vivent dans ce monde ; le bouton ADN
     « Variantes » montre toutes ses variantes : « ? » si jamais vue, grisée si
     aperçue (un monstre qui la porte est passé à moins de 20 m), en clair si
-    capturée ; toucher une variante découverte affiche sa fiche (rareté, où la
-    trouver, description) ;
+    capturée ; toucher une variante découverte affiche sa fiche à droite de la grille
+    (rareté, où la trouver, description) ;
   - Carte : locale (autour du joueur, avec les créatures proches) ou globale ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (exporter / importer la sauvegarde,
@@ -123,12 +128,13 @@ descriptions, eux, sont dans `web/lore.js`.
 
 ## Variantes
 
-Chaque monstre porte des gènes (`src/core/variants.hpp`) : pour chaque gène de
-son espèce (couleur du pelage ou des yeux, forme des oreilles, nombre de
+Chaque monstre porte des gènes (`src/core/variants.hpp`) : d'abord le sexe
+(mâle ou femelle, à parts égales ; les femelles sont dessinées 14 % plus
+petites), puis pour chaque autre gène de son espèce (couleur du pelage ou des yeux, forme des oreilles, nombre de
 queues ou d'yeux, cornes, antennes, huppe, nageoires...), un allèle tiré selon
 sa rareté (commune, peu commune, rare) ; certains allèles ne se trouvent que
 dans certaines zones (le chapeau bleu des Champi, dans les ruines). Deux
-formes très rares (1 sur 256 chacune) s'y ajoutent : chromatique (couleurs
+formes très rares (1 sur 256 chacune, jamais les deux à la fois) s'y ajoutent : chromatique (couleurs
 inhabituelles, par exemple le Croa blanc) et élémentaire (un autre élément,
 entouré d'étincelles). Les gènes sont tirés depuis la graine, un flux par
 créature : ils ne changent rien d'autre au monde. Le bestiaire retient pour
@@ -141,6 +147,36 @@ L'apparence d'une variante est construite par `creature_look`
 (`src/render/characters.cpp`) : pièces redimensionnées, ajoutées (`horn`,
 `bulb`, `eye_iris`) ou retirées, couleurs des emplacements de teinte. Les noms
 et descriptions des variantes sont dans `web/lore.js`.
+
+## Combats
+
+Règles dans `src/core/battle.hpp` / `battle.cpp`, interface dans
+`web/battle.js`. Depuis le menu contextuel, « Combattre » lance un combat entre
+le compagnon et le monstre visé (à moins de 15 m du joueur ; ni les Croa
+perchés ni les Bloup du lac pour l'instant). La caméra se place alors derrière
+le compagnon, tournée vers l'ennemi : le joystick déplace le compagnon (en
+avant : vers l'ennemi, sur les côtés : on tourne autour), le magicien attend.
+
+Boutons en bas à droite pendant un combat :
+- esquive (le bouton de saut, Espace) : un bond rapide dans la direction du
+  déplacement (en arrière à l'arrêt), pendant lequel on ne peut pas être touché ;
+- au-dessus, trois attaques (touches 1, 2, 3) : une attaque rapide au corps à
+  corps, qu'on peut enchaîner, et deux attaques spéciales avec un temps de
+  recharge (un projectile de son élément, une onde tout autour de lui) ;
+- à gauche de l'esquive, parer (F) : la prochaine attaque est bloquée, et un
+  ennemi dont le coup est paré reste étourdi un moment.
+
+L'ennemi montre ses attaques avant de frapper (anneau rouge qui bat, zone de
+l'onde, boule qui grossit) : c'est le moment d'esquiver ou de parer. Dans le
+menu contextuel : « Fuir » (le compagnon revient vers le joueur, puis le
+combat s'arrête et le joueur reprend la main) et « Capturer », possible quand
+l'ennemi n'a plus que 25 % de ses points de vie (trait doré sur sa barre) : il
+rejoint l'équipe. Une victoire ou une capture donne de l'expérience au
+compagnon (niveaux) et au magicien. Un compagnon K.O. revient avec 1 point de
+vie ; hors combat, l'équipe regagne 1 point de vie par seconde. Les monstres
+sauvages ont un niveau (1 à 3, 3 à 5 dans les ruines). Pas de forces ni de
+faiblesses entre éléments pour l'instant. Les combats ne sont pas sauvegardés :
+une partie rechargée pendant un combat reprend sans lui.
 
 ## Personnages et animations
 

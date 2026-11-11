@@ -1,4 +1,4 @@
-// The grimoire (button at the top left): character sheet, bestiary and maps.
+// The grimoire (button at the top left): character sheet, team, bestiary and maps.
 // Time stands still while it is open. Texts come from web/lore.js, data from
 // the game (window.monstres: wizard(), bestiary(), map(), portrait()).
 (() => {
@@ -74,7 +74,7 @@
   }
 
   function show(tab) {
-    if (!['character', 'bestiary', 'map'].includes(tab)) tab = 'character';
+    if (!['character', 'team', 'bestiary', 'map'].includes(tab)) tab = 'character';
     current = tab;
     prefs.set('menuTab', tab);
     for (const t of tabs) {
@@ -84,20 +84,22 @@
       $(t.getAttribute('aria-controls')).hidden = !selected;
     }
     if (tab === 'character') renderCharacter();
+    else if (tab === 'team') renderTeam();
     else if (tab === 'bestiary') renderBestiary();
     else renderMap();
   }
 
   button.addEventListener('click', () => (isOpen() ? close() : open()));
+  window.MonstresMenu = { open, close, isOpen };
   $('menu-close').addEventListener('click', close);
   menu.addEventListener('pointerdown', (event) => {
     if (event.target === menu) close();  // the dark backdrop around the window
   });
   for (const t of tabs) t.addEventListener('click', () => show(t.dataset.tab));
 
-  // Keyboard: Escape closes; C, B and M open a tab (not while typing a name).
+  // Keyboard: Escape closes; C, E, B and M open a tab (not while typing a name).
   // By letter, not by key position: M is not at the same place on AZERTY.
-  const SHORTCUTS = { c: 'character', b: 'bestiary', m: 'map' };
+  const SHORTCUTS = { c: 'character', e: 'team', b: 'bestiary', m: 'map' };
   window.addEventListener('keydown', (event) => {
     const typing = event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(event.target.tagName);
     if (event.key === 'Escape' && isOpen()) {
@@ -159,6 +161,92 @@
   nameInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') nameInput.blur();
   });
+
+  // ---- Team: the monsters of the player, the companion first ----
+  let chosenMember = prefs.get('teamSlot', 0);
+  const SEX = { true: '♀ Femelle', false: '♂ Mâle' };
+
+  function moveName(move) {
+    const text = LORE.moves[move.id] || { name: move.id };
+    return (text.byElement && text.byElement[move.element]) || text.name;
+  }
+
+  function hpBar(hp, max) {
+    const ratio = max ? hp / max : 0;
+    return el('div', { className: 'bar hp-bar' }, [el('span', {
+      style: `width:${Math.min(100, 100 * ratio)}%;background:${ratio > 0.5 ? '#8fd16a' : ratio > 0.25 ? '#f2c94c' : '#ff7a6b'}`,
+    })]);
+  }
+
+  function renderTeam() {
+    const team = game.team();
+    if (chosenMember >= team.length) chosenMember = 0;
+    $('team-list').replaceChildren(...team.map((m) => {
+      const info = LORE.species[m.species];
+      const item = el('button', { type: 'button', className: 'bestiary-entry team-entry' }, [
+        el('img', { className: 'portrait', src: portraitUrl(speciesIndex(m.species), 96, m.look), alt: '' }),
+        el('span', {}, [
+          el('strong', { textContent: info.name }),
+          el('small', { textContent: `Niveau ${m.level}${m.active ? ' · compagnon' : ''}` }),
+          hpBar(m.hp, m.maxHp),
+        ]),
+      ]);
+      item.dataset.slot = m.slot;
+      if (m.slot === chosenMember) item.setAttribute('aria-current', 'true');
+      item.addEventListener('click', () => {
+        chosenMember = m.slot;
+        prefs.set('teamSlot', chosenMember);
+        renderTeam();
+      });
+      return el('li', {}, [item]);
+    }));
+    $('team-count').textContent = `${team.length}/6 monstres`;
+    renderMember(team[chosenMember]);
+  }
+
+  function renderMember(m) {
+    const info = LORE.species[m.species];
+    const texts = info.variants || {};
+    const stats = el('dl', { className: 'stats' });
+    statList(stats, [['Points de vie', m.maxHp, 80], ['Attaque', m.attack, 25], ['Défense', m.defense, 25],
+      ['Vitesse', m.speed, 25], ['Magie', m.magic, 25]]);
+    const variants = m.variants.filter((id) => !id.startsWith('sex.'))
+      .map((id) => (id.includes('.') ? '' : '✦ ') + ((texts[id] || {}).name || id));
+    const moves = el('ol', { className: 'moves' }, m.moves.map((move, i) => {
+      const element = LORE.elements[move.element] || { name: move.element, color: '#ccc' };
+      const text = LORE.moves[move.id] || { description: '' };
+      return el('li', { className: 'move' }, [
+        el('div', { className: 'move-head' }, [
+          el('strong', { textContent: moveName(move) }),
+          el('span', { className: 'badge', textContent: element.name, style: `background:${element.color}` }),
+        ]),
+        el('p', {
+          className: 'facts',
+          textContent: `${i === 0 ? 'Attaque rapide' : 'Attaque spéciale'} · ${LORE.moveShapes[move.shape]} · ` +
+            `puissance ${move.power} · recharge ${move.cooldown.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} s`,
+        }),
+        el('p', { className: 'move-text', textContent: text.description }),
+      ]);
+    }));
+    $('team-detail').className = 'bestiary-detail member';
+    $('team-detail').replaceChildren(
+      el('img', { className: 'portrait', src: portraitUrl(speciesIndex(m.species), 256, m.look), alt: info.name }),
+      el('div', {}, [
+        el('h2', { textContent: info.name }),
+        el('p', { className: 'kind', textContent: `${info.kind} · ${SEX[m.female]}${m.active ? ' · ton compagnon' : ''}` }),
+        el('div', { className: 'badges' }, [familyBadge(m.family), ...elementBadges(m.elements)]),
+        el('p', { className: 'rank', textContent: `Niveau ${m.level}` }),
+        el('div', { className: 'xp' }, [
+          el('div', { className: 'bar' }, [el('span', { style: `width:${Math.min(100, (100 * m.xp) / m.xpToNext)}%` })]),
+          el('span', { textContent: `Expérience : ${m.xp} / ${m.xpToNext}` }),
+        ]),
+        el('div', { className: 'xp hp' }, [hpBar(m.hp, m.maxHp), el('span', { textContent: `PV : ${m.hp} / ${m.maxHp}` })]),
+        variants.length ? el('p', { className: 'facts', textContent: `Variantes : ${variants.join(' · ')}` }) : '',
+      ]),
+      stats,
+      el('section', { className: 'moves-box' }, [el('h3', { textContent: 'Attaques' }), moves]),
+    );
+  }
 
   // ---- Bestiary ----
   const MONSTER_STATS = [
@@ -256,7 +344,7 @@
     unknown: 'Inconnue', seen: 'Aperçue, pas encore capturée', captured: 'Capturée',
   };
 
-  // Every variant of a species: one row per gene, then the rare forms. Unknown
+  // Every variant of a species: one row per gene (the sex first), then the rare forms. Unknown
   // ones are a "?", seen ones are greyed, captured ones are shown as they are.
   function renderVariants(e) {
     const info = LORE.species[e.species];
@@ -317,8 +405,8 @@
           }),
         ]),
       ]),
-      ...rows,
-      infoBox,
+      // The grid on the left, the chosen variant on the right: always in view.
+      el('div', { className: 'dna-body' }, [el('div', { className: 'dna-groups' }, rows), infoBox]),
     );
     const first = e.variants.find((v) => v.id === chosenVariant);
     if (first) showInfo(first);

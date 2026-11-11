@@ -8,6 +8,7 @@ add_library(monstres_core STATIC
   save.cpp
   debug.cpp
   variants.cpp
+  battle.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

@@ -95,8 +95,17 @@ window.monstres = {
   input: {
     move: (x, y) => _monstres_set_move(x, y),
     look: (deltaYaw, deltaPitch) => _monstres_look(deltaYaw, deltaPitch),
-    jump: () => _monstres_jump(),
+    jump: () => _monstres_jump(),  // in a battle: dodge
+    attack: (slot) => _monstres_attack(slot),  // battle: 1 quick, 2 and 3 special
+    parry: () => _monstres_parry(),
   },
+  // Context menu (web/battle.js): start a battle against creature `index`,
+  // flee, capture. Applied with the next tick.
+  engage: (index) => _monstres_command(1, index),
+  flee: () => _monstres_command(2, 0),
+  capture: () => _monstres_command(3, 0),
+  team: () => JSON.parse(UTF8ToString(_monstres_team_json())),
+  battle: () => JSON.parse(UTF8ToString(_monstres_battle_json())),
   setCamera: (yaw, pitch) => _monstres_set_camera(yaw, pitch),
 
   // Creature info panel. pick: point of the canvas in CSS pixels; returns the

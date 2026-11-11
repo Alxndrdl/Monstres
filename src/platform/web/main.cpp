@@ -6,6 +6,7 @@
 // monstres_jump. Each fixed tick turns that into a monstres::Input.
 
 #include "gles3_renderer.hpp"
+#include "monstres/core/battle.hpp"
 #include "monstres/core/debug.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/variants.hpp"
@@ -46,6 +47,11 @@ struct App {
   Camera camera;
   float move_x = 0, move_y = 0;  // -1..1, set by JavaScript
   int jump_buffer = 0;           // ticks left during which a jump press is pending
+  int attack_buffer = 0;         // same for an attack (battle)
+  uint8_t attack_slot = 0;       // 1..3
+  int parry_buffer = 0;
+  Command command = Command::None;  // sent with the next tick
+  uint16_t command_target = 0;
   bool frozen = false;           // ?frozen: no automatic ticks (tests, screenshots)
   bool redraw = true;            // frozen mode only redraws when something changed
   int selected = -1;             // creature shown in the info panel (-1: none)
@@ -80,14 +86,42 @@ Input current_input(App& app) {
   in.move_y = to_axis(app.move_y);
   in.yaw = angle16_from_radians(app.camera.yaw);
   in.jump = app.jump_buffer > 0;
+  in.attack = app.attack_buffer > 0 ? app.attack_slot : 0;
+  in.parry = app.parry_buffer > 0;
+  in.command = app.command;
+  in.target = app.command_target;
   return in;
 }
 
 void tick(App& app, const Input& in) {
-  const bool was_on_ground = app.world.player.on_ground;
-  step(app.world, in);
-  if (in.jump && was_on_ground) app.jump_buffer = 0;  // the jump happened
+  World& w = app.world;
+  const bool was_on_ground = w.player.on_ground;
+  const bool fighting = w.battle.phase == BattlePhase::Fight;
+  const size_t creatures = w.creatures.size();
+  step(w, in);
+  // A press is kept a few ticks, until it happens (landing, end of a cooldown).
+  const Fighter& ally = w.battle.ally;
+  if (in.jump && (fighting ? ally.state == FighterState::Dodge : was_on_ground)) app.jump_buffer = 0;
   if (app.jump_buffer > 0) --app.jump_buffer;
+  if (in.attack && ally.attack_tick == w.tick) app.attack_buffer = 0;
+  if (app.attack_buffer > 0) --app.attack_buffer;
+  if (in.parry && ally.state == FighterState::Parry) app.parry_buffer = 0;
+  if (app.parry_buffer > 0) --app.parry_buffer;
+  app.command = Command::None;
+  if (w.creatures.size() != creatures) app.selected = -1;  // a captured monster left the world
+  if (w.battle.phase == BattlePhase::Fight) app.selected = -1;  // the enemy has its own ring
+}
+
+// In a fight the camera stays behind the companion, facing its enemy.
+void follow_battle(App& app, double dt_ms) {
+  float fx, fz;
+  if (app.world.battle.phase != BattlePhase::Fight || !battle_forward(app.world, fx, fz)) return;
+  const float target = std::atan2(-fx, -fz);  // forward = (-sin yaw, -cos yaw)
+  const float k = std::min(1.0f, static_cast<float>(dt_ms) * 0.012f);
+  Camera& c = app.camera;
+  c.yaw = std::remainder(c.yaw + std::remainder(target - c.yaw, static_cast<float>(2 * kPi)) * k,
+                         static_cast<float>(2 * kPi));
+  app.redraw = true;
 }
 
 // Call whenever app.world is replaced (new game, loaded or imported save).
@@ -151,6 +185,7 @@ void frame(void* user) {
     }
     if (app.world.tick - app.last_saved_tick >= kAutosaveEveryTicks) write_save(app);
   }
+  if (!app.paused) follow_battle(app, dt);
 
   double css_w = 0, css_h = 0;
   emscripten_get_element_css_size("#canvas", &css_w, &css_h);
@@ -193,6 +228,7 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_move(float x, float y) {
 EMSCRIPTEN_KEEPALIVE void monstres_look(float delta_yaw, float delta_pitch) {
   Camera& c = g_app->camera;
   g_app->redraw = true;
+  if (g_app->world.battle.phase == BattlePhase::Fight) delta_yaw = 0;  // locked on the enemy
   c.yaw = std::remainder(c.yaw + delta_yaw, static_cast<float>(2 * kPi));
   c.pitch = std::clamp(c.pitch + delta_pitch, kMinPitch, kMaxPitch);
 }
@@ -204,6 +240,38 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_camera(float yaw, float pitch) {
 }
 
 EMSCRIPTEN_KEEPALIVE void monstres_jump() { g_app->jump_buffer = kJumpBufferTicks; }
+
+// Battle buttons: attack 1 (quick), 2 and 3 (special); parry. The dodge is
+// the jump.
+EMSCRIPTEN_KEEPALIVE void monstres_attack(int slot) {
+  if (slot < 1 || slot > 3) return;
+  g_app->attack_slot = static_cast<uint8_t>(slot);
+  g_app->attack_buffer = kJumpBufferTicks;
+}
+
+EMSCRIPTEN_KEEPALIVE void monstres_parry() { g_app->parry_buffer = kJumpBufferTicks; }
+
+// Context menu: 1 engage creatures[target], 2 flee, 3 capture (Command).
+// Applied with the next tick (right away when frozen, for tests).
+EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
+  if (command < 1 || command > 3 || target < 0 || target > 65535) return;
+  g_app->command = static_cast<Command>(command);
+  g_app->command_target = static_cast<uint16_t>(target);
+  if (g_app->frozen) {
+    tick(*g_app, current_input(*g_app));
+    g_app->redraw = true;
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_team_json() {
+  g_app->json = team_json(g_app->world);
+  return g_app->json.c_str();
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_battle_json() {
+  g_app->json = battle_json(g_app->world);
+  return g_app->json.c_str();
+}
 
 EMSCRIPTEN_KEEPALIVE const char* monstres_state_json() {
   const Camera& c = g_app->camera;

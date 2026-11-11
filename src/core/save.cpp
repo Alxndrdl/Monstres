@@ -1,5 +1,6 @@
 #include "monstres/core/save.hpp"
 
+#include "monstres/core/battle.hpp"
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
@@ -163,6 +164,7 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u8(c.variant);
     for (uint8_t a : c.genes.allele) out.u8(a);
     out.u8(static_cast<uint8_t>((c.genes.chromatic ? 1 : 0) | (c.genes.elemental ? 2 : 0)));
+    out.u8(c.level);
   }
   const size_t name_bytes = std::min(w.wizard.name.size(), kMaxNameBytes);
   out.u8(static_cast<uint8_t>(name_bytes));
@@ -173,6 +175,15 @@ std::vector<uint8_t> serialize(const World& w) {
   out.u8(static_cast<uint8_t>(kMaxVariants));
   for (const auto& species : w.dex) {
     for (const Discovery d : species) out.u8(static_cast<uint8_t>(d));
+  }
+  out.u8(static_cast<uint8_t>(w.team.size()));
+  for (const Monster& m : w.team) {
+    out.u8(static_cast<uint8_t>(m.species));
+    for (uint8_t a : m.genes.allele) out.u8(a);
+    out.u8(static_cast<uint8_t>((m.genes.chromatic ? 1 : 0) | (m.genes.elemental ? 2 : 0)));
+    out.u16(m.level);
+    out.u32(m.xp);
+    out.u16(m.hp);
   }
   return out.take();
 }
@@ -192,6 +203,8 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   const bool v4 = version == 4;
   const bool before_village = version < 6;  // creatures had no flying height
   const bool with_genes = version >= 9;     // creatures' variants, and the bestiary's discoveries
+  const bool without_sex = version == 9;   // genes had no sex (it is now the first gene)
+  const bool with_team = version >= 11;    // levels of the monsters, and the team
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -232,20 +245,22 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       const bool ok = in.u8(species) && read_body(in, c.body, true) && in.u8(mind) && in.u16(c.timer) &&
                       in.f32(c.target.x) && in.f32(c.target.z) && (before_village || in.f32(c.target_y)) &&
                       in.f32(c.home.x) && in.f32(c.home.z) && in.u8(c.variant);
-      if (!ok || species >= static_cast<uint8_t>(Species::Count) || mind > static_cast<uint8_t>(Mind::Fly)) {
+      if (!ok || species >= static_cast<uint8_t>(Species::Count) || mind > static_cast<uint8_t>(Mind::Battle)) {
         return fail(error, LoadError::Corrupt);
       }
       c.species = static_cast<Species>(species);
       c.mind = static_cast<Mind>(mind);
+      if (c.mind == Mind::Battle) c.mind = Mind::Idle;  // battles are not saved
       if (with_genes) {
         uint8_t forms = 0;
         bool genes_ok = true;
-        for (uint8_t& a : c.genes.allele) genes_ok = genes_ok && in.u8(a);
+        for (size_t g = without_sex ? 1 : 0; g < kMaxGenes; ++g) genes_ok = genes_ok && in.u8(c.genes.allele[g]);
         if (!genes_ok || !in.u8(forms) || forms > 3) return fail(error, LoadError::Corrupt);
         c.genes.chromatic = (forms & 1) != 0;
-        c.genes.elemental = (forms & 2) != 0;
+        c.genes.elemental = (forms & 2) != 0 && !(without_sex && c.genes.chromatic);  // both: allowed before 10
         if (!valid_genes(c.species, c.genes)) return fail(error, LoadError::Corrupt);
       }
+      if (with_team && (!in.u8(c.level) || c.level == 0)) return fail(error, LoadError::Corrupt);
     }
   }
 
@@ -261,13 +276,38 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     if (!in.u8(species_count) || !in.u8(variants) || species_count != kSpeciesCount || variants != kMaxVariants) {
       return fail(error, LoadError::Corrupt);
     }
-    for (auto& species : w.dex) {
-      for (Discovery& d : species) {
+    for (size_t s = 0; s < kSpeciesCount; ++s) {
+      auto& species = w.dex[s];
+      // Version 9: the variants of the sex were not listed yet, the others come after them now.
+      const size_t shift = without_sex ? genetics(static_cast<Species>(s)).genes[0].count : 0;
+      for (size_t i = 0; i < kMaxVariants; ++i) {
         uint8_t v = 0;
         if (!in.u8(v) || v > static_cast<uint8_t>(Discovery::Captured)) return fail(error, LoadError::Corrupt);
-        d = static_cast<Discovery>(v);
+        if (i + shift < kMaxVariants) species[i + shift] = static_cast<Discovery>(v);
       }
     }
+  }
+  if (with_team) {
+    uint8_t size = 0;
+    if (!in.u8(size) || size == 0 || size > rules::kTeamSize) return fail(error, LoadError::Corrupt);
+    w.team.resize(size);
+    for (Monster& m : w.team) {
+      uint8_t species = 0, forms = 0;
+      bool ok = in.u8(species);
+      for (uint8_t& a : m.genes.allele) ok = ok && in.u8(a);
+      ok = ok && in.u8(forms) && in.u16(m.level) && in.u32(m.xp) && in.u16(m.hp);
+      if (!ok || species >= static_cast<uint8_t>(Species::Count) || forms > 2 || m.level == 0) {
+        return fail(error, LoadError::Corrupt);
+      }
+      m.species = static_cast<Species>(species);
+      m.genes.chromatic = forms == 1;
+      m.genes.elemental = forms == 2;
+      if (!monster_stats(m.species).is_monster || !valid_genes(m.species, m.genes) ||
+          m.hp > monster_fight_stats(m.species, m.level).hp) {
+        return fail(error, LoadError::Corrupt);
+      }
+    }
+    if (w.team[0].species != Species::Companion || w.creatures.empty()) return fail(error, LoadError::Corrupt);
   }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
 
@@ -287,10 +327,25 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
                                    [&](const Object& o) { return overlaps(pb, object_box(o)); });
     if (!stuck) grown.player = p;
     w = std::move(grown);
+  } else if (without_sex) {
+    // Every monster of a version 9 save gets a sex, from the seed.
+    for (size_t i = 1; i < w.creatures.size(); ++i) {
+      Creature& c = w.creatures[i];
+      if (genetics(c.species).gene_count == 0) continue;
+      Rng rng(w.seed ^ 0x534558ULL, i);  // "SEX"
+      c.genes.allele[0] = static_cast<uint8_t>(rng.below(2));
+    }
+    capture(w, 0);
   } else if (!with_genes) {
     // Saves from before variants: the monsters get theirs, nothing is discovered yet.
     assign_genes(w);
     capture(w, 0);
+  }
+  if (!with_team && version >= 8) {
+    // Saves from before battles: the monsters get a level, the companion
+    // starts the team.
+    assign_levels(w);
+    w.team = {starting_companion(w.creatures.empty() ? Genes{} : w.creatures[0].genes)};
   }
   return w;
 }

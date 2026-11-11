@@ -1,5 +1,6 @@
 #include "monstres/core/world.hpp"
 
+#include "monstres/core/battle.hpp"
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
@@ -1007,14 +1008,19 @@ World new_game(uint64_t seed) {
   w.player.pos.y = w.ground.height(0, 0);
   spawn_creatures(w);
   assign_genes(w);
+  assign_levels(w);
   capture(w, 0);  // the companion is the player's own
+  w.team = {starting_companion(w.creatures[0].genes)};
   return w;
 }
 
 void step(World& w, const Input& in) {
   ++w.tick;
+  battle_command(w, in);  // may start or end a battle, or remove a captured monster
+  const BattlePhase phase = w.battle.phase;
 
-  // Joystick -> direction on the ground, relative to the camera.
+  // Joystick -> direction on the ground, relative to the camera (in a fight:
+  // to the line from the companion to its enemy).
   float mx = static_cast<float>(std::max<int>(in.move_x, -127)) / 127.0f;
   float my = static_cast<float>(std::max<int>(in.move_y, -127)) / 127.0f;
   const float len2 = mx * mx + my * my;
@@ -1023,19 +1029,35 @@ void step(World& w, const Input& in) {
     mx /= len;
     my /= len;
   }
-  const SinCos sc = sincos16(in.yaw);
-  // forward = (-sin, 0, -cos), right = (cos, 0, -sin)
-  const float dir_x = mx * sc.cos - my * sc.sin;
-  const float dir_z = -mx * sc.sin - my * sc.cos;
+  float forward_x, forward_z;
+  if (!battle_forward(w, forward_x, forward_z)) {
+    const SinCos sc = sincos16(in.yaw);
+    forward_x = -sc.sin;  // forward = (-sin, 0, -cos), right = (cos, 0, -sin)
+    forward_z = -sc.cos;
+  }
+  const float dir_x = -mx * forward_z + my * forward_x;
+  const float dir_z = mx * forward_x + my * forward_z;
   std::vector<Box> boxes;
   boxes.reserve(w.objects.size());
   for (const Object& o : w.objects) boxes.push_back(object_box(o));
   Surroundings s{boxes, w.village.lake, w.ground, {}, {}};
   s.build();
 
-  move_body(s, w.player, kPlayerShape, dir_x, dir_z, rules::kWalkSpeed, in.jump, rules::kJumpSpeed);
+  // During a battle the magician waits: the joystick moves the companion.
+  if (phase == BattlePhase::None) {
+    move_body(s, w.player, kPlayerShape, dir_x, dir_z, rules::kWalkSpeed, in.jump, rules::kJumpSpeed);
+  } else {
+    move_body(s, w.player, kPlayerShape, 0, 0, 0, false, 0);
+  }
   std::vector<Vec3> perches;
-  for (Creature& c : w.creatures) {
+  for (size_t i = 0; i < w.creatures.size(); ++i) {
+    Creature& c = w.creatures[i];
+    if (phase == BattlePhase::Fight && (i == 0 || i == w.battle.enemy)) {
+      const Steer st = i == 0 ? battle_ally(w, in, dir_x, dir_z) : battle_foe(w);
+      const SpeciesInfo& info = species_info(c.species);
+      move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
+      continue;
+    }
     switch (c.species) {
       case Species::Companion: step_companion(w, s, c); break;
       case Species::Villager: step_villager(w, s, c); break;
@@ -1047,6 +1069,8 @@ void step(World& w, const Input& in) {
       default: step_wild(w, s, c); break;
     }
   }
+  battle_resolve(w);
+  team_regen(w);
   discover(w);
 }
 

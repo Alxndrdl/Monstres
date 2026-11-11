@@ -223,9 +223,14 @@
       content: '✓'; position: absolute; top: 3px; right: 6px; font-size: 13px; font-weight: 700; color: #8fd16a;
     }
     .variant-cell[data-rarity="veryRare"]:not([data-status="unknown"]) { box-shadow: inset 0 0 0 1px rgba(242, 201, 76, 0.55); }
-    .variant-info { display: flex; gap: 14px; align-items: flex-start; padding: 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); }
+    .dna-body { display: grid; grid-template-columns: 1fr minmax(190px, 250px); gap: 14px; align-items: start; }
+    .dna-groups { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .variant-info {
+      position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px;
+      border-radius: 10px; background: rgba(255, 255, 255, 0.05);
+    }
     .variant-info > .facts { margin: 0; }
-    .variant-info .portrait { width: 120px; height: 120px; flex: none; }
+    .variant-info .portrait { width: 140px; height: 140px; flex: none; align-self: center; }
     .variant-info h3 { margin: 0; font-size: 17px; }
     .variant-info .kind { margin: 2px 0 6px; color: #f2c94c; font-size: 12px; }
     .variant-info .description { margin: 8px 0 0; font-size: 13px; }
@@ -251,11 +256,122 @@
       .variant-cell { width: 74px; }
       .variant-cell img, .variant-cell .unknown { width: 56px; height: 56px; }
       .variant-info .portrait { width: 90px; height: 90px; }
+      .dna-body { grid-template-columns: 1fr minmax(160px, 210px); }
     }
     @media (max-width: 600px) {
       .bestiary { grid-template-columns: 1fr; }
       .bestiary-list { flex-direction: row; overflow-x: auto; }
       .bestiary-list button { width: auto; }
+      .dna-body { grid-template-columns: 1fr; }
+    }
+
+    /* ---- Team (grimoire) ---- */
+    .team-side { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+    .team-side > .facts { margin: 0 0 2px; }
+    .team-entry .hp-bar { width: 110px; margin-top: 4px; }
+    .bar.hp-bar { height: 6px; }
+    .bestiary-detail.member .moves-box { grid-column: 1 / -1; }
+    .moves-box h3 { margin: 0 0 8px; font-size: 13px; color: #f2c94c; }
+    .moves { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+    .move { padding: 8px 10px; border-radius: 9px; background: rgba(255, 255, 255, 0.06); }
+    .move-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .move-head .badge { margin: 0; }
+    .move .facts { margin: 3px 0 0; }
+    .move-text { margin: 4px 0 0; font-size: 12px; }
+    .xp.hp { margin-top: 6px; }
+
+    /* ---- Context menu (right) ---- */
+    #context {
+      position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 54px); right: var(--edge-right); z-index: 2;
+      width: 190px; padding: 9px 10px; display: flex; flex-direction: column; gap: 6px;
+    }
+    #context[hidden] { display: none; }
+    .context-title { margin: 0; font-weight: 700; font-size: 14px; }
+    .context-title small { font-weight: 400; color: rgba(255, 255, 255, 0.7); }
+    .context-actions { display: flex; flex-direction: column; gap: 6px; }
+    .context-actions button {
+      display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; font: inherit; font-weight: 600;
+      color: #fff; cursor: pointer; border-radius: 8px; background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.35); text-align: left;
+    }
+    .context-actions button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
+    .context-actions button:disabled { opacity: 0.45; cursor: default; }
+    .context-actions button.fight { border-color: rgba(255, 122, 107, 0.8); background: rgba(255, 122, 107, 0.2); }
+    .context-actions button.capture:not(:disabled) { border-color: rgba(242, 201, 76, 0.9); background: rgba(242, 201, 76, 0.22); }
+    .context-actions svg { width: 18px; height: 18px; flex: none; }
+    .context-note { margin: 0; font-size: 12px; color: rgba(255, 255, 255, 0.72); }
+    .context-note:empty { display: none; }
+    /* In a battle: the two actions side by side, above the battle buttons. */
+    #context.in-battle .context-actions { flex-direction: row; }
+    #context.in-battle .context-actions button { flex: 1; flex-direction: column; gap: 2px; padding: 6px 4px; text-align: center; }
+    .context-actions button small { font-size: 10px; font-weight: 400; color: rgba(255, 255, 255, 0.8); }
+
+    /* ---- Battle: hit points, outcome, damage numbers ---- */
+    #battle-hud[hidden] { display: none; }
+    .fighter {
+      position: fixed; left: 50%; transform: translateX(-50%); z-index: 2; width: min(300px, 42vw);
+      padding: 6px 10px 7px; border-radius: 10px; background: rgba(20, 24, 40, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.25); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    }
+    .fighter.enemy { top: max(12px, env(safe-area-inset-top)); border-color: rgba(255, 122, 107, 0.6); }
+    .fighter.ally { bottom: var(--edge-bottom); width: min(240px, 34vw); }
+    .fighter-name { display: flex; align-items: baseline; gap: 6px; font-size: 13px; margin-bottom: 4px; }
+    .fighter-name .level { font-size: 12px; color: rgba(255, 255, 255, 0.75); }
+    .fighter-name .tags { margin-left: auto; display: flex; gap: 4px; }
+    .fighter-name .badge { margin: 0; font-size: 10px; padding: 0 6px; }
+    .hp-bar { position: relative; height: 9px; border-radius: 5px; background: rgba(0, 0, 0, 0.35); overflow: hidden; }
+    .hp-bar > span { display: block; height: 100%; border-radius: 5px; background: #8fd16a; transition: width 0.15s; }
+    .hp-bar.mid > span { background: #f2c94c; }
+    .hp-bar.low > span { background: #ff7a6b; }
+    .hp-bar .capture-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(242, 201, 76, 0.95); }
+    .hp-text { display: block; margin-top: 2px; font-size: 11px; color: rgba(255, 255, 255, 0.8); }
+    .fighter.windup { animation: warn 0.25s ease-in-out infinite alternate; }
+    @keyframes warn { to { border-color: #ff5a4a; box-shadow: 0 0 14px rgba(255, 90, 74, 0.7); } }
+    #battle-banner {
+      position: fixed; left: 50%; top: 28%; transform: translate(-50%, -50%); z-index: 3; padding: 10px 22px;
+      border-radius: 12px; background: rgba(20, 24, 40, 0.85); border: 1px solid rgba(242, 201, 76, 0.6);
+      font-size: 20px; font-weight: 700; text-align: center; pointer-events: none;
+    }
+    #battle-banner small { display: block; font-size: 13px; font-weight: 400; color: rgba(255, 255, 255, 0.8); }
+    #damage-layer { position: fixed; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+    .damage {
+      position: absolute; transform: translate(-50%, -50%); font: 800 20px/1 system-ui, sans-serif; color: #fff;
+      text-shadow: 0 2px 3px rgba(0, 0, 0, 0.7), 0 0 2px #000; animation: float-up 0.9s ease-out forwards;
+    }
+    .damage.ally { color: #ff8a7a; }
+    .damage.blocked { color: #a8d8ff; font-size: 16px; }
+    @keyframes float-up { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -46px; } }
+
+    /* ---- Battle buttons: an arc around the dodge ---- */
+    .pad { position: relative; width: 88px; height: 88px; }
+    .action .dodge-icon, .battle .action .jump-icon { display: none; }
+    .battle .action .dodge-icon { display: block; }
+    .action.battle-button { position: absolute; width: 58px; height: 58px; overflow: hidden; }
+    .battle-button[hidden] { display: none; }
+    .battle-button svg { width: 26px; height: 26px; }
+    .action.battle-button.quick { width: 64px; height: 64px; left: 12px; top: -106px; border-color: rgba(255, 255, 255, 0.85); }
+    #attack-2 { left: -45px; top: -89px; }
+    #attack-3 { left: -89px; top: -45px; }
+    .battle-button.parry { left: -105px; top: 15px; border-color: rgba(168, 216, 255, 0.85); }
+    .battle-button .move-icon {
+      width: 22px; height: 22px; border-radius: 50%; background: var(--element, #fff);
+      box-shadow: 0 0 10px var(--element, #fff); position: relative; z-index: 1;
+    }
+    .battle-button.special { border-color: var(--element, #fff); }
+    .battle-button .cooldown {
+      position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+      background: conic-gradient(rgba(10, 12, 26, 0.72) calc(var(--cd, 0) * 360deg), transparent 0);
+    }
+    .battle-button.waiting .move-icon { opacity: 0.5; }
+    .battle-button kbd {
+      display: none; position: absolute; bottom: 3px; right: 50%; transform: translateX(50%); z-index: 2;
+      font: 600 9px/1.3 system-ui, sans-serif; padding: 0 3px; border-radius: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.6); background: rgba(0, 0, 0, 0.3);
+    }
+    .has-keyboard .battle-button kbd { display: block; }
+    @media (max-height: 460px) {
+      .fighter { padding: 4px 8px 5px; }
+      .fighter.ally { bottom: max(10px, env(safe-area-inset-bottom)); }
     }
 
     .control {
@@ -327,7 +443,7 @@
     <div>Tournez votre téléphone pour jouer.</div>
   </div>
 
-  <button id="menu-button" class="icon-button" type="button" aria-label="Grimoire : personnage, bestiaire, carte"
+  <button id="menu-button" class="icon-button" type="button" aria-label="Grimoire : personnage, équipe, bestiaire, carte"
           aria-expanded="false" aria-controls="game-menu">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -364,6 +480,7 @@
     <div class="menu-window">
       <div class="tabs" role="tablist">
         <button id="tab-button-character" role="tab" type="button" aria-controls="tab-character" data-tab="character">Personnage</button>
+        <button id="tab-button-team" role="tab" type="button" aria-controls="tab-team" data-tab="team">Équipe</button>
         <button id="tab-button-bestiary" role="tab" type="button" aria-controls="tab-bestiary" data-tab="bestiary">Bestiaire</button>
         <button id="tab-button-map" role="tab" type="button" aria-controls="tab-map" data-tab="map">Carte</button>
         <button id="menu-close" type="button" aria-label="Fermer">×</button>
@@ -385,6 +502,16 @@
             <img id="companion-portrait" class="portrait" alt="">
             <div><strong>Pompon</strong><span>Ton compagnon · renard des braises</span></div>
           </div>
+        </div>
+      </section>
+
+      <section id="tab-team" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-team" hidden>
+        <div class="bestiary">
+          <div class="team-side">
+            <p class="facts" id="team-count"></p>
+            <ul id="team-list" class="bestiary-list"></ul>
+          </div>
+          <article id="team-detail" class="bestiary-detail" aria-live="polite"></article>
         </div>
       </section>
 
@@ -418,6 +545,29 @@
     <button id="creature-close" type="button" aria-label="Fermer">×</button>
   </div>
 
+  <!-- Context menu (right): what can be done with the creature that was
+       touched, or during a battle. Filled by battle.js. -->
+  <div id="context" class="panel" role="menu" aria-label="Actions" hidden>
+    <p class="context-title"></p>
+    <div class="context-actions"></div>
+    <p class="context-note"></p>
+  </div>
+
+  <div id="battle-hud" hidden>
+    <div class="fighter enemy">
+      <div class="fighter-name"><strong></strong><span class="level"></span><span class="tags"></span></div>
+      <div class="hp-bar"><span></span></div>
+      <span class="hp-text"></span>
+    </div>
+    <div class="fighter ally">
+      <div class="fighter-name"><strong></strong><span class="level"></span></div>
+      <div class="hp-bar"><span></span></div>
+      <span class="hp-text"></span>
+    </div>
+  </div>
+  <div id="battle-banner" role="status" aria-live="polite" hidden></div>
+  <div id="damage-layer" aria-hidden="true"></div>
+
   <div class="control left">
     <div id="joystick" class="joystick" role="application" aria-label="Joystick de déplacement">
       <div id="knob" class="knob"></div>
@@ -426,13 +576,36 @@
   </div>
 
   <div class="control right">
-    <button id="jump" class="action" type="button" aria-label="Sauter">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 19V5M5 12l7-7 7 7"/>
-      </svg>
-    </button>
-    <div class="hint"><kbd>Espace</kbd> pour sauter</div>
+    <div class="pad">
+      <button id="jump" class="action" type="button" aria-label="Sauter">
+        <svg class="jump-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 19V5M5 12l7-7 7 7"/>
+        </svg>
+        <svg class="dodge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 12h11M11 7l5 5-5 5M18 6v12"/><path d="M2 9h4M2 15h4" opacity=".6"/>
+        </svg>
+      </button>
+      <!-- Battle buttons, in an arc around the dodge (battle.js). -->
+      <button id="attack-1" class="action battle-button quick" type="button" data-slot="1" aria-label="Attaque rapide" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true"><path d="M5 19L19 5M14 5h5v5M5 14l5 5"/></svg>
+        <kbd>1</kbd>
+      </button>
+      <button id="attack-2" class="action battle-button special" type="button" data-slot="2" aria-label="Attaque spéciale 1" hidden>
+        <span class="move-icon"></span><span class="cooldown"></span><kbd>2</kbd>
+      </button>
+      <button id="attack-3" class="action battle-button special" type="button" data-slot="3" aria-label="Attaque spéciale 2" hidden>
+        <span class="move-icon"></span><span class="cooldown"></span><kbd>3</kbd>
+      </button>
+      <button id="parry" class="action battle-button parry" type="button" aria-label="Parer" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></svg>
+        <span class="cooldown"></span><kbd>F</kbd>
+      </button>
+    </div>
+    <div class="hint" id="jump-hint"><kbd>Espace</kbd> pour sauter</div>
   </div>
 
   <script>
@@ -446,6 +619,7 @@
   <script src="controls.js"></script>
   <script src="ui.js"></script>
   <script src="menu.js"></script>
+  <script src="battle.js"></script>
   {{{ SCRIPT }}}
 </body>
 </html>

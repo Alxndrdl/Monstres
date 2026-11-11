@@ -1,3 +1,4 @@
+#include "monstres/core/battle.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/variants.hpp"
 #include "test_helpers.hpp"
@@ -148,6 +149,7 @@ TEST_CASE("a version 4 save (before creatures) loads and gets its creatures") {
   World fresh = *loaded;
   spawn_creatures(fresh);
   assign_genes(fresh);
+  assign_levels(fresh);
   CHECK(fresh.creatures == loaded->creatures);  // the same creatures as a new game with this seed
   // The village is there too, and nothing else is in its way.
   const bool has_houses = std::any_of(loaded->objects.begin(), loaded->objects.end(),

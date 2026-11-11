@@ -10,9 +10,10 @@ namespace monstres {
 
 // Variants: how monsters of one species differ from each other.
 //
-// Each species has a few genes (a body or eye color, the shape of the ears,
-// the number of tails...), each with some alleles of different rarity, and
-// two very rare forms: chromatic (unusual colors) and elemental (another
+// Each species has a few genes: first the sex (males are bigger), then a
+// body or eye color, the shape of the ears, the number of tails..., each
+// with some alleles of different rarity; and two very rare forms, never
+// both on one monster: chromatic (unusual colors) and elemental (another
 // element). Each monster carries one allele of each gene, and may have one
 // or both rare forms (Genes, in world.hpp).
 //
@@ -26,7 +27,7 @@ enum class Family : uint8_t { Beast, Bird, Fish, Reptile, Insect, Plant, Ooze, C
 
 enum class Rarity : uint8_t { Common, Uncommon, Rare, VeryRare, Count };
 
-enum class VariantKind : uint8_t { Color, Shape, Chromatic, Elemental };
+enum class VariantKind : uint8_t { Sex, Color, Shape, Chromatic, Elemental };
 
 namespace rules {
 inline constexpr float kDiscoveryDistance = 20.0f;  // a monster closer than this is seen (meters, on the ground)
@@ -49,7 +50,7 @@ struct Allele {
 
 struct Gene {
   const char* id;
-  VariantKind kind;  // Color or Shape
+  VariantKind kind;  // Sex, Color or Shape
   uint8_t count;     // alleles used
   std::array<Allele, kMaxAlleles> alleles;
 };
@@ -65,7 +66,7 @@ const Genetics& genetics(Species species);
 // The variants of a species, in the bestiary's order.
 struct Variant {
   VariantKind kind;
-  uint8_t gene;    // Color and Shape: which gene, and which allele of it
+  uint8_t gene;    // Sex, Color and Shape: which gene, and which allele of it
   uint8_t allele;
   Rarity rarity;
   ZoneMask zones;

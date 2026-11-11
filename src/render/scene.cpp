@@ -1,5 +1,8 @@
 #include "monstres/render/scene.hpp"
 
+#include "monstres/core/battle.hpp"
+#include "monstres/core/variants.hpp"
+
 #include "monstres/render/characters.hpp"
 #include "monstres/render/terrain_mesh.hpp"
 
@@ -449,6 +452,130 @@ void build_landscape(const World& w, DrawList& list) {
   add_mountains(w, list);
 }
 
+namespace {
+
+// A ring lying at the feet of a creature (on the ground, or on the water).
+void add_ring(DrawList& list, const World& w, const Creature& c, float radius, Color tint) {
+  const Body& b = c.body;
+  Instance ring;
+  ring.x = b.pos.x;
+  ring.z = b.pos.z;
+  const float ground = w.ground.height(b.pos.x, b.pos.z);
+  const bool on_ground = c.species != Species::Fish && b.pos.y - ground < 0.05f;
+  ring.y = (on_ground ? ground : b.pos.y) + kShadowHeight + 0.01f;
+  if (on_ground) ring.rotation = ground_tilt(w, b.pos.x, b.pos.z);
+  ring.sx = ring.sz = radius;
+  ring.tint = tint;
+  add(list, MeshId::Ripple, ring);
+}
+
+void add_spark(DrawList& list, float x, float y, float z, float size, Color c, float alpha, float spin = 0) {
+  Instance s;
+  s.x = x;
+  s.y = y;
+  s.z = z;
+  s.sx = s.sy = s.sz = size;
+  s.rotation = quat_yaw(spin);
+  s.tint = {c.r, c.g, c.b, alpha};
+  add(list, MeshId::Sparkle, s);
+}
+
+Element creature_element(const Creature& c) { return creature_elements(c.species, c.genes).first; }
+
+// Battle: the enemy's red ring, what it is preparing, projectiles, bursts,
+// parries, hits and stuns.
+void add_battle_effects(const World& w, float time, DrawList& list) {
+  const Battle& b = w.battle;
+  if (b.phase != BattlePhase::Fight || w.creatures.empty() || b.enemy >= w.creatures.size()) return;
+  const Creature& ally = w.creatures[0];
+  const Creature& foe = w.creatures[b.enemy];
+  const float foe_radius = species_info(foe.species).shape.half_width * 2.2f + 0.15f;
+
+  // The enemy's ring: red, beating fast while it prepares an attack.
+  const bool windup = b.foe.state == FighterState::Windup;
+  const float beat = windup ? 0.12f * std::sin(time * 22.0f) : 0.05f * std::sin(time * 4.0f);
+  add_ring(list, w, foe, foe_radius * (1 + beat), windup ? Color{1.6f, 0.25f, 0.2f, 1} : Color{1.0f, 0.3f, 0.25f, 0.85f});
+  if (windup) {
+    const Move& m = species_moves(foe.species)[b.foe.move];
+    const float total = b.foe.move == 0 ? 28.0f : b.foe.move == 1 ? 36.0f : 45.0f;
+    const float progress = 1 - static_cast<float>(b.foe.state_ticks) / total;
+    if (m.shape == MoveShape::Burst) {  // where the burst will reach
+      add_ring(list, w, foe, m.range * (0.25f + 0.75f * progress), {1.5f, 0.3f, 0.2f, 0.5f + 0.4f * progress});
+    } else if (m.shape == MoveShape::Projectile) {  // a ball of its element grows in front of it
+      const BodyShape& sh = species_info(foe.species).shape;
+      add_spark(list, foe.body.pos.x + foe.body.facing_x * sh.half_width, foe.body.pos.y + sh.height * 0.55f,
+                foe.body.pos.z + foe.body.facing_z * sh.half_width, 0.08f + 0.18f * progress,
+                element_glow(creature_element(foe)), 0.9f, time * 6);
+    }
+  }
+
+  // Projectiles: a glowing ball and its trail.
+  for (const Projectile& p : b.projectiles) {
+    const Color c = element_glow(p.element);
+    add_spark(list, p.pos.x, p.pos.y, p.pos.z, 0.24f, c, 1, time * 9);
+    for (int k = 1; k <= 3; ++k) {
+      const float back = 0.22f * static_cast<float>(k);
+      add_spark(list, p.pos.x - p.dir_x * back, p.pos.y, p.pos.z - p.dir_z * back, 0.2f - 0.04f * static_cast<float>(k),
+                c, 0.7f - 0.18f * static_cast<float>(k), time * 7 + static_cast<float>(k));
+    }
+  }
+
+  for (int side = 0; side < 2; ++side) {
+    const Fighter& f = side == 0 ? b.ally : b.foe;
+    const Creature& c = side == 0 ? ally : foe;
+    const Species species = side == 0 && !w.team.empty() ? w.team[0].species : c.species;
+    const BodyShape& sh = species_info(c.species).shape;
+    const float mid = c.body.pos.y + sh.height * 0.5f;
+    // A burst: a ring of its element spreading around it.
+    const uint64_t since_attack = w.tick - f.attack_tick;
+    if (f.attack_tick > 0 && f.attack_move == 2 && since_attack < 24) {
+      const float t = static_cast<float>(since_attack) / 24.0f;
+      const Move& m = species_moves(species)[2];
+      const Color glow = element_glow(side == 0 && !w.team.empty() ? creature_elements(species, w.team[0].genes).first
+                                                                   : creature_element(c));
+      add_ring(list, w, c, m.range * (0.3f + 0.7f * t), {glow.r, glow.g, glow.b, 1 - t});
+      for (int k = 0; k < 10; ++k) {
+        const float a = kTau * static_cast<float>(k) / 10 + t;
+        const float r = m.range * t;
+        add_spark(list, c.body.pos.x + std::cos(a) * r, c.body.pos.y + 0.3f + 0.4f * t, c.body.pos.z + std::sin(a) * r,
+                  0.12f, glow, 1 - t, a);
+      }
+    }
+    // Guarding: a bubble of light; a blocked hit flashes.
+    if (f.state == FighterState::Parry) {
+      add_spark(list, c.body.pos.x, mid, c.body.pos.z, sh.height * 0.9f + 0.2f, {0.8f, 1.2f, 2.0f, 1}, 0.28f, time);
+    }
+    if (f.parried_tick > 0 && w.tick - f.parried_tick < 14) {
+      const float t = static_cast<float>(w.tick - f.parried_tick) / 14.0f;
+      add_ring(list, w, c, sh.half_width * 2 + 0.8f * t, {1.8f, 1.9f, 2.2f, 1 - t});
+    }
+    // Hurt: sparks fly off.
+    if (f.hit_tick > 0 && w.tick - f.hit_tick < 12) {
+      const float t = static_cast<float>(w.tick - f.hit_tick) / 12.0f;
+      for (int k = 0; k < 6; ++k) {
+        const float a = kTau * static_cast<float>(k) / 6 + static_cast<float>(f.hit_tick % 7);
+        const float r = 0.2f + 0.6f * t;
+        add_spark(list, c.body.pos.x + std::cos(a) * r, mid + 0.4f * t, c.body.pos.z + std::sin(a) * r, 0.09f,
+                  {2.0f, 1.8f, 1.2f, 1}, 1 - t, a);
+      }
+    }
+    // Stunned: little stars turning above its head.
+    if (f.state == FighterState::Stunned) {
+      for (int k = 0; k < 3; ++k) {
+        const float a = time * 5 + kTau * static_cast<float>(k) / 3;
+        add_spark(list, c.body.pos.x + std::cos(a) * 0.3f, c.body.pos.y + sh.height + 0.25f,
+                  c.body.pos.z + std::sin(a) * 0.3f, 0.07f, {2.0f, 1.9f, 0.6f, 1}, 1, a);
+      }
+    }
+    // Dodging: a trail of light.
+    if (f.state == FighterState::Dodge) {
+      add_spark(list, c.body.pos.x, mid, c.body.pos.z, 0.18f, {1.6f, 1.7f, 2.0f, 1}, 0.5f, time);
+    }
+  }
+}
+
+}  // namespace
+
 void build_dynamic(const World& w, float time, DrawList& list, int selected) {
   list.batches.resize(kMeshCount);
   for (auto& batch : list.batches) batch.clear();
@@ -459,20 +586,10 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected) {
   // A golden ring, gently pulsing, at the feet of the selected creature.
   if (selected >= 0 && static_cast<size_t>(selected) < w.creatures.size()) {
     const Creature& c = w.creatures[static_cast<size_t>(selected)];
-    const Body& b = c.body;
     const float radius = species_info(c.species).shape.half_width * 2.2f + 0.15f;
-    const float pulse = 1 + 0.06f * std::sin(time * 4.0f);
-    Instance ring;
-    ring.x = b.pos.x;
-    ring.z = b.pos.z;
-    const float ground = w.ground.height(b.pos.x, b.pos.z);
-    const bool on_ground = c.species != Species::Fish && b.pos.y - ground < 0.05f;
-    ring.y = (on_ground ? ground : b.pos.y) + kShadowHeight + 0.01f;
-    if (on_ground) ring.rotation = ground_tilt(w, b.pos.x, b.pos.z);
-    ring.sx = ring.sz = radius * pulse;
-    ring.tint = {1.0f, 0.85f, 0.25f, 1.0f};
-    add(list, MeshId::Ripple, ring);
+    add_ring(list, w, c, radius * (1 + 0.06f * std::sin(time * 4.0f)), {1.0f, 0.85f, 0.25f, 1.0f});
   }
+  add_battle_effects(w, time, list);
 
   // Clouds drifting with the wind, wrapping around.
   constexpr int kClouds = 16;
@@ -655,20 +772,38 @@ bool creature_on_screen(const World& w, const View& view, int index, float& ndc_
 
 View build_view(const World& w, const Camera& cam, float aspect, float time) {
   const Player& p = w.player;
-  const float tx = p.pos.x, ty = p.pos.y + 1.0f, tz = p.pos.z;
+  float tx = p.pos.x, ty = p.pos.y + 1.0f, tz = p.pos.z;
+  float wanted = cam.distance;
+  // In a battle the camera follows the companion; in a fight it looks
+  // between the companion and its enemy (the yaw is turned towards it, see
+  // the platform code).
+  float look_x = tx, look_y = ty, look_z = tz;
+  if (w.battle.phase != BattlePhase::None && !w.creatures.empty()) {
+    const Body& a = w.creatures[0].body;
+    tx = look_x = a.pos.x;
+    ty = look_y = a.pos.y + 0.75f;
+    tz = look_z = a.pos.z;
+    wanted = cam.distance * 0.8f;
+    if (w.battle.phase == BattlePhase::Fight && w.battle.enemy < w.creatures.size()) {
+      const Body& e = w.creatures[w.battle.enemy].body;
+      look_x = lerp(tx, e.pos.x, 0.4f);
+      look_y = lerp(ty, e.pos.y + 0.5f, 0.4f);
+      look_z = lerp(tz, e.pos.z, 0.4f);
+    }
+  }
 
   // The camera sits behind the player, opposite to where it looks, and comes
   // closer when an object (a trunk, a rock...) is in between.
   const float cp = std::cos(cam.pitch), sp = std::sin(cam.pitch);
   const float fx = -std::sin(cam.yaw) * cp, fz = -std::cos(cam.yaw) * cp;
-  const float distance = camera_distance(w, tx, ty, tz, -fx, sp, -fz, cam.distance);
+  const float distance = camera_distance(w, tx, ty, tz, -fx, sp, -fz, wanted);
   float ex = tx - fx * distance;
   float ey = ty + sp * distance;
   float ez = tz - fz * distance;
   ey = std::max(ey, w.ground.height(ex, ez) + 0.2f);  // never below the ground
 
   View v;
-  v.view_projection = multiply(perspective(1.0f, aspect, 0.1f, 800.0f), look_at(ex, ey, ez, tx, ty, tz));
+  v.view_projection = multiply(perspective(1.0f, aspect, 0.1f, 800.0f), look_at(ex, ey, ez, look_x, look_y, look_z));
   v.inverse_view_projection = inverse(v.view_projection);
   v.camera_x = ex;
   v.camera_y = ey;

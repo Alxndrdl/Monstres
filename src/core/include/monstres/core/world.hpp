@@ -43,13 +43,25 @@ inline constexpr float kCompanionFollowDistance = 1.3f;  // behind the player
 inline constexpr float kCompanionTeleportDistance = 14.0f;
 }  // namespace rules
 
+// Orders given from the menus (context menu on the right), see battle.hpp.
+enum class Command : uint8_t {
+  None,
+  Engage,   // start a battle against creatures[Input::target]
+  Flee,     // the companion runs back to the player, then the battle ends
+  Capture,  // the enemy joins the team (it must be weakened first)
+};
+
 // What the player does during one tick. Integers, so that replays and saved
 // inputs reproduce exactly.
 struct Input {
   int8_t move_x = 0;   // joystick right (+127) / left (-127)
   int8_t move_y = 0;   // joystick forward (+127) / back (-127)
-  Angle16 yaw = 0;     // camera direction: movement is relative to it
-  bool jump = false;   // jump this tick (if on the ground)
+  Angle16 yaw = 0;     // camera direction: movement is relative to it (not in a battle)
+  bool jump = false;   // jump this tick (if on the ground); in a battle: dodge
+  uint8_t attack = 0;  // in a battle: 1 quick attack, 2 and 3 special attacks
+  bool parry = false;  // in a battle
+  Command command = Command::None;
+  uint16_t target = 0; // Engage: index of the creature
   bool operator==(const Input&) const = default;
 };
 
@@ -132,7 +144,7 @@ const SpeciesInfo& species_info(Species species);
 // see variants.hpp): one allele per gene of its species (colors, shapes),
 // and two very rare forms. Visual only, except the elemental form, which
 // changes its element.
-inline constexpr size_t kMaxGenes = 3;
+inline constexpr size_t kMaxGenes = 4;  // the sex, then up to three others
 struct Genes {
   std::array<uint8_t, kMaxGenes> allele{};  // index into each gene's alleles; 0 = the most common
   bool chromatic = false;                   // unusual colors
@@ -140,8 +152,8 @@ struct Genes {
   bool operator==(const Genes&) const = default;
 };
 
-// What a creature is doing.
-enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly };
+// What a creature is doing. Battle: fighting the companion (battle.hpp).
+enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly, Battle };
 
 struct Creature {
   Species species = Species::Slime;
@@ -153,7 +165,19 @@ struct Creature {
   Vec2 home;           // wild monsters wander around it
   uint8_t variant = 0; // villagers: their look (clothes, hair...), visual only
   Genes genes{};       // monsters: their variants
+  uint8_t level = 1;   // wild monsters: their strength (the companion's is in World::team)
   bool operator==(const Creature&) const = default;
+};
+
+// A monster of the player's team. team[0] is the companion, the creature
+// that follows the player (creatures[0]) and fights for it.
+struct Monster {
+  Species species = Species::Companion;
+  Genes genes{};
+  uint16_t level = 1;
+  uint32_t xp = 0;     // towards the next level (monster_xp_to_next)
+  uint16_t hp = 0;     // hit points left (monster_fight_stats(...).hp at most)
+  bool operator==(const Monster&) const = default;
 };
 
 // The player's magician. Level and experience are not used by the rules yet.
@@ -195,6 +219,64 @@ inline constexpr size_t kMaxVariants = 16;  // per species
 inline constexpr size_t kSpeciesCount = static_cast<size_t>(Species::Count);
 using Dex = std::array<std::array<Discovery, kMaxVariants>, kSpeciesCount>;
 
+// A battle between the companion and one wild monster (see battle.hpp). Not
+// saved: a game loaded during a battle goes on without it.
+enum class BattlePhase : uint8_t { None, Fight, Flee };
+enum class BattleOutcome : uint8_t { None, Victory, Defeat, Fled, Captured };
+
+// What one side of a battle is doing.
+enum class FighterState : uint8_t {
+  Ready,
+  Windup,   // about to attack (the enemy shows it: time to dodge or parry)
+  Recover,  // just attacked
+  Dodge,    // dashing, cannot be hit
+  Parry,    // guarding: the next hit is blocked
+  Stunned,  // its attack was parried
+};
+
+struct Fighter {
+  std::array<uint16_t, 3> cooldown{};  // ticks before each attack can be used again
+  FighterState state = FighterState::Ready;
+  uint16_t state_ticks = 0;  // ticks left in this state
+  uint8_t move = 0;          // Windup: the attack coming (0..2)
+  uint16_t dodge_cooldown = 0;
+  uint16_t parry_cooldown = 0;
+  float dodge_x = 0, dodge_z = 0;
+  // For the interface and the drawing: when things happened (World::tick, 0: never).
+  uint64_t attack_tick = 0;  // last attack (attack_move: which one)
+  uint8_t attack_move = 0;
+  uint64_t hit_tick = 0;     // last time it was hurt (last_damage: how much)
+  uint16_t last_damage = 0;
+  uint64_t parried_tick = 0; // last hit it blocked
+  bool operator==(const Fighter&) const = default;
+};
+
+struct Projectile {
+  Vec3 pos;            // center
+  float dir_x = 0, dir_z = 0;
+  uint16_t ticks = 0;  // left before it fades
+  bool from_ally = true;
+  uint8_t move = 0;    // attack of the thrower (1: its first special attack)
+  Element element = Element::Normal;
+  uint16_t damage = 0;
+  bool operator==(const Projectile&) const = default;
+};
+
+struct Battle {
+  BattlePhase phase = BattlePhase::None;
+  uint16_t enemy = 0;  // index of the wild creature
+  uint16_t enemy_hp = 0, enemy_max_hp = 0;
+  Fighter ally, foe;
+  std::vector<Projectile> projectiles;
+  uint16_t timer = 0;  // Flee: ticks spent running back
+  // How the last battle ended, for the interface.
+  BattleOutcome outcome = BattleOutcome::None;
+  uint64_t outcome_tick = 0;
+  uint32_t outcome_xp = 0;
+  Species outcome_species = Species::Companion;
+  bool operator==(const Battle&) const = default;
+};
+
 struct World {
   uint64_t seed = 0;   // the world's layout: path, objects, decoration
   uint64_t tick = 0;
@@ -208,6 +290,8 @@ struct World {
   std::vector<Creature> creatures;  // creatures[0] is the companion
   Wizard wizard;
   Dex dex{};           // variants seen and captured
+  std::vector<Monster> team;  // team[0]: the companion (creatures[0])
+  Battle battle;       // not saved
   bool operator==(const World&) const = default;
 };
 

@@ -143,6 +143,8 @@ void close_eyes(std::vector<PartPose>& poses, int left, int right, float time, f
 
 Color times(Color a, Color b, float k = 1) { return {a.r * b.r * k, a.g * b.g * k, a.b * b.b * k, 1}; }
 
+}  // namespace
+
 // Color of the sparks of an element (above 1: glowing).
 Color element_glow(Element e) {
   switch (e) {
@@ -157,15 +159,19 @@ Color element_glow(Element e) {
   }
 }
 
+namespace {
+
 // Body color of a monster (tint slot 1, multiplying the model's colors):
 // its color allele, or its rare form (the elemental one wins).
 Color body_tint(const Genes& g, std::span<const Color> alleles, Color chromatic, Color elemental) {
   if (g.elemental) return elemental;
   if (g.chromatic) return chromatic;
-  return alleles[g.allele[0] < alleles.size() ? g.allele[0] : 0];
+  return alleles[g.allele[1] < alleles.size() ? g.allele[1] : 0];  // gene 0 is the sex
 }
 
 // Main colors of the models (tools/make_models.py), to color horns and crests alike.
+constexpr float kFemaleSize = 0.86f;  // relative to males
+
 constexpr Color kSlimeColor{0.36f, 0.82f, 0.70f, 1};
 constexpr Color kFeatherColor{0.99f, 0.82f, 0.26f, 1};
 constexpr Color kFishColor{0.30f, 0.62f, 0.86f, 1};
@@ -247,6 +253,7 @@ CreatureLook creature_look(Species species, const Genes& g) {
     look.aura = true;
     look.aura_color = element_glow(creature_elements(species, g).first);
   }
+  if (genetics(species).gene_count > 0 && g.allele[0] == 1) look.size = kFemaleSize;
   auto& parts = look.parts;
   const auto at = [&](int i) -> RigPart& { return parts[static_cast<size_t>(i)]; };
   switch (species) {
@@ -256,9 +263,9 @@ CreatureLook creature_look(Species species, const Genes& g) {
       for (size_t i = 0; i < look.count; ++i) {
         if (!is_eye(parts[i].mesh)) parts[i].tint = 1;
       }
-      if (g.allele[1] == 1) at(kEarL).scale = at(kEarR).scale = {0.9f, 1.7f, 0.9f};    // long ears
-      if (g.allele[1] == 2) at(kEarL).scale = at(kEarR).scale = {1.15f, 1.2f, 1.0f};   // floppy (see the pose)
-      if (g.allele[2] == 1) {                                                           // two tails
+      if (g.allele[2] == 1) at(kEarL).scale = at(kEarR).scale = {0.9f, 1.7f, 0.9f};    // long ears
+      if (g.allele[2] == 2) at(kEarL).scale = at(kEarR).scale = {1.15f, 1.2f, 1.0f};   // floppy (see the pose)
+      if (g.allele[3] == 1) {                                                           // two tails
         at(kTail).rest = quat_yaw(0.38f);
         RigPart second = at(kTail);
         second.rest = quat_yaw(-0.38f);
@@ -271,17 +278,17 @@ CreatureLook creature_look(Species species, const Genes& g) {
       look.tints[0] = body_tint(g, kColors, {2.5f, 1.15f, 1.35f, 1}, {2.7f, 0.8f, 0.4f, 1});
       look.tints[1] = times(kSlimeColor, look.tints[0], 0.75f);
       look.tints[3] = element_glow(creature_elements(species, g).first);
-      if (g.allele[1] == 1) {  // one big eye
+      if (g.allele[2] == 1) {  // one big eye
         at(kSEyeL).pivot.x = 0;
         at(kSEyeL).scale = {0.058f, 0.072f, 0.058f};
         at(kSEyeR).mesh = MeshId::Count;
-      } else if (g.allele[1] == 2) {  // a third eye, above
+      } else if (g.allele[2] == 2) {  // a third eye, above
         look.add({MeshId::Eye, kSBody, {0, 0.42f, -0.2f}, {0.034f, 0.042f, 0.034f}});
       }
-      if (g.allele[2] == 1) {  // a horn on top
+      if (g.allele[3] == 1) {  // a horn on top
         look.add({MeshId::Horn, kSBody, {0, 0.44f, 0.02f}, {0.09f, 0.18f, 0.09f}, 2});
         look.extra_height = 0.15f;
-      } else if (g.allele[2] == 2) {  // two antennae with glowing tips
+      } else if (g.allele[3] == 2) {  // two antennae with glowing tips
         for (const float side : {-1.0f, 1.0f}) {
           const int stalk = look.add({MeshId::Horn, kSBody, {side * 0.1f, 0.42f, 0.02f}, {0.025f, 0.2f, 0.025f}, 2,
                                       quat_z(-side * 0.35f)});
@@ -294,12 +301,12 @@ CreatureLook creature_look(Species species, const Genes& g) {
     case Species::Mushroom: {
       static constexpr Color kCaps[] = {{1, 1, 1, 1}, {1.05f, 3.2f, 0.9f, 1}, {0.35f, 2.0f, 4.2f, 1}};
       look.tints[0] = body_tint(g, kCaps, {1.1f, 3.8f, 4.0f, 1}, {1.45f, 4.6f, 3.4f, 1});
-      if (g.allele[1] == 1) at(kCap).scale = {1.35f, 0.75f, 1.35f};  // wide
-      if (g.allele[1] == 2) {                                         // pointed
+      if (g.allele[2] == 1) at(kCap).scale = {1.35f, 0.75f, 1.35f};  // wide
+      if (g.allele[2] == 2) {                                         // pointed
         at(kCap).scale = {0.78f, 1.65f, 0.78f};
         look.extra_height += 0.14f;
       }
-      if (g.allele[2] == 1) {  // long legs: the body stands higher
+      if (g.allele[3] == 1) {  // long legs: the body stands higher
         constexpr float kLift = 0.1f;
         for (int leg : {kMLegL, kMLegR}) {
           at(leg).scale.y = 1.7f;
@@ -314,29 +321,29 @@ CreatureLook creature_look(Species species, const Genes& g) {
       static constexpr Color kPlumages[] = {{1, 1, 1, 1}, {0.6f, 0.9f, 3.2f, 1}, {1.0f, 0.75f, 1.9f, 1}};
       look.tints[0] = body_tint(g, kPlumages, {0.8f, 1.0f, 3.1f, 1}, {0.45f, 0.5f, 1.4f, 1});
       look.tints[1] = times(kFeatherColor, look.tints[0], 0.85f);
-      if (g.allele[1] == 1) {  // a crest of three feathers
+      if (g.allele[2] == 1) {  // a crest of three feathers
         for (const float k : {-1.0f, 0.0f, 1.0f}) {
           look.add({MeshId::Horn, kBBody, {k * 0.02f, 0.15f, -0.06f}, {0.03f, 0.15f, 0.03f}, 2,
                     quat_z(-0.4f * k) * quat_x(-0.15f)});
         }
         look.extra_height = 0.12f;
       }
-      if (g.allele[2] == 1) at(kWingL).scale = at(kWingR).scale = {1.55f, 1.2f, 1.45f};  // large wings
+      if (g.allele[3] == 1) at(kWingL).scale = at(kWingR).scale = {1.55f, 1.2f, 1.45f};  // large wings
       break;
     }
     case Species::Crow: {
       if (g.chromatic) look.tints[0] = {7.0f, 7.0f, 5.6f, 1};  // white
       if (g.elemental) look.tints[0] = {7.5f, 6.5f, 3.5f, 1};  // golden, like dawn
       at(kKBody).tint = at(kKWingL).tint = at(kKWingR).tint = 1;
-      if (g.allele[0] != 0) {  // white or red eyes
+      if (g.allele[1] != 0) {  // white or red eyes
         for (int eye : {kKEyeL, kKEyeR}) {
           at(eye).mesh = MeshId::EyeIris;
           at(eye).tint = 3;
           at(eye).scale = {0.024f, 0.028f, 0.024f};  // a bit bigger, to see their color
         }
-        look.tints[2] = g.allele[0] == 1 ? Color{1.05f, 1.05f, 1.05f, 1} : Color{1.5f, 0.18f, 0.12f, 1};
+        look.tints[2] = g.allele[1] == 1 ? Color{1.05f, 1.05f, 1.05f, 1} : Color{1.5f, 0.18f, 0.12f, 1};
       }
-      if (g.allele[1] == 1) {  // horns
+      if (g.allele[2] == 1) {  // horns
         for (const float side : {-1.0f, 1.0f}) {
           look.add({MeshId::Horn, kKBody, {side * 0.045f, 0.165f, -0.14f}, {0.028f, 0.1f, 0.028f}, 2,
                     quat_z(-side * 0.5f)});
@@ -344,7 +351,7 @@ CreatureLook creature_look(Species species, const Genes& g) {
         look.tints[1] = {0.86f, 0.8f, 0.68f, 1};
         look.extra_height = 0.06f;
       }
-      if (g.allele[2] == 1) at(kKWingL).scale = at(kKWingR).scale = {1.45f, 1.0f, 1.25f};  // long wings
+      if (g.allele[3] == 1) at(kKWingL).scale = at(kKWingR).scale = {1.45f, 1.0f, 1.25f};  // long wings
       break;
     }
     case Species::Fish: {
@@ -352,11 +359,11 @@ CreatureLook creature_look(Species species, const Genes& g) {
       look.tints[0] = body_tint(g, kScales, {3.2f, 1.25f, 0.3f, 1}, {0.6f, 0.6f, 0.7f, 1});
       look.tints[1] = times(kFishColor, look.tints[0], 0.8f);
       look.tints[3] = {2.4f, 2.1f, 1.0f, 1};
-      if (g.allele[1] == 1) {  // veil fins
+      if (g.allele[2] == 1) {  // veil fins
         at(kFFinL).scale = at(kFFinR).scale = {2.0f, 2.0f, 2.0f};
         at(kFTail).scale = {1.0f, 1.7f, 1.6f};
       }
-      if (g.allele[2] == 1) {  // a glowing lure over the head
+      if (g.allele[3] == 1) {  // a glowing lure over the head
         const int stalk = look.add({MeshId::Horn, kFBody, {0, 0.19f, -0.1f}, {0.02f, 0.22f, 0.06f}, 2,
                                     quat_yaw(kTau / 2) * quat_x(0.25f)});
         look.add({MeshId::Bulb, stalk, {0, 0.22f, 0.3f * 0.06f}, {0.05f, 0.05f, 0.05f}, 4});
@@ -464,7 +471,7 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
       }
       poses[kCHead].rotation = quat_z(std::sin(t * 0.8f) * 0.18f * (1 - walk)) * quat_x(0.08f * std::sin(phase) * walk);
       const float twitch = std::sin(t * 1.3f) > 0.97f ? 0.35f : 0.0f;
-      const float spread = c.genes.allele[1] == 2 ? 1.3f : 0.35f;  // floppy ears hang on the sides
+      const float spread = c.genes.allele[2] == 2 ? 1.3f : 0.35f;  // floppy ears hang on the sides
       poses[kEarL].rotation = quat_z(spread) * quat_x(-twitch - (b.on_ground ? 0 : 0.5f));
       poses[kEarR].rotation = quat_z(-spread) * quat_x(-twitch - (b.on_ground ? 0 : 0.5f));
       break;
@@ -622,7 +629,7 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   }
   const CreatureLook look = creature_look(c.species, c.genes);
   const float scale = rig_scale(c.species);
-  add_rig(list, look.rig(), poses, c.body, look.tints, scale);
+  add_rig(list, look.rig(), poses, c.body, look.tints, scale * look.size);
   // Drawn taller than their body for the rules: the fish floats half under
   // water, the crow stands on its tail feathers.
   float height = species_info(c.species).shape.height * 1.1f;
@@ -631,9 +638,29 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   height += look.extra_height * scale;
   if (look.aura) {
     const BodyShape& shape = species_info(c.species).shape;
-    add_aura(list, c.body, shape.half_width * 1.5f + 0.1f, height, look.aura_color, time, 0.4f);
+    add_aura(list, c.body, (shape.half_width * 1.5f + 0.1f) * look.size, height * look.size, look.aura_color, time,
+             0.4f);
   }
-  return height;
+  return height;  // framed for a male: a female looks smaller
+}
+
+// In a battle: a fighter lunges when it bites, and flashes when it is hurt.
+void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body) {
+  const Battle& b = w.battle;
+  if (b.phase != BattlePhase::Fight || (index != 0 && index != b.enemy)) return;
+  const Fighter& f = index == 0 ? b.ally : b.foe;
+  const uint64_t since_attack = w.tick - f.attack_tick;
+  if (f.attack_tick > 0 && f.attack_move == 0 && since_attack < 12) {
+    const float k = 0.35f * std::sin((kTau / 2) * static_cast<float>(since_attack) / 12.0f);
+    body.pos.x += body.facing_x * k;
+    body.pos.z += body.facing_z * k;
+  }
+  if (f.state == FighterState::Windup) {  // it gathers itself: drawn a little lower and wider
+    body.pos.y -= 0.03f;
+  }
+  if (f.hit_tick > 0 && w.tick - f.hit_tick < 8) {
+    for (Color& t : look.tints) t = {t.r * 2.4f + 0.4f, t.g * 1.3f + 0.2f, t.b * 1.3f + 0.2f, t.a};
+  }
 }
 
 void add_characters(const World& w, float time, DrawList& list) {
@@ -646,6 +673,7 @@ void add_characters(const World& w, float time, DrawList& list) {
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     const Creature& c = w.creatures[i];
     pose_creature(c, time, static_cast<float>(i) * 0.731f, poses);
+    float shadow_size = 1;
     if (c.species == Species::Villager) {
       const VillagerLook look = villager_look(c.variant);
       std::copy(std::begin(kVillagerRig), std::end(kVillagerRig), villager_rig.begin());
@@ -654,17 +682,20 @@ void add_characters(const World& w, float time, DrawList& list) {
       const Color tints[] = {look.shirt, look.pants, look.skin, look.hair, look.hat};
       add_rig(list, villager_rig, poses, c.body, tints, look.child ? 0.75f : 1.0f);
     } else {
-      const CreatureLook look = creature_look(c.species, c.genes);
-      add_rig(list, look.rig(), poses, c.body, look.tints, rig_scale(c.species));
+      CreatureLook look = creature_look(c.species, c.genes);
+      Body body = c.body;
+      battle_pose(w, i, look, body);
+      add_rig(list, look.rig(), poses, body, look.tints, rig_scale(c.species) * look.size);
       if (look.aura) {
         const BodyShape& shape = species_info(c.species).shape;
-        add_aura(list, c.body, shape.half_width * 1.5f + 0.1f, shape.height * 1.2f, look.aura_color, time,
-                 static_cast<float>(i));
+        add_aura(list, c.body, (shape.half_width * 1.5f + 0.1f) * look.size, shape.height * 1.2f * look.size,
+                 look.aura_color, time, static_cast<float>(i));
       }
+      shadow_size = look.size;
     }
     if (c.species == Species::Fish) continue;  // no shadow on water
     const BodyShape& shape = species_info(c.species).shape;
-    add_body_shadow(w, c.body, shape, shape.half_width * 1.7f, list);
+    add_body_shadow(w, c.body, shape, shape.half_width * 1.7f * shadow_size, list);
   }
 }
 

@@ -9,48 +9,56 @@ namespace {
 using enum Rarity;
 using enum VariantKind;
 
-static_assert(kMaxGenes * kMaxAlleles + 2 <= kMaxVariants);
 static_assert(kMaxAlleles <= 4, "genes_code packs an allele in 2 bits");
 
 constexpr ZoneMask kRuinsOnly = zone_bit(Zone::Ruins);
 
+// Every monster is a male or a female (males are drawn bigger): the first gene.
+constexpr Gene kSex{"sex", Sex, 2, {{{"male", Common}, {"female", Common}}}};
+
 // Names and texts of each variant are in web/lore.js, under these identifiers.
 constexpr Genetics kGenetics[] = {
     // Companion: Pompon, fox of embers.
-    {Family::Beast, 3,
-     {{{"fur", Color, 3, {{{"ember", Common}, {"golden", Uncommon}, {"ash", Rare}}}},
+    {Family::Beast, 4,
+     {{kSex,
+       {"fur", Color, 3, {{{"ember", Common}, {"golden", Uncommon}, {"ash", Rare}}}},
        {"ears", Shape, 3, {{{"pointed", Common}, {"long", Uncommon}, {"floppy", Rare}}}},
        {"tails", Shape, 2, {{{"one", Common}, {"two", Rare}}}}}},
      Element::Electric},
     // Slime: Gloubi.
-    {Family::Ooze, 3,
-     {{{"color", Color, 3, {{{"teal", Common}, {"blue", Uncommon}, {"green", Uncommon}}}},
+    {Family::Ooze, 4,
+     {{kSex,
+       {"color", Color, 3, {{{"teal", Common}, {"blue", Uncommon}, {"green", Uncommon}}}},
        {"eyes", Shape, 3, {{{"two", Common}, {"one", Uncommon}, {"three", Rare}}}},
        {"top", Shape, 3, {{{"smooth", Common}, {"horn", Uncommon}, {"antennae", Rare}}}}}},
      Element::Fire},
     // Mushroom: Champi. The blue cap only grows in the ruins.
-    {Family::Plant, 3,
-     {{{"cap", Color, 3, {{{"red", Common}, {"golden", Uncommon}, {"blue", Rare, kRuinsOnly}}}},
+    {Family::Plant, 4,
+     {{kSex,
+       {"cap", Color, 3, {{{"red", Common}, {"golden", Uncommon}, {"blue", Rare, kRuinsOnly}}}},
        {"shape", Shape, 3, {{{"round", Common}, {"wide", Uncommon}, {"pointed", Rare}}}},
        {"legs", Shape, 2, {{{"short", Common}, {"long", Uncommon}}}}}},
      Element::Light},
     // Bird: Piou.
-    {Family::Bird, 3,
-     {{{"plumage", Color, 3, {{{"yellow", Common}, {"blue", Uncommon}, {"pink", Uncommon}}}},
+    {Family::Bird, 4,
+     {{kSex,
+       {"plumage", Color, 3, {{{"yellow", Common}, {"blue", Uncommon}, {"pink", Uncommon}}}},
        {"crest", Shape, 2, {{{"none", Common}, {"crest", Uncommon}}}},
        {"wings", Shape, 2, {{{"small", Common}, {"large", Rare}}}}}},
      Element::Electric},
     // Villager: not a monster.
     {Family::None, 0, {}, Element::Count},
     // Crow: Croa.
-    {Family::Bird, 3,
-     {{{"eyes", Color, 3, {{{"black", Common}, {"white", Uncommon}, {"red", Rare}}}},
+    {Family::Bird, 4,
+     {{kSex,
+       {"eyes", Color, 3, {{{"black", Common}, {"white", Uncommon}, {"red", Rare}}}},
        {"horns", Shape, 2, {{{"none", Common}, {"horns", Rare}}}},
        {"wings", Shape, 2, {{{"normal", Common}, {"long", Uncommon}}}}}},
      Element::Light},
     // Fish: Bloup.
-    {Family::Fish, 3,
-     {{{"scales", Color, 3, {{{"blue", Common}, {"red", Uncommon}, {"green", Uncommon}}}},
+    {Family::Fish, 4,
+     {{kSex,
+       {"scales", Color, 3, {{{"blue", Common}, {"red", Uncommon}, {"green", Uncommon}}}},
        {"fins", Shape, 2, {{{"small", Common}, {"veil", Uncommon}}}},
        {"lure", Shape, 2, {{{"none", Common}, {"lantern", Rare}}}}}},
      Element::Electric},
@@ -126,7 +134,8 @@ Genes genes_with(Species species, size_t index) {
 Genes roll_genes(Species species, Zone zone, Rng& rng) {
   const Genetics& g = genetics(species);
   Genes out;
-  for (size_t i = 0; i < g.gene_count; ++i) {
+  // The sex is drawn last: adding it kept the other genes of every world as they were.
+  const auto roll = [&](size_t i) {
     const Gene& gene = g.genes[i];
     uint32_t total = 0;
     for (size_t a = 0; a < gene.count; ++a) {
@@ -142,12 +151,18 @@ Genes roll_genes(Species species, Zone zone, Rng& rng) {
       }
       pick -= w;
     }
+  };
+  for (size_t i = 0; i < g.gene_count; ++i) {
+    if (g.genes[i].kind != Sex) roll(i);
   }
   if (has_rare_forms(species)) {
     const uint32_t chromatic = rng.below(rules::kChromaticChance);
     const uint32_t elemental = rng.below(rules::kElementalChance);
     out.chromatic = chromatic == 0;
-    out.elemental = elemental == 0;
+    out.elemental = elemental == 0 && !out.chromatic;  // never both
+  }
+  for (size_t i = 0; i < g.gene_count; ++i) {
+    if (g.genes[i].kind == Sex) roll(i);
   }
   return out;
 }
@@ -202,7 +217,7 @@ void capture(World& w, size_t index) {
 uint32_t genes_code(const Genes& g) {
   uint32_t code = 0;
   for (size_t i = 0; i < kMaxGenes; ++i) code |= static_cast<uint32_t>(g.allele[i] & 3u) << (2 * i);
-  code |= (g.chromatic ? 1u : 0u) << (2 * kMaxGenes);
+  code |= (g.chromatic ? 1u : 0u) << (2 * kMaxGenes);  // bits 0-7: alleles
   code |= (g.elemental ? 1u : 0u) << (2 * kMaxGenes + 1);
   return code;
 }
@@ -221,6 +236,7 @@ bool valid_genes(Species species, const Genes& genes) {
     const uint8_t count = i < g.gene_count ? g.genes[i].count : 1;
     if (genes.allele[i] >= count) return false;
   }
+  if (genes.chromatic && genes.elemental) return false;
   return has_rare_forms(species) || (!genes.chromatic && !genes.elemental);
 }
 

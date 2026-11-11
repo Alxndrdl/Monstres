@@ -121,6 +121,7 @@
       case 'follow': return 'Te suit';
       case 'greet': return 'Te salue';
       case 'flee': return 'S’enfuit';
+      case 'battle': return 'Se bat !';
       case 'wander': return 'Se promène';
       default: return c.species === 'companion' ? 'T’attend' : 'Se repose';
     }
@@ -164,7 +165,8 @@
       fields.variants.textContent = names.length ? `Variantes : ${names.join(' · ')}` : '';
     }
     const meters = Math.round(c.distance);
-    fields.facts.textContent = `${activity(c)} · ${meters < 1 ? 'tout près' : `à ${meters} m`}`;
+    const level = c.level && c.species !== 'villager' ? `Niveau ${c.level} · ` : '';
+    fields.facts.textContent = `${level}${activity(c)} · ${meters < 1 ? 'tout près' : `à ${meters} m`}`;
   }
 
   function select(index) {
@@ -172,6 +174,7 @@
     shownLook = null;
     if (game) game.select(index);
     panel.hidden = index < 0;
+    window.dispatchEvent(new CustomEvent('monstres-selection', { detail: { index } }));
     if (index >= 0) {
       update();
       refresh = setInterval(update, 250);  // activity and distance change
