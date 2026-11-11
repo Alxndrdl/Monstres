@@ -49,7 +49,10 @@ namespace monstres {
 //      the seed, the team is the companion alone.
 //  12  time of day: after the team, u32 ticks since midnight. Older saves
 //      start at 8:00.
-inline constexpr uint32_t kSaveVersion = 12;
+//  13  the team member out of the crystal (u8 index in the team, 0xff:
+//      none), after the time of day; creatures[0] is that monster. Older
+//      saves: Pompon is out.
+inline constexpr uint32_t kSaveVersion = 13;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

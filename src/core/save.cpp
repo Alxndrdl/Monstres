@@ -186,6 +186,7 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u16(m.hp);
   }
   out.u32(w.clock);
+  out.u8(w.active < 0 ? 0xff : static_cast<uint8_t>(w.active));
   return out.take();
 }
 
@@ -207,6 +208,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   const bool without_sex = version == 9;   // genes had no sex (it is now the first gene)
   const bool with_team = version >= 11;    // levels of the monsters, and the team
   const bool with_clock = version >= 12;   // time of day
+  const bool with_active = version >= 13;  // which team member is out of the crystal
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -312,6 +314,14 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     if (w.team[0].species != Species::Companion || w.creatures.empty()) return fail(error, LoadError::Corrupt);
   }
   if (with_clock && (!in.u32(w.clock) || w.clock >= rules::kTicksPerDay)) return fail(error, LoadError::Corrupt);
+  if (with_active) {
+    uint8_t active = 0;
+    if (!in.u8(active) || (active != 0xff && active >= w.team.size())) return fail(error, LoadError::Corrupt);
+    w.active = active == 0xff ? int8_t{-1} : static_cast<int8_t>(active);
+    if (w.active >= 0 && w.creatures[0].species != w.team[static_cast<size_t>(w.active)].species) {
+      return fail(error, LoadError::Corrupt);
+    }
+  }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
 
   if (version < 8) {

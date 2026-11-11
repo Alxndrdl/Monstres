@@ -347,7 +347,7 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
   float speed = 0;
   if (d > 0.6f) {
     c.mind = Mind::Follow;
-    speed = d > 4.0f ? info.run_speed : info.walk_speed;
+    speed = d > 4.0f ? std::max(info.run_speed, rules::kCompanionMinRunSpeed) : std::max(info.walk_speed, 3.0f);
   } else {
     c.mind = Mind::Idle;
     dir_x = dir_z = 0;
@@ -360,8 +360,12 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
   // something (heights above the ground: a slope is not a reason to jump).
   const float player_up = p.pos.y - w.ground.height(p.pos.x, p.pos.z);
   const float own_up = b.pos.y - w.ground.height(b.pos.x, b.pos.z);
-  const bool jump = b.on_ground && (c.timer >= 8 || (player_up > own_up + 0.4f && player_distance < 2.5f));
+  bool jump = b.on_ground && (c.timer >= 8 || (player_up > own_up + 0.4f && player_distance < 2.5f));
   if (jump) c.timer = 0;
+  if (c.species == Species::Slime && speed > 0) {  // a slime follows by hopping
+    jump = jump || b.on_ground;
+    if (b.on_ground) speed = 0;
+  }
   move_body(boxes, b, info.shape, dir_x, dir_z, speed, jump, info.jump_speed);
   c.timer = (speed > 0 && b.on_ground && b.speed < 0.3f * speed) ? static_cast<uint16_t>(c.timer + 1) : 0;
 }
@@ -1053,10 +1057,18 @@ void step(World& w, const Input& in) {
   std::vector<Vec3> perches;
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     Creature& c = w.creatures[i];
+    if (i == 0 && w.active < 0) {  // in the crystal: it waits by the player, unseen
+      c.body.pos = w.player.pos;
+      continue;
+    }
     if (phase == BattlePhase::Fight && (i == 0 || i == w.battle.enemy)) {
       const Steer st = i == 0 ? battle_ally(w, in, dir_x, dir_z) : battle_foe(w);
       const SpeciesInfo& info = species_info(c.species);
       move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
+      continue;
+    }
+    if (i == 0) {
+      step_companion(w, s, c);
       continue;
     }
     switch (c.species) {

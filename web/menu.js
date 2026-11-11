@@ -599,11 +599,12 @@
     ctx.setLineDash([]);
 
     // Creatures: all of them on the local map, only the companion on the global one.
-    for (const c of s.creatures) {
-      if (global && c.species !== 'companion') continue;
+    for (const [i, c] of s.creatures.entries()) {
+      const mine = i === 0;  // the companion (unless it is in the crystal)
+      if ((mine && s.active < 0) || (global && !mine)) continue;
       ctx.beginPath();
-      ctx.arc(X(c.x), Y(c.z), c.species === 'companion' ? 4.5 : 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = SPECIES_DOT[c.species] || '#fff';
+      ctx.arc(X(c.x), Y(c.z), mine ? 4.5 : 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = mine ? SPECIES_DOT.companion : SPECIES_DOT[c.species] || '#fff';
       ctx.fill();
       ctx.lineWidth = 1;
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';

@@ -489,6 +489,31 @@ test.describe('battles', () => {
     expect((await page.evaluate(() => window.monstres.battle())).outcome.result).toBe('fled');
   });
 
+  test('the team bar recalls the companion into the crystal and summons it back', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const icon = page.locator('.team-icon[data-slot="0"]');
+    await expect(page.locator('.team-icon')).toHaveCount(1);
+    await expect(icon).toHaveAttribute('aria-pressed', 'true');
+    await icon.click();
+    await expect(icon).toHaveAttribute('aria-pressed', 'false');
+    expect((await state(page)).active).toBe(-1);
+    expect(await page.evaluate(() => window.monstres.pick(...Object.values(window.monstres.creatureOnScreen(0) || { x: 0, y: 0 })))).not.toBe(0);
+    // Without a companion out, no battle.
+    await page.evaluate(() => {
+      const s = window.monstres.state();
+      const c = s.creatures[3];
+      window.monstres.setCamera(Math.atan2(-(c.x - s.player.x), -(c.z - s.player.z)), 0.35);
+    });
+    const at = await page.evaluate(() => window.monstres.creatureOnScreen(3));
+    await page.mouse.click(at.x, at.y);
+    await expect(page.locator('#action-fight')).toBeDisabled();
+    await expect(page.locator('#context .context-note')).toContainText('Invoque');
+    await icon.click();
+    await expect(icon).toHaveAttribute('aria-pressed', 'true');
+    expect((await state(page)).active).toBe(0);
+    await expect(page.locator('#action-fight')).toBeEnabled();
+  });
+
   test('a weakened monster is captured and joins the team', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     await page.evaluate((i) => window.monstres.engage(i), BIRD);
@@ -510,6 +535,21 @@ test.describe('battles', () => {
     await page.locator('#action-capture').click();
     await expect(page.locator('#battle-banner')).toContainText('Piou capturé');
     await expect(page.locator('.fighter.enemy')).toBeHidden();
+
+    // The team bar: Pompon is out; the bird takes its place, then goes back in.
+    await expect(page.locator('.team-icon')).toHaveCount(2);
+    await expect(page.locator('.team-icon[data-slot="0"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('.team-icon[data-slot="1"]').click();
+    await expect(page.locator('.team-icon[data-slot="1"]')).toHaveAttribute('aria-pressed', 'true');
+    let s = await state(page);
+    expect(s.active).toBe(1);
+    expect(s.creatures[0].species).toBe('bird');
+    await page.locator('.team-icon[data-slot="1"]').click();
+    await expect(page.locator('.team-icon[aria-pressed="true"]')).toHaveCount(0);
+    s = await state(page);
+    expect(s.active).toBe(-1);
+    await page.locator('.team-icon[data-slot="0"]').click();
+    expect((await state(page)).creatures[0].species).toBe('companion');
 
     await page.keyboard.press('e');  // the team, in the grimoire
     await expect(page.getByRole('tab', { name: 'Équipe' })).toHaveAttribute('aria-selected', 'true');

@@ -53,6 +53,7 @@ enum class Command : uint8_t {
   Engage,   // start a battle against creatures[Input::target]
   Flee,     // the companion runs back to the player, then the battle ends
   Capture,  // the enemy joins the team (it must be weakened first)
+  Summon,   // team[Input::target] comes out of the staff's crystal (or goes back in, if it is out)
 };
 
 // What the player does during one tick. Integers, so that replays and saved
@@ -65,7 +66,7 @@ struct Input {
   uint8_t attack = 0;  // in a battle: 1 quick attack, 2 and 3 special attacks
   bool parry = false;  // in a battle
   Command command = Command::None;
-  uint16_t target = 0; // Engage: index of the creature
+  uint16_t target = 0; // Engage: index of the creature; Summon: index in the team
   bool operator==(const Input&) const = default;
 };
 
@@ -173,8 +174,9 @@ struct Creature {
   bool operator==(const Creature&) const = default;
 };
 
-// A monster of the player's team. team[0] is the companion, the creature
-// that follows the player (creatures[0]) and fights for it.
+// A monster of the player's team. team[World::active] is the companion: out
+// of the staff's crystal, it is creatures[0], follows the player and fights
+// for it. team[0] is Pompon, the first companion.
 struct Monster {
   Species species = Species::Companion;
   Genes genes{};
@@ -281,6 +283,17 @@ struct Battle {
   bool operator==(const Battle&) const = default;
 };
 
+// What the staff's crystal just did, for the drawing (not saved): a monster
+// went in (recalled, or captured: runes first), another came out.
+struct CrystalTrace {
+  uint64_t tick = 0;   // when (0: never)
+  bool captured = false;
+  Species species = Species::Companion;
+  Genes genes{};
+  Body body;           // where it was
+  bool operator==(const CrystalTrace&) const = default;
+};
+
 struct World {
   uint64_t seed = 0;   // the world's layout: path, objects, decoration
   uint64_t tick = 0;
@@ -294,13 +307,26 @@ struct World {
   std::vector<Creature> creatures;  // creatures[0] is the companion
   Wizard wizard;
   Dex dex{};           // variants seen and captured
-  std::vector<Monster> team;  // team[0]: the companion (creatures[0])
+  std::vector<Monster> team;  // team[0]: Pompon
+  int8_t active = 0;   // team member out of the crystal (creatures[0]), -1: none
+  CrystalTrace went_in;        // not saved
+  uint64_t came_out_tick = 0;  // not saved: when creatures[0] was summoned
   Battle battle;       // not saved
   uint32_t clock = rules::kStartClock;  // time of day: ticks since midnight, < kTicksPerDay
   bool operator==(const World&) const = default;
 };
 
 World new_game(uint64_t seed);
+
+// The companion out of the crystal (creatures[0]), or nullptr.
+inline const Monster* active_monster(const World& w) {
+  return w.active >= 0 && static_cast<size_t>(w.active) < w.team.size() && !w.creatures.empty()
+             ? &w.team[static_cast<size_t>(w.active)]
+             : nullptr;
+}
+inline Monster* active_monster(World& w) {
+  return const_cast<Monster*>(active_monster(static_cast<const World&>(w)));
+}
 
 // Time of day in hours, [0, 24).
 inline float hour_of_day(const World& world) {

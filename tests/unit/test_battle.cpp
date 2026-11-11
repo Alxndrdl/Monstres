@@ -353,3 +353,99 @@ TEST_CASE("the companion does not walk through its enemy") {
   const float touching = species_info(Species::Companion).shape.half_width + species_info(Species::Mushroom).shape.half_width;
   CHECK(std::hypot(a.pos.x - e.pos.x, a.pos.z - e.pos.z) >= touching);
 }
+
+namespace {
+Input summon_input(uint16_t slot) { return command(Command::Summon, slot); }
+}  // namespace
+
+TEST_CASE("the companion goes back into the crystal, and comes out next to the player") {
+  World w = arena();
+  REQUIRE(active_monster(w) == &w.team[0]);
+  step(w, summon_input(0));  // recall
+  CHECK(w.active == -1);
+  CHECK(active_monster(w) == nullptr);
+  CHECK(w.went_in.tick == w.tick);
+  CHECK_FALSE(w.went_in.captured);
+  CHECK(w.went_in.species == Species::Companion);
+  CHECK(can_engage(w, 1) == EngageCheck::NoCompanion);
+  run(w, forward(), 60);
+  CHECK(w.creatures[0].body.pos == w.player.pos);  // inside the crystal, it goes along
+
+  step(w, summon_input(0));
+  CHECK(w.active == 0);
+  CHECK(w.came_out_tick == w.tick);
+  const Body& c = w.creatures[0].body;
+  const float d = std::hypot(c.pos.x - w.player.pos.x, c.pos.z - w.player.pos.z);
+  CHECK(d > 0.8f);
+  CHECK(d < 2.0f);
+  step(w, summon_input(9));  // no such member: nothing happens
+  CHECK(w.active == 0);
+}
+
+TEST_CASE("another team member takes the companion's place") {
+  World w = arena();
+  Genes genes{};
+  genes.allele[1] = 2;
+  w.team.push_back({Species::Mushroom, genes, 4, 0, 20});
+  w.creatures[0].body.pos = {2, 0, 2};
+  step(w, summon_input(1));
+  CHECK(w.active == 1);
+  CHECK(w.creatures[0].species == Species::Mushroom);
+  CHECK(w.creatures[0].genes == genes);
+  CHECK(w.creatures[0].level == 4);
+  CHECK(w.creatures[0].body.pos.x == doctest::Approx(2).epsilon(0.05));  // where Pompon was
+  CHECK(w.went_in.species == Species::Companion);
+  CHECK(w.came_out_tick == w.tick);
+  // It is the one fighting now.
+  World fight = w;
+  engage(fight);
+  const uint16_t hp = fight.team[1].hp;
+  fight.battle.foe.cooldown = {};
+  fight.creatures[0].body.pos = {fight.creatures[1].body.pos.x, 0, fight.creatures[1].body.pos.z + 1.2f};
+  for (int i = 0; i < 300 && fight.team[1].hp == hp; ++i) step(fight, Input{});
+  CHECK(fight.team[1].hp < hp);
+  CHECK(fight.team[0].hp == monster_fight_stats(Species::Companion, fight.team[0].level).hp);
+  // Even a slow mushroom keeps up with the player.
+  run(w, forward(), 4 * rules::kTicksPerSecond);
+  const Body& m = w.creatures[0].body;
+  CHECK(std::hypot(m.pos.x - w.player.pos.x, m.pos.z - w.player.pos.z) < 6.0f);  // like Pompon: a few steps behind
+}
+
+TEST_CASE("during a fight, a companion can be swapped but not recalled") {
+  World w = arena();
+  w.team.push_back({Species::Bird, {}, 3, 0, 15});
+  engage(w);
+  step(w, summon_input(0));  // recall: no
+  CHECK(w.active == 0);
+  step(w, attack_input(2));
+  CHECK(w.battle.ally.cooldown[1] > 0);
+  step(w, summon_input(1));  // swap: yes, with a fresh fighter
+  CHECK(w.active == 1);
+  CHECK(w.creatures[0].species == Species::Bird);
+  CHECK(w.battle.phase == BattlePhase::Fight);
+  CHECK(w.battle.ally.cooldown[1] == 0);
+  CHECK(battle_json(w).find("\"ally\":{\"species\":\"bird\"") != std::string::npos);
+}
+
+TEST_CASE("a captured monster leaves a trace for the runes; the companion out is saved") {
+  World w = arena();
+  engage(w);
+  w.battle.enemy_hp = 1;
+  const Vec3 where = w.creatures[1].body.pos;
+  step(w, command(Command::Capture));
+  CHECK(w.went_in.captured);
+  CHECK(w.went_in.species == Species::Slime);
+  CHECK(w.went_in.body.pos.x == doctest::Approx(where.x));
+
+  World g = new_game(5);
+  g.team.push_back({Species::Slime, {}, 2, 0, 10});
+  step(g, summon_input(1));
+  auto loaded = deserialize(serialize(g));
+  REQUIRE(loaded.has_value());
+  CHECK(loaded->active == 1);
+  CHECK(loaded->creatures[0].species == Species::Slime);
+  step(g, summon_input(1));  // recalled
+  loaded = deserialize(serialize(g));
+  REQUIRE(loaded.has_value());
+  CHECK(loaded->active == -1);
+}

@@ -130,7 +130,7 @@ float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
 void add(DrawList& list, MeshId id, const Instance& in) {
   list.batches[static_cast<size_t>(id)].push_back(in);
-  if (id == MeshId::Sparkle) list.batches[static_cast<size_t>(id)].back().material = kGlowing;  // magic glows
+  if (id == MeshId::Sparkle || id == MeshId::RuneCircle) list.batches[static_cast<size_t>(id)].back().material = kGlowing;  // magic glows
 }
 
 }  // namespace
@@ -526,7 +526,8 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
   for (int side = 0; side < 2; ++side) {
     const Fighter& f = side == 0 ? b.ally : b.foe;
     const Creature& c = side == 0 ? ally : foe;
-    const Species species = side == 0 && !w.team.empty() ? w.team[0].species : c.species;
+    const Monster* mine = side == 0 ? active_monster(w) : nullptr;
+    const Species species = mine ? mine->species : c.species;
     const BodyShape& sh = species_info(c.species).shape;
     const float mid = c.body.pos.y + sh.height * 0.5f;
     // A burst: a ring of its element spreading around it.
@@ -534,8 +535,7 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
     if (f.attack_tick > 0 && f.attack_move == 2 && since_attack < 24) {
       const float t = static_cast<float>(since_attack) / 24.0f;
       const Move& m = species_moves(species)[2];
-      const Color glow = element_glow(side == 0 && !w.team.empty() ? creature_elements(species, w.team[0].genes).first
-                                                                   : creature_element(c));
+      const Color glow = element_glow(mine ? creature_elements(species, mine->genes).first : creature_element(c));
       add_ring(list, w, c, m.range * (0.3f + 0.7f * t), {glow.r, glow.g, glow.b, 1 - t});
       for (int k = 0; k < 10; ++k) {
         const float a = kTau * static_cast<float>(k) / 10 + t;
@@ -593,6 +593,7 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected) {
     add_ring(list, w, c, radius * (1 + 0.06f * std::sin(time * 4.0f)), {1.0f, 0.85f, 0.25f, 1.0f});
   }
   add_battle_effects(w, time, list);
+  add_crystal_effects(w, time, list);
 
   // At night: a glowing halo around each lantern (their light is in build_view).
   const float dark = night_amount(w);
@@ -719,6 +720,7 @@ int pick_creature(const World& w, const View& view, float ndc_x, float ndc_y) {
   int best = -1;
   float best_t = 2;
   for (size_t i = 0; i < w.creatures.size(); ++i) {
+    if (i == 0 && w.active < 0) continue;  // in the crystal
     const Creature& c = w.creatures[i];
     Box b = body_box(c.body, species_info(c.species).shape);
     b.min = b.min - Vec3{kMargin, kMargin * 0.5f, kMargin};

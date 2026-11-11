@@ -147,7 +147,7 @@
       case 'flee': return 'S’enfuit';
       case 'battle': return 'Se bat !';
       case 'wander': return 'Se promène';
-      default: return c.species === 'companion' ? 'T’attend' : 'Se repose';
+      default: return c.index === 0 ? 'T’attend' : 'Se repose';
     }
   }
 
@@ -172,7 +172,7 @@
     }
     const info = SPECIES[c.species] || { name: c.species, kind: '', description: '' };
     fields.name.textContent = info.name;
-    fields.kind.textContent = info.kind;
+    fields.kind.textContent = c.index === 0 ? `${info.kind} · ton compagnon` : info.kind;
     fields.description.textContent = info.description;
     const look = `${c.index}/${c.look}`;
     if (look !== shownLook) {

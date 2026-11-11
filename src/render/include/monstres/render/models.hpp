@@ -52,6 +52,7 @@ enum class MeshId : size_t {
   Ripple,
   Smoke,
   Sparkle,
+  RuneCircle,  // the capture seal
   Count
 };
 inline constexpr size_t kMeshCount = static_cast<size_t>(MeshId::Count);

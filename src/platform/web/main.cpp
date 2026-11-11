@@ -254,10 +254,11 @@ EMSCRIPTEN_KEEPALIVE void monstres_attack(int slot) {
 
 EMSCRIPTEN_KEEPALIVE void monstres_parry() { g_app->parry_buffer = kJumpBufferTicks; }
 
-// Context menu: 1 engage creatures[target], 2 flee, 3 capture (Command).
+// Context menu: 1 engage creatures[target], 2 flee, 3 capture; team bar:
+// 4 summon (or recall) team[target] (Command).
 // Applied with the next tick (right away when frozen, for tests).
 EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
-  if (command < 1 || command > 3 || target < 0 || target > 65535) return;
+  if (command < 1 || command > 4 || target < 0 || target > 65535) return;
   g_app->command = static_cast<Command>(command);
   g_app->command_target = static_cast<uint16_t>(target);
   if (g_app->frozen) {
@@ -294,9 +295,9 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_state_json() {
   const Camera& c = g_app->camera;
   std::string json = to_json(g_app->world);
   json.pop_back();  // add the camera, which lives here and not in the world
-  char camera[96];
-  std::snprintf(camera, sizeof camera, ",\"camera\":{\"yaw\":%.4f,\"pitch\":%.4f}}",
-                static_cast<double>(c.yaw), static_cast<double>(c.pitch));
+  char camera[128];
+  std::snprintf(camera, sizeof camera, ",\"camera\":{\"yaw\":%.4f,\"pitch\":%.4f},\"active\":%d}",
+                static_cast<double>(c.yaw), static_cast<double>(c.pitch), g_app->world.active);
   g_app->json = json + camera;
   return g_app->json.c_str();
 }

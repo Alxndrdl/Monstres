@@ -70,7 +70,7 @@ std::string creature_json(const World& w, int index) {
     s += ",\"variants\":" + carried_variants_json(c.species, c.genes);
     s += std::string(",\"chromatic\":") + (c.genes.chromatic ? "true" : "false");
     s += std::string(",\"elemental\":") + (c.genes.elemental ? "true" : "false");
-    s += ",\"level\":" + std::to_string(index == 0 && !w.team.empty() ? w.team[0].level : c.level);
+    s += ",\"level\":" + std::to_string(index == 0 && active_monster(w) ? active_monster(w)->level : c.level);
     s += std::string(",\"engage\":\"") + engage_check_name(can_engage(w, static_cast<size_t>(index))) + "\"";
   }
   s += ",\"x\":" + num(p.x) + ",\"y\":" + num(p.y) + ",\"z\":" + num(p.z);
@@ -327,7 +327,7 @@ std::string team_json(const World& w) {
     const FightStats st = monster_fight_stats(m.species, m.level);
     if (i) s += ',';
     s += "{\"slot\":" + std::to_string(i) + ",\"species\":\"" + species_name(m.species) + "\"";
-    s += std::string(",\"active\":") + (i == 0 ? "true" : "false");
+    s += std::string(",\"active\":") + (static_cast<int>(i) == w.active ? "true" : "false");
     s += ",\"level\":" + std::to_string(m.level) + ",\"xp\":" + std::to_string(m.xp);
     s += ",\"xpToNext\":" + std::to_string(monster_xp_to_next(m.level));
     s += ",\"hp\":" + std::to_string(m.hp) + ",\"maxHp\":" + std::to_string(st.hp);
@@ -351,9 +351,9 @@ std::string battle_json(const World& w) {
   s += std::string(",\"outcome\":{\"result\":\"") + outcome_name(b.outcome) + "\",\"tick\":" +
        std::to_string(b.outcome_tick) + ",\"xp\":" + std::to_string(b.outcome_xp) + ",\"species\":\"" +
        species_name(b.outcome_species) + "\"}";
-  if (b.phase != BattlePhase::None && !w.team.empty()) {
+  if (b.phase != BattlePhase::None && active_monster(w)) {
     const Creature& e = w.creatures[b.enemy];
-    const Monster& a = w.team[0];
+    const Monster& a = *active_monster(w);
     s += ",\"enemy\":{\"index\":" + std::to_string(b.enemy) + ",\"species\":\"" + species_name(e.species) + "\"";
     s += ",\"level\":" + std::to_string(e.level) + ",\"hp\":" + std::to_string(b.enemy_hp);
     s += ",\"maxHp\":" + std::to_string(b.enemy_max_hp);

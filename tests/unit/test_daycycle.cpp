@@ -28,7 +28,7 @@ TEST_CASE("the time of day is saved") {
   REQUIRE(loaded.has_value());
   CHECK(loaded->clock == w.clock);
   std::vector<uint8_t> bytes = serialize(w);
-  bytes[bytes.size() - 1] = 0xff;  // past the end of the day
+  bytes[bytes.size() - 2] = 0xff;  // past the end of the day (the clock, before the active member)
   CHECK_FALSE(deserialize(bytes).has_value());
 }
 

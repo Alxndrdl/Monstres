@@ -33,6 +33,7 @@ inline constexpr uint16_t kParryCooldown = 42;
 inline constexpr uint16_t kStunTicks = 70;          // an enemy whose attack was parried
 inline constexpr float kProjectileSpeed = 13.0f;
 inline constexpr uint16_t kRegenEveryTicks = rules::kTicksPerSecond;  // +1 hit point (out of battle)
+inline constexpr float kCompanionMinRunSpeed = 6.0f;  // slow species keep up with the player
 }  // namespace rules
 
 enum class MoveShape : uint8_t {
@@ -76,6 +77,7 @@ enum class EngageCheck : uint8_t {
   Unreachable,  // flying crows, fish in the lake
   TooFar,
   InBattle,
+  NoCompanion,  // no monster out of the crystal
 };
 EngageCheck can_engage(const World& world, size_t index);
 const char* engage_check_name(EngageCheck check);
@@ -92,6 +94,11 @@ struct Steer {
   float speed = 0;
   bool jump = false;
 };
+
+// Summon team[slot] out of the staff's crystal, where the companion was (it
+// goes back in), or next to the player. If it is the one out: recalled
+// (not during a fight). During a fight, swapping is allowed.
+void summon(World& world, size_t slot);
 
 // Steps of a tick, called by step() in this order:
 void battle_command(World& world, const Input& input);  // Engage, Flee, Capture

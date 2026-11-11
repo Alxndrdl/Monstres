@@ -79,7 +79,7 @@
     /* Info about the creature that was clicked, top left (the creature is
        usually in the middle of the view), below the frame counter if shown. */
     #creature {
-      position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: var(--edge);
+      position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: calc(var(--edge) + var(--team-width, 0px));
       z-index: 2; width: min(290px, calc(100% - 120px)); padding: 10px 36px 10px 14px;
     }
     #creature .name { margin: 0; font-size: 17px; font-weight: 700; }
@@ -266,6 +266,31 @@
       .bestiary-list { flex-direction: row; overflow-x: auto; }
       .bestiary-list button { width: auto; }
       .dna-body { grid-template-columns: 1fr; }
+    }
+
+    /* ---- Team bar (left): summon and recall ---- */
+    #team-bar {
+      position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 54px); left: var(--edge); z-index: 2;
+      display: grid; grid-template-rows: repeat(3, 44px); grid-auto-flow: column; grid-auto-columns: 44px; gap: 6px;
+    }
+    .team-icon {
+      position: relative; width: 44px; height: 44px; padding: 0; border-radius: 50%; cursor: pointer;
+      background: radial-gradient(circle at 50% 40%, rgba(130, 120, 220, 0.55), rgba(30, 28, 60, 0.75));
+      border: 2px solid rgba(255, 255, 255, 0.45); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    .team-icon img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; opacity: 0.6; filter: saturate(0.6); }
+    .team-icon:hover img { opacity: 0.85; }
+    .team-icon[aria-pressed="true"] { border-color: var(--element, #f2c94c); box-shadow: 0 0 10px var(--element, #f2c94c); }
+    .team-icon[aria-pressed="true"] img { opacity: 1; filter: none; }
+    .team-icon:disabled { cursor: default; }
+    .team-hp {
+      position: absolute; left: 7px; right: 7px; bottom: -3px; height: 4px; border-radius: 2px;
+      background: rgba(0, 0, 0, 0.55); overflow: hidden;
+    }
+    .team-hp > span { display: block; height: 100%; }
+    .team-level {
+      position: absolute; top: -4px; right: -4px; min-width: 16px; padding: 0 3px; border-radius: 8px;
+      font: 700 10px/16px system-ui, sans-serif; text-align: center; color: #1b1830; background: rgba(255, 255, 255, 0.9);
     }
 
     /* ---- Team (grimoire) ---- */
@@ -546,6 +571,10 @@
     </div>
   </div>
 
+  <!-- The team (team.js): touch a monster to summon it from the staff's
+       crystal, touch the companion to recall it. -->
+  <div id="team-bar" role="toolbar" aria-label="Équipe : invoquer ou rappeler"></div>
+
   <div id="creature" class="panel" role="status" aria-live="polite" hidden>
     <p class="name"></p>
     <p class="kind"></p>
@@ -631,6 +660,7 @@
   <script src="ui.js"></script>
   <script src="menu.js"></script>
   <script src="battle.js"></script>
+  <script src="team.js"></script>
   {{{ SCRIPT }}}
 </body>
 </html>

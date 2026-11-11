@@ -28,6 +28,7 @@ Unit sizes (the game scales each copy, see src/render/scene.cpp):
   rune_stone
   sparkle                small transparent spark (radius 1)
   smoke, ripple          transparent puff (radius 1) and water ring (radius 1)
+  rune_circle            flat circle of runes (radius 1), transparent: the capture seal
 
 Character parts (player_*, companion_*, slime_*, mushroom_*, bird_*, eye) are
 real-size (meters) and have their origin at their joint, so the game can
@@ -1065,6 +1066,54 @@ def ripple():
     return m
 
 
+def rune_circle():
+    """The capture seal (radius 1, flat on y = 0): two rings, runes between
+    them and a six-pointed star inside, white, tinted and made to glow by the game."""
+    m = Mesh(transparent=True, double_sided=True)
+    up = (0.0, 1.0, 0.0)
+    ink = (1, 1, 1, 0.9)
+
+    def stroke(p, q, width):
+        dx, dz = q[0] - p[0], q[1] - p[1]
+        n = math.hypot(dx, dz)
+        ox, oz = -dz / n * width / 2, dx / n * width / 2
+        a, b = (p[0] + ox, 0, p[1] + oz), (p[0] - ox, 0, p[1] - oz)
+        c, d = (q[0] - ox, 0, q[1] - oz), (q[0] + ox, 0, q[1] + oz)
+        m.tri(a, b, c, ink, normal=up)
+        m.tri(a, c, d, ink, normal=up)
+
+    def ring(r0, r1, segments=48):
+        for i in range(segments):
+            a0, a1 = TAU * i / segments, TAU * (i + 1) / segments
+            p = [(r * math.cos(a), 0, r * math.sin(a)) for r, a in ((r0, a0), (r0, a1), (r1, a1), (r1, a0))]
+            m.tri(p[0], p[1], p[2], ink, normal=up)
+            m.tri(p[0], p[2], p[3], ink, normal=up)
+
+    ring(0.93, 1.0)
+    ring(0.66, 0.70)
+    # Runes: a few strokes each, in the band between the rings.
+    glyphs = 12
+    for g in range(glyphs):
+        center = TAU * (g + 0.5) / glyphs
+        def at(u, v):  # u along the circle (-1..1), v across the band (0..1)
+            a = center + u * 0.16
+            r = 0.75 + v * 0.13
+            return (r * math.cos(a), r * math.sin(a))
+        strokes = 2 + int(hash01(2100, g) * 2)
+        for k in range(strokes):
+            u0, v0 = 2 * hash01(2101, g * 8 + k) - 1, hash01(2102, g * 8 + k)
+            u1, v1 = 2 * hash01(2103, g * 8 + k) - 1, hash01(2104, g * 8 + k)
+            if abs(u1 - u0) + abs(v1 - v0) < 0.6:
+                v1 = 1 - v0
+            stroke(at(u0, v0), at(u1, v1), 0.022)
+    # A six-pointed star inside.
+    for t in range(2):
+        pts = [(0.62 * math.cos(TAU * (k / 3 + t / 6)), 0.62 * math.sin(TAU * (k / 3 + t / 6))) for k in range(3)]
+        for k in range(3):
+            stroke(pts[k], pts[(k + 1) % 3], 0.025)
+    return m
+
+
 # ---------------------------------------------------------------- village people & animals
 
 def villager_torso():
@@ -1319,6 +1368,7 @@ def all_models():
         "rubble": rubble(),
         "rune_stone": rune_stone(),
         "sparkle": sparkle(),
+        "rune_circle": rune_circle(),
     }
     for v in range(4):
         models[f"rock{v}"] = rock(v)

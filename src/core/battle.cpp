@@ -48,9 +48,13 @@ float flat_distance(const Body& a, const Body& b, float& dx, float& dz) {
 }
 
 Creature& companion(World& w) { return w.creatures[0]; }
+Monster& ally(World& w) { return *active_monster(w); }  // in a battle, there is one
 Creature& enemy(World& w) { return w.creatures[w.battle.enemy]; }
 
-FightStats ally_stats(const World& w) { return monster_fight_stats(w.team[0].species, w.team[0].level); }
+FightStats ally_stats(const World& w) {
+  const Monster& m = *active_monster(w);
+  return monster_fight_stats(m.species, m.level);
+}
 FightStats foe_stats(const World& w) {
   const Creature& e = w.creatures[w.battle.enemy];
   return monster_fight_stats(e.species, e.level);
@@ -82,7 +86,7 @@ void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
   Battle& b = w.battle;
   b.outcome_species = enemy(w).species;
   if (xp > 0) {
-    grant_xp(w.team[0], xp);
+    grant_xp(ally(w), xp);
     grant_wizard_xp(w.wizard, xp / 2);
   }
   b.phase = BattlePhase::None;
@@ -111,7 +115,7 @@ bool hit(World& w, bool on_ally, uint16_t damage, bool melee) {
     }
     return false;
   }
-  uint16_t& hp = on_ally ? w.team[0].hp : b.enemy_hp;
+  uint16_t& hp = on_ally ? ally(w).hp : b.enemy_hp;
   hp = static_cast<uint16_t>(hp - std::min(hp, damage));
   target.hit_tick = w.tick;
   target.last_damage = damage;
@@ -123,8 +127,8 @@ void attack(World& w, bool by_ally, uint8_t slot) {
   Fighter& f = by_ally ? b.ally : b.foe;
   const Creature& self = by_ally ? companion(w) : enemy(w);
   const Creature& other = by_ally ? enemy(w) : companion(w);
-  const Species species = by_ally ? w.team[0].species : self.species;
-  const Genes& genes = by_ally ? w.team[0].genes : self.genes;
+  const Species species = by_ally ? ally(w).species : self.species;
+  const Genes& genes = by_ally ? ally(w).genes : self.genes;
   const Move& m = species_moves(species)[slot];
   f.cooldown[slot] = by_ally ? m.cooldown : foe_cooldown(m, slot);
   f.attack_tick = w.tick;
@@ -173,6 +177,41 @@ bool free_to_act(const Fighter& f) { return f.state == FighterState::Ready || f.
 
 }  // namespace
 
+void summon(World& w, size_t slot) {
+  if (slot >= w.team.size() || w.creatures.empty()) return;
+  Creature& c = w.creatures[0];
+  const bool fighting = w.battle.phase == BattlePhase::Fight;
+  if (w.active >= 0) {  // the one out goes back into the crystal
+    const Monster& out = w.team[static_cast<size_t>(w.active)];
+    w.went_in = {w.tick, false, out.species, out.genes, c.body};
+    if (static_cast<int>(slot) == w.active) {  // just recalled (not in the middle of a fight)
+      if (fighting) return;
+      w.active = -1;
+      c.mind = Mind::Idle;
+      return;
+    }
+  } else {
+    // Out next to the player, a little behind on its right.
+    const Body& p = w.player;
+    c.body = {};
+    c.body.pos = {p.pos.x - p.facing_x * 1.1f - p.facing_z * 0.7f, p.pos.y,
+                  p.pos.z - p.facing_z * 1.1f + p.facing_x * 0.7f};
+    c.body.facing_x = p.facing_x;
+    c.body.facing_z = p.facing_z;
+  }
+  // The new one appears where the other was.
+  const Monster& m = w.team[slot];
+  w.active = static_cast<int8_t>(slot);
+  c.species = m.species;
+  c.genes = m.genes;
+  c.level = static_cast<uint8_t>(std::min<uint16_t>(m.level, 255));
+  c.mind = Mind::Idle;
+  c.timer = 0;
+  c.body.velocity_y = 0;
+  w.came_out_tick = w.tick;
+  if (fighting) w.battle.ally = {};  // a fresh fighter
+}
+
 const Moves& species_moves(Species species) {
   const auto i = static_cast<size_t>(species);
   return kMoves[i < kSpeciesCount ? i : 0];
@@ -220,6 +259,7 @@ EngageCheck can_engage(const World& w, size_t index) {
   const Creature& c = w.creatures[index];
   if (!monster_stats(c.species).is_monster) return EngageCheck::NotMonster;
   if (w.battle.phase != BattlePhase::None) return EngageCheck::InBattle;
+  if (!active_monster(w)) return EngageCheck::NoCompanion;
   if (c.species == Species::Crow || c.species == Species::Fish) return EngageCheck::Unreachable;
   const float dx = c.body.pos.x - w.player.pos.x, dz = c.body.pos.z - w.player.pos.z;
   if (dx * dx + dz * dz > rules::kEngageDistance * rules::kEngageDistance) return EngageCheck::TooFar;
@@ -227,7 +267,7 @@ EngageCheck can_engage(const World& w, size_t index) {
 }
 
 const char* engage_check_name(EngageCheck check) {
-  static const char* kNames[] = {"ok", "notMonster", "unreachable", "tooFar", "inBattle"};
+  static const char* kNames[] = {"ok", "notMonster", "unreachable", "tooFar", "inBattle", "noCompanion"};
   const auto i = static_cast<size_t>(check);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
@@ -249,14 +289,14 @@ void battle_command(World& w, const Input& in) {
   switch (in.command) {
     case Command::None: break;
     case Command::Engage: {
-      if (w.team.empty() || can_engage(w, in.target) != EngageCheck::Ok) break;
+      if (can_engage(w, in.target) != EngageCheck::Ok) break;
       Battle fresh;
       fresh.phase = BattlePhase::Fight;
       fresh.enemy = in.target;
       Creature& e = w.creatures[in.target];
       fresh.enemy_max_hp = fresh.enemy_hp = monster_fight_stats(e.species, e.level).hp;
       fresh.foe.cooldown = {40, 120, 240};  // it takes a moment to start
-      w.team[0].hp = std::max<uint16_t>(w.team[0].hp, 1);
+      ally(w).hp = std::max<uint16_t>(ally(w).hp, 1);
       b = fresh;
       e.mind = Mind::Battle;
       e.timer = 0;
@@ -272,6 +312,9 @@ void battle_command(World& w, const Input& in) {
       enemy(w).mind = Mind::Idle;
       enemy(w).timer = 2 * rules::kTicksPerSecond;
       break;
+    case Command::Summon:
+      summon(w, in.target);
+      break;
     case Command::Capture: {
       if (!can_capture(w)) break;
       const size_t index = b.enemy;
@@ -282,6 +325,7 @@ void battle_command(World& w, const Input& in) {
       m.level = e.level;
       m.hp = b.enemy_hp;
       capture(w, index);
+      w.went_in = {w.tick, true, e.species, e.genes, e.body};  // runes, then into the crystal
       end_battle(w, BattleOutcome::Captured, reward(w));
       w.team.push_back(m);
       w.creatures.erase(w.creatures.begin() + static_cast<std::ptrdiff_t>(index));
@@ -330,7 +374,8 @@ Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {
       s.dir_x -= fx * towards;
       s.dir_z -= fz * towards;
     }
-    s.speed = species_info(companion(w).species).run_speed * (f.state == FighterState::Parry ? 0.3f : 1.0f);
+    s.speed = std::max(species_info(companion(w).species).run_speed, rules::kCompanionMinRunSpeed) *
+              (f.state == FighterState::Parry ? 0.3f : 1.0f);
   }
   return s;
 }
@@ -435,10 +480,10 @@ void battle_resolve(World& w) {
     foe.target = foe.home;
     foe.timer = 4 * rules::kTicksPerSecond;
     end_battle(w, BattleOutcome::Victory, reward(w));
-  } else if (w.team[0].hp == 0) {
+  } else if (monstres::ally(w).hp == 0) {
     foe.mind = Mind::Idle;
     foe.timer = 2 * rules::kTicksPerSecond;
-    w.team[0].hp = 1;  // knocked out: it comes back to the player and rests
+    monstres::ally(w).hp = 1;  // knocked out: it comes back to the player and rests
     end_battle(w, BattleOutcome::Defeat, 0);
   } else if (d > rules::kBattleLeash) {
     foe.mind = Mind::Idle;
@@ -449,7 +494,7 @@ void battle_resolve(World& w) {
 void team_regen(World& w) {
   if (w.tick % rules::kRegenEveryTicks != 0) return;
   for (size_t i = 0; i < w.team.size(); ++i) {
-    if (i == 0 && w.battle.phase != BattlePhase::None) continue;
+    if (static_cast<int>(i) == w.active && w.battle.phase != BattlePhase::None) continue;
     Monster& m = w.team[i];
     if (m.hp < monster_fight_stats(m.species, m.level).hp) ++m.hp;
   }

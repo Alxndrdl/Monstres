@@ -91,6 +91,18 @@ inline void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<cons
   add_rig(list, rig, poses, body, std::span<const Color>(&tint, 1), size, glow_slot);
 }
 
+// Where the crystal of the magician's staff is (its right hand).
+Vec3 crystal_position(const Body& player);
+
+// Summons and recalls (World::came_out_tick, World::went_in): a beam of
+// light of the monster's element between the crystal and the monster, which
+// appears or vanishes in light; a captured monster is first held in a circle
+// of runes. Durations in ticks:
+inline constexpr uint64_t kSummonTicks = 24;   // 0.4 s
+inline constexpr uint64_t kRecallTicks = 24;
+inline constexpr uint64_t kRuneTicks = 18;     // before a captured monster goes in
+void add_crystal_effects(const World& world, float time, DrawList& list);
+
 // Tint slot of the glowing parts: the magician's crystal, monsters' bulbs.
 inline constexpr uint8_t kPlayerGlowSlot = 1;
 inline constexpr uint8_t kMonsterGlowSlot = 4;

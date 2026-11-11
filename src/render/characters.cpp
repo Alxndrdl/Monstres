@@ -646,6 +646,30 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   return height;  // framed for a male: a female looks smaller
 }
 
+// A monster appearing (t from 0 to 1) or vanishing (t from 1 to 0) in the
+// light of its element: smaller, whiter.
+void materialize(CreatureLook& look, Element element, float t) {
+  const float grow = t < 0.7f ? t / 0.7f * 1.08f : 1.08f - 0.08f * (t - 0.7f) / 0.3f;  // a small bounce
+  look.size *= std::max(grow, 0.05f);
+  const Color glow = element_glow(element);
+  const float white = std::clamp(1.4f - 1.6f * t, 0.0f, 1.0f);
+  for (Color& c : look.tints) {
+    c = {c.r + (glow.r * 1.3f - c.r) * white, c.g + (glow.g * 1.3f - c.g) * white,
+         c.b + (glow.b * 1.3f - c.b) * white, c.a};
+  }
+}
+
+// A monster going into the crystal (t from 0 to 1): it flashes, then shrinks to a point.
+void vanish(CreatureLook& look, Element element, float t) {
+  look.size *= std::max(1 - t * t * 0.4f - t * 0.6f, 0.03f);
+  const Color glow = element_glow(element);
+  const float white = std::min(1.0f, t * 3);
+  for (Color& c : look.tints) {
+    c = {c.r + (glow.r * 1.3f - c.r) * white, c.g + (glow.g * 1.3f - c.g) * white,
+         c.b + (glow.b * 1.3f - c.b) * white, c.a};
+  }
+}
+
 // In a battle: a fighter lunges when it bites, and flashes when it is hurt.
 void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body) {
   const Battle& b = w.battle;
@@ -673,6 +697,7 @@ void add_characters(const World& w, float time, DrawList& list) {
 
   std::array<RigPart, std::size(kVillagerRig)> villager_rig;
   for (size_t i = 0; i < w.creatures.size(); ++i) {
+    if (i == 0 && w.active < 0) continue;  // in the crystal
     const Creature& c = w.creatures[i];
     pose_creature(c, time, static_cast<float>(i) * 0.731f, poses);
     float shadow_size = 1;
@@ -687,6 +712,11 @@ void add_characters(const World& w, float time, DrawList& list) {
       CreatureLook look = creature_look(c.species, c.genes);
       Body body = c.body;
       battle_pose(w, i, look, body);
+      if (i == 0 && w.came_out_tick > 0 && w.tick - w.came_out_tick < kSummonTicks) {
+        // Just summoned: it grows out of the light.
+        const float t = static_cast<float>(w.tick - w.came_out_tick) / kSummonTicks;
+        materialize(look, creature_elements(c.species, c.genes).first, t);
+      }
       add_rig(list, look.rig(), poses, body, look.tints, rig_scale(c.species) * look.size, kMonsterGlowSlot);
       if (look.aura) {
         const BodyShape& shape = species_info(c.species).shape;
@@ -705,6 +735,129 @@ void add_characters(const World& w, float time, DrawList& list) {
 
 namespace monstres {
 
+Vec3 crystal_position(const Body& p) {
+  return {p.pos.x + p.facing_x * 0.15f - p.facing_z * 0.3f, p.pos.y + 1.45f,
+          p.pos.z + p.facing_z * 0.15f + p.facing_x * 0.3f};
+}
+
+namespace {
+
+void add_glow(DrawList& list, MeshId mesh, Instance in) {
+  in.material = kGlowing;
+  list.batches[static_cast<size_t>(mesh)].push_back(in);
+}
+
+// A beam of light from a to b, fading with `alpha`.
+void add_beam(DrawList& list, Vec3 a, Vec3 b, Color color, float alpha, float time) {
+  const float dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const float length = std::sqrt(dx * dx + dy * dy + dz * dz);
+  if (length < 1e-3f || alpha <= 0) return;
+  Instance beam;
+  beam.x = (a.x + b.x) / 2;
+  beam.y = (a.y + b.y) / 2;
+  beam.z = (a.z + b.z) / 2;
+  // Turn the mesh's up axis along the beam.
+  const float ax = dz / length, az = -dx / length;
+  const float axis = std::sqrt(ax * ax + az * az);
+  if (axis > 1e-4f) beam.rotation = quat_axis(ax / axis, 0, az / axis, std::acos(std::clamp(dy / length, -1.0f, 1.0f)));
+  beam.sx = beam.sz = 0.07f;
+  beam.sy = length / 2;
+  beam.tint = {color.r, color.g, color.b, alpha};
+  add_glow(list, MeshId::Sparkle, beam);
+  beam.sx = beam.sz = 0.16f;  // a softer glow around it
+  beam.tint.a = alpha * 0.35f;
+  add_glow(list, MeshId::Sparkle, beam);
+  for (int k = 0; k < 4; ++k) {  // sparks running along
+    const float u = std::fmod(time * 3.0f + static_cast<float>(k) * 0.25f, 1.0f);
+    Instance spark;
+    spark.x = a.x + dx * u;
+    spark.y = a.y + dy * u;
+    spark.z = a.z + dz * u;
+    spark.sx = spark.sy = spark.sz = 0.09f;
+    spark.rotation = quat_yaw(time * 5 + static_cast<float>(k));
+    spark.tint = {color.r, color.g, color.b, alpha};
+    add_glow(list, MeshId::Sparkle, spark);
+  }
+}
+
+// Sparks bursting out of a point.
+void add_burst(DrawList& list, Vec3 at, Color color, float t, float radius) {
+  for (int k = 0; k < 10; ++k) {
+    const float a = kTau * static_cast<float>(k) / 10;
+    Instance spark;
+    spark.x = at.x + std::cos(a) * radius * t;
+    spark.y = at.y + 0.3f * t + 0.15f * std::sin(a * 3);
+    spark.z = at.z + std::sin(a) * radius * t;
+    spark.sx = spark.sy = spark.sz = 0.07f * (1 - 0.5f * t);
+    spark.tint = {color.r, color.g, color.b, 1 - t};
+    add_glow(list, MeshId::Sparkle, spark);
+  }
+}
+
+}  // namespace
+
+void add_crystal_effects(const World& w, float time, DrawList& list) {
+  const Vec3 crystal = crystal_position(w.player);
+
+  // Summoned: the beam reaches where it appears.
+  if (w.came_out_tick > 0 && w.tick - w.came_out_tick < kSummonTicks && w.active >= 0 && !w.creatures.empty()) {
+    const Creature& c = w.creatures[0];
+    const float t = static_cast<float>(w.tick - w.came_out_tick) / kSummonTicks;
+    const Color glow = element_glow(creature_elements(c.species, c.genes).first);
+    const float h = species_info(c.species).shape.height * 0.5f;
+    add_beam(list, crystal, {c.body.pos.x, c.body.pos.y + h, c.body.pos.z}, glow, 1 - t * t, time);
+    add_burst(list, {c.body.pos.x, c.body.pos.y + 0.1f, c.body.pos.z}, glow, t, 0.9f);
+  }
+
+  // Gone in: held by runes first if captured, then it vanishes into the beam.
+  const CrystalTrace& g = w.went_in;
+  if (g.tick == 0) return;
+  const uint64_t since = w.tick - g.tick;
+  const uint64_t runes = g.captured ? kRuneTicks : 0;
+  if (since >= runes + kRecallTicks) return;
+  const Color glow = element_glow(creature_elements(g.species, g.genes).first);
+  const BodyShape& shape = species_info(g.species).shape;
+  if (g.captured) {
+    // The seal: it opens under the monster, turns, and fades once it is in.
+    const float open = std::min(1.0f, static_cast<float>(since) / (kRuneTicks * 0.6f));
+    const float fade = since < runes ? 1.0f : 1 - static_cast<float>(since - runes) / kRecallTicks;
+    Instance seal;
+    seal.x = g.body.pos.x;
+    seal.y = g.body.pos.y + 0.04f;
+    seal.z = g.body.pos.z;
+    seal.rotation = quat_yaw(time * 2.5f);
+    seal.sx = seal.sz = (shape.half_width * 2.4f + 0.5f) * (0.3f + 0.7f * open);
+    seal.tint = {1.9f, 1.7f, 1.0f, 0.95f * fade};  // golden runes
+    add_glow(list, MeshId::RuneCircle, seal);
+    seal.rotation = quat_yaw(-time * 1.5f);  // an inner one, turning the other way, of its element
+    seal.sx = seal.sz *= 0.55f;
+    seal.tint = {glow.r, glow.g, glow.b, 0.8f * fade};
+    add_glow(list, MeshId::RuneCircle, seal);
+  }
+  // The monster itself, held still, then vanishing.
+  Creature ghost;
+  ghost.species = g.species;
+  ghost.genes = g.genes;
+  ghost.body = g.body;
+  ghost.body.speed = 0;
+  CreatureLook look = creature_look(g.species, g.genes);
+  const float t = since < runes ? 0.0f : static_cast<float>(since - runes) / kRecallTicks;  // 0 .. 1: going in
+  if (since < runes) {
+    // Held by the seal: it trembles and starts to glow.
+    const float k = static_cast<float>(since) / static_cast<float>(runes);
+    ghost.body.pos.x += 0.03f * std::sin(time * 60.0f) * k;
+    for (Color& c : look.tints) c = {c.r * (1 + k), c.g * (1 + k), c.b * (1 + k), c.a};
+  } else {
+    vanish(look, creature_elements(g.species, g.genes).first, t);
+    ghost.body.pos.y += 0.3f * t;
+    const float h = shape.height * 0.5f * look.size;
+    add_beam(list, {ghost.body.pos.x, ghost.body.pos.y + h, ghost.body.pos.z}, crystal, glow, 1 - t * t, time);
+  }
+  std::vector<PartPose> poses;
+  pose_creature(ghost, time, 0, poses);
+  add_rig(list, look.rig(), poses, ghost.body, look.tints, rig_scale(g.species) * look.size, kMonsterGlowSlot);
+}
+
 size_t world_lights(const World& w, float x, float z, float night, float time, PointLight* out) {
   struct Candidate {
     PointLight light;
@@ -721,19 +874,19 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
   // The staff's crystal, in the magician's right hand: first, always kept.
   const Body& p = w.player;
   const float flicker = 1 + 0.05f * std::sin(time * 7.0f);
-  PointLight staff{p.pos.x + p.facing_x * 0.15f - p.facing_z * 0.3f, p.pos.y + 1.45f,
-                   p.pos.z + p.facing_z * 0.15f + p.facing_x * 0.3f, 6.5f,
-                   scaled({0.55f, 0.75f, 1.0f, 1}, 1.2f * night * flicker)};
+  const Vec3 crystal = crystal_position(p);
+  PointLight staff{crystal.x, crystal.y, crystal.z, 6.5f, scaled({0.55f, 0.75f, 1.0f, 1}, 1.2f * night * flicker)};
 
   for (const Object& o : w.objects) {
     if (o.kind == ObjectKind::Lamp) offer(o.pos.x, o.pos.y + 2.2f, o.pos.z, 8.0f, scaled({1.0f, 0.68f, 0.32f, 1}, 1.5f * night));
   }
-  for (const Creature& c : w.creatures) {
-    if (!monster_stats(c.species).is_monster) continue;
+  for (size_t i = 0; i < w.creatures.size(); ++i) {
+    const Creature& c = w.creatures[i];
+    if (!monster_stats(c.species).is_monster || (i == 0 && w.active < 0)) continue;
     const CreatureLook look = creature_look(c.species, c.genes);
     const BodyShape& shape = species_info(c.species).shape;
     bool bulbs = false;
-    for (size_t i = 0; i < look.count; ++i) bulbs = bulbs || (look.parts[i].tint == kMonsterGlowSlot && look.parts[i].mesh != MeshId::Count);
+    for (size_t k = 0; k < look.count; ++k) bulbs = bulbs || (look.parts[k].tint == kMonsterGlowSlot && look.parts[k].mesh != MeshId::Count);
     if (!look.aura && !bulbs) continue;
     const Color glow = look.aura ? look.aura_color : look.tints[kMonsterGlowSlot - 1];
     offer(c.body.pos.x, c.body.pos.y + shape.height * 0.8f, c.body.pos.z, 3.5f, scaled(glow, 0.4f * night));

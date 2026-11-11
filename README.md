@@ -149,6 +149,20 @@ L'apparence d'une variante est construite par `creature_look`
 `bulb`, `eye_iris`) ou retirées, couleurs des emplacements de teinte. Les noms
 et descriptions des variantes sont dans `web/lore.js`.
 
+## Équipe, invocation et rappel
+
+Les monstres de l'équipe vivent dans le cristal du bâton du magicien. À
+gauche de l'écran, une icône par monstre (niveau, points de vie) :
+toucher un monstre resté dans le cristal l'invoque à la place du compagnon,
+qui y retourne (le nouveau prend sa place exacte) ; toucher le compagnon le
+rappelle, et plus aucun monstre ne suit le magicien. Pendant un combat, on
+peut échanger le compagnon, pas le rappeler. Un faisceau de lumière de la
+couleur de l'élément du monstre relie le cristal au monstre, qui apparaît ou
+disparaît dans la lumière (0,4 s). Un monstre capturé est d'abord retenu par
+un cercle de runes (0,3 s), puis rejoint le cristal de la même façon
+(`add_crystal_effects`, `src/render/characters.cpp` ; modèle `rune_circle`).
+Les espèces lentes suivent quand même le magicien (au moins 6 m/s en courant).
+
 ## Jour et nuit
 
 Une heure de jeu dure une minute réelle : une journée, 24 minutes. L'heure

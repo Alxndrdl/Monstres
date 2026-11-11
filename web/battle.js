@@ -95,6 +95,7 @@
     tooFar: 'Trop loin : approche-toi à moins de 15 m.',
     unreachable: 'Hors de portée : ton compagnon ne peut pas l’atteindre.',
     inBattle: 'Un combat est déjà en cours.',
+    noCompanion: 'Invoque d’abord un monstre de ton équipe (à gauche).',
   };
   // Under the capture button: why it cannot be used yet.
   const CAPTURE_NOTES = {
@@ -127,7 +128,7 @@
       };
     } else {
       const c = selected >= 0 && game.selected();
-      if (!c || c.species === 'companion') {
+      if (!c || c.index === 0) {
         key = 'none';
       } else if (c.species === 'villager') {
         key = `villager/${c.index}`;
@@ -255,7 +256,7 @@
     if (o.result === 'none' || o.tick <= seen.outcome) return;
     seen.outcome = o.tick;
     const foe = speciesName(o.species);
-    const companion = speciesName((game.team()[0] || {}).species || 'companion');
+    const companion = speciesName((game.team().find((m) => m.active) || {}).species || 'companion');
     const xp = o.xp ? ` · +${o.xp} XP` : '';
     const texts = {
       victory: ['Victoire !', `${foe} s’enfuit${xp}`],
