@@ -27,6 +27,17 @@ test('the village', async ({ page }) => {
   await expect(page).toHaveScreenshot('village-seed42.png');
 });
 
+test('the ruins of the tower', async ({ page }) => {
+  await openGame(page, '?seed=42&new&frozen');
+  await page.evaluate(() => window.monstres.setCamera(Math.PI, 0.25));  // facing south
+  await walk(page, 0, 1, 480);
+  await page.evaluate(() => {
+    window.monstres.step(30);
+    window.monstres.setCamera(Math.PI - 1.2, 0.2);
+  });
+  await expect(page).toHaveScreenshot('ruins-seed42.png');
+});
+
 test.describe('phone', () => {
   test.skip(({ browserName }) => browserName === 'firefox', 'Firefox has no mobile emulation');
 

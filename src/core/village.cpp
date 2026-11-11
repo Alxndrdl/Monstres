@@ -1,5 +1,7 @@
 #include "monstres/core/village.hpp"
 
+#include "monstres/core/rng.hpp"
+
 #include <cmath>
 #include <limits>
 
@@ -31,6 +33,23 @@ VillageLayout make_village_layout(uint64_t, const Path& path) {
   v.lake.radius_x = rules::kLakeRadiusX;
   v.lake.radius_z = rules::kLakeRadiusZ;
   return v;
+}
+
+RuinsLayout make_ruins_layout(uint64_t seed, const Path& path) {
+  RuinsLayout r;
+  // Beside the path, on the side chosen by the seed.
+  Rng rng(seed ^ 0x544F574552544F57ULL, 19);  // own stream
+  const float side = rng.below(2) ? 1.0f : -1.0f;
+  r.center = {path_x_at(path, rules::kRuinsZ) + side * rules::kRuinsFromPath, rules::kRuinsZ};
+  r.radius = rules::kRuinsRadius;
+  return r;
+}
+
+bool in_ruins(const RuinsLayout& r, float x, float z, float margin) {
+  if (r.radius <= 0) return false;
+  const float dx = x - r.center.x, dz = z - r.center.z;
+  const float radius = r.radius + margin;
+  return dx * dx + dz * dz < radius * radius;
 }
 
 bool in_lake(const Lake& lake, float x, float z, float margin) {

@@ -30,7 +30,7 @@ enum class MeshId : size_t {
   Mountain0, Mountain1,
   // Character parts (see src/render/characters.cpp).
   Eye,
-  PlayerLeg, PlayerTorso, PlayerArm, PlayerHead,
+  PlayerLeg, PlayerTorso, PlayerArm, PlayerHead, PlayerStaff, PlayerCrystal,
   CompanionBody, CompanionLeg, CompanionHead, CompanionEar, CompanionTail,
   SlimeBody,
   MushroomStem, MushroomCap, MushroomLeg,
@@ -41,6 +41,8 @@ enum class MeshId : size_t {
   HairShort, HairLong, HairBun, HatCap, HatStraw, HatBeanie,
   CrowBody, CrowWing, CrowLeg,
   FishBody, FishTail, FishFin,
+  // Ruins of the tower.
+  Tower, RuinWallLow, RuinWallHigh, Pillar, FallenPillar, Rubble, RuneStone,
   Ground,  // built at runtime
   // Transparent, drawn last, in this order:
   Path,    // built at runtime
@@ -48,6 +50,7 @@ enum class MeshId : size_t {
   Shadow,  // after the path so shadows fall on it
   Ripple,
   Smoke,
+  Sparkle,
   Count
 };
 inline constexpr size_t kMeshCount = static_cast<size_t>(MeshId::Count);

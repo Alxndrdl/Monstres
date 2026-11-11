@@ -10,7 +10,7 @@
 namespace monstres {
 
 namespace rules {
-inline constexpr float kReliefHalfSize = 72.0f;  // the relief spans [-72, 72]; flat (y = 0) beyond
+inline constexpr float kReliefHalfSize = 100.0f;  // the relief spans [-100, 100]; flat (y = 0) beyond
 inline constexpr float kMaxWalkSlope = 1.0f;     // 45°: steeper ground cannot be walked up (jump instead)
 }  // namespace rules
 
@@ -27,7 +27,7 @@ float value_noise(uint64_t seed, float x, float z, float cell_size);
 struct Heightmap {
   static constexpr int kCells = static_cast<int>(2 * rules::kReliefHalfSize);  // per side
   static constexpr int kPoints = kCells + 1;
-  std::vector<float> heights;  // kPoints * kPoints, index = i * kPoints + j for (x = i - 72, z = j - 72)
+  std::vector<float> heights;  // kPoints * kPoints, index = i * kPoints + j for (x = i - 100, z = j - 100)
 
   bool empty() const { return heights.empty(); }
   float at(int i, int j) const { return heights[static_cast<size_t>(i * kPoints + j)]; }
@@ -42,7 +42,8 @@ struct Heightmap {
 };
 
 // Rolling hills, higher towards the edges of the world; flat around the
-// village, a sunken bed under the lake, and gentle along the path.
-Heightmap make_heightmap(uint64_t seed, const Path& path, const VillageLayout& village);
+// village, a sunken bed under the lake, gentle along the path, and a knoll
+// with a flat top for the tower of the ruins.
+Heightmap make_heightmap(uint64_t seed, const Path& path, const VillageLayout& village, const RuinsLayout& ruins);
 
 }  // namespace monstres

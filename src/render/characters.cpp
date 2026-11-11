@@ -15,7 +15,8 @@ constexpr Color kWhite{1, 1, 1, 1};
 
 // ---- Rigs (characters face -Z, origin between the feet) ------------------------
 
-enum PlayerPart { kTorso, kHead, kPlayerEyeL, kPlayerEyeR, kArmL, kArmR, kLegL, kLegR };
+// The magician: robe, pointed hat, a staff in the right hand with a glowing crystal (tint 1).
+enum PlayerPart { kTorso, kHead, kPlayerEyeL, kPlayerEyeR, kArmL, kArmR, kLegL, kLegR, kStaff, kCrystal };
 constexpr RigPart kPlayerRig[] = {
     {MeshId::PlayerTorso, -1, {0, 0.37f, 0}},
     {MeshId::PlayerHead, kTorso, {0, 0.37f, 0}},
@@ -25,7 +26,10 @@ constexpr RigPart kPlayerRig[] = {
     {MeshId::PlayerArm, kTorso, {0.205f, 0.31f, 0}},
     {MeshId::PlayerLeg, -1, {-0.095f, 0.38f, 0}},
     {MeshId::PlayerLeg, -1, {0.095f, 0.38f, 0}},
+    {MeshId::PlayerStaff, kArmR, {0, -0.29f, -0.02f}},
+    {MeshId::PlayerCrystal, kStaff, {0, 0.9f, 0}, {1, 1, 1}, 1},
 };
+constexpr Color kCrystalGlow{1.7f, 1.8f, 1.9f, 1};
 
 enum CompanionPart { kCBody, kCHead, kCEyeL, kCEyeR, kEarL, kEarR, kTail, kLegFL, kLegFR, kLegBL, kLegBR };
 constexpr RigPart kCompanionRig[] = {
@@ -247,6 +251,13 @@ void pose_player(const Body& b, float time, std::vector<PartPose>& poses) {
     poses[kArmR].rotation = quat_z(0.9f + 0.4f * rising);
     poses[kHead].rotation = quat_x(-0.1f * rising);
   }
+  // The right hand holds the staff: the arm swings less, the staff stays
+  // nearly upright whatever the arm does.
+  if (b.on_ground) poses[kArmR].rotation = quat_x(0.25f + swing * 0.35f) * quat_z(0.12f);
+  const Quat arm = poses[kArmR].rotation;
+  poses[kStaff].rotation = Quat{-arm.x, -arm.y, -arm.z, arm.w} * quat_x(0.12f);
+  poses[kCrystal].rotation = quat_yaw(time * 1.6f);
+  poses[kCrystal].offset.y = 0.015f * std::sin(time * 2.5f);
   close_eyes(poses, kPlayerEyeL, kPlayerEyeR, time, 0.3f);
 }
 
@@ -408,10 +419,45 @@ void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<const PartP
   }
 }
 
+float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float time) {
+  Body body;
+  body.facing_x = 0.45f;  // three-quarters towards the camera (+Z)
+  body.facing_z = 0.89f;
+  std::vector<PartPose> poses;
+  if (subject.wizard) {
+    pose_player(body, time, poses);
+    add_rig(list, player_rig(), poses, body, kCrystalGlow);
+    return 1.55f;  // with the hat
+  }
+  Creature c;
+  c.species = subject.species;
+  c.variant = subject.variant;
+  c.body = body;
+  pose_creature(c, time, 0.4f, poses);
+  if (c.species == Species::Villager) {
+    const VillagerLook look = villager_look(c.variant);
+    std::array<RigPart, std::size(kVillagerRig)> rig;
+    std::copy(std::begin(kVillagerRig), std::end(kVillagerRig), rig.begin());
+    rig[kVHair].mesh = look.hair_mesh;
+    rig[kVHat].mesh = look.hat_mesh;
+    const Color tints[] = {look.shirt, look.pants, look.skin, look.hair, look.hat};
+    add_rig(list, rig, poses, c.body, tints);
+    return 1.3f;
+  }
+  const Color tint = tint_for(c.species, c.variant);
+  add_rig(list, creature_rig(c.species, c.variant), poses, c.body, std::span<const Color>(&tint, 1),
+          rig_scale(c.species));
+  // Drawn taller than their body for the rules: the fish floats half under
+  // water, the crow stands on its tail feathers.
+  if (c.species == Species::Fish) return 0.8f;
+  if (c.species == Species::Crow) return 0.7f;
+  return species_info(c.species).shape.height * 1.1f;
+}
+
 void add_characters(const World& w, float time, DrawList& list) {
   std::vector<PartPose> poses;
   pose_player(w.player, time, poses);
-  add_rig(list, player_rig(), poses, w.player, kWhite);
+  add_rig(list, player_rig(), poses, w.player, kCrystalGlow);
   add_body_shadow(w, w.player, kPlayerShape, 0.5f, list);
 
   std::array<RigPart, std::size(kVillagerRig)> villager_rig;

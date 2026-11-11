@@ -6,7 +6,7 @@
 namespace monstres {
 
 namespace terrain {
-inline constexpr float kDetailHalfSize = 72.0f;   // fine ground grid, 1 m cells
+inline constexpr float kDetailHalfSize = rules::kReliefHalfSize;  // fine ground grid, 1 m cells
 inline constexpr float kHorizonHalfSize = 600.0f; // coarse ground up to the horizon
 inline constexpr float kPathHeight = 0.03f;       // just above the ground
 }  // namespace terrain

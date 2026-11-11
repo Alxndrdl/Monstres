@@ -16,6 +16,7 @@ constexpr Color kSand{0.80f, 0.72f, 0.52f, 1};
 constexpr Color kLakeBed{0.36f, 0.42f, 0.36f, 1};
 constexpr Color kSquare{0.58f, 0.50f, 0.38f, 1};  // trodden earth of the village square
 constexpr Color kSlope{0.50f, 0.44f, 0.34f, 1};   // bare earth and stones on steep slopes
+constexpr Color kPaving{0.60f, 0.58f, 0.54f, 1};  // old flagstones of the ruins' courtyard
 
 Color lerp(Color a, Color b, float t) {
   t = std::clamp(t, 0.0f, 1.0f);
@@ -80,6 +81,14 @@ Color ground_color(const World& w, float x, float z) {
     const float depth = lake_depth_factor(w.village.lake, x, z);
     c = lerp(c, kSand, smooth(-0.18f, -0.02f, depth));
     c = lerp(c, kLakeBed, smooth(0.08f, 0.35f, depth));
+  }
+  if (w.ruins.radius > 0) {
+    // The courtyard of the ruins: worn flagstones, grass growing through.
+    const float dx = x - w.ruins.center.x, dz = z - w.ruins.center.z;
+    const float inside = 1 - smooth(7.0f, 9.5f, std::max(std::fabs(dx), std::fabs(dz)));
+    const float worn = value_noise(w.seed + 31, x, z, 2.5f);
+    const Color stone = lerp(kPaving, kEarth, 0.25f * value_noise(w.seed + 32, x, z, 1.0f));
+    c = lerp(c, stone, inside * (0.35f + 0.6f * smooth(0.3f, 0.6f, worn)));
   }
   return c;
 }

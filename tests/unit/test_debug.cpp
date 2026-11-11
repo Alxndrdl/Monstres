@@ -9,6 +9,21 @@ TEST_CASE("to_json describes the world") {
   w.player.pos = {1.5f, 0.25f, -2};
   w.player.on_ground = false;
   CHECK(to_json(w) ==
-        "{\"tick\":0,\"player\":{\"x\":1.5000,\"y\":0.2500,\"z\":-2.0000,\"ground\":0.0000,\"onGround\":false,"
+        "{\"tick\":0,\"player\":{\"x\":1.5000,\"y\":0.2500,\"z\":-2.0000,\"ground\":0.0000,\"zone\":\"meadow\",\"onGround\":false,"
         "\"facingX\":0.0000,\"facingZ\":-1.0000},\"objects\":1,\"creatures\":[]}");
+}
+
+TEST_CASE("creature_json describes one creature for the info panel") {
+  World w = empty_world();
+  Creature c;
+  c.species = Species::Bird;
+  c.mind = Mind::Flee;
+  c.variant = 3;
+  c.body.pos = {3, 0, -4};
+  w.creatures.push_back(c);
+  CHECK(creature_json(w, 0) ==
+        "{\"index\":0,\"species\":\"bird\",\"mind\":\"flee\",\"variant\":3,"
+        "\"x\":3.0000,\"y\":0.0000,\"z\":-4.0000,\"distance\":5.0000,\"onGround\":true}");
+  CHECK(creature_json(w, 1) == "null");
+  CHECK(creature_json(w, -1) == "null");
 }

@@ -22,7 +22,7 @@ target_link_options(monstres_web PRIVATE
   -sALLOW_MEMORY_GROWTH=1
   -sENVIRONMENT=web
   -sEXPORTED_FUNCTIONS=_main,_malloc,_free
-  -sEXPORTED_RUNTIME_METHODS=UTF8ToString,FS
+  -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,FS
   -lidbfs.js
   -sMINIFY_HTML=0   # Debian's emscripten package lacks html-minifier-terser
   "--preload-file=${MONSTRES_ASSETS_DIR}/models@/models"
@@ -37,7 +37,7 @@ target_link_options(monstres_web PRIVATE
 add_custom_target(monstres_web_files ALL
   COMMAND ${CMAKE_COMMAND} -E make_directory "${SITE_DIR}"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${WEB_DIR}/sw.js" "${WEB_DIR}/manifest.webmanifest" "${WEB_DIR}/controls.js" "${SITE_DIR}/"
+          "${WEB_DIR}/sw.js" "${WEB_DIR}/manifest.webmanifest" "${WEB_DIR}/lore.js" "${WEB_DIR}/controls.js" "${WEB_DIR}/ui.js" "${WEB_DIR}/menu.js" "${SITE_DIR}/"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${WEB_DIR}/icons" "${SITE_DIR}/icons"
   VERBATIM
 )

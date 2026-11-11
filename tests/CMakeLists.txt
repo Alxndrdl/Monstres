@@ -47,6 +47,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_characters.cpp
   unit/test_village.cpp
   unit/test_relief.cpp
+  unit/test_ruins.cpp
 )
 
 monstres_add_tests(monstres_functional_tests functional

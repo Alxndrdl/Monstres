@@ -27,9 +27,13 @@ namespace monstres {
 //      Versions 4 and 5 still load: the village is built (removing what was
 //      in its way) and the creatures appear anew from the seed.
 //   7  relief: same layout, but heights are on hills (objects rest on the
-//      ground, bodies walk on it). Versions 4 to 6 still load: objects are
-//      set on the ground and bodies lifted out of it.
-inline constexpr uint32_t kSaveVersion = 7;
+//      ground, bodies walk on it).
+//   8  the world grew (150 m wide, ruins of the tower) and the magician has a
+//      name, a level and experience (after the creatures: u8 name length,
+//      UTF-8 name, u16 level, u32 xp). Versions 4 to 7 still load: the world
+//      is built anew from their seed, the player keeps its place if it is
+//      free (and lands on the ground), the tick goes on.
+inline constexpr uint32_t kSaveVersion = 8;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

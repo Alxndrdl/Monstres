@@ -1,5 +1,7 @@
 #include "monstres/core/heightmap.hpp"
 
+#include "monstres/core/world.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -26,17 +28,35 @@ float smooth(float e0, float e1, float x) {
 
 constexpr float kLakeDepth = 1.4f;
 
-float relief(uint64_t seed, const Path& path, const VillageLayout& village, float x, float z) {
+// The big hills only (no small bumps).
+float hills(uint64_t seed, float x, float z) {
+  return (value_noise(seed + 40, x, z, 34.0f) - 0.5f) * 8.0f + (value_noise(seed + 41, x, z, 15.0f) - 0.5f) * 3.0f;
+}
+
+constexpr float kKnollHeight = 3.0f;  // the tower's knoll, above the hills around it
+
+// knoll_top: height of the flat top of the tower's knoll (see make_heightmap).
+float relief(uint64_t seed, const Path& path, const VillageLayout& village, const RuinsLayout& ruins,
+             float knoll_top, float x, float z) {
   // Three octaves of hills; the smallest bumps fade out along the path.
-  const float near_path = 1 - smooth(1.5f, 7.0f, distance_to_path(path, x, z));
-  float h = (value_noise(seed + 40, x, z, 34.0f) - 0.5f) * 8.0f +
-            (value_noise(seed + 41, x, z, 15.0f) - 0.5f) * 3.0f +
-            (value_noise(seed + 42, x, z, 6.0f) - 0.5f) * 0.8f * (1 - near_path);
+  const float near_path = 1 - smooth(1.5f, 7.0f, distance_to_path(path, x, z, 7.0f));
+  float h = hills(seed, x, z) + (value_noise(seed + 42, x, z, 6.0f) - 0.5f) * 0.8f * (1 - near_path);
+
+  if (ruins.radius > 0) {
+    // A knoll with a flat top where the tower stands, gentle slopes around.
+    const float rx = x - ruins.center.x, rz = z - ruins.center.z;
+    const float d = std::sqrt(rx * rx + rz * rz);
+    const float top = knoll_top;
+    const float flat = 1 - smooth(11.0f, ruins.radius + 17, d);  // the enclosure (±9 m) stands level
+    const float knoll = kKnollHeight * (1 - smooth(4.0f, ruins.radius + 17, d));
+    h = h + knoll + (top - (h + knoll)) * flat;
+  }
+
   // Hills rise around the playable area, then the relief fades out far
   // beyond it, where the flat horizon ground takes over.
   const float edge = std::max(std::fabs(x), std::fabs(z));
-  h += smooth(36.0f, 56.0f, edge) * 5.0f;
-  h *= 1 - smooth(62.0f, rules::kReliefHalfSize - 1, edge);
+  h += smooth(rules::kWorldHalfSize - 9, rules::kWorldHalfSize + 11, edge) * 5.0f;
+  h *= 1 - smooth(rules::kReliefHalfSize - 10, rules::kReliefHalfSize - 1, edge);
 
   if (village.lake.radius_x > 0) {
     // Flat village and shore, at y = 0.
@@ -84,14 +104,15 @@ Vec3 Heightmap::normal(float x, float z) const {
   return {-gx / len, 1 / len, -gz / len};
 }
 
-Heightmap make_heightmap(uint64_t seed, const Path& path, const VillageLayout& village) {
+Heightmap make_heightmap(uint64_t seed, const Path& path, const VillageLayout& village, const RuinsLayout& ruins) {
   Heightmap m;
   m.heights.resize(static_cast<size_t>(Heightmap::kPoints * Heightmap::kPoints));
+  const float knoll_top = hills(seed, ruins.center.x, ruins.center.z) + kKnollHeight;
   for (int i = 0; i < Heightmap::kPoints; ++i) {
     for (int j = 0; j < Heightmap::kPoints; ++j) {
       const float x = static_cast<float>(i) - rules::kReliefHalfSize;
       const float z = static_cast<float>(j) - rules::kReliefHalfSize;
-      m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] = relief(seed, path, village, x, z);
+      m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] = relief(seed, path, village, ruins, knoll_top, x, z);
     }
   }
   return m;

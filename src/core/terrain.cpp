@@ -9,7 +9,8 @@ namespace monstres {
 
 namespace {
 
-constexpr int kControlPoints = 19;          // every 6 m from z = -54 to z = +54
+// Every 6 m, from beyond one edge of the world to beyond the other.
+constexpr int kControlPoints = 2 * (static_cast<int>(rules::kPathExtent / 6.0f) + 1) + 1;
 constexpr float kControlStep = 6.0f;
 constexpr int kSamplesPerSegment = 8;
 
@@ -27,11 +28,11 @@ Path make_path(uint64_t seed) {
   float xs[kControlPoints];
   const int middle = kControlPoints / 2;
   xs[middle] = static_cast<float>(static_cast<int>(rng.below(201)) - 100) / 100.0f;  // ±1 m from spawn
-  // Random walk outwards from the middle, at most ±3.5 m per step, kept within ±14 m.
+  // Random walk outwards from the middle, at most ±3.5 m per step, kept within ±kPathMaxX.
   for (int dir : {1, -1}) {
     for (int i = middle + dir; i >= 0 && i < kControlPoints; i += dir) {
       const float step = static_cast<float>(static_cast<int>(rng.below(701)) - 350) / 100.0f;
-      xs[i] = std::clamp(xs[i - dir] + step, -14.0f, 14.0f);
+      xs[i] = std::clamp(xs[i - dir] + step, -rules::kPathMaxX, rules::kPathMaxX);
     }
   }
 
@@ -52,21 +53,35 @@ Path make_path(uint64_t seed) {
   return path;
 }
 
-float distance_to_path(const Path& path, float x, float z) {
-  float best2 = 1e30f;
-  for (size_t i = 0; i + 1 < path.points.size(); ++i) {
-    const Vec2 a = path.points[i], b = path.points[i + 1];
-    // Cheap rejection: the segment is farther along z than the best so far.
-    if ((a.z - z) * (b.z - z) > 0) {  // both ends on the same side of z
-      const float gap_z = std::min(std::fabs(a.z - z), std::fabs(b.z - z));
-      if (gap_z * gap_z >= best2) continue;
-    }
+float distance_to_path(const Path& path, float x, float z, float limit) {
+  const auto& pts = path.points;
+  float best2 = limit * limit;
+  if (pts.size() < 2) return std::sqrt(best2);
+  auto visit = [&](size_t i) {
+    const Vec2 a = pts[i], b = pts[i + 1];
     const float abx = b.x - a.x, abz = b.z - a.z;
     const float len2 = abx * abx + abz * abz;
     float t = len2 > 0 ? ((x - a.x) * abx + (z - a.z) * abz) / len2 : 0;
     t = std::clamp(t, 0.0f, 1.0f);
     const float dx = a.x + abx * t - x, dz = a.z + abz * t - z;
     best2 = std::min(best2, dx * dx + dz * dz);
+  };
+  // The points go by increasing z: start from the segment at z and walk
+  // outwards, stopping on each side at the first segment that is farther
+  // along z alone than the best distance so far (all the next ones are too).
+  const auto k = static_cast<size_t>(std::lower_bound(pts.begin(), pts.end(), z,
+                                                      [](const Vec2& p, float v) { return p.z < v; }) -
+                                     pts.begin());
+  const size_t first = std::min(k > 0 ? k - 1 : 0, pts.size() - 2);
+  for (size_t i = first; i + 1 < pts.size(); ++i) {
+    const float gap = pts[i].z - z;
+    if (gap > 0 && gap * gap >= best2) break;
+    visit(i);
+  }
+  for (size_t i = first; i-- > 0;) {
+    const float gap = z - pts[i + 1].z;
+    if (gap > 0 && gap * gap >= best2) break;
+    visit(i);
   }
   return std::sqrt(best2);
 }

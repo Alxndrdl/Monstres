@@ -2,6 +2,7 @@
 
 #include <GLES3/gl3.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <unordered_map>
@@ -241,7 +242,7 @@ public:
   }
 
   void draw(const View& view, std::span<const DrawList* const> lists) override {
-    draw_sky(view);
+    if (view.sky) draw_sky(view);
 
     glUseProgram(mesh_program_);
     glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.view_projection.m);
@@ -286,6 +287,54 @@ public:
   }
 
   void end_frame() override {}
+
+  std::vector<uint8_t> draw_offscreen(const View& view, std::span<const DrawList* const> lists, int width,
+                                      int height) override {
+    std::vector<uint8_t> pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4, 0);
+    if (width <= 0 || height <= 0) return pixels;
+    // Multisampled color + depth, resolved into a plain color buffer to read back.
+    GLuint fbo[2], rb[3];
+    glGenFramebuffers(2, fbo);
+    glGenRenderbuffers(3, rb);
+    GLint samples = 0;
+    glGetIntegerv(GL_MAX_SAMPLES, &samples);
+    samples = std::min(samples, 4);
+    glBindRenderbuffer(GL_RENDERBUFFER, rb[0]);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, width, height);
+    glBindRenderbuffer(GL_RENDERBUFFER, rb[1]);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH_COMPONENT24, width, height);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo[0]);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb[0]);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rb[1]);
+    glBindRenderbuffer(GL_RENDERBUFFER, rb[2]);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, width, height);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo[1]);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb[2]);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+      glBindFramebuffer(GL_FRAMEBUFFER, fbo[0]);
+      glViewport(0, 0, width, height);
+      glClearColor(0, 0, 0, 0);
+      glDepthMask(GL_TRUE);
+      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+      draw(view, lists);
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo[0]);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo[1]);
+      glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+      glBindFramebuffer(GL_FRAMEBUFFER, fbo[1]);
+      std::vector<uint8_t> bottom_up(pixels.size());
+      glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, bottom_up.data());
+      const size_t row = static_cast<size_t>(width) * 4;
+      for (int y = 0; y < height; ++y) {
+        std::copy_n(bottom_up.begin() + static_cast<std::ptrdiff_t>(static_cast<size_t>(height - 1 - y) * row), row,
+                    pixels.begin() + static_cast<std::ptrdiff_t>(static_cast<size_t>(y) * row));
+      }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(2, fbo);
+    glDeleteRenderbuffers(3, rb);
+    return pixels;  // the next frame sets the screen viewport again
+  }
 
 private:
   void draw_sky(const View& view) {

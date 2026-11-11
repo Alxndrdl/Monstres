@@ -111,6 +111,7 @@ struct View {
   Color fog;
   float fog_start = 45, fog_end = 320;
   float time = 0;  // seconds, drives the wind
+  bool sky = true;  // false: no sky, the background stays transparent (portraits)
 };
 
 struct Frame {
@@ -127,6 +128,11 @@ public:
   // Draws the sky, then every list (all opaque batches, then all transparent ones).
   virtual void draw(const View& view, std::span<const DrawList* const> lists) = 0;
   virtual void end_frame() = 0;
+  // Draws the lists into an image of width x height pixels instead of the
+  // screen (portraits for the menus), antialiased. Returns RGBA bytes, rows
+  // from the top; transparent where nothing was drawn when view.sky is false.
+  virtual std::vector<uint8_t> draw_offscreen(const View& view, std::span<const DrawList* const> lists, int width,
+                                              int height) = 0;
 };
 
 }  // namespace monstres

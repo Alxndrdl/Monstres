@@ -85,8 +85,9 @@ TEST_CASE("walking swings the legs in opposite directions, standing does not") {
   Body b;
   std::vector<PartPose> poses;
   pose_player(b, 0.1f, poses);
-  for (const PartPose& p : poses) {
-    CHECK(std::fabs(p.rotation.x) < 0.05f);  // at most a small lean or breath
+  for (size_t i = 0; i < 8; ++i) {   // body parts (not the staff, held forward)
+    if (i == 5) continue;            // the right arm holds the staff
+    CHECK(std::fabs(poses[i].rotation.x) < 0.05f);  // at most a small lean or breath
   }
 
   b.speed = rules::kWalkSpeed;

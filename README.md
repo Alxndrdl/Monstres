@@ -3,25 +3,46 @@
 Petit jeu en C++ compilé en WebAssembly avec Emscripten, rendu WebGL2
 (OpenGL ES 3.0), installable en PWA et jouable hors ligne.
 
-Le joueur, un petit explorateur, se déplace avec son compagnon Pompon (un
-renard rond qui le suit et saute derrière lui) dans une prairie vallonnée en 3D peuplée
-de monstres sauvages : Gloubi la gelée sauteuse, Champi le champignon qui se
-dandine et Piou l'oiseau qui s'enfuit quand on approche. Au nord, le sentier
-mène à un village : chaumières, maisons à cheminée qui fume, huttes rondes,
-puits, barrières, panneaux, tonneaux et lanternes, des villageois variés qui
-se promènent et saluent de la main, des corbeaux (Croa) perchés sur les toits
-qui s'envolent quand on approche, et un lac où nagent des poissons (Bloup)
-qui sautent hors de l'eau. La prairie est traversée par un
-sentier de terre, parsemée d'arbres, sapins, rochers, troncs couchés, souches,
-buissons et caisses. On peut sauter sur les rochers, troncs, souches, buissons
-et caisses ; les arbres ne bloquent qu'au niveau du tronc. Autour : herbes
-courtes et hautes qui ondulent au vent, fleurs, plaques de terre, ombres
-douces, forêt au-delà des bords, montagnes enneigées, nuages, ciel et soleil.
+Le joueur est un apprenti magicien (robe étoilée, chapeau pointu, bâton à
+cristal lumineux) qui parcourt un monde magique de 150 m de côté avec son
+compagnon Pompon, un renard des braises tout rond qui le suit et saute derrière
+lui. Dans les prairies vallonnées vivent des monstres sauvages : Gloubi la
+gelée sauteuse, Champi le champignon qui se dandine et Piou l'oiseau qui
+s'enfuit quand on approche.
+
+Au nord, le sentier mène au village : chaumières, maisons à cheminée qui fume,
+huttes rondes, puits, barrières, panneaux, tonneaux et lanternes, des
+villageois variés qui se promènent et saluent de la main, des corbeaux (Croa)
+perchés sur les toits, et un lac où nagent des poissons (Bloup) qui sautent
+hors de l'eau.
+
+Au sud, sur une butte au bord du sentier, se dressent les ruines de la Tour :
+la tour abandonnée d'un ancien magicien (visible de loin), les restes d'une
+enceinte, une colonnade à moitié effondrée, des éboulis et quatre pierres à
+runes qui brillent encore, entourées d'étincelles magiques.
+
+Partout : herbes qui ondulent au vent, fleurs, arbres, sapins, rochers,
+troncs, souches et buissons ; forêt au-delà des bords, montagnes enneigées,
+nuages, ciel et soleil.
 
 Contrôles :
 - joystick en bas à gauche, ou ZQSD / flèches : se déplacer (par rapport à la caméra) ;
 - glisser sur l'écran (doigt ou souris) : regarder autour de soi ;
 - bouton en bas à droite, ou Espace : sauter.
+- toucher ou cliquer sur un monstre (ou un villageois) : sa fiche s'affiche en
+  haut à gauche (nom, description, ce qu'il fait, distance) et un anneau doré
+  le marque au sol ; toucher ailleurs ou × la ferme ;
+- livre en haut à gauche (ou touches C, B, M) : le grimoire, qui met le jeu en
+  pause, avec trois onglets :
+  - Personnage : portrait du magicien, nom (modifiable, enregistré dans la
+    sauvegarde), niveau, expérience, caractéristiques, où l'on se trouve ;
+  - Bestiaire : tous les monstres, avec pour chacun un portrait, l'élément,
+    une description, l'habitat, la taille, la vitesse, les caractéristiques et
+    combien vivent dans ce monde ;
+  - Carte : locale (autour du joueur, avec les créatures proches) ou globale ;
+  Échap le ferme ;
+- engrenage en haut à droite : paramètres (exporter / importer la sauvegarde,
+  afficher les FPS ; ce choix est retenu par le navigateur).
 
 Sur ordinateur, les touches sont rappelées sous le joystick et le bouton ;
 elles s'adaptent à la disposition du clavier quand le navigateur le permet.
@@ -40,7 +61,10 @@ src/render/      monstres_render    monde -> instances à dessiner, caméra, mod
   gles3/         monstres_render_gles3   backend OpenGL ES 3.0 / WebGL2
 src/platform/web/                   main(), boucle, caméra, IndexedDB, API JS (pre.js, post.js)
 web/                                index.html (gabarit Emscripten), controls.js (joystick,
-                                    saut, regard, clavier), sw.js, manifeste, icônes
+                                    saut, regard, clavier), ui.js (paramètres, FPS, fiche
+                                    des monstres), menu.js (grimoire : personnage,
+                                    bestiaire, cartes), lore.js (noms et textes du monde),
+                                    sw.js, manifeste, icônes
 assets/models/                      modèles 3D .glb chargés par le jeu (générés par
                                     tools/make_models.py, remplaçables par des exports Blender)
 tests/unit/                         tests unitaires (doctest)
@@ -85,6 +109,12 @@ décrites en tête du script. Un modèle peut être remplacé par un export Blen
 en `.glb` qui les respecte ; il faut alors le retirer du script, sinon
 `--check` le signalera. Le sol et le sentier dépendent de la graine du monde et
 sont construits par le jeu (`src/render/terrain_mesh.cpp`).
+
+Les portraits du grimoire sont dessinés par le moteur lui-même, hors écran
+(`build_portrait` dans `src/render/scene.cpp`, `draw_offscreen` du rendu).
+Les caractéristiques des monstres et du magicien sont des règles du jeu
+(`monster_stats`, `wizard_stats` dans `src/core/world.cpp`) ; les noms et
+descriptions, eux, sont dans `web/lore.js`.
 
 ## Personnages et animations
 

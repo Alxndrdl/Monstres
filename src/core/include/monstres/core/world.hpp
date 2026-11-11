@@ -7,6 +7,7 @@
 #include "monstres/core/village.hpp"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace monstres {
@@ -18,17 +19,17 @@ namespace monstres {
 namespace rules {
 inline constexpr int32_t kTicksPerSecond = 60;
 inline constexpr float kDt = 1.0f / kTicksPerSecond;
-inline constexpr float kWorldHalfSize = 45.0f;  // the ground spans [-45, 45] on X and Z
+inline constexpr float kWorldHalfSize = 75.0f;  // the playable ground spans [-75, 75] on X and Z
 inline constexpr float kPlayerHalfWidth = 0.28f; // collision box of the explorer
 inline constexpr float kPlayerHeight = 1.1f;
 inline constexpr float kWalkSpeed = 5.0f;       // m/s
 inline constexpr float kJumpSpeed = 7.0f;       // m/s, jumps ~1.2 m high
 inline constexpr float kGravity = 20.0f;        // m/s²
 inline constexpr float kMaxFallSpeed = 30.0f;
-inline constexpr uint32_t kObjectCount = 150;   // trees, rocks... outside the village
+inline constexpr uint32_t kObjectCount = 380;   // trees, rocks... outside the village and the ruins
 inline constexpr float kSpawnClearRadius = 4.0f;
 inline constexpr float kObjectGap = 0.6f;       // free space kept between objects
-inline constexpr uint32_t kWildMonsters = 16;
+inline constexpr uint32_t kWildMonsters = 40;
 inline constexpr uint32_t kVillagers = 8;
 inline constexpr uint32_t kCrows = 5;
 inline constexpr uint32_t kFish = 4;
@@ -68,6 +69,13 @@ enum class ObjectKind : uint8_t {
   Well,
   Barrel,
   Lamp,          // lantern on a post
+  // Ruins of the tower (fixed sizes unless said otherwise):
+  Tower,         // the abandoned magician's tower, round, about 11 m high
+  RuinWall,      // a 3 m broken wall along its yaw; variant odd = high (not jumpable)
+  Pillar,        // standing column, size.y = height
+  FallenPillar,  // a column lying along its yaw, 3 m long
+  Rubble,        // a low pile of stones
+  RuneStone,     // standing stone with glowing runes
   Count
 };
 
@@ -134,16 +142,48 @@ struct Creature {
   bool operator==(const Creature&) const = default;
 };
 
+// The player's magician. Level and experience are not used by the rules yet.
+struct Wizard {
+  std::string name;    // chosen by the player (UTF-8, at most kMaxNameBytes), may be empty
+  uint16_t level = 1;
+  uint32_t xp = 0;
+  bool operator==(const Wizard&) const = default;
+};
+inline constexpr size_t kMaxNameBytes = 24;
+
+// Characteristics derived from the level (character sheet).
+struct WizardStats {
+  uint16_t hp, mana, power, wisdom, agility, endurance;
+  uint32_t xp_to_next;  // experience needed for the next level
+};
+WizardStats wizard_stats(const Wizard& wizard);
+
+// Elements of magic, for monsters (and later spells).
+enum class Element : uint8_t { Fire, Water, Nature, Air, Shadow, Light, Count };
+
+// Base characteristics of a monster species (bestiary). Villagers have none.
+struct MonsterStats {
+  uint16_t hp, attack, defense, speed, magic;
+  Element element;
+  bool is_monster;  // false for villagers
+};
+const MonsterStats& monster_stats(Species species);
+
+// Named parts of the world, for maps and the interface.
+enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Count };
+
 struct World {
   uint64_t seed = 0;   // the world's layout: path, objects, decoration
   uint64_t tick = 0;
   Rng rng;
   Path path;           // derived from the seed (not saved)
   VillageLayout village;  // derived from the seed (not saved)
+  RuinsLayout ruins;   // derived from the seed (not saved)
   Heightmap ground;    // derived from the seed (not saved)
   Body player;
   std::vector<Object> objects;
   std::vector<Creature> creatures;  // creatures[0] is the companion
+  Wizard wizard;
   bool operator==(const World&) const = default;
 };
 
@@ -159,6 +199,13 @@ void spawn_creatures(World& world);
 // any other object in its way or in the lake. Used by new_game, and when
 // loading saves from before the village existed.
 void build_village(World& world);
+
+// Builds the ruins of the tower (tower, walls, columns, rubble, rune stones)
+// as objects, removing any other object in their way.
+void build_ruins(World& world);
+
+// Which named part of the world (x, z) is in.
+Zone zone_at(const World& world, float x, float z);
 
 // Sets every object on the ground: its base goes to the lowest point of the
 // ground under it, slightly sunk, so that no edge floats on a slope. Low

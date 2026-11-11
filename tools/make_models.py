@@ -22,7 +22,11 @@ Unit sizes (the game scales each copy, see src/render/scene.cpp):
   mountain0..1           fit [-1, 1] x [0, 1] x [-1, 1]
   shadow                 soft black disc of radius 1 on y = 0
   house_*, fence, sign,  real size (see each function), door / front at -Z;
-  well, barrel, lamp     collision boxes in src/core/world.cpp must match
+  well, barrel, lamp,    collision boxes in src/core/world.cpp must match
+  tower, ruin_*, pillar, (pillar: unit height, scaled by the game)
+  fallen_pillar, rubble,
+  rune_stone
+  sparkle                small transparent spark (radius 1)
   smoke, ripple          transparent puff (radius 1) and water ring (radius 1)
 
 Character parts (player_*, companion_*, slime_*, mushroom_*, bird_*, eye) are
@@ -432,13 +436,14 @@ def shadow():
 SKIN = (0.96, 0.78, 0.62, 1)
 CHEEK = (0.98, 0.62, 0.58, 1)
 HAIR = (0.36, 0.22, 0.12, 1)
-HAT = (0.82, 0.68, 0.42, 1)
-HAT_BAND = (0.45, 0.30, 0.18, 1)
-SHIRT = (0.27, 0.52, 0.80, 1)
-BELT = (0.40, 0.27, 0.15, 1)
-PANTS = (0.38, 0.33, 0.27, 1)
+ROBE = (0.24, 0.30, 0.68, 1)        # the magician's robe and hat
+ROBE_DARK = (0.17, 0.20, 0.48, 1)
+GOLD = (0.96, 0.78, 0.30, 1)
+STAR = (1.0, 0.92, 0.55, 1)
+PANTS = (0.26, 0.22, 0.30, 1)
 BOOT = (0.30, 0.20, 0.13, 1)
-BACKPACK = (0.78, 0.35, 0.22, 1)
+STAFF_WOOD = (0.48, 0.32, 0.20, 1)
+CRYSTAL = (0.62, 0.90, 1.0, 1)
 EYE_BLACK = (0.07, 0.07, 0.10, 1)
 FUR = (0.95, 0.55, 0.20, 1)
 CREAM = (0.99, 0.92, 0.80, 1)
@@ -479,42 +484,97 @@ def eye():
     return m
 
 
+def star(m, center, radius, facing, color, points=5):
+    """A flat five-pointed star on a surface facing `facing` (unit axis vector)."""
+    f = normalize(facing)
+    up = (0.0, 1.0, 0.0) if abs(f[1]) < 0.9 else (0.0, 0.0, 1.0)
+    u = normalize(cross(up, f))
+    v = cross(f, u)
+    c = add(center, mul(f, 0.004))
+    corner = []
+    for i in range(2 * points):
+        a = math.pi / 2 + math.pi * i / points
+        r = radius if i % 2 == 0 else radius * 0.42
+        corner.append(add(c, add(mul(u, r * math.cos(a)), mul(v, r * math.sin(a)))))
+    for i in range(2 * points):
+        a, b = corner[i], corner[(i + 1) % (2 * points)]
+        if dot(cross(sub(a, c), sub(b, c)), f) < 0:
+            a, b = b, a
+        m.tri(c, a, b, color)
+
+
 def player_leg():
+    """Trousers and boots, under the robe."""
     m = Mesh()
-    frustum(m, translate(0, -0.30, 0), 0.062, 0.072, 0.30, 7, PANTS)
-    box(m, (0, -0.335, -0.025), (0.072, 0.045, 0.105), BOOT)
+    frustum(m, translate(0, -0.30, 0), 0.058, 0.066, 0.30, 7, PANTS)
+    box(m, (0, -0.335, -0.025), (0.07, 0.045, 0.105), BOOT)
     return m
 
 
 def player_torso():
+    """The robe: upper body, golden belt, and a skirt flaring down to the ankles."""
     m = Mesh()
-    frustum(m, identity, 0.17, 0.145, 0.34, 8, SHIRT, bottom_cap=SHIRT, top_cap=SHIRT)
-    frustum(m, identity, 0.176, 0.174, 0.05, 8, BELT)
+    frustum(m, identity, 0.17, 0.145, 0.34, 8, ROBE, bottom_cap=ROBE, top_cap=ROBE)
+    frustum(m, identity, 0.178, 0.176, 0.05, 8, GOLD)
+    frustum(m, translate(0, -0.29, 0), 0.25, 0.172, 0.29, 10, ROBE, bottom_cap=ROBE_DARK)
+    frustum(m, translate(0, -0.29, 0), 0.253, 0.24, 0.04, 10, GOLD)  # hem
     frustum(m, translate(0, 0.33, 0), 0.055, 0.05, 0.07, 6, SKIN)  # neck
-    box(m, (0, 0.2, 0.19), (0.12, 0.13, 0.06), BACKPACK)
-    box(m, (0, 0.14, 0.255), (0.08, 0.05, 0.012), shade(BACKPACK, 0.8))  # pocket
+    frustum(m, translate(0, 0.29, 0), 0.165, 0.1, 0.06, 8, ROBE_DARK)  # collar
+    for a, y in ((2.0, -0.17), (2.6, -0.08), (3.4, -0.2), (3.9, -0.1), (4.5, -0.18), (1.2, -0.2)):
+        r = 0.175 - y * 0.269  # on the skirt's surface (radius 0.172 at y = 0, 0.25 at y = -0.29)
+        star(m, (r * math.cos(a), y, r * math.sin(a)), 0.03, (math.cos(a), 0.25, math.sin(a)), STAR)
     return m
 
 
 def player_arm():
+    """A wide sleeve with a golden cuff, and the hand."""
     m = Mesh()
-    frustum(m, translate(0, -0.19, 0), 0.05, 0.058, 0.19, 7, SHIRT, bottom_cap=SHIRT)
-    frustum(m, translate(0, -0.30, 0), 0.042, 0.046, 0.11, 6, SKIN)
-    blob(m, (0, -0.33, 0), (0.05, 0.055, 0.05), 0.05, 910, solid(SKIN))
+    frustum(m, translate(0, -0.23, 0), 0.08, 0.052, 0.23, 8, ROBE, bottom_cap=ROBE_DARK)
+    frustum(m, translate(0, -0.235, 0), 0.083, 0.081, 0.03, 8, GOLD)
+    blob(m, (0, -0.29, 0), (0.048, 0.055, 0.048), 0.05, 910, solid(SKIN))
     return m
 
 
 def player_head():
+    """Face, hair and the pointed hat with a wide brim and a bent tip."""
     m = Mesh()
     blob(m, (0, 0.2, 0), (0.21, 0.2, 0.2), 0.03, 920, solid(SKIN))
-    blob(m, (0, 0.3, 0.07), (0.215, 0.15, 0.19), 0.05, 921, jitter(HAIR, 921, 0.06))
+    blob(m, (0, 0.27, 0.06), (0.22, 0.16, 0.2), 0.06, 921, jitter(HAIR, 921, 0.06))
     blob(m, (0, 0.165, -0.2), (0.03, 0.028, 0.03), 0.0, 922, solid(shade(SKIN, 0.92)))  # nose
     for side in (-1, 1):
         blob(m, (side * 0.12, 0.135, -0.155), (0.04, 0.025, 0.02), 0.0, 923, solid(CHEEK))
-    # Explorer hat: brim, crown, band.
-    frustum(m, translate(0, 0.33, 0.02), 0.31, 0.29, 0.025, 12, HAT, bottom_cap=shade(HAT, 0.8), top_cap=HAT)
-    frustum(m, translate(0, 0.35, 0.02), 0.17, 0.14, 0.13, 10, HAT, top_cap=HAT)
-    frustum(m, translate(0, 0.355, 0.02), 0.172, 0.166, 0.035, 10, HAT_BAND)
+    frustum(m, translate(0, 0.32, 0.02), 0.36, 0.33, 0.025, 14, ROBE, bottom_cap=ROBE_DARK, top_cap=ROBE)  # brim
+    frustum(m, translate(0, 0.34, 0.02), 0.19, 0.11, 0.26, 12, ROBE)
+    frustum(m, translate(0, 0.345, 0.02), 0.192, 0.18, 0.05, 12, GOLD)  # band
+    # The tip, bent backwards.
+    tilt = 0.55
+    bend = lambda p: (p[0], 0.6 + p[1] * math.cos(tilt) - p[2] * math.sin(tilt),
+                      0.02 + p[1] * math.sin(tilt) + p[2] * math.cos(tilt))  # rotation around X
+    frustum(m, bend, 0.11, 0.0, 0.24, 12, ROBE)
+    star(m, (0, 0.47, -0.135), 0.045, (0, 0.3, -1), STAR)
+    return m
+
+
+def player_staff():
+    """Held in the right hand (origin at the grip), a crystal sits on top (player_crystal)."""
+    m = Mesh()
+    frustum(m, translate(0, -0.3, 0), 0.022, 0.026, 1.05, 6, STAFF_WOOD, bottom_cap=STAFF_WOOD)
+    frustum(m, translate(0, 0.72, 0), 0.03, 0.05, 0.06, 6, GOLD)
+    for i in range(3):  # claws holding the crystal
+        a = TAU * i / 3
+        box(m, (0.045 * math.cos(a), 0.83, 0.045 * math.sin(a)), (0.012, 0.06, 0.012), GOLD)
+    return m
+
+
+def player_crystal():
+    """The crystal of the staff (origin at its center), drawn glowing by the game."""
+    m = Mesh()
+    top, bottom = (0, 0.11, 0), (0, -0.08, 0)
+    ring = [(0.055 * math.cos(TAU * i / 6), 0.0, 0.055 * math.sin(TAU * i / 6)) for i in range(6)]
+    for i in range(6):
+        a, b = ring[i], ring[(i + 1) % 6]
+        m.tri(top, b, a, shade(CRYSTAL, 1.0 if i % 2 else 0.85))
+        m.tri(bottom, a, b, shade(CRYSTAL, 0.8 if i % 2 else 0.7))
     return m
 
 
@@ -821,6 +881,160 @@ def lamp():
     return m
 
 
+
+RUIN_STONE = (0.66, 0.63, 0.58, 1)
+RUIN_DARK = (0.36, 0.34, 0.36, 1)
+IVY = (0.30, 0.50, 0.26, 1)
+RUNE = (0.62, 0.92, 1.0, 1)
+RUNE_VIOLET = (0.80, 0.58, 1.0, 1)
+
+
+def stone_ring(m, y0, height, r0, r1, segments, seed, color, phase=0.0):
+    """A ring of stone blocks, each with its own shade."""
+    for i in range(segments):
+        a0, a1 = phase + TAU * i / segments, phase + TAU * (i + 1) / segments
+        c = shade(color, 0.88 + 0.2 * hash01(seed, i))
+        b0, b1 = (r0 * math.cos(a0), y0, r0 * math.sin(a0)), (r0 * math.cos(a1), y0, r0 * math.sin(a1))
+        t0 = (r1 * math.cos(a0), y0 + height, r1 * math.sin(a0))
+        t1 = (r1 * math.cos(a1), y0 + height, r1 * math.sin(a1))
+        m.quad(b0, t0, t1, b1, c)
+
+
+def tower():
+    """The abandoned magician's tower: round, 2.5 m radius, broken top at
+    about 9.2 m with three merlons left up to 10.5 m at radius 2.15 and
+    angles 0, 120 and 240 degrees (crows land there, see crow_perches in
+    src/core/world.cpp). Door at -Z. Collision: half extents 2.35 x 5.25."""
+    m = Mesh()
+    segments = 16
+    frustum(m, identity, 2.6, 2.5, 0.6, segments, RUIN_DARK)  # plinth
+    rows = 15
+    for row in range(rows):
+        y0 = 0.6 + row * (8.6 / rows)
+        r0 = 2.4 - 0.15 * row / rows
+        r1 = 2.4 - 0.15 * (row + 1) / rows
+        stone_ring(m, y0, 8.6 / rows, r0, r1, segments, 1000 + row, RUIN_STONE, phase=(row % 2) * TAU / 32)
+    # The floor of the top, seen from above, and the broken parapet.
+    frustum(m, translate(0, 9.15, 0), 2.26, 2.26, 0.05, segments, RUIN_DARK, top_cap=RUIN_DARK)
+    for i in range(12):
+        a = TAU * i / 12
+        intact = i % 4 == 0  # 0, 120 and 240 degrees
+        h = 1.3 if intact else 0.15 + 0.6 * hash01(1100, i)
+        if not intact and hash01(1101, i) < 0.35:
+            continue  # fallen
+        c = (2.15 * math.cos(a), 9.2 + h / 2, -2.15 * math.sin(a))
+        box(m, c, (0.32, h / 2, 0.32), shade(RUIN_STONE, 0.9 + 0.15 * hash01(1102, i)))
+    # Door and windows, dark inside; a band of glowing runes.
+    box(m, (0, 1.25, -2.38), (0.62, 1.25, 0.1), RUIN_DARK)
+    frustum(m, lambda p: (p[0], 2.5 + p[2], -2.36 - p[1]), 0.62, 0.62, 0.1, 10, RUIN_DARK)
+    for i, (a, y) in enumerate(((0.6, 4.2), (2.2, 5.6), (3.6, 4.6), (5.0, 6.8), (1.4, 7.6), (4.2, 8.2))):
+        r = 2.33
+        n = (math.cos(a), 0, math.sin(a))
+        box(m, (r * n[0], y, r * n[2]), (0.14 + 0.1 * abs(n[2]), 0.45, 0.14 + 0.1 * abs(n[0])), RUIN_DARK)
+    for i in range(24):
+        a = TAU * i / 24
+        n = (math.cos(a), 0, math.sin(a))
+        if abs(a - 3 * math.pi / 2) < 0.4:
+            continue  # not over the door
+        y = 3.0 + 0.12 * math.sin(i * 1.7)
+        r = 2.33
+        color = RUNE if i % 3 else RUNE_VIOLET
+        box(m, (r * n[0], y, r * n[2]), (0.07 + 0.05 * abs(n[2]), 0.12 + 0.06 * hash01(1103, i), 0.07 + 0.05 * abs(n[0])), color)
+    # Ivy climbing the walls.
+    for i in range(9):
+        a = TAU * hash01(1104, i)
+        y = 0.8 + 6.5 * hash01(1105, i)
+        r = 2.36
+        blob(m, (r * math.cos(a), y, r * math.sin(a)), (0.55, 0.9, 0.55), 0.25, 1106 + i, jitter(IVY, 1107 + i, 0.12),
+             reshape=lambda p, a=a: (p[0] * abs(math.sin(a)) + p[0] * 0.3, p[1], p[2] * abs(math.cos(a)) + p[2] * 0.3))
+    return m
+
+
+def ruin_wall(high):
+    """A broken wall 3 m long along X, 0.56 m thick; low: up to 1.0 m (can be
+    jumped onto), high: up to 2.2 m. Collision: half 1.5 x 0.5 (or 1.1) x 0.28."""
+    m = Mesh()
+    top = 2.2 if high else 1.0
+    seed = 1200 if high else 1300
+    columns = 6
+    for k in range(columns):
+        x0 = -1.5 + 3.0 * k / columns
+        w = 3.0 / columns
+        h = top * (0.55 + 0.45 * hash01(seed, k)) if k not in (1, 4) else top
+        rows = max(2, int(h / 0.35))
+        for r in range(rows):
+            y0 = h * r / rows
+            hh = h / rows
+            off = 0.05 * (hash01(seed + 1, k * 10 + r) - 0.5)
+            box(m, (x0 + w / 2 + off, y0 + hh / 2, 0), (w / 2 - 0.01, hh / 2 - 0.01, 0.28 - 0.02 * hash01(seed + 2, r)),
+                shade(RUIN_STONE, 0.85 + 0.22 * hash01(seed + 3, k * 10 + r)))
+        if hash01(seed + 4, k) < 0.5:  # moss on top
+            box(m, (x0 + w / 2, h + 0.02, 0), (w / 2 - 0.03, 0.03, 0.24), IVY)
+    return m
+
+
+def pillar():
+    """A broken column: plinth and fluted shaft, unit height (scaled by the
+    game to its height), radius 0.34. Collision: half 0.4 x height / 2."""
+    m = Mesh()
+    box(m, (0, 0.06, 0), (0.42, 0.06, 0.42), RUIN_DARK)
+    frustum(m, translate(0, 0.12, 0), 0.34, 0.31, 0.88, 10, RUIN_STONE)
+    for i in range(10):  # jagged break at the top
+        a0, a1 = TAU * i / 10, TAU * (i + 1) / 10
+        y = 1.0 - 0.08 * hash01(1400, i)
+        m.tri((0, 0.97, 0), (0.31 * math.cos(a1), y, 0.31 * math.sin(a1)), (0.31 * math.cos(a0), y, 0.31 * math.sin(a0)),
+              shade(RUIN_STONE, 1.08))
+    return m
+
+
+def fallen_pillar():
+    """A column lying along X, 3 m long, radius 0.34, in two pieces."""
+    m = Mesh()
+    lie = lambda dx: (lambda p: (p[1] + dx, 0.34 - p[0], p[2]))  # +Y turned to +X (a rotation)
+    frustum(m, lie(-1.5), 0.34, 0.33, 1.7, 10, RUIN_STONE, bottom_cap=shade(RUIN_STONE, 0.9), top_cap=shade(RUIN_STONE, 1.1))
+    frustum(m, lie(0.28), 0.32, 0.31, 1.2, 10, shade(RUIN_STONE, 0.95), bottom_cap=shade(RUIN_STONE, 1.1),
+            top_cap=shade(RUIN_STONE, 1.05))
+    box(m, (-1.38, 0.38, 0), (0.12, 0.38, 0.38), RUIN_DARK)
+    return m
+
+
+def rubble():
+    """A low pile of stones, radius about 0.75, 0.6 high."""
+    m = Mesh()
+    for i in range(7):
+        a = TAU * hash01(1500, i)
+        d = 0.45 * hash01(1501, i)
+        r = 0.18 + 0.14 * hash01(1502, i)
+        blob(m, (d * math.cos(a), r * 0.7, d * math.sin(a)), (r * 1.2, r * 0.8, r), 0.2, 1503 + i,
+             jitter(RUIN_STONE if i % 3 else RUIN_DARK, 1510 + i, 0.1))
+    m.fit((-0.75, 0, -0.75), (0.75, 0.6, 0.75))
+    return m
+
+
+def rune_stone():
+    """A standing stone 0.6 wide (X), 1.9 high, 0.3 thick, with glowing runes on
+    both faces. Collision: half 0.35 x 0.95 x 0.18."""
+    m = Mesh()
+    blob(m, (0, 0.95, 0), (0.33, 0.97, 0.16), 0.06, 1600, jitter(RUIN_DARK, 1601, 0.1))
+    for face in (-1, 1):
+        for k in range(5):
+            y = 0.5 + 0.26 * k
+            w = 0.07 + 0.06 * hash01(1602, k)
+            box(m, (0.06 * math.sin(k * 2.1), y, face * 0.155), (w, 0.03 + 0.03 * hash01(1603, k), 0.012),
+                RUNE if k % 2 else RUNE_VIOLET)
+    m.fit((-0.35, 0, -0.18), (0.35, 1.9, 0.18))
+    return m
+
+
+def sparkle():
+    """A small magic spark (radius 1), transparent; tinted and faded by the game."""
+    m = Mesh(transparent=True)
+    pts = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+    for a, b, c in ((0, 2, 4), (4, 2, 1), (1, 2, 5), (5, 2, 0), (4, 3, 0), (1, 3, 4), (5, 3, 1), (0, 3, 5)):
+        m.tri(pts[a], pts[b], pts[c], (1, 1, 1, 0.85))
+    return m
+
+
 def smoke():
     """One puff (radius 1), drawn transparent: the game fades it out."""
     m = Mesh(transparent=True)
@@ -997,6 +1211,8 @@ def all_models():
         "player_torso": player_torso(),
         "player_arm": player_arm(),
         "player_head": player_head(),
+        "player_staff": player_staff(),
+        "player_crystal": player_crystal(),
         "companion_body": companion_body(),
         "companion_leg": companion_leg(),
         "companion_head": companion_head(),
@@ -1036,6 +1252,14 @@ def all_models():
         "fish_body": fish_body(),
         "fish_tail": fish_tail(),
         "fish_fin": fish_fin(),
+        "tower": tower(),
+        "ruin_wall_low": ruin_wall(False),
+        "ruin_wall_high": ruin_wall(True),
+        "pillar": pillar(),
+        "fallen_pillar": fallen_pillar(),
+        "rubble": rubble(),
+        "rune_stone": rune_stone(),
+        "sparkle": sparkle(),
     }
     for v in range(4):
         models[f"rock{v}"] = rock(v)

@@ -30,6 +30,18 @@ TEST_CASE("a world survives serialize + deserialize unchanged") {
   CHECK(*loaded == w);
 }
 
+TEST_CASE("every new world can be saved and loaded back") {
+  for (uint64_t seed = 0; seed < 25; ++seed) {
+    CAPTURE(seed);
+    const World w = new_game(seed);
+    LoadError error = LoadError::None;
+    const auto loaded = deserialize(serialize(w), &error);
+    CHECK(error == LoadError::None);
+    REQUIRE(loaded.has_value());
+    CHECK(*loaded == w);
+  }
+}
+
 TEST_CASE("a loaded world continues exactly like the original") {
   World original = some_game();
   World copy = *deserialize(serialize(original));

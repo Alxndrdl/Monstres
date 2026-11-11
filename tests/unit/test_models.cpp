@@ -111,26 +111,35 @@ TEST_CASE("grass and flowers are small, double-sided and stand on the ground") {
   CHECK(bounds(model(MeshId::GrassTall)).max[1] > bounds(model(MeshId::GrassShort)).max[1]);
 }
 
-TEST_CASE("only the shadow, smoke and ripples are transparent") {
+TEST_CASE("only the shadow, smoke, ripples and sparks are transparent") {
   for (size_t id = 0; id < kMeshCount; ++id) {
     const auto mesh = static_cast<MeshId>(id);
     if (!model_name(mesh)) continue;
     CAPTURE(model_name(mesh));
-    const bool expected = mesh == MeshId::Shadow || mesh == MeshId::Smoke || mesh == MeshId::Ripple;
+    const bool expected = mesh == MeshId::Shadow || mesh == MeshId::Smoke || mesh == MeshId::Ripple ||
+                          mesh == MeshId::Sparkle;
     CHECK(models()[id].transparent == expected);
     if (expected) CHECK(mesh > MeshId::Ground);  // drawn after the opaque meshes
   }
 }
 
-TEST_CASE("village models match their collision boxes") {
-  struct Expect { MeshId mesh; ObjectKind kind; };
-  for (Expect e : {Expect{MeshId::HouseCottage, ObjectKind::HouseCottage}, Expect{MeshId::HouseChimney, ObjectKind::HouseChimney},
-                   Expect{MeshId::HouseHut, ObjectKind::HouseHut}, Expect{MeshId::Fence, ObjectKind::Fence},
-                   Expect{MeshId::Well, ObjectKind::Well}, Expect{MeshId::Barrel, ObjectKind::Barrel},
-                   Expect{MeshId::Lamp, ObjectKind::Lamp}}) {
+TEST_CASE("village and ruins models match their collision boxes") {
+  struct Expect { MeshId mesh; ObjectKind kind; uint8_t variant = 0; bool flat_top = true; };
+  // Roofs, the chimney and the well's roof rise above their box: only the
+  // walls count there.
+  for (Expect e : {Expect{MeshId::HouseCottage, ObjectKind::HouseCottage, 0, false},
+                   Expect{MeshId::HouseChimney, ObjectKind::HouseChimney, 0, false},
+                   Expect{MeshId::HouseHut, ObjectKind::HouseHut, 0, false}, Expect{MeshId::Fence, ObjectKind::Fence},
+                   Expect{MeshId::Well, ObjectKind::Well, 0, false}, Expect{MeshId::Barrel, ObjectKind::Barrel},
+                   Expect{MeshId::Lamp, ObjectKind::Lamp}, Expect{MeshId::Tower, ObjectKind::Tower},
+                   Expect{MeshId::RuinWallLow, ObjectKind::RuinWall, 0},
+                   Expect{MeshId::RuinWallHigh, ObjectKind::RuinWall, 1},
+                   Expect{MeshId::FallenPillar, ObjectKind::FallenPillar}, Expect{MeshId::Rubble, ObjectKind::Rubble},
+                   Expect{MeshId::RuneStone, ObjectKind::RuneStone}}) {
     CAPTURE(model_name(e.mesh));
     Object o;
     o.kind = e.kind;
+    o.variant = e.variant;
     const Box box = object_box(o);
     const Bounds b = bounds(model(e.mesh));
     CHECK(b.min[1] == doctest::Approx(0).epsilon(0.01));
@@ -140,7 +149,20 @@ TEST_CASE("village models match their collision boxes") {
     CHECK(b.max[0] <= box.max.x + 0.8f);
     CHECK(b.max[2] >= box.max.z - 0.05f);
     CHECK(b.max[2] <= box.max.z + 0.8f);
+    CHECK(b.max[1] >= box.max.y - 0.05f);  // as high as the box (one can stand on it)
+    if (e.flat_top) CHECK(b.max[1] <= box.max.y + 0.6f);
   }
+}
+
+TEST_CASE("the tower's merlons are where crows land") {
+  Object tower;
+  tower.kind = ObjectKind::Tower;
+  World w;
+  w.objects.push_back(tower);
+  const auto perches = crow_perches(w);
+  REQUIRE(perches.size() == 3);
+  const Bounds b = bounds(model(MeshId::Tower));
+  for (const Vec3& p : perches) CHECK(p.y == doctest::Approx(b.max[1]).epsilon(0.01));
 }
 
 TEST_CASE("a missing or broken file is reported, not loaded") {

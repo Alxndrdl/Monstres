@@ -69,6 +69,12 @@ public:
     return std::isfinite(v);
   }
   bool vec3(Vec3& v) { return f32(v.x) && f32(v.y) && f32(v.z); }
+  bool text(std::string& s, size_t n) {
+    if (remaining() < n) return false;
+    s.assign(reinterpret_cast<const char*>(in_.data() + pos_), n);
+    pos_ += n;
+    return s.find('\0') == std::string::npos;
+  }
   size_t remaining() const { return in_.size() - pos_; }
 
 private:
@@ -83,7 +89,8 @@ std::optional<World> fail(LoadError* error, LoadError e) {
 
 bool inside_world(Vec3 p) {
   const float limit = rules::kWorldHalfSize;
-  return p.x >= -limit && p.x <= limit && p.z >= -limit && p.z <= limit && p.y >= -5 && p.y < 1000;  // fish swim below 0
+  // Heights: valleys and the lake bed are below 0, but never this deep.
+  return p.x >= -limit && p.x <= limit && p.z >= -limit && p.z <= limit && p.y >= -50 && p.y < 1000;
 }
 
 }  // namespace
@@ -153,6 +160,11 @@ std::vector<uint8_t> serialize(const World& w) {
     out.f32(c.home.z);
     out.u8(c.variant);
   }
+  const size_t name_bytes = std::min(w.wizard.name.size(), kMaxNameBytes);
+  out.u8(static_cast<uint8_t>(name_bytes));
+  out.bytes(reinterpret_cast<const uint8_t*>(w.wizard.name.data()), name_bytes);
+  out.u16(w.wizard.level);
+  out.u32(w.wizard.xp);
   return out.take();
 }
 
@@ -169,7 +181,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     return fail(error, LoadError::UnsupportedVersion);
   }
   const bool v4 = version == 4;
-  const bool before_village = version < 6;
+  const bool before_village = version < 6;  // creatures had no flying height
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -185,7 +197,8 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   w.rng = Rng::from_raw(rng_state, rng_inc);
   w.path = make_path(w.seed);
   w.village = make_village_layout(w.seed, w.path);
-  w.ground = make_heightmap(w.seed, w.path, w.village);
+  w.ruins = make_ruins_layout(w.seed, w.path);
+  w.ground = make_heightmap(w.seed, w.path, w.village, w.ruins);
 
   w.objects.resize(count);
   const auto valid_size = [](float v) { return v >= 0 && v <= kMaxObjectSize; };
@@ -215,37 +228,33 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       c.species = static_cast<Species>(species);
       c.mind = static_cast<Mind>(mind);
     }
-    if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
   }
 
-  if (before_village) {
-    // Saves from before the village: build it, and bring everyone anew.
-    build_village(w);
-  }
-  if (version < 7) {
-    // Saves from the flat world: set the objects on the relief and lift
-    // bodies out of the ground (they fall onto it if it is now lower).
-    settle_objects(w);
-    auto lift = [&](Body& b) {
-      const float ground = w.ground.height(b.pos.x, b.pos.z);
-      if (b.pos.y < ground) b.pos.y = ground;
-      if (b.pos.y > ground) b.on_ground = false;
-    };
-    lift(w.player);
-    for (Creature& c : w.creatures) {
-      if (c.species != Species::Fish && c.species != Species::Crow) lift(c.body);
+  if (version >= 8) {
+    uint8_t name_bytes = 0;
+    if (!in.u8(name_bytes) || name_bytes > kMaxNameBytes || !in.text(w.wizard.name, name_bytes) ||
+        !in.u16(w.wizard.level) || !in.u32(w.wizard.xp) || w.wizard.level == 0) {
+      return fail(error, LoadError::Corrupt);
     }
   }
-  if (before_village) spawn_creatures(w);
-  if (version < 7) {
-    const Box pb = player_box(w.player);
-    const bool stuck = in_lake(w.village.lake, w.player.pos.x, w.player.pos.z, 0.5f) ||
-                       std::any_of(w.objects.begin(), w.objects.end(),
+  if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
+
+  if (version < 8) {
+    // Saves from the smaller world: the world is built anew from the seed
+    // (it grew, the path and everything along it moved). The player keeps
+    // its place if it is free, the time goes on.
+    World grown = new_game(w.seed);
+    grown.tick = w.tick;
+    grown.rng = w.rng;
+    Body p = w.player;
+    p.pos.y = std::max(p.pos.y, grown.ground.height(p.pos.x, p.pos.z));
+    p.on_ground = false;  // falls onto the ground if it is now lower
+    const Box pb = player_box(p);
+    const bool stuck = in_lake(grown.village.lake, p.pos.x, p.pos.z, 0.5f) ||
+                       std::any_of(grown.objects.begin(), grown.objects.end(),
                                    [&](const Object& o) { return overlaps(pb, object_box(o)); });
-    if (stuck) {  // back to the start
-      w.player = Body{};
-      w.player.pos.y = w.ground.height(0, 0);
-    }
+    if (!stuck) grown.player = p;
+    w = std::move(grown);
   }
   return w;
 }

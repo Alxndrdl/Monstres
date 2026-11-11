@@ -47,6 +47,9 @@ struct App {
   int jump_buffer = 0;           // ticks left during which a jump press is pending
   bool frozen = false;           // ?frozen: no automatic ticks (tests, screenshots)
   bool redraw = true;            // frozen mode only redraws when something changed
+  int selected = -1;             // creature shown in the info panel (-1: none)
+  bool paused = false;           // a game menu is open: time stands still
+  std::vector<uint8_t> portrait; // last portrait drawn for the page (RGBA)
   int canvas_w = 0, canvas_h = 0;
   double last_time = 0;
   double accumulator = 0;
@@ -89,6 +92,7 @@ void tick(App& app, const Input& in) {
 // Call whenever app.world is replaced (new game, loaded or imported save).
 void world_changed(App& app) {
   app.redraw = true;
+  app.selected = -1;
   build_landscape(app.world, app.landscape);
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), build_ground_mesh(app.world));
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), build_path_mesh(app.world));
@@ -125,6 +129,11 @@ bool read_save(World& out) {
   return true;
 }
 
+View current_view(const App& app, float time) {
+  const float aspect = app.canvas_h > 0 ? static_cast<float>(app.canvas_w) / static_cast<float>(app.canvas_h) : 1.0f;
+  return build_view(app.world, app.camera, aspect, time);
+}
+
 void frame(void* user) {
   App& app = *static_cast<App*>(user);
 
@@ -132,7 +141,8 @@ void frame(void* user) {
   double dt = now - app.last_time;
   app.last_time = now;
 
-  if (!app.frozen) {
+  if (app.paused) app.accumulator = 0;
+  if (!app.frozen && !app.paused) {
     app.accumulator = std::min(app.accumulator + dt, kTickMs * kMaxTicksPerFrame);
     while (app.accumulator >= kTickMs) {
       app.accumulator -= kTickMs;
@@ -158,8 +168,8 @@ void frame(void* user) {
 
   // Time follows the simulation, so ?frozen screenshots are reproducible.
   const float time = static_cast<float>(app.world.tick) / rules::kTicksPerSecond;
-  build_dynamic(app.world, time, app.dynamic);
-  const View view = build_view(app.world, app.camera, static_cast<float>(pw) / static_cast<float>(ph), time);
+  build_dynamic(app.world, time, app.dynamic, app.selected);
+  const View view = current_view(app, time);
   const DrawList* lists[] = {&app.landscape, &app.dynamic};
   app.renderer->begin_frame({pw, ph});
   app.renderer->draw(view, lists);
@@ -213,6 +223,90 @@ EMSCRIPTEN_KEEPALIVE double monstres_debug_step(int ticks) {
 }
 
 EMSCRIPTEN_KEEPALIVE void monstres_save_now() { write_save(*g_app); }
+
+// Selects the creature under a point of the canvas (normalized device
+// coordinates, -1..1, y up), or nothing. Returns its index or -1.
+EMSCRIPTEN_KEEPALIVE int monstres_pick(float ndc_x, float ndc_y) {
+  g_app->selected = pick_creature(g_app->world, current_view(*g_app, 0), ndc_x, ndc_y);
+  g_app->redraw = true;
+  return g_app->selected;
+}
+
+// Game menus: time stands still while one is open (saved when it opens).
+EMSCRIPTEN_KEEPALIVE void monstres_set_paused(int paused) {
+  g_app->paused = paused != 0;
+  if (g_app->paused) write_save(*g_app);
+}
+
+// Renames the magician (UTF-8, cut to kMaxNameBytes on a character boundary).
+EMSCRIPTEN_KEEPALIVE void monstres_set_name(const char* name) {
+  std::string n = name ? name : "";
+  if (n.size() > kMaxNameBytes) {
+    size_t cut = kMaxNameBytes;
+    while (cut > 0 && (static_cast<unsigned char>(n[cut]) & 0xC0) == 0x80) --cut;  // not inside a character
+    n.resize(cut);
+  }
+  g_app->world.wizard.name = n;
+  write_save(*g_app);
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_wizard_json() {
+  g_app->json = wizard_json(g_app->world);
+  return g_app->json.c_str();
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_bestiary_json() {
+  g_app->json = bestiary_json(g_app->world);
+  return g_app->json.c_str();
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_map_json() {
+  g_app->json = map_json(g_app->world);
+  return g_app->json.c_str();
+}
+
+// Heights of the ground, Heightmap::kPoints squared floats (see map_json).
+EMSCRIPTEN_KEEPALIVE const float* monstres_heights() { return g_app->world.ground.heights.data(); }
+
+// Draws a portrait of `size` x `size` pixels: species index, or -1 for the
+// magician. Returns the RGBA pixels (rows from the top), valid until the next call.
+EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_portrait(int species, int variant, int size) {
+  PortraitSubject subject;
+  subject.wizard = species < 0;
+  subject.species = static_cast<Species>(std::clamp(species, 0, static_cast<int>(Species::Count) - 1));
+  subject.variant = static_cast<uint8_t>(variant);
+  Portrait p = build_portrait(subject, 1.0f);
+  const DrawList* lists[] = {&p.list};
+  g_app->portrait = g_app->renderer->draw_offscreen(p.view, lists, size, size);
+  g_app->redraw = true;  // the screen's viewport has to be set again
+  return g_app->portrait.data();
+}
+
+EMSCRIPTEN_KEEPALIVE void monstres_select(int index) {
+  const bool valid = index >= 0 && static_cast<size_t>(index) < g_app->world.creatures.size();
+  g_app->selected = valid ? index : -1;
+  g_app->redraw = true;
+}
+
+// The selected creature as JSON (see creature_json), or "null".
+EMSCRIPTEN_KEEPALIVE const char* monstres_selected_json() {
+  g_app->json = creature_json(g_app->world, g_app->selected);
+  return g_app->json.c_str();
+}
+
+// Where creatures[index] is drawn, as JSON {"x", "y"} in normalized device
+// coordinates, or "null" (tests click on it).
+EMSCRIPTEN_KEEPALIVE const char* monstres_creature_screen_json(int index) {
+  float x = 0, y = 0;
+  if (!creature_on_screen(g_app->world, current_view(*g_app, 0), index, x, y)) {
+    g_app->json = "null";
+  } else {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "{\"x\":%.4f,\"y\":%.4f}", static_cast<double>(x), static_cast<double>(y));
+    g_app->json = buf;
+  }
+  return g_app->json.c_str();
+}
 
 EMSCRIPTEN_KEEPALIVE int monstres_export_prepare() {
   g_app->export_buffer = serialize(g_app->world);

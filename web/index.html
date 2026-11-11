@@ -25,15 +25,179 @@
     }
     #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
 
-    .topbar {
-      position: fixed; top: max(10px, env(safe-area-inset-top)); right: var(--edge-right);
-      display: flex; gap: 6px;
+    /* Panels and buttons over the 3D view. */
+    .panel {
+      background: rgba(20, 24, 40, 0.82); border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3);
     }
-    .topbar button {
-      font: inherit; font-size: 12px; color: #fff; background: rgba(20, 24, 40, 0.45);
-      border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 6px; padding: 4px 9px; cursor: pointer;
+    .button {
+      font: inherit; font-size: 13px; color: #fff; background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 6px; padding: 6px 12px; cursor: pointer;
     }
-    .topbar button:hover { background: rgba(20, 24, 40, 0.65); }
+    .button:hover { background: rgba(255, 255, 255, 0.22); }
+    .icon-button {
+      width: 42px; height: 42px; padding: 0; border-radius: 50%; cursor: pointer; color: #fff;
+      background: rgba(20, 24, 40, 0.45); border: 1px solid rgba(255, 255, 255, 0.4);
+      display: grid; place-items: center;
+    }
+    .icon-button:hover, .icon-button[aria-expanded="true"] { background: rgba(20, 24, 40, 0.7); }
+    .icon-button svg { width: 24px; height: 24px; }
+
+    /* Settings: gear at the top right, menu below it. */
+    #settings-button {
+      position: fixed; top: max(12px, env(safe-area-inset-top)); right: var(--edge-right); z-index: 3;
+    }
+    #settings {
+      position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 50px); right: var(--edge-right); z-index: 3;
+      width: 250px; max-height: calc(100% - 80px); overflow-y: auto; padding: 12px 14px;
+    }
+    #settings h2 { margin: 0 0 8px; font-size: 16px; }
+    #settings h3 {
+      margin: 12px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; color: rgba(255, 255, 255, 0.65);
+    }
+    #settings .row { display: flex; gap: 8px; }
+    #settings .note { margin: 6px 0 0; font-size: 12px; color: rgba(255, 255, 255, 0.7); }
+    #settings label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    #settings input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: #f2c94c; }
+
+    /* Grimoire (game menus), top left. */
+    #menu-button {
+      position: fixed; top: max(12px, env(safe-area-inset-top)); left: var(--edge); z-index: 3;
+    }
+
+    /* Frames per second, next to the grimoire. */
+    #fps {
+      position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 9px); left: calc(var(--edge) + 52px); z-index: 2;
+      padding: 2px 8px; border-radius: 5px; background: rgba(20, 24, 40, 0.55);
+      font: 600 12px/1.6 ui-monospace, monospace; pointer-events: none;
+    }
+
+    /* Info about the creature that was clicked, top left (the creature is
+       usually in the middle of the view), below the frame counter if shown. */
+    #creature {
+      position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: var(--edge);
+      z-index: 2; width: min(290px, calc(100% - 120px)); padding: 10px 36px 10px 14px;
+    }
+    #creature .name { margin: 0; font-size: 17px; font-weight: 700; }
+    #creature .kind { margin: 0; font-size: 12px; color: #f2c94c; }
+    #creature .description { margin: 6px 0; font-size: 13px; }
+    #creature .facts { margin: 0; font-size: 12px; color: rgba(255, 255, 255, 0.75); }
+    #creature-close {
+      position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0;
+      border: none; border-radius: 50%; background: transparent; color: #fff; font-size: 18px; cursor: pointer;
+    }
+    #creature-close:hover { background: rgba(255, 255, 255, 0.15); }
+
+    /* ---- Grimoire: character sheet, bestiary, maps ---- */
+    #game-menu {
+      position: fixed; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
+      background: rgba(10, 12, 26, 0.55); padding: max(10px, env(safe-area-inset-top)) var(--edge-right)
+        max(10px, env(safe-area-inset-bottom)) var(--edge);
+    }
+    #game-menu[hidden] { display: none; }
+    .menu-window {
+      width: min(940px, 100%); height: min(620px, 100%); display: flex; flex-direction: column;
+      background: rgba(24, 22, 44, 0.94); border: 1px solid rgba(242, 201, 76, 0.35); border-radius: 12px;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45); overflow: hidden;
+    }
+    .tabs {
+      display: flex; align-items: center; gap: 4px; padding: 8px 8px 0 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .tabs [role="tab"] {
+      font: inherit; font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, 0.7); cursor: pointer;
+      background: transparent; border: none; border-bottom: 2px solid transparent; padding: 8px 12px 9px;
+    }
+    .tabs [role="tab"]:hover { color: #fff; }
+    .tabs [role="tab"][aria-selected="true"] { color: #f2c94c; border-bottom-color: #f2c94c; }
+    #menu-close {
+      margin-left: auto; width: 34px; height: 34px; border: none; border-radius: 50%; background: transparent;
+      color: #fff; font-size: 22px; cursor: pointer;
+    }
+    #menu-close:hover { background: rgba(255, 255, 255, 0.12); }
+    .tab-panel { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px; }
+    .tab-panel[hidden] { display: none; }
+    .portrait {
+      display: block; border-radius: 10px; object-fit: contain;
+      background: radial-gradient(circle at 50% 40%, rgba(130, 120, 220, 0.45), rgba(40, 36, 80, 0.6));
+    }
+    .bar { height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+    .bar > span { display: block; height: 100%; border-radius: 4px; background: #f2c94c; }
+
+    /* Character sheet. */
+    .sheet { display: grid; grid-template-columns: auto 1fr; gap: 16px 20px; align-items: start; }
+    .sheet > .portrait { width: 170px; height: 170px; }
+    .name-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: rgba(255, 255, 255, 0.7); }
+    .name-field input {
+      font: 600 20px/1.2 inherit; font-family: inherit; color: #fff; padding: 5px 8px; max-width: 320px;
+      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 6px;
+    }
+    .name-field input:focus { outline: 2px solid rgba(242, 201, 76, 0.7); outline-offset: 1px; }
+    .rank { margin: 8px 0 4px; color: #f2c94c; font-weight: 600; }
+    .xp { display: flex; align-items: center; gap: 10px; font-size: 12px; color: rgba(255, 255, 255, 0.75); }
+    .xp .bar { flex: 0 1 220px; }
+    .xp .bar > span { background: linear-gradient(90deg, #8f7cf0, #c8a6ff); }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 18px; margin: 14px 0 0; }
+    .stat { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; font-size: 13px; }
+    .stat dt { color: rgba(255, 255, 255, 0.75); }
+    .stat dd { margin: 0; font-weight: 700; }
+    .stat .bar { grid-column: 1 / -1; }
+    .where { margin: 12px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.75); }
+    .companion-card {
+      grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 8px 10px;
+      background: rgba(255, 255, 255, 0.06); border-radius: 10px;
+    }
+    .companion-card .portrait { width: 64px; height: 64px; }
+    .companion-card span { display: block; font-size: 12px; color: rgba(255, 255, 255, 0.7); }
+
+    /* Bestiary. */
+    .bestiary { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 16px; height: 100%; }
+    .bestiary-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow: auto; }
+    .bestiary-list button {
+      width: 100%; display: flex; align-items: center; gap: 10px; padding: 5px 8px; cursor: pointer;
+      font: inherit; color: #fff; text-align: left; background: rgba(255, 255, 255, 0.05);
+      border: 1px solid transparent; border-radius: 8px;
+    }
+    .bestiary-list button:hover { background: rgba(255, 255, 255, 0.1); }
+    .bestiary-list button[aria-current="true"] { border-color: rgba(242, 201, 76, 0.7); background: rgba(242, 201, 76, 0.12); }
+    .bestiary-list .portrait { width: 44px; height: 44px; flex: none; }
+    .bestiary-list small { display: block; font-size: 11px; color: rgba(255, 255, 255, 0.6); }
+    .bestiary-detail { display: grid; grid-template-columns: auto 1fr; gap: 14px 18px; align-content: start; }
+    .bestiary-detail > .portrait { width: 190px; height: 190px; }
+    .bestiary-detail h2 { margin: 0; font-size: 22px; }
+    .bestiary-detail .kind { margin: 2px 0 8px; color: #f2c94c; font-size: 13px; }
+    .bestiary-detail .description { margin: 0 0 10px; font-size: 14px; }
+    .badge {
+      display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; font-weight: 600;
+      color: #1b1830; margin-right: 6px;
+    }
+    .facts { margin: 6px 0 0; font-size: 12px; color: rgba(255, 255, 255, 0.72); }
+    .bestiary-detail .stats { grid-column: 1 / -1; margin-top: 0; }
+
+    /* Maps. */
+    #tab-map { display: flex; flex-direction: column; gap: 10px; }
+    #tab-map[hidden] { display: none; }
+    .map-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+    .segmented { display: inline-flex; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 7px; overflow: hidden; }
+    .segmented button {
+      font: inherit; font-size: 13px; color: #fff; background: transparent; border: none; padding: 5px 14px; cursor: pointer;
+    }
+    .segmented button[aria-pressed="true"] { background: rgba(242, 201, 76, 0.25); color: #f2c94c; font-weight: 600; }
+    .map-frame { flex: 1; min-height: 0; position: relative; }
+    #map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
+
+    @media (max-height: 460px) {
+      .tab-panel { padding: 10px 12px; }
+      .sheet > .portrait { width: 120px; height: 120px; }
+      .bestiary-detail > .portrait { width: 130px; height: 130px; }
+      .bestiary-list .portrait { width: 36px; height: 36px; }
+    }
+    @media (max-width: 600px) {
+      .bestiary { grid-template-columns: 1fr; }
+      .bestiary-list { flex-direction: row; overflow-x: auto; }
+      .bestiary-list button { width: auto; }
+    }
 
     .control {
       position: fixed; bottom: var(--edge-bottom);
@@ -104,10 +268,93 @@
     <div>Tournez votre téléphone pour jouer.</div>
   </div>
 
-  <div class="topbar">
-    <button id="export" type="button">Exporter</button>
-    <button id="import" type="button">Importer</button>
+  <button id="menu-button" class="icon-button" type="button" aria-label="Grimoire : personnage, bestiaire, carte"
+          aria-expanded="false" aria-controls="game-menu">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 5.5C4 4.7 4.7 4 5.5 4H11v16H5.5c-.8 0-1.5-.7-1.5-1.5z"/>
+      <path d="M20 5.5c0-.8-.7-1.5-1.5-1.5H13v16h5.5c.8 0 1.5-.7 1.5-1.5z"/>
+      <path d="M16.5 7.5l.6 1.3 1.3.6-1.3.6-.6 1.3-.6-1.3-1.3-.6 1.3-.6z"/>
+    </svg>
+  </button>
+
+  <button id="settings-button" class="icon-button" type="button" aria-label="Paramètres"
+          aria-expanded="false" aria-controls="settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+    </svg>
+  </button>
+  <div id="settings" class="panel" role="dialog" aria-label="Paramètres" hidden>
+    <h2>Paramètres</h2>
+    <h3>Sauvegarde</h3>
+    <div class="row">
+      <button id="export" class="button" type="button">Exporter</button>
+      <button id="import" class="button" type="button">Importer</button>
+    </div>
     <input id="import-file" type="file" accept=".sav,application/octet-stream" hidden>
+    <p class="note">La partie est sauvegardée automatiquement. Exporter en garde une copie dans un fichier.</p>
+    <h3>Affichage</h3>
+    <label><input id="show-fps" type="checkbox"> Afficher les FPS</label>
+  </div>
+
+  <div id="fps" hidden></div>
+
+  <div id="game-menu" role="dialog" aria-modal="true" aria-label="Grimoire" hidden>
+    <div class="menu-window">
+      <div class="tabs" role="tablist">
+        <button id="tab-button-character" role="tab" type="button" aria-controls="tab-character" data-tab="character">Personnage</button>
+        <button id="tab-button-bestiary" role="tab" type="button" aria-controls="tab-bestiary" data-tab="bestiary">Bestiaire</button>
+        <button id="tab-button-map" role="tab" type="button" aria-controls="tab-map" data-tab="map">Carte</button>
+        <button id="menu-close" type="button" aria-label="Fermer">×</button>
+      </div>
+
+      <section id="tab-character" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-character">
+        <div class="sheet">
+          <img id="wizard-portrait" class="portrait" alt="Ton magicien">
+          <div>
+            <label class="name-field">Nom
+              <input id="wizard-name" type="text" maxlength="24" placeholder="Choisis ton nom" autocomplete="off" spellcheck="false">
+            </label>
+            <p class="rank" id="wizard-rank"></p>
+            <div class="xp"><div class="bar"><span id="wizard-xp-fill"></span></div><span id="wizard-xp-text"></span></div>
+            <dl class="stats" id="wizard-stats"></dl>
+            <p class="where" id="wizard-where"></p>
+          </div>
+          <div class="companion-card">
+            <img id="companion-portrait" class="portrait" alt="">
+            <div><strong>Pompon</strong><span>Ton compagnon · renard des braises</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-bestiary" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-bestiary" hidden>
+        <div class="bestiary">
+          <ul id="bestiary-list" class="bestiary-list"></ul>
+          <article id="bestiary-detail" class="bestiary-detail" aria-live="polite"></article>
+        </div>
+      </section>
+
+      <section id="tab-map" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-map" hidden>
+        <div class="map-tools">
+          <div class="segmented" role="group" aria-label="Échelle de la carte">
+            <button type="button" data-map="local" aria-pressed="true">Locale</button>
+            <button type="button" data-map="global" aria-pressed="false">Globale</button>
+          </div>
+          <span id="map-where"></span>
+        </div>
+        <div class="map-frame"><canvas id="map-canvas" aria-label="Carte du monde"></canvas></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="creature" class="panel" role="status" aria-live="polite" hidden>
+    <p class="name"></p>
+    <p class="kind"></p>
+    <p class="description"></p>
+    <p class="facts"></p>
+    <button id="creature-close" type="button" aria-label="Fermer">×</button>
   </div>
 
   <div class="control left">
@@ -130,22 +377,14 @@
   <script>
     var Module = { canvas: document.getElementById('canvas') };
 
-    document.getElementById('export').addEventListener('click', () => window.monstres?.exportSave());
-    const fileInput = document.getElementById('import-file');
-    document.getElementById('import').addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files[0];
-      fileInput.value = '';
-      if (file && !(await window.monstres?.importSave(file))) {
-        alert("Ce fichier n'est pas une sauvegarde Monstres valide.");
-      }
-    });
-
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service Worker :', e));
     }
   </script>
+  <script src="lore.js"></script>
   <script src="controls.js"></script>
+  <script src="ui.js"></script>
+  <script src="menu.js"></script>
   {{{ SCRIPT }}}
 </body>
 </html>

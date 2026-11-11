@@ -99,6 +99,51 @@ window.monstres = {
   },
   setCamera: (yaw, pitch) => _monstres_set_camera(yaw, pitch),
 
+  // Creature info panel. pick: point of the canvas in CSS pixels; returns the
+  // index of the creature there (now selected) or -1 (selection cleared).
+  pick: (clientX, clientY) => {
+    const rect = Module.canvas.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const y = 1 - ((clientY - rect.top) / rect.height) * 2;
+    return _monstres_pick(x, y);
+  },
+  select: (index) => _monstres_select(index),
+
+  // Game menus (web/menu.js).
+  setPaused: (paused) => _monstres_set_paused(paused ? 1 : 0),
+  wizard: () => JSON.parse(UTF8ToString(_monstres_wizard_json())),
+  setName: (name) => {
+    const bytes = lengthBytesUTF8(name) + 1;
+    const ptr = _malloc(bytes);
+    stringToUTF8(name, ptr, bytes);
+    _monstres_set_name(ptr);
+    _free(ptr);
+    return monstresSync();
+  },
+  bestiary: () => JSON.parse(UTF8ToString(_monstres_bestiary_json())),
+  // Map data, plus the heights of the ground as a Float32Array (a copy).
+  map: () => {
+    const data = JSON.parse(UTF8ToString(_monstres_map_json()));
+    const n = data.points * data.points;
+    const ptr = _monstres_heights() >> 2;
+    data.heights = n ? HEAPF32.slice(ptr, ptr + n) : new Float32Array(0);
+    return data;
+  },
+  // Portrait of a species (index in the bestiary order of Species) or of the
+  // magician (species -1), as ImageData of size x size pixels.
+  portrait: (species, size = 256, variant = 0) => {
+    const ptr = _monstres_portrait(species, variant, size);
+    return new ImageData(new Uint8ClampedArray(HEAPU8.slice(ptr, ptr + size * size * 4)), size, size);
+  },
+  selected: () => JSON.parse(UTF8ToString(_monstres_selected_json())),
+  // Where creature `index` is drawn, in CSS pixels of the page, or null.
+  creatureOnScreen: (index) => {
+    const p = JSON.parse(UTF8ToString(_monstres_creature_screen_json(index)));
+    if (!p) return null;
+    const rect = Module.canvas.getBoundingClientRect();
+    return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height };
+  },
+
   state: () => JSON.parse(UTF8ToString(_monstres_state_json())),
   // Runs ticks with the current input; useful with ?frozen in tests.
   step: (ticks = 1) => _monstres_debug_step(ticks),

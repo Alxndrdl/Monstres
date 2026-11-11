@@ -65,4 +65,15 @@ inline void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<cons
 // The player, the companion and the wild monsters, with their shadows.
 void add_characters(const World& world, float time, DrawList& list);
 
+// Who a portrait shows: the magician, or a species.
+struct PortraitSubject {
+  bool wizard = false;
+  Species species = Species::Companion;
+  uint8_t variant = 0;
+};
+
+// One figure alone, standing at the origin, turned three-quarters towards
+// +Z, at rest; returns how high it is drawn (meters), to frame it.
+float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float time);
+
 }  // namespace monstres

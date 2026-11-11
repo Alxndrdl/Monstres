@@ -199,3 +199,63 @@ TEST_CASE("the camera comes closer when an object is between it and the player")
   CHECK(camera_distance(w, 0, 1, 0, 0, 0, 1, 6) < 3.0f);
   CHECK(camera_distance(w, 0, 1, 0, 0, 0, -1, 6) == Approx(6));  // nothing in front
 }
+
+namespace {
+
+World world_with_slime_ahead() {
+  World w = empty_world();  // the player at the origin, the camera looks north (-Z)
+  Creature c;
+  c.species = Species::Slime;
+  c.body.pos = {0, 0, -5};
+  w.creatures.push_back(c);
+  return w;
+}
+
+}  // namespace
+
+TEST_CASE("clicking on a creature picks it, clicking on the sky picks nothing") {
+  World w = world_with_slime_ahead();
+  const View v = build_view(w, Camera{}, 1.5f, 0);
+  float x = 0, y = 0;
+  REQUIRE(creature_on_screen(w, v, 0, x, y));
+  CHECK(std::fabs(x) < 0.05f);  // straight ahead
+  CHECK(pick_creature(w, v, x, y) == 0);
+  CHECK(pick_creature(w, v, x + 0.03f, y + 0.03f) == 0);  // a little off: still easy to hit
+  CHECK(pick_creature(w, v, x, 0.9f) == -1);              // the sky
+  CHECK(pick_creature(w, v, 0.9f, y) == -1);              // far to the right
+  CHECK_FALSE(creature_on_screen(w, v, 1, x, y));         // no such creature
+}
+
+TEST_CASE("a creature hidden behind an object cannot be picked") {
+  World w = world_with_slime_ahead();
+  const View v = build_view(w, Camera{}, 1.5f, 0);
+  float x = 0, y = 0;
+  REQUIRE(creature_on_screen(w, v, 0, x, y));
+  add_box(w, {0, 0, -3.5f}, {1, 1.5f, 0.2f});  // a wall in between
+  CHECK(pick_creature(w, v, x, y) == -1);
+}
+
+TEST_CASE("the nearest of two creatures in line is picked") {
+  World w = world_with_slime_ahead();
+  Creature far = w.creatures[0];
+  far.body.pos.z = -9;
+  w.creatures.insert(w.creatures.begin(), far);  // index 0 far, index 1 near
+  const View v = build_view(w, Camera{}, 1.5f, 0);
+  float x = 0, y = 0;
+  REQUIRE(creature_on_screen(w, v, 1, x, y));
+  CHECK(pick_creature(w, v, x, y) == 1);
+}
+
+TEST_CASE("the selected creature has a ring at its feet") {
+  const World w = world_with_slime_ahead();
+  DrawList none, marked;
+  build_dynamic(w, 0, none);
+  build_dynamic(w, 0, marked, 0);
+  const auto& rings = batch(marked, MeshId::Ripple);
+  REQUIRE(rings.size() == batch(none, MeshId::Ripple).size() + 1);
+  CHECK(rings.back().x == Approx(0));
+  CHECK(rings.back().z == Approx(-5));
+  CHECK(rings.back().y > 0);
+  build_dynamic(w, 0, marked, 7);  // out of range: no ring, no crash
+  CHECK(batch(marked, MeshId::Ripple).size() == batch(none, MeshId::Ripple).size());
+}

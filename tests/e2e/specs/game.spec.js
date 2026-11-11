@@ -14,7 +14,7 @@ test('the game starts in a 3D world', async ({ page }) => {
   const bySpecies = {};
   for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
   expect(bySpecies).toMatchObject({ companion: 1, villager: 8, crow: 5, fish: 4 });
-  expect(bySpecies.slime + bySpecies.mushroom + bySpecies.bird).toBe(16);
+  expect(bySpecies.slime + bySpecies.mushroom + bySpecies.bird).toBe(40);
   await expect(page.locator('#message')).toBeHidden();
 });
 
@@ -211,4 +211,154 @@ test('the game still starts offline once installed', async ({ page, context, bro
   await openGame(page, '?frozen');
   expect((await state(page)).objects).toBeGreaterThan(150);
   await expect(page.locator('#joystick')).toBeVisible();  // controls.js came from the cache too
+});
+
+test.describe('settings menu', () => {
+  test('the gear opens the menu with the save buttons, Escape closes it', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const menu = page.locator('#settings');
+    await expect(menu).toBeHidden();
+    await expect(page.locator('#export')).toBeHidden();  // only in the menu
+    await page.locator('#settings-button').click();
+    await expect(menu).toBeVisible();
+    await expect(page.locator('#export')).toBeVisible();
+    await expect(page.locator('#import')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    // Clicking on the game view closes it too.
+    await page.locator('#settings-button').click();
+    await expect(menu).toBeVisible();
+    await page.mouse.click(400, 150);
+    await expect(menu).toBeHidden();
+  });
+
+  test('the FPS counter can be shown, and stays shown after a reload', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const fps = page.locator('#fps');
+    await expect(fps).toBeHidden();
+    await page.locator('#settings-button').click();
+    await page.locator('#show-fps').check();
+    await expect(fps).toBeVisible();
+    await expect(fps).toHaveText(/^\d+ FPS$/);
+    await openGame(page, '?seed=42&new&frozen');
+    await expect(fps).toBeVisible();
+    await page.locator('#settings-button').click();
+    await expect(page.locator('#show-fps')).toBeChecked();
+    await page.locator('#show-fps').uncheck();
+    await expect(fps).toBeHidden();
+  });
+});
+
+test.describe('creature info', () => {
+  test('clicking on the companion shows who it is, clicking elsewhere hides it', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const panel = page.locator('#creature');
+    await expect(panel).toBeHidden();
+    const at = await page.evaluate(() => window.monstres.creatureOnScreen(0));
+    expect(at).not.toBeNull();
+    await page.mouse.click(at.x, at.y);
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('.name')).toHaveText('Pompon');
+    await expect(panel.locator('.facts')).toHaveText(/^T’attend · à 1 m$/);  // just behind the player
+    expect((await page.evaluate(() => window.monstres.selected())).index).toBe(0);
+
+    await page.mouse.click(220, 300);  // grass, no creature there
+    await expect(panel).toBeHidden();
+    expect(await page.evaluate(() => window.monstres.selected())).toBeNull();
+  });
+
+  test('dragging to look around does not select anything', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const at = await page.evaluate(() => window.monstres.creatureOnScreen(0));
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.x + 80, at.y, { steps: 5 });
+    await page.mouse.up();
+    await expect(page.locator('#creature')).toBeHidden();
+  });
+
+  test('the close button hides the panel', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const at = await page.evaluate(() => window.monstres.creatureOnScreen(0));
+    await page.mouse.click(at.x, at.y);
+    await expect(page.locator('#creature')).toBeVisible();
+    await page.locator('#creature-close').click();
+    await expect(page.locator('#creature')).toBeHidden();
+  });
+});
+
+test.describe('grimoire', () => {
+  test('the book opens the menus and stops time, Escape closes it', async ({ page }) => {
+    await openGame(page, '?seed=42&new');
+    const menu = page.locator('#game-menu');
+    await expect(menu).toBeHidden();
+    await page.locator('#menu-button').click();
+    await expect(menu).toBeVisible();
+    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Bestiaire', 'Carte']);
+    const tick = (await state(page)).tick;
+    await page.waitForTimeout(500);
+    expect((await state(page)).tick).toBe(tick);  // paused
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect.poll(async () => (await state(page)).tick).toBeGreaterThan(tick);  // time goes on
+  });
+
+  test('the character sheet shows the magician, the name is kept', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await page.locator('#menu-button').click();
+    await page.getByRole('tab', { name: 'Personnage' }).click();
+    await expect(page.locator('#wizard-rank')).toHaveText('Apprenti magicien · niveau 1');
+    await expect(page.locator('#wizard-stats')).toContainText('Points de vie');
+    await expect(page.locator('#wizard-where')).toContainText('Prairie');
+    await expect(page.locator('#wizard-portrait')).toHaveAttribute('src', /^data:image\/png/);
+    const before = (await state(page)).player;
+    const name = page.locator('#wizard-name');
+    await name.fill('Zoé');
+    await name.press('d');  // typing letters does not walk
+    await name.press('Enter');
+    expect((await state(page)).player).toEqual(before);
+    await expect.poll(() => page.evaluate(() => window.monstres.wizard().name)).toBe('Zoéd');
+    await page.evaluate(() => window.monstres.saveNow());
+
+    await openGame(page, '?frozen');  // the same game, loaded again
+    await page.locator('#menu-button').click();
+    await page.getByRole('tab', { name: 'Personnage' }).click();
+    await expect(page.locator('#wizard-name')).toHaveValue('Zoéd');
+  });
+
+  test('the bestiary lists the monsters, each with its card', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await page.locator('#menu-button').click();
+    await page.getByRole('tab', { name: 'Bestiaire' }).click();
+    const entries = page.locator('.bestiary-entry');
+    await expect(entries).toHaveCount(6);  // villagers are not monsters
+    await expect(entries.locator('strong')).toHaveText(['Pompon', 'Gloubi', 'Champi', 'Piou', 'Croa', 'Bloup']);
+    await page.locator('.bestiary-entry[data-species="mushroom"]').click();
+    const detail = page.locator('#bestiary-detail');
+    await expect(detail.locator('h2')).toHaveText('Champi');
+    await expect(detail.locator('.badge')).toHaveText('Nature');
+    await expect(detail).toContainText('Défense');
+    await expect(detail).toContainText(/Dans ce monde : \d+ individu/);
+    await expect(detail.locator('img')).toHaveAttribute('src', /^data:image\/png/);
+  });
+
+  test('the map shows where the player is, nearby or the whole world', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await page.keyboard.press('m');  // shortcut
+    await expect(page.getByRole('tab', { name: 'Carte' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#map-where')).toHaveText('Tu te trouves : Prairie');
+    const painted = () => page.evaluate(() => {
+      const c = document.getElementById('map-canvas');
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const colors = new Set();
+      for (let i = 0; i < d.length; i += 4 * 97) colors.add(`${d[i] >> 4},${d[i + 1] >> 4},${d[i + 2] >> 4}`);
+      return colors.size;
+    });
+    expect(await painted()).toBeGreaterThan(20);  // terrain, path, trees...
+    await page.getByRole('button', { name: 'Globale' }).click();
+    await expect(page.getByRole('button', { name: 'Globale' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await painted()).toBeGreaterThan(20);
+    await page.keyboard.press('m');
+    await expect(page.locator('#game-menu')).toBeHidden();
+  });
 });

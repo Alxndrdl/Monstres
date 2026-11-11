@@ -33,7 +33,8 @@ TEST_CASE("the path crosses the world and passes by the spawn point") {
     CHECK(path.points.back().z > rules::kWorldHalfSize);
     CHECK(distance_to_path(path, 0, 0) <= 1.0f + 1e-4f);
     for (size_t i = 0; i < path.points.size(); ++i) {
-      CHECK(std::fabs(path.points[i].x) <= 14.5f);
+      CHECK(std::fabs(path.points[i].x) <= rules::kPathMaxX + 0.5f);
+      if (i > 0) CHECK(path.points[i].z > path.points[i - 1].z);  // by increasing z
       if (i > 0) {
         const float dx = path.points[i].x - path.points[i - 1].x;
         const float dz = path.points[i].z - path.points[i - 1].z;

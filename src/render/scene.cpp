@@ -98,6 +98,12 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::Well: return MeshId::Well;
     case ObjectKind::Barrel: return MeshId::Barrel;
     case ObjectKind::Lamp: return MeshId::Lamp;
+    case ObjectKind::Tower: return MeshId::Tower;
+    case ObjectKind::RuinWall: return o.variant & 1 ? MeshId::RuinWallHigh : MeshId::RuinWallLow;
+    case ObjectKind::Pillar: return MeshId::Pillar;
+    case ObjectKind::FallenPillar: return MeshId::FallenPillar;
+    case ObjectKind::Rubble: return MeshId::Rubble;
+    case ObjectKind::RuneStone: return MeshId::RuneStone;
     default:                return MeshId::Crate;
   }
 }
@@ -105,8 +111,8 @@ MeshId mesh_for(const Object& o) {
 namespace {
 
 constexpr float kTau = 6.28318530718f;
-constexpr float kDecorationHalfSize = 58.0f; // grass and flowers up to here
-constexpr float kForestOuter = 64.0f;        // trees beyond the edges, up to here
+constexpr float kDecorationHalfSize = rules::kWorldHalfSize + 13; // grass and flowers up to here
+constexpr float kForestOuter = rules::kWorldHalfSize + 19;        // trees beyond the edges, up to here
 
 // Deterministic pseudo-random number in [0, 1) for decoration.
 float rand01(uint64_t seed, uint64_t a, uint64_t b = 0) {
@@ -162,6 +168,7 @@ void scale_for(const Object& o, Instance& in) {
     case ObjectKind::Stump:
     case ObjectKind::Bush:  in.sx = s.x; in.sy = s.y; in.sz = s.x; break;
     case ObjectKind::Crate: in.sx = s.x; in.sy = s.y; in.sz = s.z; in.y += s.y; break;  // centered cube
+    case ObjectKind::Pillar: in.sx = in.sz = 1; in.sy = s.y; break;                    // unit height
     default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
   }
 }
@@ -205,6 +212,12 @@ void add_object(DrawList& list, const World& w, const Object& o) {
     case ObjectKind::Barrel: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.6f, 0.6f, 0); break;
     case ObjectKind::Lamp:
     case ObjectKind::Sign: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.35f, 0.35f, 0, 0.8f); break;
+    case ObjectKind::Tower: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.6f, 3.6f, 0, 0.75f); break;
+    case ObjectKind::RuinWall: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.9f, 0.6f, yaw, 0.7f); break;
+    case ObjectKind::Pillar: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.6f, 0.6f, 0, 0.8f); break;
+    case ObjectKind::FallenPillar: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.8f, 0.6f, yaw, 0.7f); break;
+    case ObjectKind::Rubble: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.0f, 1.0f, 0, 0.6f); break;
+    case ObjectKind::RuneStone: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.6f, 0.4f, yaw, 0.7f); break;
     default: break;
   }
 }
@@ -224,7 +237,7 @@ std::vector<Object> border_forest(const World& w) {
       if (edge < rules::kWorldHalfSize + 2.0f) continue;
       const float density = std::clamp((edge - rules::kWorldHalfSize) / 10.0f, 0.35f, 0.8f);
       if (rand01(w.seed, 300 + ui, uj) > density) continue;
-      if (distance_to_path(w.path, x, z) < rules::kPathHalfWidth + 2.0f) continue;
+      if (distance_to_path(w.path, x, z, rules::kPathHalfWidth + 3.0f) < rules::kPathHalfWidth + 2.0f) continue;
       Object o;
       o.pos = {x, w.ground.height(x, z) - 0.1f, z};
       o.variant = static_cast<uint8_t>(rand01(w.seed, 400 + ui, uj) * 255);
@@ -269,10 +282,14 @@ void add_vegetation(const World& w, const std::vector<Box>& obstacles, DrawList&
       const auto ui = static_cast<uint64_t>(i), uj = static_cast<uint64_t>(j);
       const float x = -kDecorationHalfSize + kCell * (static_cast<float>(i) + rand01(w.seed, 1000 + ui, uj));
       const float z = -kDecorationHalfSize + kCell * (static_cast<float>(j) + rand01(w.seed, 2000 + ui, uj));
-      const float on_path = distance_to_path(w.path, x, z) / rules::kPathHalfWidth;
+      const float on_path = distance_to_path(w.path, x, z, 2 * rules::kPathHalfWidth) / rules::kPathHalfWidth;
       if (on_path < 0.75f) continue;
       if (covered(obstacles, x, z, 0.05f)) continue;
       if (in_lake(w.village.lake, x, z, 0.6f)) continue;
+      if (w.ruins.radius > 0) {  // the paved courtyard of the ruins
+        const float rx = x - w.ruins.center.x, rz = z - w.ruins.center.z;
+        if (std::max(std::fabs(rx), std::fabs(rz)) < 8.5f && rand01(w.seed, 3500 + ui, uj) < 0.8f) continue;
+      }
       if (w.village.lake.radius_x > 0) {  // the trodden village square
         const float vx = x - w.village.center.x, vz = z - w.village.center.z;
         if (vx * vx + vz * vz < 6.0f * 6.0f) continue;
@@ -362,6 +379,29 @@ void add_village_effects(const World& w, float time, DrawList& list) {
       add(list, MeshId::Smoke, puff);
     }
   }
+  // Magic sparks drifting up around the rune stones and the top of the tower.
+  for (size_t k = 0; k < w.objects.size(); ++k) {
+    const Object& o = w.objects[k];
+    if (o.kind != ObjectKind::RuneStone && o.kind != ObjectKind::Tower) continue;
+    const bool tower = o.kind == ObjectKind::Tower;
+    const int sparks = tower ? 10 : 5;
+    for (int i = 0; i < sparks; ++i) {
+      const auto u = static_cast<uint64_t>(k * 16 + static_cast<size_t>(i));
+      const float t = std::fmod(time * (0.18f + 0.1f * rand01(w.seed, 31000, u)) + rand01(w.seed, 31100, u), 1.0f);
+      const float a = kTau * rand01(w.seed, 31200, u) + time * 0.6f;
+      const float r = (tower ? 2.6f : 0.5f) + 0.4f * std::sin(time * 1.3f + static_cast<float>(i));
+      Instance spark;
+      spark.x = o.pos.x + std::cos(a) * r;
+      spark.z = o.pos.z + std::sin(a) * r;
+      spark.y = o.pos.y + (tower ? 8.5f + t * 4.5f : 0.4f + t * 2.0f);
+      spark.sx = spark.sy = spark.sz = (tower ? 0.09f : 0.06f) * (1 - 0.5f * t);
+      spark.rotation = quat_yaw(time * 2 + static_cast<float>(i));
+      const bool violet = (i % 3) == 0;
+      const float fade = std::min(1.0f, t * 5) * (1 - t);
+      spark.tint = violet ? Color{1.6f, 1.2f, 2.0f, fade} : Color{1.2f, 1.8f, 2.0f, fade};
+      add(list, MeshId::Sparkle, spark);
+    }
+  }
   for (const Creature& c : w.creatures) {
     if (c.species != Species::Fish) continue;
     const Body& b = c.body;
@@ -409,12 +449,30 @@ void build_landscape(const World& w, DrawList& list) {
   add_mountains(w, list);
 }
 
-void build_dynamic(const World& w, float time, DrawList& list) {
+void build_dynamic(const World& w, float time, DrawList& list, int selected) {
   list.batches.resize(kMeshCount);
   for (auto& batch : list.batches) batch.clear();
 
   add_characters(w, time, list);
   add_village_effects(w, time, list);
+
+  // A golden ring, gently pulsing, at the feet of the selected creature.
+  if (selected >= 0 && static_cast<size_t>(selected) < w.creatures.size()) {
+    const Creature& c = w.creatures[static_cast<size_t>(selected)];
+    const Body& b = c.body;
+    const float radius = species_info(c.species).shape.half_width * 2.2f + 0.15f;
+    const float pulse = 1 + 0.06f * std::sin(time * 4.0f);
+    Instance ring;
+    ring.x = b.pos.x;
+    ring.z = b.pos.z;
+    const float ground = w.ground.height(b.pos.x, b.pos.z);
+    const bool on_ground = c.species != Species::Fish && b.pos.y - ground < 0.05f;
+    ring.y = (on_ground ? ground : b.pos.y) + kShadowHeight + 0.01f;
+    if (on_ground) ring.rotation = ground_tilt(w, b.pos.x, b.pos.z);
+    ring.sx = ring.sz = radius * pulse;
+    ring.tint = {1.0f, 0.85f, 0.25f, 1.0f};
+    add(list, MeshId::Ripple, ring);
+  }
 
   // Clouds drifting with the wind, wrapping around.
   constexpr int kClouds = 16;
@@ -469,6 +527,130 @@ float camera_distance(const World& w, float tx, float ty, float tz, float dx, fl
     }
   }
   return std::max(best, kClosest);
+}
+
+namespace {
+
+struct Ray {
+  float origin[3];
+  float dir[3];  // not normalized: t = 1 is the far plane
+};
+
+// Point (ndc_x, ndc_y, ndc_z) of the screen, back in the world.
+void unproject(const Mat4& inv, float x, float y, float z, float out[3]) {
+  const float* m = inv.m;
+  const float v[4] = {x, y, z, 1};
+  float r[4];
+  for (int row = 0; row < 4; ++row) {
+    r[row] = m[row] * v[0] + m[4 + row] * v[1] + m[8 + row] * v[2] + m[12 + row] * v[3];
+  }
+  for (int i = 0; i < 3; ++i) out[i] = r[i] / r[3];
+}
+
+Ray screen_ray(const View& view, float ndc_x, float ndc_y) {
+  Ray ray;
+  float far_point[3];
+  unproject(view.inverse_view_projection, ndc_x, ndc_y, -1, ray.origin);
+  unproject(view.inverse_view_projection, ndc_x, ndc_y, 1, far_point);
+  for (int i = 0; i < 3; ++i) ray.dir[i] = far_point[i] - ray.origin[i];
+  return ray;
+}
+
+// Where the ray enters the box (t in [0, 1]), or a negative value if it misses.
+float ray_box(const Ray& ray, const Box& b) {
+  const float lo[3] = {b.min.x, b.min.y, b.min.z};
+  const float hi[3] = {b.max.x, b.max.y, b.max.z};
+  float enter = 0, leave = 1;
+  for (int a = 0; a < 3; ++a) {
+    if (std::fabs(ray.dir[a]) < 1e-9f) {
+      if (ray.origin[a] < lo[a] || ray.origin[a] > hi[a]) return -1;
+      continue;
+    }
+    float t0 = (lo[a] - ray.origin[a]) / ray.dir[a], t1 = (hi[a] - ray.origin[a]) / ray.dir[a];
+    if (t0 > t1) std::swap(t0, t1);
+    enter = std::max(enter, t0);
+    leave = std::min(leave, t1);
+    if (enter > leave) return -1;
+  }
+  return enter;
+}
+
+}  // namespace
+
+int pick_creature(const World& w, const View& view, float ndc_x, float ndc_y) {
+  constexpr float kMargin = 0.2f;  // easier to tap on a phone
+  const Ray ray = screen_ray(view, ndc_x, ndc_y);
+  int best = -1;
+  float best_t = 2;
+  for (size_t i = 0; i < w.creatures.size(); ++i) {
+    const Creature& c = w.creatures[i];
+    Box b = body_box(c.body, species_info(c.species).shape);
+    b.min = b.min - Vec3{kMargin, kMargin * 0.5f, kMargin};
+    b.max = b.max + Vec3{kMargin, kMargin, kMargin};
+    const float t = ray_box(ray, b);
+    if (t >= 0 && t < best_t) {
+      best_t = t;
+      best = static_cast<int>(i);
+    }
+  }
+  if (best < 0) return -1;
+  // Hidden behind an object or a hill?
+  for (const Object& o : w.objects) {
+    const float t = ray_box(ray, object_box(o));
+    if (t >= 0 && t < best_t) return -1;
+  }
+  float hit[3];
+  for (int i = 0; i < 3; ++i) hit[i] = ray.origin[i] + ray.dir[i] * best_t;
+  const float dx = hit[0] - ray.origin[0], dy = hit[1] - ray.origin[1], dz = hit[2] - ray.origin[2];
+  const float length = std::sqrt(dx * dx + dy * dy + dz * dz);
+  for (float d = 0.5f; d < length - 0.5f; d += 0.5f) {
+    const float k = d / length;
+    if (ray.origin[1] + dy * k < w.ground.height(ray.origin[0] + dx * k, ray.origin[2] + dz * k)) return -1;
+  }
+  return best;
+}
+
+Portrait build_portrait(const PortraitSubject& subject, float aspect) {
+  Portrait p;
+  p.list.batches.assign(kMeshCount, {});
+  const float height = add_portrait_figure(p.list, subject, 0.6f);
+  // Framed so that the figure fills about 80% of the height.
+  const float distance = height * 1.3f + 0.3f;
+  const float tx = 0, ty = height * 0.48f, tz = 0;
+  const float ex = distance * 0.12f, ey = ty + distance * 0.22f, ez = distance;
+  p.view.view_projection = multiply(perspective(0.8f, aspect, 0.05f, 50.0f), look_at(ex, ey, ez, tx, ty, tz));
+  p.view.inverse_view_projection = inverse(p.view.view_projection);
+  p.view.camera_x = ex;
+  p.view.camera_y = ey;
+  p.view.camera_z = ez;
+  const float l = std::sqrt(0.5f * 0.5f + 0.9f * 0.9f + 0.8f * 0.8f);
+  p.view.light_x = -0.5f / l;
+  p.view.light_y = 0.9f / l;
+  p.view.light_z = 0.8f / l;
+  p.view.sun_x = p.view.light_x;
+  p.view.sun_y = p.view.light_y;
+  p.view.sun_z = p.view.light_z;
+  p.view.fog = palette::kSkyHorizon;
+  p.view.fog_start = 1000;
+  p.view.fog_end = 2000;
+  p.view.sky = false;
+  return p;
+}
+
+bool creature_on_screen(const World& w, const View& view, int index, float& ndc_x, float& ndc_y) {
+  if (index < 0 || static_cast<size_t>(index) >= w.creatures.size()) return false;
+  const Creature& c = w.creatures[static_cast<size_t>(index)];
+  const Vec3 p = c.body.pos + Vec3{0, species_info(c.species).shape.height * 0.5f, 0};
+  const float* m = view.view_projection.m;
+  const float v[4] = {p.x, p.y, p.z, 1};
+  float r[4];
+  for (int row = 0; row < 4; ++row) {
+    r[row] = m[row] * v[0] + m[4 + row] * v[1] + m[8 + row] * v[2] + m[12 + row] * v[3];
+  }
+  if (r[3] <= 0) return false;
+  ndc_x = r[0] / r[3];
+  ndc_y = r[1] / r[3];
+  return true;
 }
 
 View build_view(const World& w, const Camera& cam, float aspect, float time) {

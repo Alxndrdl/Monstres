@@ -4,17 +4,20 @@
 //   joystick (bottom left)   move, relative to the camera
 //   jump button (bottom right)
 //   drag anywhere else       look around
+//   tap / click on the view  'monstres-tap' event (ui.js shows the creature there)
 //   keyboard                 ZQSD / WASD / arrows to move, Space to jump
 (() => {
   'use strict';
 
   const LOOK_SPEED = { mouse: 0.006, pen: 0.006, touch: 0.009 };  // radians per CSS pixel
   const DEAD_ZONE = 0.12;
+  const TAP_MAX_MOVE = 10;   // CSS pixels: more is a drag (looking around)
+  const TAP_MAX_MS = 500;
 
   let game = null;
   const keys = new Set();
   const joystick = { pointer: null, x: 0, y: 0 };
-  const lookPointers = new Map();  // pointerId -> {x, y}
+  const lookPointers = new Map();  // pointerId -> {x, y, moved, start}
 
   // ---- Sending the current direction to the game ----
   const pressed = (...codes) => codes.some((c) => keys.has(c));
@@ -105,7 +108,7 @@
   canvas.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     canvas.setPointerCapture(event.pointerId);
-    lookPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    lookPointers.set(event.pointerId, { x: event.clientX, y: event.clientY, moved: 0, start: event.timeStamp });
   });
   canvas.addEventListener('pointermove', (event) => {
     const last = lookPointers.get(event.pointerId);
@@ -115,10 +118,19 @@
     const dy = event.clientY - last.y;
     last.x = event.clientX;
     last.y = event.clientY;
+    last.moved += Math.hypot(dx, dy);
     // Drag right: turn right. Drag down: look further down.
     if (game && (dx || dy)) game.input.look(-dx * speed, dy * speed);
   });
-  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+  canvas.addEventListener('pointerup', (event) => {
+    const pointer = lookPointers.get(event.pointerId);
+    lookPointers.delete(event.pointerId);
+    // A short press without moving is a tap, not a look.
+    if (pointer && pointer.moved < TAP_MAX_MOVE && event.timeStamp - pointer.start < TAP_MAX_MS) {
+      window.dispatchEvent(new CustomEvent('monstres-tap', { detail: { x: event.clientX, y: event.clientY } }));
+    }
+  });
+  for (const type of ['pointercancel', 'lostpointercapture']) {
     canvas.addEventListener(type, (event) => lookPointers.delete(event.pointerId));
   }
 
@@ -126,8 +138,12 @@
   // KeyboardEvent.code is the physical key: KeyW is Z on AZERTY, W on QWERTY.
   const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
+  // Typing in a text field (the magician's name) does not move the player.
+  const typing = (event) => event.target instanceof HTMLElement &&
+    (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName));
+
   window.addEventListener('keydown', (event) => {
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || typing(event)) return;
     if (MOVE_KEYS.has(event.code)) {
       event.preventDefault();
       keys.add(event.code);

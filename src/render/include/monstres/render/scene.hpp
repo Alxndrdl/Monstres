@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monstres/core/world.hpp"
+#include "monstres/render/characters.hpp"
 #include "monstres/render/models.hpp"
 #include "monstres/render/renderer.hpp"
 
@@ -50,7 +51,8 @@ MeshId mesh_for(const Object& object);
 void build_landscape(const World& world, DrawList& list);
 
 // What moves: the player, its shadow, the clouds. `time` in seconds.
-void build_dynamic(const World& world, float time, DrawList& list);
+// `selected`: index of a creature to mark with a ring at its feet (-1: none).
+void build_dynamic(const World& world, float time, DrawList& list, int selected = -1);
 
 // How far the camera can be from the target (tx, ty, tz) along the unit
 // direction (dx, dy, dz) without an object in between, at most `wanted`.
@@ -59,5 +61,23 @@ float camera_distance(const World& world, float tx, float ty, float tz, float dx
 
 // Camera matrices, sky and lighting for one frame.
 View build_view(const World& world, const Camera& camera, float aspect, float time);
+
+// A portrait for the menus: one figure (see add_portrait_figure), framed
+// from a little above, lit from the front, without sky (draw it with
+// Renderer::draw_offscreen).
+struct Portrait {
+  DrawList list;
+  View view;
+};
+Portrait build_portrait(const PortraitSubject& subject, float aspect);
+
+// The creature under a point of the screen, given in normalized device
+// coordinates (-1..1, y up), or -1. Creatures are a little easier to hit
+// than their size; an object in front (a tree trunk, a house) hides them.
+int pick_creature(const World& world, const View& view, float ndc_x, float ndc_y);
+
+// Where the middle of creatures[index] is on screen (normalized device
+// coordinates). False if there is no such creature or it is behind the camera.
+bool creature_on_screen(const World& world, const View& view, int index, float& ndc_x, float& ndc_y);
 
 }  // namespace monstres

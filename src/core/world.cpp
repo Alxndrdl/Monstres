@@ -117,12 +117,16 @@ void generate_objects(World& w) {
       if (center - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
     }
 
-    // Keep the village and the lake clear.
-    if (in_village(w.village, o.pos.x, o.pos.z, 2.0f) || in_lake(w.village.lake, o.pos.x, o.pos.z, 2.5f)) continue;
+    // Keep the village, the lake and the ruins clear.
+    if (in_village(w.village, o.pos.x, o.pos.z, 2.0f) || in_lake(w.village.lake, o.pos.x, o.pos.z, 2.5f) ||
+        in_ruins(w.ruins, o.pos.x, o.pos.z, 2.0f)) {
+      continue;
+    }
 
     // Keep the path clear.
     const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
-    if (distance_to_path(w.path, o.pos.x, o.pos.z) < rules::kPathHalfWidth + reach + 0.3f) continue;
+    const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
+    if (distance_to_path(w.path, o.pos.x, o.pos.z, keep_off + 1) < keep_off) continue;
 
     // Keep a gap between objects so the player can always walk between them.
     Box wide = b;
@@ -148,21 +152,31 @@ struct Surroundings {
   // body only tests the objects around it.
   static constexpr float kCell = 6.0f;
   static constexpr int kCells = static_cast<int>(2 * rules::kWorldHalfSize / kCell) + 2;
-  std::vector<std::vector<uint16_t>> grid;
+  // Box indices of cell c: cell_items[cell_start[c] .. cell_start[c + 1]),
+  // in increasing order (two allocations per tick, not one per cell).
+  std::vector<uint32_t> cell_start;
+  std::vector<uint16_t> cell_items;
 
   static int cell_of(float v) {
     return std::clamp(static_cast<int>((v + rules::kWorldHalfSize) / kCell), 0, kCells - 1);
   }
 
+  template <typename F>
+  void for_cells(const Box& b, F f) const {
+    for (int cx = cell_of(b.min.x); cx <= cell_of(b.max.x); ++cx) {
+      for (int cz = cell_of(b.min.z); cz <= cell_of(b.max.z); ++cz) f(static_cast<size_t>(cx * kCells + cz));
+    }
+  }
+
   void build() {
-    grid.assign(static_cast<size_t>(kCells * kCells), {});
+    // Counting sort: count per cell, then fill.
+    cell_start.assign(static_cast<size_t>(kCells * kCells) + 1, 0);
+    for (const Box& b : boxes) for_cells(b, [&](size_t c) { ++cell_start[c + 1]; });
+    for (size_t c = 1; c < cell_start.size(); ++c) cell_start[c] += cell_start[c - 1];
+    cell_items.resize(cell_start.back());
+    std::vector<uint32_t> fill(cell_start.begin(), cell_start.end() - 1);
     for (size_t i = 0; i < boxes.size(); ++i) {
-      const Box& b = boxes[i];
-      for (int cx = cell_of(b.min.x); cx <= cell_of(b.max.x); ++cx) {
-        for (int cz = cell_of(b.min.z); cz <= cell_of(b.max.z); ++cz) {
-          grid[static_cast<size_t>(cx * kCells + cz)].push_back(static_cast<uint16_t>(i));
-        }
-      }
+      for_cells(boxes[i], [&](size_t c) { cell_items[fill[c]++] = static_cast<uint16_t>(i); });
     }
   }
 
@@ -170,11 +184,9 @@ struct Surroundings {
   // visited more than once; callers do not mind).
   template <typename F>
   void near(const Box& area, F f) const {
-    for (int cx = cell_of(area.min.x); cx <= cell_of(area.max.x); ++cx) {
-      for (int cz = cell_of(area.min.z); cz <= cell_of(area.max.z); ++cz) {
-        for (uint16_t i : grid[static_cast<size_t>(cx * kCells + cz)]) f(boxes[i]);
-      }
-    }
+    for_cells(area, [&](size_t c) {
+      for (uint32_t k = cell_start[c]; k < cell_start[c + 1]; ++k) f(boxes[cell_items[k]]);
+    });
   }
 
   bool any_overlap(const Box& area) const {
@@ -800,6 +812,114 @@ void settle_objects(World& w) {
   }
 }
 
+void build_ruins(World& w) {
+  const RuinsLayout& r = w.ruins;
+  if (r.radius <= 0) return;
+  // Own random stream. Every draw goes into a variable first: the order in
+  // which a call's arguments are evaluated differs between compilers (GCC,
+  // Clang), and the layout must be the same natively and in WebAssembly.
+  Rng rng(w.seed ^ 0x5255494E53212121ULL, 17);
+  auto any_yaw16 = [&] { return static_cast<Angle16>(rng.below(65536)); };
+  auto quarter_yaw16 = [&] { return static_cast<Angle16>(rng.below(4) << 14); };
+  auto variant8 = [&] { return static_cast<uint8_t>(rng.below(256)); };
+  std::erase_if(w.objects, [&](const Object& o) { return in_ruins(r, o.pos.x, o.pos.z, 2.0f); });
+  const Vec2 c = r.center;
+  auto place = [&](ObjectKind kind, Vec2 pos, Angle16 yaw, Vec3 size, uint8_t variant, float gap) {
+    Object o = village_object(kind, pos, yaw, variant);
+    o.size = size;
+    if (!can_place(w, o, gap, true)) return false;
+    w.objects.push_back(o);
+    return true;
+  };
+
+  // The tower, its door towards the path.
+  const float to_path = w.path.points.empty() ? -1.0f : (distance_to_path(w.path, c.x - 1, c.z) <
+                                                         distance_to_path(w.path, c.x + 1, c.z) ? -1.0f : 1.0f);
+  const Angle16 door_yaw = to_path < 0 ? Angle16{16384} : Angle16{49152};  // front (-Z) turned to -X / +X
+  place(ObjectKind::Tower, c, door_yaw, {1, 1, 1}, variant8(), 0.5f);
+
+  // What is left of the square enclosure: wall pieces, an opening towards the path.
+  constexpr float kHalf = 9.0f;
+  for (int side = 0; side < 4; ++side) {
+    for (int k = 0; k < 6; ++k) {
+      const float along = -7.5f + 3.0f * static_cast<float>(k);
+      const bool x_side = side < 2;  // the wall runs along Z, at x = ±kHalf
+      const float sign = side % 2 ? 1.0f : -1.0f;
+      const Vec2 pos = x_side ? Vec2{c.x + sign * kHalf, c.z + along} : Vec2{c.x + along, c.z + sign * kHalf};
+      const bool entrance = x_side && sign == to_path && (k == 2 || k == 3);
+      if (entrance || rng.below(100) < 40) continue;  // fallen long ago
+      const Angle16 yaw = x_side ? Angle16{16384} : Angle16{0};
+      place(ObjectKind::RuinWall, pos, yaw, {1, 1, 1}, variant8(), 0.0f);
+    }
+  }
+
+  // A colonnade from the entrance towards the path, some columns fallen.
+  for (int row = 0; row < 3; ++row) {
+    for (float across : {-2.4f, 2.4f}) {
+      const Vec2 pos{c.x + to_path * (11.0f + 2.8f * static_cast<float>(row)), c.z + across};
+      if (rng.below(100) < 25) {
+        const Angle16 yaw = quarter_yaw16();
+        const uint8_t variant = variant8();
+        place(ObjectKind::FallenPillar, {pos.x + to_path * 0.5f, pos.z + across * 0.3f}, yaw, {1, 1, 1}, variant, 0.2f);
+      } else {
+        const Angle16 yaw = any_yaw16();
+        const float height = random_range(rng, 1.2f, 3.4f);
+        const uint8_t variant = variant8();
+        place(ObjectKind::Pillar, pos, yaw, {1, height, 1}, variant, 0.2f);
+      }
+    }
+  }
+
+  // Four rune stones in the courtyard, still glowing.
+  for (int k = 0; k < 4; ++k) {
+    const SinCos sc = sincos16(static_cast<Angle16>(8192 + k * 16384));
+    place(ObjectKind::RuneStone, {c.x + sc.cos * 5.6f, c.z + sc.sin * 5.6f}, static_cast<Angle16>((k % 2) << 14),
+          {1, 1, 1}, variant8(), 0.3f);
+  }
+
+  // Fallen columns and rubble scattered around.
+  for (int n = 0, attempt = 0; n < 9 && attempt < 200; ++attempt) {
+    const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
+    const float d = random_range(rng, 3.5f, r.radius - 1);
+    const Vec2 pos{c.x + sc.cos * d, c.z + sc.sin * d};
+    const bool rubble = n % 3 != 0;
+    const Angle16 yaw = rubble ? any_yaw16() : quarter_yaw16();
+    const uint8_t variant = variant8();
+    const bool ok = place(rubble ? ObjectKind::Rubble : ObjectKind::FallenPillar, pos, yaw, {1, 1, 1}, variant, 0.4f);
+    n += ok ? 1 : 0;
+  }
+}
+
+Zone zone_at(const World& w, float x, float z) {
+  if (in_lake(w.village.lake, x, z, 1.5f)) return Zone::Lake;
+  if (w.village.lake.radius_x > 0 && in_village(w.village, x, z, 2.0f)) return Zone::Village;
+  if (in_ruins(w.ruins, x, z, 3.0f)) return Zone::Ruins;
+  return Zone::Meadow;
+}
+
+WizardStats wizard_stats(const Wizard& wiz) {
+  const auto l = static_cast<uint16_t>(std::max<uint16_t>(wiz.level, 1) - 1);  // levels gained
+  return {static_cast<uint16_t>(30 + 6 * l),  static_cast<uint16_t>(20 + 5 * l), static_cast<uint16_t>(6 + 2 * l),
+          static_cast<uint16_t>(5 + 2 * l),   static_cast<uint16_t>(5 + l),     static_cast<uint16_t>(5 + l),
+          100u * (l + 1u)};
+}
+
+const MonsterStats& monster_stats(Species species) {
+  //                               hp atk def spd mag element
+  static constexpr MonsterStats kStats[] = {
+      {32, 9, 6, 11, 8, Element::Fire, true},     // Companion: Pompon, fox of embers
+      {40, 5, 9, 4, 6, Element::Water, true},     // Slime
+      {34, 6, 8, 3, 9, Element::Nature, true},    // Mushroom
+      {22, 7, 4, 13, 5, Element::Air, true},      // Bird
+      {0, 0, 0, 0, 0, Element::Light, false},     // Villager: not a monster
+      {24, 8, 5, 12, 9, Element::Shadow, true},   // Crow
+      {28, 6, 6, 8, 7, Element::Water, true},     // Fish
+  };
+  static_assert(std::size(kStats) == static_cast<size_t>(Species::Count));
+  const auto i = static_cast<size_t>(species);
+  return kStats[i < std::size(kStats) ? i : 0];
+}
+
 std::vector<Vec3> crow_perches(const World& w) {
   std::vector<Vec3> perches;
   auto add = [&](const Object& o, float lx, float y, float lz) {
@@ -812,6 +932,11 @@ std::vector<Vec3> crow_perches(const World& w) {
       case ObjectKind::HouseChimney: add(o, -1.1f, 5.63f, 0); add(o, 0.4f, 5.63f, 0); break;
       case ObjectKind::HouseHut: add(o, 0, 4.22f, 0); break;
       case ObjectKind::Well: add(o, 0, 2.45f, 0); break;
+      case ObjectKind::Tower:  // three merlons left on the broken top
+        add(o, 2.15f, 10.5f, 0);
+        add(o, -1.075f, 10.5f, 1.862f);
+        add(o, -1.075f, 10.5f, -1.862f);
+        break;
       default: break;
     }
   }
@@ -821,7 +946,8 @@ std::vector<Vec3> crow_perches(const World& w) {
 bool is_round(ObjectKind kind) {
   return kind == ObjectKind::Tree || kind == ObjectKind::Pine || kind == ObjectKind::Stump ||
          kind == ObjectKind::Bush || kind == ObjectKind::HouseHut || kind == ObjectKind::Well ||
-         kind == ObjectKind::Barrel || kind == ObjectKind::Lamp;
+         kind == ObjectKind::Barrel || kind == ObjectKind::Lamp || kind == ObjectKind::Tower ||
+         kind == ObjectKind::Pillar || kind == ObjectKind::Rubble;
 }
 
 Box object_box(const Object& o) {
@@ -843,6 +969,13 @@ Box object_box(const Object& o) {
     case ObjectKind::Well:         half = {0.85f, 0.45f, 0.85f}; break;
     case ObjectKind::Barrel:       half = {0.35f, 0.45f, 0.35f}; break;
     case ObjectKind::Lamp:         half = {0.1f, 1.25f, 0.1f}; break;
+    // Ruins: matching the models of tools/make_models.py.
+    case ObjectKind::Tower:        half = {2.35f, 5.25f, 2.35f}; break;
+    case ObjectKind::RuinWall:     half = o.variant & 1 ? Vec3{1.5f, 1.1f, 0.28f} : Vec3{1.5f, 0.5f, 0.28f}; break;
+    case ObjectKind::Pillar:       half = {0.4f, 0.5f * s.y, 0.4f}; break;
+    case ObjectKind::FallenPillar: half = {1.5f, 0.38f, 0.38f}; break;
+    case ObjectKind::Rubble:       half = {0.75f, 0.3f, 0.75f}; break;
+    case ObjectKind::RuneStone:    half = {0.35f, 0.95f, 0.18f}; break;
     default:                half = s; break;  // Crate
   }
   if (!is_round(o.kind) && ((o.yaw >> 14) & 1)) std::swap(half.x, half.z);  // turned 90° or 270°
@@ -861,9 +994,11 @@ World new_game(uint64_t seed) {
   w.rng = Rng(seed);
   w.path = make_path(seed);
   w.village = make_village_layout(seed, w.path);
-  w.ground = make_heightmap(seed, w.path, w.village);
+  w.ruins = make_ruins_layout(seed, w.path);
+  w.ground = make_heightmap(seed, w.path, w.village, w.ruins);
   // Objects are placed as if on flat ground, then set on the relief.
   build_village(w);
+  build_ruins(w);
   generate_objects(w);
   settle_objects(w);
   w.player.pos.y = w.ground.height(0, 0);
@@ -890,7 +1025,7 @@ void step(World& w, const Input& in) {
   std::vector<Box> boxes;
   boxes.reserve(w.objects.size());
   for (const Object& o : w.objects) boxes.push_back(object_box(o));
-  Surroundings s{boxes, w.village.lake, w.ground, {}};
+  Surroundings s{boxes, w.village.lake, w.ground, {}, {}};
   s.build();
 
   move_body(s, w.player, kPlayerShape, dir_x, dir_z, rules::kWalkSpeed, in.jump, rules::kJumpSpeed);
