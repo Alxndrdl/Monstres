@@ -52,7 +52,8 @@ Contrôles :
   - Carte : locale (autour du joueur, avec les créatures proches) ou globale ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (exporter / importer la sauvegarde,
-  afficher les FPS ; ce choix est retenu par le navigateur).
+  afficher les FPS ; ce choix est retenu par le navigateur) et options de
+  debug : un curseur pour choisir l'heure de la journée, et « Figer l'heure ».
 
 Sur ordinateur, les touches sont rappelées sous le joystick et le bouton ;
 elles s'adaptent à la disposition du clavier quand le navigateur le permet.
@@ -147,6 +148,21 @@ L'apparence d'une variante est construite par `creature_look`
 (`src/render/characters.cpp`) : pièces redimensionnées, ajoutées (`horn`,
 `bulb`, `eye_iris`) ou retirées, couleurs des emplacements de teinte. Les noms
 et descriptions des variantes sont dans `web/lore.js`.
+
+## Jour et nuit
+
+Une heure de jeu dure une minute réelle : une journée, 24 minutes. L'heure
+fait partie du monde (`World::clock`, dans la sauvegarde) ; une partie
+commence à 8 h. Le rendu (`sky_at`, `sky_directions` et `world_lights` dans
+`src/render/`) en tire les couleurs du ciel et de la lumière (aube vers 6 h,
+crépuscule vers 18 h 30, nuit de 20 h 30 à 4 h 30), la course du soleil et
+celle de la lune, les étoiles. La nuit, les fenêtres et les lanternes
+s'allument (couleurs des modèles d'alpha 0,985, voir `tools/make_models.py`),
+les lanternes éclairent autour d'elles, le cristal du bâton du magicien
+aussi, de même que les monstres lumineux (formes élémentaires, antennes des
+Gloubi, lanterne des Bloup) et les projectiles des combats : jusqu'à 12
+lumières, les plus proches. Les étincelles et les parties lumineuses des
+personnages gardent leur éclat la nuit (`kGlowing`).
 
 ## Combats
 

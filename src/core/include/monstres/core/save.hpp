@@ -47,7 +47,9 @@ namespace monstres {
 //      allele, u8 forms, u16 level, u32 xp, u16 hit points). Battles are
 //      not saved. Versions 8 to 10 still load: the monsters get a level from
 //      the seed, the team is the companion alone.
-inline constexpr uint32_t kSaveVersion = 11;
+//  12  time of day: after the team, u32 ticks since midnight. Older saves
+//      start at 8:00.
+inline constexpr uint32_t kSaveVersion = 12;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

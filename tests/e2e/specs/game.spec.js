@@ -232,6 +232,27 @@ test.describe('settings menu', () => {
     await expect(menu).toBeHidden();
   });
 
+  test('debug: the slider sets the time of day, which can stand still', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    expect((await state(page)).hour).toBeCloseTo(8, 3);  // a new game starts in the morning
+    await page.locator('#settings-button').click();
+    const slider = page.locator('#hour');
+    await expect(slider).toBeVisible();
+    await slider.fill('22.5');
+    await expect(page.locator('#hour-value')).toHaveText('22:30');
+    expect((await state(page)).hour).toBeCloseTo(22.5, 3);
+    // Time goes on: one hour per minute of play.
+    await page.evaluate(() => window.monstres.step(3600));
+    expect((await state(page)).hour).toBeCloseTo(23.5, 3);
+    // Unless it is held.
+    await page.locator('#hold-hour').check();
+    await page.evaluate(() => window.monstres.step(600));
+    expect((await state(page)).hour).toBeCloseTo(23.5, 3);
+    await page.locator('#hold-hour').uncheck();
+    await page.evaluate(() => window.monstres.step(600));
+    expect((await state(page)).hour).toBeCloseTo(23.666, 2);
+  });
+
   test('the FPS counter can be shown, and stays shown after a reload', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     const fps = page.locator('#fps');

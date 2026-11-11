@@ -41,6 +41,10 @@ inline constexpr float kWanderRadius = 8.0f;             // around a monster's h
 inline constexpr float kBirdFleeDistance = 3.5f;
 inline constexpr float kCompanionFollowDistance = 1.3f;  // behind the player
 inline constexpr float kCompanionTeleportDistance = 14.0f;
+// Time of day: one hour of the game lasts one real minute, a day 24 minutes.
+inline constexpr uint32_t kTicksPerHour = 60 * kTicksPerSecond;
+inline constexpr uint32_t kTicksPerDay = 24 * kTicksPerHour;
+inline constexpr uint32_t kStartClock = 8 * kTicksPerHour;  // a new game starts at 8:00
 }  // namespace rules
 
 // Orders given from the menus (context menu on the right), see battle.hpp.
@@ -292,10 +296,16 @@ struct World {
   Dex dex{};           // variants seen and captured
   std::vector<Monster> team;  // team[0]: the companion (creatures[0])
   Battle battle;       // not saved
+  uint32_t clock = rules::kStartClock;  // time of day: ticks since midnight, < kTicksPerDay
   bool operator==(const World&) const = default;
 };
 
 World new_game(uint64_t seed);
+
+// Time of day in hours, [0, 24).
+inline float hour_of_day(const World& world) {
+  return static_cast<float>(world.clock) / static_cast<float>(rules::kTicksPerHour);
+}
 
 // Places the companion next to the player and the wild monsters around the
 // world (replaces any existing creatures). Uses its own random stream from

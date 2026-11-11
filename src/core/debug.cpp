@@ -36,6 +36,7 @@ std::string to_json(const World& w) {
   const Player& p = w.player;
   std::string s;
   s += "{\"tick\":" + std::to_string(w.tick);
+  s += ",\"clock\":" + std::to_string(w.clock) + ",\"hour\":" + num(hour_of_day(w));
   s += ",\"player\":{\"x\":" + num(p.pos.x) + ",\"y\":" + num(p.pos.y) + ",\"z\":" + num(p.pos.z) +
        ",\"ground\":" + num(w.ground.height(p.pos.x, p.pos.z)) +  // height of the ground under it
        ",\"zone\":\"" + zone_name(zone_at(w, p.pos.x, p.pos.z)) + "\"" +

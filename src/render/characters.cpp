@@ -190,6 +190,7 @@ void add_aura(DrawList& list, const Body& b, float radius, float height, Color c
     spark.sx = spark.sy = spark.sz = 0.055f * (1 - 0.5f * t);
     spark.rotation = quat_yaw(time * 2 + static_cast<float>(i));
     spark.tint = {color.r, color.g, color.b, std::min(1.0f, t * 5) * (1 - t)};
+    spark.material = kGlowing;
     list.batches[static_cast<size_t>(MeshId::Sparkle)].push_back(spark);
   }
 }
@@ -568,7 +569,7 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
 // ---- Assembly -------------------------------------------------------------------------
 
 void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<const PartPose> poses, const Body& body,
-             std::span<const Color> tints, float size) {
+             std::span<const Color> tints, float size, uint8_t glow_slot) {
   constexpr size_t kMaxParts = kMaxRigParts;
   std::array<Quat, kMaxParts> world_rotation;
   std::array<Vec3f, kMaxParts> world_position;
@@ -597,6 +598,7 @@ void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<const PartP
     in.sy = part.scale.y * pose.scale.y * size;
     in.sz = part.scale.z * pose.scale.z * size;
     in.tint = part.tint > 0 && part.tint <= tints.size() ? tints[part.tint - 1] : kWhite;
+    if (glow_slot > 0 && part.tint == glow_slot) in.material = kGlowing;
     if (part.mesh != MeshId::Count) list.batches[static_cast<size_t>(part.mesh)].push_back(in);
   }
 }
@@ -608,7 +610,7 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   std::vector<PartPose> poses;
   if (subject.wizard) {
     pose_player(body, time, poses);
-    add_rig(list, player_rig(), poses, body, kCrystalGlow);
+    add_rig(list, player_rig(), poses, body, kCrystalGlow, 1, kPlayerGlowSlot);
     return 1.55f;  // with the hat
   }
   Creature c;
@@ -629,7 +631,7 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   }
   const CreatureLook look = creature_look(c.species, c.genes);
   const float scale = rig_scale(c.species);
-  add_rig(list, look.rig(), poses, c.body, look.tints, scale * look.size);
+  add_rig(list, look.rig(), poses, c.body, look.tints, scale * look.size, kMonsterGlowSlot);
   // Drawn taller than their body for the rules: the fish floats half under
   // water, the crow stands on its tail feathers.
   float height = species_info(c.species).shape.height * 1.1f;
@@ -666,7 +668,7 @@ void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body) {
 void add_characters(const World& w, float time, DrawList& list) {
   std::vector<PartPose> poses;
   pose_player(w.player, time, poses);
-  add_rig(list, player_rig(), poses, w.player, kCrystalGlow);
+  add_rig(list, player_rig(), poses, w.player, kCrystalGlow, 1, kPlayerGlowSlot);
   add_body_shadow(w, w.player, kPlayerShape, 0.5f, list);
 
   std::array<RigPart, std::size(kVillagerRig)> villager_rig;
@@ -685,7 +687,7 @@ void add_characters(const World& w, float time, DrawList& list) {
       CreatureLook look = creature_look(c.species, c.genes);
       Body body = c.body;
       battle_pose(w, i, look, body);
-      add_rig(list, look.rig(), poses, body, look.tints, rig_scale(c.species) * look.size);
+      add_rig(list, look.rig(), poses, body, look.tints, rig_scale(c.species) * look.size, kMonsterGlowSlot);
       if (look.aura) {
         const BodyShape& shape = species_info(c.species).shape;
         add_aura(list, c.body, (shape.half_width * 1.5f + 0.1f) * look.size, shape.height * 1.2f * look.size,
@@ -697,6 +699,57 @@ void add_characters(const World& w, float time, DrawList& list) {
     const BodyShape& shape = species_info(c.species).shape;
     add_body_shadow(w, c.body, shape, shape.half_width * 1.7f * shadow_size, list);
   }
+}
+
+}  // namespace monstres
+
+namespace monstres {
+
+size_t world_lights(const World& w, float x, float z, float night, float time, PointLight* out) {
+  struct Candidate {
+    PointLight light;
+    float distance2;
+  };
+  std::vector<Candidate> found;
+  const auto scaled = [](Color c, float k) { return Color{c.r * k, c.g * k, c.b * k, 1}; };
+  const auto offer = [&](float lx, float ly, float lz, float radius, Color color) {
+    if (color.r + color.g + color.b < 0.01f) return;
+    const float dx = lx - x, dz = lz - z;
+    found.push_back({{lx, ly, lz, radius, color}, dx * dx + dz * dz});
+  };
+
+  // The staff's crystal, in the magician's right hand: first, always kept.
+  const Body& p = w.player;
+  const float flicker = 1 + 0.05f * std::sin(time * 7.0f);
+  PointLight staff{p.pos.x + p.facing_x * 0.15f - p.facing_z * 0.3f, p.pos.y + 1.45f,
+                   p.pos.z + p.facing_z * 0.15f + p.facing_x * 0.3f, 6.5f,
+                   scaled({0.55f, 0.75f, 1.0f, 1}, 1.2f * night * flicker)};
+
+  for (const Object& o : w.objects) {
+    if (o.kind == ObjectKind::Lamp) offer(o.pos.x, o.pos.y + 2.2f, o.pos.z, 8.0f, scaled({1.0f, 0.68f, 0.32f, 1}, 1.5f * night));
+  }
+  for (const Creature& c : w.creatures) {
+    if (!monster_stats(c.species).is_monster) continue;
+    const CreatureLook look = creature_look(c.species, c.genes);
+    const BodyShape& shape = species_info(c.species).shape;
+    bool bulbs = false;
+    for (size_t i = 0; i < look.count; ++i) bulbs = bulbs || (look.parts[i].tint == kMonsterGlowSlot && look.parts[i].mesh != MeshId::Count);
+    if (!look.aura && !bulbs) continue;
+    const Color glow = look.aura ? look.aura_color : look.tints[kMonsterGlowSlot - 1];
+    offer(c.body.pos.x, c.body.pos.y + shape.height * 0.8f, c.body.pos.z, 3.5f, scaled(glow, 0.4f * night));
+  }
+  for (const Projectile& pr : w.battle.projectiles) {
+    offer(pr.pos.x, pr.pos.y, pr.pos.z, 4.0f, scaled(element_glow(pr.element), 0.15f + 0.5f * night));
+  }
+
+  std::sort(found.begin(), found.end(), [](const Candidate& a, const Candidate& b) { return a.distance2 < b.distance2; });
+  size_t n = 0;
+  if (night > 0.01f) out[n++] = staff;
+  for (const Candidate& c : found) {
+    if (n >= kMaxPointLights) break;
+    out[n++] = c.light;
+  }
+  return n;
 }
 
 }  // namespace monstres

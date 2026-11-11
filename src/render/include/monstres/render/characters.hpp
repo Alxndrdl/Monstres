@@ -83,12 +83,22 @@ void pose_creature(const Creature& creature, float time, float phase_offset, std
 // Turns a posed rig into instances, placed at the body and facing its way,
 // drawn `size` times larger than the models. tints[n - 1] colors the parts
 // whose `tint` is n. Parts whose mesh is MeshId::Count are skipped.
+// Parts whose `tint` is `glow_slot` (0: none) give their own light (kGlowing).
 void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<const PartPose> poses, const Body& body,
-             std::span<const Color> tints, float size = 1);
+             std::span<const Color> tints, float size = 1, uint8_t glow_slot = 0);
 inline void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<const PartPose> poses,
-                    const Body& body, Color tint, float size = 1) {
-  add_rig(list, rig, poses, body, std::span<const Color>(&tint, 1), size);
+                    const Body& body, Color tint, float size = 1, uint8_t glow_slot = 0) {
+  add_rig(list, rig, poses, body, std::span<const Color>(&tint, 1), size, glow_slot);
 }
+
+// Tint slot of the glowing parts: the magician's crystal, monsters' bulbs.
+inline constexpr uint8_t kPlayerGlowSlot = 1;
+inline constexpr uint8_t kMonsterGlowSlot = 4;
+
+// The small lights a world gives at this time (lanterns at night, the
+// staff's crystal, glowing monsters, battle projectiles), the nearest to
+// (x, z) first, at most kMaxPointLights. `night`: 0 by day, 1 at night.
+size_t world_lights(const World& world, float x, float z, float night, float time, PointLight* out);
 
 // The player, the companion and the wild monsters, with their shadows.
 void add_characters(const World& world, float time, DrawList& list);

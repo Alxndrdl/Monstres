@@ -50,6 +50,8 @@ struct App {
   int attack_buffer = 0;         // same for an attack (battle)
   uint8_t attack_slot = 0;       // 1..3
   int parry_buffer = 0;
+  bool hold_clock = false;       // debug: the time of day stands still
+  uint32_t held_clock = 0;
   Command command = Command::None;  // sent with the next tick
   uint16_t command_target = 0;
   bool frozen = false;           // ?frozen: no automatic ticks (tests, screenshots)
@@ -99,6 +101,7 @@ void tick(App& app, const Input& in) {
   const bool fighting = w.battle.phase == BattlePhase::Fight;
   const size_t creatures = w.creatures.size();
   step(w, in);
+  if (app.hold_clock) w.clock = app.held_clock;
   // A press is kept a few ticks, until it happens (landing, end of a cooldown).
   const Fighter& ally = w.battle.ally;
   if (in.jump && (fighting ? ally.state == FighterState::Dodge : was_on_ground)) app.jump_buffer = 0;
@@ -261,6 +264,20 @@ EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
     tick(*g_app, current_input(*g_app));
     g_app->redraw = true;
   }
+}
+
+// Debug options (settings menu): the time of day, in hours (0..24), and
+// whether it stands still.
+EMSCRIPTEN_KEEPALIVE void monstres_set_hour(float hour) {
+  const float h = std::fmod(std::fmod(hour, 24.0f) + 24.0f, 24.0f);
+  g_app->world.clock = std::min(static_cast<uint32_t>(h * rules::kTicksPerHour), rules::kTicksPerDay - 1);
+  g_app->held_clock = g_app->world.clock;
+  g_app->redraw = true;
+}
+
+EMSCRIPTEN_KEEPALIVE void monstres_hold_hour(int hold) {
+  g_app->hold_clock = hold != 0;
+  g_app->held_clock = g_app->world.clock;
 }
 
 EMSCRIPTEN_KEEPALIVE const char* monstres_team_json() {

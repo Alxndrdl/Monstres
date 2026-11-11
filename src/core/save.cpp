@@ -185,6 +185,7 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u32(m.xp);
     out.u16(m.hp);
   }
+  out.u32(w.clock);
   return out.take();
 }
 
@@ -205,6 +206,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   const bool with_genes = version >= 9;     // creatures' variants, and the bestiary's discoveries
   const bool without_sex = version == 9;   // genes had no sex (it is now the first gene)
   const bool with_team = version >= 11;    // levels of the monsters, and the team
+  const bool with_clock = version >= 12;   // time of day
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -309,6 +311,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     }
     if (w.team[0].species != Species::Companion || w.creatures.empty()) return fail(error, LoadError::Corrupt);
   }
+  if (with_clock && (!in.u32(w.clock) || w.clock >= rules::kTicksPerDay)) return fail(error, LoadError::Corrupt);
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
 
   if (version < 8) {

@@ -128,7 +128,10 @@ float rand01(uint64_t seed, uint64_t a, uint64_t b = 0) {
 
 float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
-void add(DrawList& list, MeshId id, const Instance& in) { list.batches[static_cast<size_t>(id)].push_back(in); }
+void add(DrawList& list, MeshId id, const Instance& in) {
+  list.batches[static_cast<size_t>(id)].push_back(in);
+  if (id == MeshId::Sparkle) list.batches[static_cast<size_t>(id)].back().material = kGlowing;  // magic glows
+}
 
 }  // namespace
 
@@ -436,7 +439,7 @@ void build_landscape(const World& w, DrawList& list) {
   add(list, MeshId::Ground, Instance{});
   add(list, MeshId::Path, Instance{});
   Instance water;
-  water.unused = 1;  // the shader adds waves and reflections
+  water.material = kWater;  // the shader adds waves and reflections
   add(list, MeshId::Water, water);
 
   std::vector<Box> obstacles;
@@ -591,6 +594,21 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected) {
   }
   add_battle_effects(w, time, list);
 
+  // At night: a glowing halo around each lantern (their light is in build_view).
+  const float dark = night_amount(w);
+  if (dark > 0.01f) {
+    for (const Object& o : w.objects) {
+      if (o.kind != ObjectKind::Lamp) continue;
+      Instance halo;
+      halo.x = o.pos.x;
+      halo.y = o.pos.y + 2.29f;
+      halo.z = o.pos.z;
+      halo.sx = halo.sy = halo.sz = 0.45f + 0.03f * std::sin(time * 3 + o.pos.x);
+      halo.tint = {1.6f, 1.15f, 0.55f, 0.35f * dark};
+      add(list, MeshId::Sparkle, halo);
+    }
+  }
+
   // Clouds drifting with the wind, wrapping around.
   constexpr int kClouds = 16;
   constexpr float kSpan = 440.0f;
@@ -605,7 +623,8 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected) {
     c.sx = lerp(14.0f, 28.0f, rand01(w.seed, 20400 + u));
     c.sy = lerp(4.0f, 7.0f, rand01(w.seed, 20500 + u));
     c.sz = lerp(8.0f, 15.0f, rand01(w.seed, 20600 + u));
-    c.tint = {1.45f, 1.45f, 1.45f, 1};  // clouds glow: brighter than the lighting alone
+    // Clouds glow by day (brighter than the lighting alone), turn grey-blue at night.
+    c.tint = {lerp(1.45f, 0.16f, dark), lerp(1.45f, 0.18f, dark), lerp(1.45f, 0.26f, dark), 1};
     add(list, mesh_offset(MeshId::Cloud0, u % kCloudVariants), c);
   }
 }
@@ -770,6 +789,68 @@ bool creature_on_screen(const World& w, const View& view, int index, float& ndc_
   return true;
 }
 
+namespace {
+
+struct SkyKey {
+  float hour;
+  SkyState state;
+};
+
+// Colors of the sky and of the light through the day (linear in between).
+constexpr SkyState kNight{{0.015f, 0.025f, 0.075f, 1}, {0.05f, 0.07f, 0.16f, 1}, {0.10f, 0.12f, 0.22f, 1},
+                          {0.05f, 0.06f, 0.09f, 1}, {0.16f, 0.20f, 0.32f, 1}, 0};
+constexpr SkyState kDawn{{0.24f, 0.30f, 0.55f, 1}, {0.95f, 0.62f, 0.45f, 1}, {0.40f, 0.38f, 0.46f, 1},
+                         {0.28f, 0.26f, 0.25f, 1}, {0.62f, 0.42f, 0.30f, 1}, 0.55f};
+constexpr SkyState kDay{palette::kSkyZenith, palette::kSkyHorizon, {0.52f, 0.58f, 0.70f, 1},
+                        {0.36f, 0.40f, 0.32f, 1}, {0.62f, 0.589f, 0.527f, 1}, 1};
+constexpr SkyState kDusk{{0.18f, 0.18f, 0.42f, 1}, {1.0f, 0.52f, 0.33f, 1}, {0.38f, 0.32f, 0.42f, 1},
+                         {0.27f, 0.23f, 0.22f, 1}, {0.60f, 0.36f, 0.24f, 1}, 0.45f};
+constexpr SkyKey kSkyKeys[] = {{0, kNight}, {4.5f, kNight}, {6, kDawn}, {8, kDay}, {16.5f, kDay},
+                               {18.5f, kDusk}, {20.5f, kNight}, {24, kNight}};
+
+Color mix(Color a, Color b, float t) { return {lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t), 1}; }
+
+}  // namespace
+
+SkyState sky_at(float hour) {
+  hour = std::fmod(std::fmod(hour, 24.0f) + 24.0f, 24.0f);
+  for (size_t i = 1; i < std::size(kSkyKeys); ++i) {
+    const SkyKey& a = kSkyKeys[i - 1];
+    const SkyKey& b = kSkyKeys[i];
+    if (hour > b.hour) continue;
+    const float t = (hour - a.hour) / (b.hour - a.hour);
+    return {mix(a.state.zenith, b.state.zenith, t), mix(a.state.horizon, b.state.horizon, t),
+            mix(a.state.ambient_sky, b.state.ambient_sky, t), mix(a.state.ambient_ground, b.state.ambient_ground, t),
+            mix(a.state.light, b.state.light, t), lerp(a.state.daylight, b.state.daylight, t)};
+  }
+  return kNight;
+}
+
+SkyDirections sky_directions(float hour) {
+  // The sun rises in the east at 6:00, is highest at noon (ahead when
+  // looking towards -Z), sets at 18:00. The moon is on the other side.
+  const float a = (hour - 12.0f) / 12.0f * static_cast<float>(kPi);
+  const float south_x = 0.47f, south_z = -0.88f;
+  const float hx = std::cos(a) * south_x - std::sin(a) * south_z;
+  const float hz = std::cos(a) * south_z + std::sin(a) * south_x;
+  const float elevation = std::sin((hour - 6.0f) / 12.0f * static_cast<float>(kPi)) * 0.95f;
+  const auto normalized = [](Vec3 v) {
+    const float l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    return Vec3{v.x / l, v.y / l, v.z / l};
+  };
+  SkyDirections d;
+  d.sun = normalized({std::cos(elevation) * hx, std::sin(elevation), std::cos(elevation) * hz});
+  // The moon stays low enough to be seen while walking.
+  d.moon = normalized({-d.sun.x, -d.sun.y * 0.4f, -d.sun.z});
+  // Surfaces are lit from higher than the disc (the ground stays bright
+  // with a low sun); at night by the moon.
+  const Vec3 from = d.sun.y > -0.05f ? d.sun : d.moon;
+  d.light = normalized({from.x, std::max(from.y, 0.0f) + 0.7f, from.z});
+  return d;
+}
+
+float night_amount(const World& world) { return 1 - sky_at(hour_of_day(world)).daylight; }
+
 View build_view(const World& w, const Camera& cam, float aspect, float time) {
   const Player& p = w.player;
   float tx = p.pos.x, ty = p.pos.y + 1.0f, tz = p.pos.z;
@@ -809,19 +890,27 @@ View build_view(const World& w, const Camera& cam, float aspect, float time) {
   v.camera_y = ey;
   v.camera_z = ez;
 
-  // The sun, low enough to be seen when looking ahead; the light comes from
-  // the same side but higher, so the ground stays bright.
-  auto normalized = [](float x, float y, float z, float& ox, float& oy, float& oz) {
-    const float l = std::sqrt(x * x + y * y + z * z);
-    ox = x / l;
-    oy = y / l;
-    oz = z / l;
-  };
-  normalized(0.45f, 0.27f, -0.85f, v.sun_x, v.sun_y, v.sun_z);
-  normalized(0.45f, 0.95f, -0.85f, v.light_x, v.light_y, v.light_z);
-  v.sky_zenith = palette::kSkyZenith;
-  v.sky_horizon = palette::kSkyHorizon;
-  v.fog = palette::kSkyHorizon;
+  // Sun, moon, sky and light from the time of day.
+  const float hour = hour_of_day(w);
+  const SkyState sky = sky_at(hour);
+  const SkyDirections dirs = sky_directions(hour);
+  v.sun_x = dirs.sun.x;
+  v.sun_y = dirs.sun.y;
+  v.sun_z = dirs.sun.z;
+  v.moon_x = dirs.moon.x;
+  v.moon_y = dirs.moon.y;
+  v.moon_z = dirs.moon.z;
+  v.light_x = dirs.light.x;
+  v.light_y = dirs.light.y;
+  v.light_z = dirs.light.z;
+  v.sky_zenith = sky.zenith;
+  v.sky_horizon = sky.horizon;
+  v.fog = sky.horizon;
+  v.light_color = sky.light;
+  v.ambient_sky = sky.ambient_sky;
+  v.ambient_ground = sky.ambient_ground;
+  v.night = 1 - sky.daylight;
+  v.light_count = world_lights(w, tx, tz, v.night, time, v.lights);
   v.time = time;
   return v;
 }

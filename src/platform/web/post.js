@@ -104,6 +104,9 @@ window.monstres = {
   engage: (index) => _monstres_command(1, index),
   flee: () => _monstres_command(2, 0),
   capture: () => _monstres_command(3, 0),
+  // Debug (settings menu): time of day in hours; hold: it stands still.
+  setHour: (hour) => _monstres_set_hour(hour),
+  holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),
   team: () => JSON.parse(UTF8ToString(_monstres_team_json())),
   battle: () => JSON.parse(UTF8ToString(_monstres_battle_json())),
   setCamera: (yaw, pitch) => _monstres_set_camera(yaw, pitch),

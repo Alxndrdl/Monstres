@@ -73,6 +73,30 @@
     }
   });
 
+  // ---- Debug: time of day ----
+  const hourInput = document.getElementById('hour');
+  const hourValue = document.getElementById('hour-value');
+  const holdHour = document.getElementById('hold-hour');
+  const clockText = (hour) => {
+    const minutes = Math.floor(hour * 60) % (24 * 60);
+    return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
+  };
+  let dragging = false;
+  hourInput.addEventListener('input', () => {
+    dragging = true;
+    hourValue.textContent = clockText(Number(hourInput.value));
+    if (game) game.setHour(Number(hourInput.value));
+  });
+  hourInput.addEventListener('change', () => { dragging = false; });
+  holdHour.addEventListener('change', () => game && game.holdHour(holdHour.checked));
+  // While the menu is open, the slider follows the time going by.
+  setInterval(() => {
+    if (menu.hidden || dragging || !game || typeof game.state !== 'function') return;
+    const hour = game.state().hour;
+    hourInput.value = String(hour);
+    hourValue.textContent = clockText(hour);
+  }, 500);
+
   // ---- Frames per second ----
   const fpsBox = document.getElementById('fps');
   const fpsCheck = document.getElementById('show-fps');

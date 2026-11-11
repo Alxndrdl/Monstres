@@ -1016,6 +1016,7 @@ World new_game(uint64_t seed) {
 
 void step(World& w, const Input& in) {
   ++w.tick;
+  w.clock = (w.clock + 1) % rules::kTicksPerDay;
   battle_command(w, in);  // may start or end a battle, or remove a captured monster
   const BattlePhase phase = w.battle.phase;
 

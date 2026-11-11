@@ -697,6 +697,11 @@ THATCH = (0.86, 0.72, 0.40, 1)
 MUD = (0.74, 0.60, 0.42, 1)
 WATER_DARK = (0.12, 0.24, 0.32, 1)
 LANTERN = (1.0, 0.86, 0.45, 1)
+# Alpha 0.985 (opaque meshes): lit from inside at night by the game's shader
+# (kLitAtNightAlpha in src/render/include/monstres/render/renderer.hpp).
+LIT_AT_NIGHT = 0.985
+LIT_LANTERN = LANTERN[:3] + (LIT_AT_NIGHT,)
+LIT_GLASS = GLASS[:3] + (LIT_AT_NIGHT,)
 METAL = (0.25, 0.25, 0.28, 1)
 
 
@@ -735,7 +740,10 @@ def window(m, center, half_w, half_h, facing):
         return (center[0] + side[0] * u + fx * out, center[1] + v, center[2] + side[2] * u + fz * out)
     box(m, at(0, 0, 0.02), (max(side[0] * (half_w + 0.07), abs(fx) * 0.03), half_h + 0.07,
                            max(side[2] * (half_w + 0.07), abs(fz) * 0.03)), TIMBER)
-    box(m, at(0, 0, 0.05), (max(side[0] * half_w, abs(fx) * 0.02), half_h, max(side[2] * half_w, abs(fz) * 0.02)), GLASS)
+    # Most windows have someone home at night.
+    lit = hash01(int(center[0] * 100 + 7), int(center[1] * 100 + center[2] * 1000)) > 0.3
+    box(m, at(0, 0, 0.05), (max(side[0] * half_w, abs(fx) * 0.02), half_h, max(side[2] * half_w, abs(fz) * 0.02)),
+        LIT_GLASS if lit else GLASS)
     box(m, at(0, 0, 0.075), (max(side[0] * half_w, abs(fx) * 0.01), 0.025, max(side[2] * half_w, abs(fz) * 0.01)), TIMBER)
 
 
@@ -873,7 +881,7 @@ def lamp():
     m = Mesh()
     box(m, (0, 1.1, 0), (0.06, 1.1, 0.06), TIMBER)
     box(m, (0, 0.06, 0), (0.14, 0.06, 0.14), DARK_STONE)
-    box(m, (0, 2.29, 0), (0.15, 0.17, 0.15), LANTERN)
+    box(m, (0, 2.29, 0), (0.15, 0.17, 0.15), LIT_LANTERN)
     for sx in (-1, 1):
         for sz in (-1, 1):
             box(m, (sx * 0.14, 2.29, sz * 0.14), (0.02, 0.18, 0.02), METAL)

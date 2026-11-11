@@ -69,10 +69,27 @@ struct Instance {
   float wind = 0;                // how much the wind sways it (0 = rigid)
   Quat rotation;
   float sx = 1, sy = 1, sz = 1;  // scale
-  float unused = 0;
+  float material = 0;            // kLit, kWater or kGlowing
   Color tint{1, 1, 1, 1};        // multiplies the mesh colors (alpha too)
 };
 static_assert(sizeof(Instance) == 16 * sizeof(float), "uploaded as-is to the GPU");
+
+// Instance::material.
+inline constexpr float kLit = 0;      // shaded by the sun, the sky and the lights around
+inline constexpr float kWater = 1;    // waves and reflections
+inline constexpr float kGlowing = 2;  // gives its own light: as bright by night as by day
+
+// Vertex colors with this alpha (opaque meshes: windows, lanterns) light up
+// at night (View::night).
+inline constexpr float kLitAtNightAlpha = 0.985f;
+
+// A small light (lantern, the magician's staff, a glowing monster).
+struct PointLight {
+  float x = 0, y = 0, z = 0;
+  float radius = 1;  // no light beyond
+  Color color;       // at the center
+};
+inline constexpr size_t kMaxPointLights = 12;
 
 // The usual case: turned around the vertical axis only.
 inline Instance make_instance(float x, float y, float z, float yaw, float sx, float sy, float sz,
@@ -106,9 +123,17 @@ struct View {
   float camera_x = 0, camera_y = 0, camera_z = 0;
   float sun_x = 0, sun_y = 1, sun_z = 0;  // direction towards the sun disc, normalized
   float light_x = 0, light_y = 1, light_z = 0;  // direction of the light used for shading
+  float moon_x = 0, moon_y = -1, moon_z = 0;  // direction towards the moon, normalized
   Color sky_zenith;
   Color sky_horizon;
   Color fog;
+  // Lighting (the defaults: a sunny day, as portraits are drawn).
+  Color light_color{0.62f, 0.589f, 0.527f, 1};  // sun (or moon) on surfaces facing it
+  Color ambient_sky{0.52f, 0.58f, 0.70f, 1};    // on surfaces facing up
+  Color ambient_ground{0.36f, 0.40f, 0.32f, 1}; // on surfaces facing down
+  float night = 0;                              // 0 day .. 1 night: stars, lit windows
+  PointLight lights[kMaxPointLights];
+  size_t light_count = 0;
   float fog_start = 45, fog_end = 320;
   float time = 0;  // seconds, drives the wind
   bool sky = true;  // false: no sky, the background stays transparent (portraits)

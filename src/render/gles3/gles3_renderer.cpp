@@ -27,7 +27,7 @@ uniform float uTime;
 out vec3 vNormal;
 out vec3 vWorld;
 out vec4 vColor;
-out float vWater;
+out float vMaterial;
 vec3 rotate(vec4 q, vec3 v) {
   return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
 }
@@ -44,32 +44,55 @@ void main() {
   }
   vWorld = world;
   vColor = aColor * iTint;
-  vWater = iScale.w;
+  vMaterial = iScale.w;
   gl_Position = uViewProjection * vec4(world, 1.0);
 }
 )";
 
 constexpr const char* kMeshFragmentShader = R"(#version 300 es
 precision mediump float;
+#define MAX_LIGHTS 12
 in vec3 vNormal;
 in vec3 vWorld;
 in vec4 vColor;
-in float vWater;
+in float vMaterial;
 uniform vec3 uCamera;
 uniform vec3 uLight;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientSky;
+uniform vec3 uAmbientGround;
+uniform float uNight;
+uniform bool uOpaquePass;
 uniform float uTimeFs;
 uniform vec3 uFog;
 uniform vec2 uFogRange;
+uniform int uLightCount;
+uniform vec4 uLightPos[MAX_LIGHTS];    // xyz, radius
+uniform vec3 uLightColors[MAX_LIGHTS];
 out vec4 outColor;
 void main() {
   vec3 n = normalize(vNormal);
   if (!gl_FrontFacing) n = -n;  // double-sided meshes
   float diffuse = max(dot(n, uLight), 0.0);
-  // Ambient light: bluish from the sky, greenish bounced from the ground.
-  vec3 ambient = mix(vec3(0.36, 0.40, 0.32), vec3(0.52, 0.58, 0.70), n.y * 0.5 + 0.5);
-  vec3 color = vColor.rgb * (ambient + vec3(1.0, 0.95, 0.85) * 0.62 * diffuse);
+  // Ambient light: from the sky above, bounced from the ground below.
+  vec3 light = mix(uAmbientGround, uAmbientSky, n.y * 0.5 + 0.5) + uLightColor * diffuse;
+  // Lanterns, the staff, glowing monsters: soft lights fading with distance.
+  for (int i = 0; i < MAX_LIGHTS; ++i) {
+    if (i >= uLightCount) break;
+    vec3 d = uLightPos[i].xyz - vWorld;
+    float dist = length(d);
+    float fall = clamp(1.0 - dist / uLightPos[i].w, 0.0, 1.0);
+    light += uLightColors[i] * fall * fall * (0.35 + 0.65 * max(dot(n, d / max(dist, 1e-3)), 0.0));
+  }
+  vec3 color = vColor.rgb * light;
   float alpha = vColor.a;
-  if (vWater > 0.5) {
+  if (vMaterial > 1.5) {
+    color = vColor.rgb;  // glowing: its own light
+  } else if (uOpaquePass && abs(vColor.a - 0.985) < 0.002) {
+    // Windows and lanterns: lit from inside at night.
+    color = mix(color, vec3(1.0, 0.78, 0.42) * 1.15, uNight);
+    alpha = 1.0;
+  } else if (vMaterial > 0.5) {
     // Small moving waves: sky reflection at grazing angles and sun glints.
     vec3 wave = normalize(vec3(sin(vWorld.x * 1.7 + uTimeFs * 1.3) * 0.06 + sin(vWorld.z * 2.3 - uTimeFs) * 0.04,
                                1.0,
@@ -78,7 +101,7 @@ void main() {
     float fresnel = pow(1.0 - max(dot(view, wave), 0.0), 3.0);
     color = mix(color, uFog * 1.05, fresnel * 0.7);
     float glint = pow(max(dot(reflect(-uLight, wave), view), 0.0), 80.0);
-    color += vec3(1.0, 0.95, 0.85) * glint * 0.8;
+    color += uLightColor * (1.0 / 0.62) * glint * 0.8;  // the sun at noon: (1, 0.95, 0.85)
     alpha = max(alpha, fresnel * 0.9 * step(0.01, vColor.a));
   }
   float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uCamera));
@@ -103,17 +126,30 @@ in vec2 vNdc;
 uniform mat4 uInverseViewProjection;
 uniform vec3 uCamera;
 uniform vec3 uSun;
+uniform vec3 uMoon;
 uniform vec3 uZenith;
 uniform vec3 uHorizon;
+uniform float uNight;
 out vec4 outColor;
+float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 void main() {
   vec4 far = uInverseViewProjection * vec4(vNdc, 1.0, 1.0);
   vec3 dir = normalize(far.xyz / far.w - uCamera);
   float up = max(dir.y, 0.0);
   vec3 sky = mix(uHorizon, uZenith, pow(up, 0.55));
+  // Stars, at night, fading towards the horizon.
+  vec3 cell = floor(dir * 180.0);
+  float star = step(0.9965, hash(cell)) * hash(cell + 7.0);
+  sky += vec3(0.9, 0.92, 1.0) * star * uNight * smoothstep(0.02, 0.25, dir.y);
   float sun = max(dot(dir, uSun), 0.0);
-  sky += vec3(1.0, 0.85, 0.6) * (pow(sun, 8.0) * 0.25 + pow(sun, 64.0) * 0.35);  // glow
-  sky = mix(sky, vec3(1.0, 0.98, 0.9), smoothstep(0.9993, 0.9996, sun));      // disc
+  float day = 1.0 - uNight;
+  sky += vec3(1.0, 0.85, 0.6) * (pow(sun, 8.0) * 0.25 + pow(sun, 64.0) * 0.35) * day;  // glow
+  sky = mix(sky, vec3(1.0, 0.98, 0.9), smoothstep(0.9993, 0.9996, sun) * step(-0.02, uSun.y));  // disc
+  // The moon: a pale disc with a soft halo.
+  float moon = max(dot(dir, uMoon), 0.0);
+  sky += vec3(0.55, 0.62, 0.8) * pow(moon, 200.0) * 0.5 * uNight;
+  vec3 moonColor = mix(vec3(0.85, 0.87, 0.95), vec3(0.62, 0.64, 0.72), hash(floor(dir * 900.0)) * 0.6);
+  sky = mix(sky, moonColor, smoothstep(0.99955, 0.99975, moon) * step(-0.02, uMoon.y) * max(uNight, 0.25));
   outColor = vec4(sky, 1.0);
 }
 )";
@@ -177,6 +213,16 @@ public:
     u_time_fs_ = glGetUniformLocation(mesh_program_, "uTimeFs");
     u_camera_ = glGetUniformLocation(mesh_program_, "uCamera");
     u_light_ = glGetUniformLocation(mesh_program_, "uLight");
+    u_light_color_ = glGetUniformLocation(mesh_program_, "uLightColor");
+    u_ambient_sky_ = glGetUniformLocation(mesh_program_, "uAmbientSky");
+    u_ambient_ground_ = glGetUniformLocation(mesh_program_, "uAmbientGround");
+    u_night_ = glGetUniformLocation(mesh_program_, "uNight");
+    u_opaque_pass_ = glGetUniformLocation(mesh_program_, "uOpaquePass");
+    u_light_count_ = glGetUniformLocation(mesh_program_, "uLightCount");
+    u_light_pos_ = glGetUniformLocation(mesh_program_, "uLightPos");
+    u_light_colors_ = glGetUniformLocation(mesh_program_, "uLightColors");
+    u_sky_moon_ = glGetUniformLocation(sky_program_, "uMoon");
+    u_sky_night_ = glGetUniformLocation(sky_program_, "uNight");
     u_fog_ = glGetUniformLocation(mesh_program_, "uFog");
     u_fog_range_ = glGetUniformLocation(mesh_program_, "uFogRange");
     u_sky_inverse_ = glGetUniformLocation(sky_program_, "uInverseViewProjection");
@@ -250,6 +296,25 @@ public:
     glUniform1f(u_time_fs_, view.time);
     glUniform3f(u_camera_, view.camera_x, view.camera_y, view.camera_z);
     glUniform3f(u_light_, view.light_x, view.light_y, view.light_z);
+    glUniform3f(u_light_color_, view.light_color.r, view.light_color.g, view.light_color.b);
+    glUniform3f(u_ambient_sky_, view.ambient_sky.r, view.ambient_sky.g, view.ambient_sky.b);
+    glUniform3f(u_ambient_ground_, view.ambient_ground.r, view.ambient_ground.g, view.ambient_ground.b);
+    glUniform1f(u_night_, view.night);
+    {
+      const auto count = static_cast<GLsizei>(std::min(view.light_count, kMaxPointLights));
+      float pos[kMaxPointLights * 4] = {}, colors[kMaxPointLights * 3] = {};
+      for (GLsizei i = 0; i < count; ++i) {
+        const PointLight& l = view.lights[i];
+        const float p[] = {l.x, l.y, l.z, l.radius}, c[] = {l.color.r, l.color.g, l.color.b};
+        std::copy_n(p, 4, pos + 4 * i);
+        std::copy_n(c, 3, colors + 3 * i);
+      }
+      glUniform1i(u_light_count_, count);
+      if (count > 0) {
+        glUniform4fv(u_light_pos_, count, pos);
+        glUniform3fv(u_light_colors_, count, colors);
+      }
+    }
     glUniform3f(u_fog_, view.fog.r, view.fog.g, view.fog.b);
     glUniform2f(u_fog_range_, view.fog_start, view.fog_end);
     glEnable(GL_DEPTH_TEST);
@@ -261,6 +326,7 @@ public:
     for (bool transparent : {false, true}) {
       glDepthMask(transparent ? GL_FALSE : GL_TRUE);
       if (transparent) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+      glUniform1i(u_opaque_pass_, transparent ? 0 : 1);  // fading edges are not lit windows
       for (size_t i = 0; i < meshes_.size(); ++i) {
         const GpuMesh& m = meshes_[i];
         if (m.vertex_count == 0 || m.transparent != transparent) continue;
@@ -345,6 +411,8 @@ private:
     glUniformMatrix4fv(u_sky_inverse_, 1, GL_FALSE, view.inverse_view_projection.m);
     glUniform3f(u_sky_camera_, view.camera_x, view.camera_y, view.camera_z);
     glUniform3f(u_sky_sun_, view.sun_x, view.sun_y, view.sun_z);
+    glUniform3f(u_sky_moon_, view.moon_x, view.moon_y, view.moon_z);
+    glUniform1f(u_sky_night_, view.night);
     glUniform3f(u_sky_zenith_, view.sky_zenith.r, view.sky_zenith.g, view.sky_zenith.b);
     glUniform3f(u_sky_horizon_, view.sky_horizon.r, view.sky_horizon.g, view.sky_horizon.b);
     glBindVertexArray(sky_vao_);
@@ -390,6 +458,9 @@ private:
   GLint u_time_fs_ = -1;
   GLint u_view_projection_ = -1, u_time_ = -1, u_camera_ = -1, u_light_ = -1, u_fog_ = -1, u_fog_range_ = -1;
   GLint u_sky_inverse_ = -1, u_sky_camera_ = -1, u_sky_sun_ = -1, u_sky_zenith_ = -1, u_sky_horizon_ = -1;
+  GLint u_opaque_pass_ = -1;
+  GLint u_light_color_ = -1, u_ambient_sky_ = -1, u_ambient_ground_ = -1, u_night_ = -1;
+  GLint u_light_count_ = -1, u_light_pos_ = -1, u_light_colors_ = -1, u_sky_moon_ = -1, u_sky_night_ = -1;
   GLuint sky_vao_ = 0;
   GLuint instance_vbo_ = 0;
   std::vector<GpuMesh> meshes_;

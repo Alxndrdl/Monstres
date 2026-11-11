@@ -59,7 +59,26 @@ void build_dynamic(const World& world, float time, DrawList& list, int selected 
 float camera_distance(const World& world, float tx, float ty, float tz, float dx, float dy, float dz,
                       float wanted);
 
-// Camera matrices, sky and lighting for one frame.
+// The day: colors of the sky and of the light at an hour (0..24), and how
+// much daylight there is (0 at night, 1 by day).
+struct SkyState {
+  Color zenith, horizon;
+  Color ambient_sky, ambient_ground;
+  Color light;  // the sun's or the moon's
+  float daylight;
+};
+SkyState sky_at(float hour);
+
+// Where the sun and the moon are at an hour, and where surfaces are lit from.
+struct SkyDirections {
+  Vec3 sun, moon, light;  // unit vectors
+};
+SkyDirections sky_directions(float hour);
+
+// 0 by day, 1 at night (lanterns lit, stars), in between at dawn and dusk.
+float night_amount(const World& world);
+
+// Camera matrices, sky and lighting (time of day, lanterns...) for one frame.
 View build_view(const World& world, const Camera& camera, float aspect, float time);
 
 // A portrait for the menus: one figure (see add_portrait_figure), framed
