@@ -185,6 +185,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   w.rng = Rng::from_raw(rng_state, rng_inc);
   w.path = make_path(w.seed);
   w.village = make_village_layout(w.seed, w.path);
+  w.ground = make_heightmap(w.seed, w.path, w.village);
 
   w.objects.resize(count);
   const auto valid_size = [](float v) { return v >= 0 && v <= kMaxObjectSize; };
@@ -220,12 +221,31 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   if (before_village) {
     // Saves from before the village: build it, and bring everyone anew.
     build_village(w);
-    spawn_creatures(w);
+  }
+  if (version < 7) {
+    // Saves from the flat world: set the objects on the relief and lift
+    // bodies out of the ground (they fall onto it if it is now lower).
+    settle_objects(w);
+    auto lift = [&](Body& b) {
+      const float ground = w.ground.height(b.pos.x, b.pos.z);
+      if (b.pos.y < ground) b.pos.y = ground;
+      if (b.pos.y > ground) b.on_ground = false;
+    };
+    lift(w.player);
+    for (Creature& c : w.creatures) {
+      if (c.species != Species::Fish && c.species != Species::Crow) lift(c.body);
+    }
+  }
+  if (before_village) spawn_creatures(w);
+  if (version < 7) {
     const Box pb = player_box(w.player);
     const bool stuck = in_lake(w.village.lake, w.player.pos.x, w.player.pos.z, 0.5f) ||
                        std::any_of(w.objects.begin(), w.objects.end(),
                                    [&](const Object& o) { return overlaps(pb, object_box(o)); });
-    if (stuck) w.player = Body{};  // back to the start
+    if (stuck) {  // back to the start
+      w.player = Body{};
+      w.player.pos.y = w.ground.height(0, 0);
+    }
   }
   return w;
 }

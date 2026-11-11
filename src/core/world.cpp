@@ -106,6 +106,17 @@ void generate_objects(World& w) {
     const float dz = std::max({b.min.z, -b.max.z, 0.0f});
     if (dx * dx + dz * dz < rules::kSpawnClearRadius * rules::kSpawnClearRadius) continue;
 
+    // Not on a slope too steep for its size (a flat rock would float).
+    if (!w.ground.empty()) {
+      const Box box = object_box(o);
+      const float center = w.ground.height(o.pos.x, o.pos.z);
+      float lowest = center;
+      for (float cx : {box.min.x, box.max.x}) {
+        for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+      }
+      if (center - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
+    }
+
     // Keep the village and the lake clear.
     if (in_village(w.village, o.pos.x, o.pos.z, 2.0f) || in_lake(w.village.lake, o.pos.x, o.pos.z, 2.5f)) continue;
 
@@ -127,10 +138,12 @@ void generate_objects(World& w) {
 }
 
 // What bodies collide with during a tick: object boxes (computed once per
-// tick) and the lake, which walkers cannot enter and swimmers cannot leave.
+// tick), the ground, and the lake, which walkers cannot enter and swimmers
+// cannot leave.
 struct Surroundings {
   std::span<const Box> boxes;
   const Lake& lake;
+  const Heightmap& ground;
   // Broad phase: box indices per cell of a grid over the world, so that a
   // body only tests the objects around it.
   static constexpr float kCell = 6.0f;
@@ -178,6 +191,9 @@ bool wrong_medium(const Surroundings& s, const Body& b, const BodyShape& shape, 
   return in_lake(s.lake, b.pos.x, b.pos.z, shape.half_width * 0.5f);
 }
 
+constexpr float kStepUp = 0.01f;     // rise always allowed in one step (rounding)
+constexpr float kGroundSnap = 0.25f; // walking downhill: stay on the ground if it is this close
+
 // Moves a body along one axis, then pushes it out of any object it entered.
 void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis, float delta,
                Medium medium = Medium::Land) {
@@ -199,17 +215,25 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
   });
   const float limit = rules::kWorldHalfSize - h;
   *coord = std::clamp(*coord, -limit, limit);
+  // Walkers cannot go up a slope steeper than kMaxWalkSlope (but can jump
+  // onto it: the ground then is below their feet).
+  const bool too_steep = medium == Medium::Land &&
+                         s.ground.height(b.pos.x, b.pos.z) - b.pos.y >
+                             std::fabs(*coord - start) * rules::kMaxWalkSlope + kStepUp;
   // Pushed out of one object into another (a gap narrower than the body):
   // do not move along this axis at all.
-  if (s.any_overlap(body_box(b, shape)) || wrong_medium(s, b, shape, medium)) *coord = start;
+  if (too_steep || s.any_overlap(body_box(b, shape)) || wrong_medium(s, b, shape, medium)) *coord = start;
 }
 
 void move_vertical(const Surroundings& s, Body& b, const BodyShape& shape) {  // walkers only
   const float previous_y = b.pos.y;
+  const bool was_on_ground = b.on_ground;
+  const float ground = s.ground.height(b.pos.x, b.pos.z);
   b.pos.y += b.velocity_y * rules::kDt;
   b.on_ground = false;
-  if (b.pos.y <= 0) {
-    b.pos.y = 0;
+  // On the ground, or walking down a slope (not jumping): follow the ground.
+  if (b.pos.y <= ground || (was_on_ground && b.velocity_y <= 0 && b.pos.y - ground < kGroundSnap)) {
+    b.pos.y = ground;
     b.velocity_y = 0;
     b.on_ground = true;
   }
@@ -225,7 +249,7 @@ void move_vertical(const Surroundings& s, Body& b, const BodyShape& shape) {  //
       // Already touching it from the side (squeezed between two objects):
       // stay at the same height rather than being pushed through anything.
       b.pos.y = previous_y;
-      b.on_ground = b.on_ground || previous_y == 0;
+      b.on_ground = b.on_ground || previous_y <= ground;
     }
     b.velocity_y = 0;
   });
@@ -294,6 +318,7 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
     // Lost behind: catch up instantly, just behind the player.
     b.pos = {p.pos.x - p.facing_x * rules::kCompanionFollowDistance, p.pos.y,
              p.pos.z - p.facing_z * rules::kCompanionFollowDistance};
+    b.pos.y = std::max(b.pos.y, w.ground.height(b.pos.x, b.pos.z));
     if (inside_any_object(w, b, info.shape)) b.pos = p.pos;
     b.velocity_y = 0;
     c.timer = 0;
@@ -316,8 +341,11 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
       b.facing_z = to_player_z;
     }
   }
-  // Jump when stuck against something, or to follow the player up.
-  const bool jump = b.on_ground && (c.timer >= 8 || (p.pos.y > b.pos.y + 0.4f && player_distance < 2.5f));
+  // Jump when stuck against something, or to follow the player up onto
+  // something (heights above the ground: a slope is not a reason to jump).
+  const float player_up = p.pos.y - w.ground.height(p.pos.x, p.pos.z);
+  const float own_up = b.pos.y - w.ground.height(b.pos.x, b.pos.z);
+  const bool jump = b.on_ground && (c.timer >= 8 || (player_up > own_up + 0.4f && player_distance < 2.5f));
   if (jump) c.timer = 0;
   move_body(boxes, b, info.shape, dir_x, dir_z, speed, jump, info.jump_speed);
   c.timer = (speed > 0 && b.on_ground && b.speed < 0.3f * speed) ? static_cast<uint16_t>(c.timer + 1) : 0;
@@ -543,7 +571,7 @@ void spawn_creatures(World& w) {
 
   Creature companion;
   companion.species = Species::Companion;
-  companion.body.pos = {0.8f, 0, 1.2f};  // just behind the player, on the right
+  companion.body.pos = {0.8f, w.ground.height(0.8f, 1.2f), 1.2f};  // just behind the player, on the right
   companion.home = {0.8f, 1.2f};
   w.creatures.push_back(companion);
 
@@ -552,6 +580,7 @@ void spawn_creatures(World& w) {
     Creature c;
     c.species = static_cast<Species>(1 + rng.below(3));
     c.body.pos = {random_range(rng, -limit, limit), 0, random_range(rng, -limit, limit)};
+    c.body.pos.y = w.ground.height(c.body.pos.x, c.body.pos.z);
     c.variant = static_cast<uint8_t>(rng.below(256));
     const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
     c.body.facing_x = sc.sin;
@@ -578,6 +607,7 @@ void spawn_creatures(World& w) {
     c.species = Species::Villager;
     const float r = rules::kVillageRadius - 4.0f;
     c.body.pos = {center.x + random_range(rng, -r, r), 0, center.z + random_range(rng, -r, r)};
+    c.body.pos.y = w.ground.height(c.body.pos.x, c.body.pos.z);
     c.variant = static_cast<uint8_t>(rng.below(256));
     c.home = center;
     c.timer = static_cast<uint16_t>(rng.below(4 * rules::kTicksPerSecond));
@@ -754,6 +784,22 @@ void build_village(World& w) {
   }
 }
 
+void settle_objects(World& w) {
+  constexpr float kSink = 0.05f;
+  if (w.ground.empty()) return;  // flat: objects stay where they are
+  for (Object& o : w.objects) {
+    const Box b = object_box(o);
+    const float center = w.ground.height(o.pos.x, o.pos.z);
+    float lowest = center;
+    for (float x : {b.min.x, b.max.x}) {
+      for (float z : {b.min.z, b.max.z}) lowest = std::min(lowest, w.ground.height(x, z));
+    }
+    // A low object on a slope (a flat rock) would vanish into the ground:
+    // sink it at most 40 % of its height, an edge may then float a little.
+    o.pos.y = std::max(lowest - kSink, center - kSink - 0.4f * (b.max.y - b.min.y));
+  }
+}
+
 std::vector<Vec3> crow_perches(const World& w) {
   std::vector<Vec3> perches;
   auto add = [&](const Object& o, float lx, float y, float lz) {
@@ -815,8 +861,12 @@ World new_game(uint64_t seed) {
   w.rng = Rng(seed);
   w.path = make_path(seed);
   w.village = make_village_layout(seed, w.path);
+  w.ground = make_heightmap(seed, w.path, w.village);
+  // Objects are placed as if on flat ground, then set on the relief.
   build_village(w);
   generate_objects(w);
+  settle_objects(w);
+  w.player.pos.y = w.ground.height(0, 0);
   spawn_creatures(w);
   return w;
 }
@@ -840,7 +890,7 @@ void step(World& w, const Input& in) {
   std::vector<Box> boxes;
   boxes.reserve(w.objects.size());
   for (const Object& o : w.objects) boxes.push_back(object_box(o));
-  Surroundings s{boxes, w.village.lake, {}};
+  Surroundings s{boxes, w.village.lake, w.ground, {}};
   s.build();
 
   move_body(s, w.player, kPlayerShape, dir_x, dir_z, rules::kWalkSpeed, in.jump, rules::kJumpSpeed);

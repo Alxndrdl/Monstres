@@ -1,6 +1,6 @@
-hash 1cfaedc10933c679
+hash f84887afd92892f0
 tick 761
-player -3.7747 0.0000 6.7833 on-ground
+player -3.7747 0.0000 6.7833 in-air
 objects 93
 creatures 34
-companion 0.8000 0.0000 1.2000
+companion 0.8000 -0.1593 1.2000

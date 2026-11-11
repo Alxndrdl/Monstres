@@ -123,17 +123,29 @@ void add(DrawList& list, MeshId id, const Instance& in) { list.batches[static_ca
 
 }  // namespace
 
-void add_shadow(DrawList& list, float x, float z, float rx, float rz, float yaw, float alpha, float y) {
+void add_shadow(DrawList& list, float x, float z, float rx, float rz, float yaw, float alpha, float y, Quat tilt) {
   Instance s;
   s.x = x;
   s.y = y;
   s.z = z;
-  s.rotation = quat_yaw(yaw);
+  s.rotation = tilt * quat_yaw(yaw);
   s.sx = rx;
   s.sy = 1;
   s.sz = rz;
   s.tint = {1, 1, 1, alpha};
   add(list, MeshId::Shadow, s);
+}
+
+Quat ground_tilt(const World& w, float x, float z) {
+  // Shortest rotation from (0, 1, 0) to n: axis up x n, half angle via (1 + n.y).
+  const Vec3 n = w.ground.normal(x, z);
+  const float qx = n.z, qz = -n.x, qw = 1 + n.y;
+  const float len = std::sqrt(qx * qx + qz * qz + qw * qw);
+  return {qx / len, 0, qz / len, qw / len};
+}
+
+void add_ground_shadow(DrawList& list, const World& w, float x, float z, float rx, float rz, float yaw, float alpha) {
+  add_shadow(list, x, z, rx, rz, yaw, alpha, w.ground.height(x, z) + kShadowHeight, ground_tilt(w, x, z));
 }
 
 namespace {
@@ -163,7 +175,7 @@ float wind_for(ObjectKind kind) {
   }
 }
 
-void add_object(DrawList& list, const Object& o) {
+void add_object(DrawList& list, const World& w, const Object& o) {
   Instance in;
   in.x = o.pos.x;
   in.y = o.pos.y;
@@ -179,20 +191,20 @@ void add_object(DrawList& list, const Object& o) {
   // Soft shadow on the ground, sized to the object.
   const Vec3 s = o.size;
   switch (o.kind) {
-    case ObjectKind::Tree:  add_shadow(list, o.pos.x, o.pos.z, 1.7f * s.x, 1.7f * s.x, 0); break;
-    case ObjectKind::Pine:  add_shadow(list, o.pos.x, o.pos.z, 1.4f * s.x, 1.4f * s.x, 0); break;
-    case ObjectKind::Rock:  add_shadow(list, o.pos.x, o.pos.z, 1.25f * s.x, 1.25f * s.z, yaw); break;
-    case ObjectKind::Log:   add_shadow(list, o.pos.x, o.pos.z, 1.15f * s.x, 1.8f * s.y, yaw); break;
-    case ObjectKind::Stump: add_shadow(list, o.pos.x, o.pos.z, 1.5f * s.x, 1.5f * s.x, 0); break;
-    case ObjectKind::Bush:  add_shadow(list, o.pos.x, o.pos.z, 1.3f * s.x, 1.3f * s.x, 0); break;
-    case ObjectKind::Crate: add_shadow(list, o.pos.x, o.pos.z, 1.5f * s.x, 1.5f * s.z, yaw, 0.9f); break;
-    case ObjectKind::HouseCottage: add_shadow(list, o.pos.x, o.pos.z, 3.6f, 3.0f, yaw, 0.7f); break;
-    case ObjectKind::HouseChimney: add_shadow(list, o.pos.x, o.pos.z, 3.3f, 3.3f, yaw, 0.7f); break;
-    case ObjectKind::HouseHut: add_shadow(list, o.pos.x, o.pos.z, 3.2f, 3.2f, 0, 0.7f); break;
-    case ObjectKind::Well: add_shadow(list, o.pos.x, o.pos.z, 1.4f, 1.4f, 0); break;
-    case ObjectKind::Barrel: add_shadow(list, o.pos.x, o.pos.z, 0.6f, 0.6f, 0); break;
+    case ObjectKind::Tree:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.7f * s.x, 1.7f * s.x, 0); break;
+    case ObjectKind::Pine:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.4f * s.x, 1.4f * s.x, 0); break;
+    case ObjectKind::Rock:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.25f * s.x, 1.25f * s.z, yaw); break;
+    case ObjectKind::Log:   add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.15f * s.x, 1.8f * s.y, yaw); break;
+    case ObjectKind::Stump: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.5f * s.x, 1.5f * s.x, 0); break;
+    case ObjectKind::Bush:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.3f * s.x, 1.3f * s.x, 0); break;
+    case ObjectKind::Crate: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.5f * s.x, 1.5f * s.z, yaw, 0.9f); break;
+    case ObjectKind::HouseCottage: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.6f, 3.0f, yaw, 0.7f); break;
+    case ObjectKind::HouseChimney: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.3f, 3.3f, yaw, 0.7f); break;
+    case ObjectKind::HouseHut: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.2f, 3.2f, 0, 0.7f); break;
+    case ObjectKind::Well: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.4f, 1.4f, 0); break;
+    case ObjectKind::Barrel: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.6f, 0.6f, 0); break;
     case ObjectKind::Lamp:
-    case ObjectKind::Sign: add_shadow(list, o.pos.x, o.pos.z, 0.35f, 0.35f, 0, 0.8f); break;
+    case ObjectKind::Sign: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.35f, 0.35f, 0, 0.8f); break;
     default: break;
   }
 }
@@ -214,7 +226,7 @@ std::vector<Object> border_forest(const World& w) {
       if (rand01(w.seed, 300 + ui, uj) > density) continue;
       if (distance_to_path(w.path, x, z) < rules::kPathHalfWidth + 2.0f) continue;
       Object o;
-      o.pos = {x, 0, z};
+      o.pos = {x, w.ground.height(x, z) - 0.1f, z};
       o.variant = static_cast<uint8_t>(rand01(w.seed, 400 + ui, uj) * 255);
       o.yaw = static_cast<Angle16>(rand01(w.seed, 500 + ui, uj) * 65535);
       const float r = rand01(w.seed, 600 + ui, uj);
@@ -273,6 +285,7 @@ void add_vegetation(const World& w, const std::vector<Box>& obstacles, DrawList&
 
       Instance in;
       in.x = x;
+      in.y = w.ground.height(x, z) - 0.02f;
       in.z = z;
       in.rotation = quat_yaw(kTau * rand01(w.seed, 4000 + ui, uj));
       in.wind = 1;
@@ -338,7 +351,7 @@ void add_village_effects(const World& w, float time, DrawList& list) {
       const float t = std::fmod(time * 0.22f + offset + static_cast<float>(i) / kPuffs, 1.0f);  // 0 = just out
       Instance puff;
       puff.x = cx + t * t * 2.5f + std::sin(time * 0.9f + static_cast<float>(i)) * 0.15f * t;
-      puff.y = 6.55f + t * 4.5f;
+      puff.y = o.pos.y + 6.55f + t * 4.5f;
       puff.z = cz + t * t * 1.0f;
       const float size = 0.25f + 0.85f * t;
       puff.sx = puff.sy = puff.sz = size;
@@ -385,11 +398,11 @@ void build_landscape(const World& w, DrawList& list) {
 
   std::vector<Box> obstacles;
   for (const Object& o : w.objects) {
-    add_object(list, o);
+    add_object(list, w, o);
     obstacles.push_back(object_box(o));
   }
   for (const Object& o : border_forest(w)) {
-    add_object(list, o);
+    add_object(list, w, o);
     obstacles.push_back(object_box(o));
   }
   add_vegetation(w, obstacles, list);
@@ -447,6 +460,14 @@ float camera_distance(const World& w, float tx, float ty, float tz, float dx, fl
     }
     if (hit && enter > 0) best = std::min(best, enter);
   }
+  // The ground (a hill behind the player): stop just before it.
+  constexpr float kStep = 0.2f;
+  for (float t = kStep; t < best; t += kStep) {
+    if (ty + dy * t < w.ground.height(tx + dx * t, tz + dz * t) + kMargin) {
+      best = std::max(t - kStep, 0.0f);
+      break;
+    }
+  }
   return std::max(best, kClosest);
 }
 
@@ -462,7 +483,7 @@ View build_view(const World& w, const Camera& cam, float aspect, float time) {
   float ex = tx - fx * distance;
   float ey = ty + sp * distance;
   float ez = tz - fz * distance;
-  if (ey < 0.2f) ey = 0.2f;  // never below the ground
+  ey = std::max(ey, w.ground.height(ex, ez) + 0.2f);  // never below the ground
 
   View v;
   v.view_projection = multiply(perspective(1.0f, aspect, 0.1f, 800.0f), look_at(ex, ey, ez, tx, ty, tz));

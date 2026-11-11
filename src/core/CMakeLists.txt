@@ -3,6 +3,7 @@
 add_library(monstres_core STATIC
   world.cpp
   terrain.cpp
+  heightmap.cpp
   village.cpp
   save.cpp
   debug.cpp

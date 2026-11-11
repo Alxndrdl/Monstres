@@ -107,7 +107,7 @@ TEST_CASE("the path mesh is a ribbon on the path, with soft edges") {
   float min_alpha = 1, max_alpha = 0;
   for (size_t i = 0; i < path.vertices.size(); i += MeshData::kFloatsPerVertex) {
     const float* v = &path.vertices[i];
-    CHECK(v[1] == Approx(terrain::kPathHeight));
+    CHECK(v[1] == Approx(ground_height(w, v[0], v[2]) + terrain::kPathHeight));  // just above the ground
     CHECK(distance_to_path(w.path, v[0], v[2]) <= rules::kPathHalfWidth * 1.5f);
     min_alpha = std::min(min_alpha, v[9]);
     max_alpha = std::max(max_alpha, v[9]);

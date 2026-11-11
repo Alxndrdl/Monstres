@@ -4,7 +4,7 @@ Petit jeu en C++ compilé en WebAssembly avec Emscripten, rendu WebGL2
 (OpenGL ES 3.0), installable en PWA et jouable hors ligne.
 
 Le joueur, un petit explorateur, se déplace avec son compagnon Pompon (un
-renard rond qui le suit et saute derrière lui) dans une prairie en 3D peuplée
+renard rond qui le suit et saute derrière lui) dans une prairie vallonnée en 3D peuplée
 de monstres sauvages : Gloubi la gelée sauteuse, Champi le champignon qui se
 dandine et Piou l'oiseau qui s'enfuit quand on approche. Au nord, le sentier
 mène à un village : chaumières, maisons à cheminée qui fume, huttes rondes,
@@ -50,6 +50,18 @@ tests/e2e/                          tests navigateurs Playwright (Chromium, Fire
 tools/                              make_models.py (modèles), make_icons.py (icônes PWA)
 scripts/test.sh                     lance tous les tests
 ```
+
+## Relief
+
+Le sol est une carte de hauteurs (`src/core/heightmap.cpp`) : une grille de
+1 m tirée de la graine du monde (collines, plus hautes vers les bords ; plat
+autour du village ; fond du lac creusé ; petites bosses atténuées le long du
+sentier). Entre deux points, le sol est fait de deux triangles par case,
+exactement ceux que dessine le moteur : on marche sur ce qu'on voit. Les
+pentes de plus de 45° (`kMaxWalkSlope`) ne se montent pas à pied, il faut
+sauter. Les objets sont posés sur le sol (légèrement enfoncés), l'herbe, les
+ombres et le sentier suivent la pente, et la caméra ne passe jamais sous une
+colline.
 
 La simulation (60 pas par seconde) est déterministe : entrées en entiers,
 générateur aléatoire PCG32 à graine, sinus/cosinus maison

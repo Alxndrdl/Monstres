@@ -55,7 +55,7 @@ inline void check_invariants(const World& w) {
   CHECK(std::isfinite(p.pos.x));
   CHECK(std::isfinite(p.pos.y));
   CHECK(std::isfinite(p.pos.z));
-  CHECK(p.pos.y >= 0.0f);
+  CHECK(p.pos.y >= w.ground.height(p.pos.x, p.pos.z));  // never inside the ground
   const float limit = rules::kWorldHalfSize - rules::kPlayerHalfWidth;
   CHECK(std::fabs(p.pos.x) <= limit);
   CHECK(std::fabs(p.pos.z) <= limit);
@@ -74,7 +74,7 @@ inline void check_invariants(const World& w) {
       CHECK(in_lake(w.village.lake, c.body.pos.x, c.body.pos.z));
       continue;
     }
-    CHECK(c.body.pos.y >= 0.0f);
+    CHECK(c.body.pos.y >= w.ground.height(c.body.pos.x, c.body.pos.z));
     if (c.species == Species::Crow) continue;  // flies over everything
     CHECK_FALSE(in_lake(w.village.lake, c.body.pos.x, c.body.pos.z));
     for (const Object& o : w.objects) {

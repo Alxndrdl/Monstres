@@ -7,7 +7,8 @@ test('the game starts in a 3D world', async ({ page }) => {
   await openGame(page, '?seed=42&new&frozen');
   const s = await state(page);
   expect(s.tick).toBe(0);
-  expect(s.player).toMatchObject({ x: 0, y: 0, z: 0, onGround: true });
+  expect(s.player).toMatchObject({ x: 0, z: 0, onGround: true });
+  expect(s.player.y).toBe(s.player.ground);  // standing on the hills
   expect(s.objects).toBeGreaterThan(150);  // nature + village
   expect(s.creatures[0].species).toBe('companion');
   const bySpecies = {};
@@ -52,7 +53,7 @@ test.describe('keyboard', () => {
   test('space jumps', async ({ page }) => {
     await openGame(page, '?seed=42&new');
     await page.keyboard.press('Space');
-    await expect.poll(async () => (await state(page)).player.y).toBeGreaterThan(0.3);
+    await expect.poll(async () => { const p = (await state(page)).player; return p.y - p.ground; }).toBeGreaterThan(0.3);
     await expect.poll(async () => (await state(page)).player.onGround).toBe(true);
   });
 
@@ -87,7 +88,7 @@ test.describe('on-screen controls', () => {
   test('the jump button jumps', async ({ page }) => {
     await openGame(page, '?seed=42&new');
     await page.locator('#jump').click();
-    await expect.poll(async () => (await state(page)).player.y).toBeGreaterThan(0.3);
+    await expect.poll(async () => { const p = (await state(page)).player; return p.y - p.ground; }).toBeGreaterThan(0.3);
   });
 
   test('dragging on the view turns the camera', async ({ page }) => {
@@ -135,7 +136,7 @@ test.describe('on a phone in landscape', () => {
   test('tapping the jump button jumps', async ({ page }) => {
     await openGame(page, '?seed=42&new');
     await page.locator('#jump').tap();
-    await expect.poll(async () => (await state(page)).player.y).toBeGreaterThan(0.3);
+    await expect.poll(async () => { const p = (await state(page)).player; return p.y - p.ground; }).toBeGreaterThan(0.3);
   });
 });
 

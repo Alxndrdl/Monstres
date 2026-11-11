@@ -15,18 +15,7 @@ constexpr Color kPath{0.60f, 0.47f, 0.32f, 1};
 constexpr Color kSand{0.80f, 0.72f, 0.52f, 1};
 constexpr Color kLakeBed{0.36f, 0.42f, 0.36f, 1};
 constexpr Color kSquare{0.58f, 0.50f, 0.38f, 1};  // trodden earth of the village square
-
-uint64_t mix64(uint64_t z) {
-  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
-  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
-  return z ^ (z >> 31);
-}
-
-float lattice(uint64_t seed, int64_t x, int64_t z) {
-  const uint64_t h = mix64(seed * 0x9E3779B97F4A7C15ULL + static_cast<uint64_t>(x) * 0xC2B2AE3D27D4EB4FULL +
-                           static_cast<uint64_t>(z) * 0x165667B19E3779F9ULL);
-  return static_cast<float>(h >> 40) / static_cast<float>(1ULL << 24);
-}
+constexpr Color kSlope{0.50f, 0.44f, 0.34f, 1};   // bare earth and stones on steep slopes
 
 Color lerp(Color a, Color b, float t) {
   t = std::clamp(t, 0.0f, 1.0f);
@@ -54,8 +43,8 @@ void face_up(MeshData& m) {
   }
 }
 
-void vertex(MeshData& m, float x, float y, float z, Color c) {
-  m.vertices.insert(m.vertices.end(), {x, y, z, 0, 1, 0, c.r, c.g, c.b, c.a});
+void vertex(MeshData& m, float x, float y, float z, Color c, Vec3 n = {0, 1, 0}) {
+  m.vertices.insert(m.vertices.end(), {x, y, z, n.x, n.y, n.z, c.r, c.g, c.b, c.a});
 }
 
 // 0 at the shore, 1 in the middle of the lake, negative outside.
@@ -77,6 +66,11 @@ Color base_ground_color(uint64_t seed, float x, float z) {
 
 Color ground_color(const World& w, float x, float z) {
   Color c = base_ground_color(w.seed, x, z);
+  // Hilltops a little drier, steep slopes bare.
+  const float h = w.ground.height(x, z);
+  c = lerp(c, kGrassDry, smooth(2.5f, 8.0f, h) * 0.45f);
+  const float steep = 1 - w.ground.normal(x, z).y;  // 0 flat, 0.29 at 45°
+  c = lerp(c, kSlope, smooth(0.10f, 0.25f, steep) * 0.8f);
   if (w.village.lake.radius_x > 0) {
     // The village square: trodden earth fading into the grass.
     const float dx = x - w.village.center.x, dz = z - w.village.center.z;
@@ -92,21 +86,7 @@ Color ground_color(const World& w, float x, float z) {
 
 }  // namespace
 
-float ground_height(const World& w, float x, float z) {
-  const float depth = lake_depth_factor(w.village.lake, x, z);
-  return depth > 0 ? -1.4f * std::min(1.0f, depth * 2.5f) : 0.0f;
-}
-
-float value_noise(uint64_t seed, float x, float z, float cell) {
-  const float fx = x / cell, fz = z / cell;
-  const float x0 = std::floor(fx), z0 = std::floor(fz);
-  const float tx = fx - x0, tz = fz - z0;
-  const float sx = tx * tx * (3 - 2 * tx), sz = tz * tz * (3 - 2 * tz);
-  const auto ix = static_cast<int64_t>(x0), iz = static_cast<int64_t>(z0);
-  const float a = lattice(seed, ix, iz), b = lattice(seed, ix + 1, iz);
-  const float c = lattice(seed, ix, iz + 1), d = lattice(seed, ix + 1, iz + 1);
-  return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sz;
-}
+float ground_height(const World& w, float x, float z) { return w.ground.height(x, z); }
 
 MeshData build_ground_mesh(const World& world) {
   MeshData m;
@@ -121,9 +101,11 @@ MeshData build_ground_mesh(const World& world) {
       const Color c01 = ground_color(world, x0, z1), c11 = ground_color(world, x1, z1);
       const float h00 = ground_height(world, x0, z0), h10 = ground_height(world, x1, z0);
       const float h01 = ground_height(world, x0, z1), h11 = ground_height(world, x1, z1);
-      // Counter-clockwise seen from above.
-      vertex(m, x0, h00, z0, c00); vertex(m, x0, h01, z1, c01); vertex(m, x1, h11, z1, c11);
-      vertex(m, x0, h00, z0, c00); vertex(m, x1, h11, z1, c11); vertex(m, x1, h10, z0, c10);
+      const Vec3 n00 = world.ground.normal(x0, z0), n10 = world.ground.normal(x1, z0);
+      const Vec3 n01 = world.ground.normal(x0, z1), n11 = world.ground.normal(x1, z1);
+      // Counter-clockwise seen from above; the same triangles as Heightmap::height.
+      vertex(m, x0, h00, z0, c00, n00); vertex(m, x0, h01, z1, c01, n01); vertex(m, x1, h11, z1, c11, n11);
+      vertex(m, x0, h00, z0, c00, n00); vertex(m, x1, h11, z1, c11, n11); vertex(m, x1, h10, z0, c10, n10);
     }
   }
   // Coarse skirt from the fine grid out to the horizon (4 trapezoids).
@@ -184,7 +166,6 @@ MeshData build_path_mesh(const World& world) {
   const auto& pts = world.path.points;
   if (pts.size() < 2) return m;
   const size_t n = pts.size();
-  const float y = terrain::kPathHeight;
 
   // Across the path: soft edge, dirt, center, dirt, soft edge.
   constexpr int kColumns = 5;
@@ -216,8 +197,10 @@ MeshData build_path_mesh(const World& world) {
       point(i, col + 1, bx, bz, cb);
       point(i + 1, col + 1, cx, cz, cc);
       point(i + 1, col, dx, dz, cd);
-      vertex(m, ax, y, az, ca); vertex(m, bx, y, bz, cb); vertex(m, cx, y, cz, cc);
-      vertex(m, ax, y, az, ca); vertex(m, cx, y, cz, cc); vertex(m, dx, y, dz, cd);
+      // Following the ground, just above it.
+      auto y = [&](float x, float z) { return ground_height(world, x, z) + terrain::kPathHeight; };
+      vertex(m, ax, y(ax, az), az, ca); vertex(m, bx, y(bx, bz), bz, cb); vertex(m, cx, y(cx, cz), cz, cc);
+      vertex(m, ax, y(ax, az), az, ca); vertex(m, cx, y(cx, cz), cz, cc); vertex(m, dx, y(dx, dz), dz, cd);
     }
   }
   face_up(m);

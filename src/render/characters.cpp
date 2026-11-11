@@ -153,7 +153,7 @@ Color tint_for(Species species, uint8_t variant) {
 // Height of what is under a body: the top of an object, or the ground.
 float support_height(const World& w, const Body& b, const BodyShape& shape) {
   const Box bb = body_box(b, shape);
-  float support = 0;
+  float support = w.ground.height(b.pos.x, b.pos.z);
   for (const Object& o : w.objects) {
     const Box ob = object_box(o);
     if (bb.min.x < ob.max.x && bb.max.x > ob.min.x && bb.min.z < ob.max.z && bb.max.z > ob.min.z &&
@@ -167,7 +167,9 @@ float support_height(const World& w, const Body& b, const BodyShape& shape) {
 void add_body_shadow(const World& w, const Body& b, const BodyShape& shape, float radius, DrawList& list) {
   const float support = support_height(w, b, shape);
   const float lift = std::clamp(1.0f - (b.pos.y - support) / 3.0f, 0.35f, 1.0f);
-  add_shadow(list, b.pos.x, b.pos.z, radius * lift, radius * lift, 0, lift, support + kShadowHeight + 0.005f);
+  const bool on_ground = support == w.ground.height(b.pos.x, b.pos.z);  // not on top of an object
+  add_shadow(list, b.pos.x, b.pos.z, radius * lift, radius * lift, 0, lift, support + kShadowHeight + 0.005f,
+             on_ground ? ground_tilt(w, b.pos.x, b.pos.z) : Quat{});
 }
 
 }  // namespace

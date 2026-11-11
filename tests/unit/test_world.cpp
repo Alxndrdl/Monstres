@@ -9,7 +9,7 @@ TEST_CASE("new_game builds a valid world") {
     CAPTURE(seed);
     const World w = new_game(seed);
     CHECK(w.tick == 0);
-    CHECK(w.player.pos == Vec3{0, 0, 0});
+    CHECK(w.player.pos == Vec3{0, w.ground.height(0, 0), 0});  // standing on the ground
     CHECK(w.player.on_ground);
     size_t nature = 0;
     for (const Object& o : w.objects) nature += o.kind <= ObjectKind::Crate;
@@ -18,8 +18,14 @@ TEST_CASE("new_game builds a valid world") {
       const Object& o = w.objects[i];
       const Box b = object_box(o);
       CHECK(o.kind < ObjectKind::Count);
-      CHECK(o.pos.y == 0.0f);   // resting on the ground
-      CHECK(b.min.y == 0.0f);
+      // Resting on the ground: slightly sunk, but more than half of it out.
+      const float height = b.max.y - b.min.y;
+      CHECK(b.min.y == Approx(o.pos.y));
+      CHECK(o.pos.y < w.ground.height(o.pos.x, o.pos.z));
+      CHECK(o.pos.y >= w.ground.height(o.pos.x, o.pos.z) - 0.05f - 0.4f * height - 1e-4f);
+      for (float x : {b.min.x, b.max.x}) {
+        for (float z : {b.min.z, b.max.z}) CHECK(o.pos.y < w.ground.height(x, z) + 0.2f * height + 0.05f);
+      }
       CHECK(b.max.x <= rules::kWorldHalfSize);
       CHECK(b.min.x >= -rules::kWorldHalfSize);
       if (!is_round(o.kind)) CHECK((o.yaw & 0x3FFF) == 0);  // boxy objects turn by quarters

@@ -56,6 +56,11 @@ float distance_to_path(const Path& path, float x, float z) {
   float best2 = 1e30f;
   for (size_t i = 0; i + 1 < path.points.size(); ++i) {
     const Vec2 a = path.points[i], b = path.points[i + 1];
+    // Cheap rejection: the segment is farther along z than the best so far.
+    if ((a.z - z) * (b.z - z) > 0) {  // both ends on the same side of z
+      const float gap_z = std::min(std::fabs(a.z - z), std::fabs(b.z - z));
+      if (gap_z * gap_z >= best2) continue;
+    }
     const float abx = b.x - a.x, abz = b.z - a.z;
     const float len2 = abx * abx + abz * abz;
     float t = len2 > 0 ? ((x - a.x) * abx + (z - a.z) * abz) / len2 : 0;

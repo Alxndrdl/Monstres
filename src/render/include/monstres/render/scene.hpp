@@ -28,11 +28,18 @@ Mat4 inverse(const Mat4& m);
 Mat4 perspective(float fov_y_radians, float aspect, float near_z, float far_z);
 Mat4 look_at(float eye_x, float eye_y, float eye_z, float target_x, float target_y, float target_z);
 
-inline constexpr float kShadowHeight = 0.025f;  // above the path
+inline constexpr float kShadowHeight = 0.045f;  // above the ground and the path
 
-// A soft round shadow on the ground (or on top of something at height y).
+// A soft round shadow at height y (on top of something), tilted by `tilt`.
 void add_shadow(DrawList& list, float x, float z, float rx, float rz, float yaw, float alpha = 1,
-                float y = kShadowHeight);
+                float y = kShadowHeight, Quat tilt = {});
+
+// A soft round shadow on the ground at (x, z), lying on the slope.
+void add_ground_shadow(DrawList& list, const World& world, float x, float z, float rx, float rz, float yaw,
+                       float alpha = 1);
+
+// Rotation that turns "up" into the ground's normal at (x, z).
+Quat ground_tilt(const World& world, float x, float z);
 
 // Which mesh draws an object.
 MeshId mesh_for(const Object& object);

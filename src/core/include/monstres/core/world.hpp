@@ -1,5 +1,6 @@
 #pragma once
 
+#include "monstres/core/heightmap.hpp"
 #include "monstres/core/math.hpp"
 #include "monstres/core/rng.hpp"
 #include "monstres/core/terrain.hpp"
@@ -10,7 +11,8 @@
 
 namespace monstres {
 
-// Coordinates: meters. Y is up, the ground is the plane y = 0.
+// Coordinates: meters. Y is up; the ground is World::ground (hills, y = 0
+// around the village and in hand-made worlds without a heightmap).
 // With a camera yaw of 0, "forward" is -Z and "right" is +X.
 
 namespace rules {
@@ -138,6 +140,7 @@ struct World {
   Rng rng;
   Path path;           // derived from the seed (not saved)
   VillageLayout village;  // derived from the seed (not saved)
+  Heightmap ground;    // derived from the seed (not saved)
   Body player;
   std::vector<Object> objects;
   std::vector<Creature> creatures;  // creatures[0] is the companion
@@ -156,6 +159,11 @@ void spawn_creatures(World& world);
 // any other object in its way or in the lake. Used by new_game, and when
 // loading saves from before the village existed.
 void build_village(World& world);
+
+// Sets every object on the ground: its base goes to the lowest point of the
+// ground under it, slightly sunk, so that no edge floats on a slope. Low
+// objects sink at most 40 % of their height (an edge may float a little).
+void settle_objects(World& world);
 
 // Places on roofs (and the well) where crows land.
 std::vector<Vec3> crow_perches(const World& world);

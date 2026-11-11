@@ -17,6 +17,7 @@ std::string to_json(const World& w) {
   std::string s;
   s += "{\"tick\":" + std::to_string(w.tick);
   s += ",\"player\":{\"x\":" + num(p.pos.x) + ",\"y\":" + num(p.pos.y) + ",\"z\":" + num(p.pos.z) +
+       ",\"ground\":" + num(w.ground.height(p.pos.x, p.pos.z)) +  // height of the ground under it
        ",\"onGround\":" + (p.on_ground ? "true" : "false") +
        ",\"facingX\":" + num(p.facing_x) + ",\"facingZ\":" + num(p.facing_z) + "}";
   s += ",\"objects\":" + std::to_string(w.objects.size());

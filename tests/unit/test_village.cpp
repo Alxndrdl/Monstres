@@ -134,8 +134,8 @@ TEST_CASE("crows start on roofs and fly to another perch when the player comes")
   w.player.pos = {start.x + 1, 0, start.z};
   step(w, move(0, 0));
   CHECK(w.creatures[index].mind == Mind::Fly);
-  w.player.pos = {0, 0, 0};  // walk away; the crow lands somewhere else
-  run(w, move(0, 0), 20 * rules::kTicksPerSecond);
+  w.player.pos = {0, w.ground.height(0, 0), 0};  // walk away; the crow lands somewhere else
+  for (int i = 0; i < 20 * rules::kTicksPerSecond && w.creatures[index].mind == Mind::Fly; ++i) step(w, move(0, 0));
   const Creature& after = w.creatures[index];
   const float moved = std::hypot(after.body.pos.x - start.x, after.body.pos.z - start.z);
   CHECK(moved > 1.0f);
@@ -167,7 +167,7 @@ TEST_CASE("the lake has water above a sunken bed, chimneys smoke") {
   const World w = new_game(8);
   const Lake& lake = w.village.lake;
   CHECK(ground_height(w, lake.center.x, lake.center.z) < rules::kWaterLevel - 0.5f);
-  CHECK(ground_height(w, 0, 0) == 0.0f);
+  CHECK(ground_height(w, w.village.center.x, w.village.center.z) == 0.0f);  // the village is flat
   const MeshData water = build_water_mesh(w);
   CHECK(water.transparent);
   REQUIRE(water.vertex_count() > 0);

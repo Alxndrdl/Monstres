@@ -26,7 +26,10 @@ namespace monstres {
 //   6  the village (objects), villagers, crows and fish; flying height.
 //      Versions 4 and 5 still load: the village is built (removing what was
 //      in its way) and the creatures appear anew from the seed.
-inline constexpr uint32_t kSaveVersion = 6;
+//   7  relief: same layout, but heights are on hills (objects rest on the
+//      ground, bodies walk on it). Versions 4 to 6 still load: objects are
+//      set on the ground and bodies lifted out of it.
+inline constexpr uint32_t kSaveVersion = 7;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };
