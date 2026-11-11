@@ -1,0 +1,48 @@
+name: Publier sur GitHub Pages
+
+# Uniquement à la main : bouton « Run workflow » dans l'onglet Actions.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Une seule publication à la fois.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  compiler:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Emscripten (même version qu'en local)
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.69
+
+      - name: Compiler le jeu
+        run: |
+          emcmake cmake --preset web-release -DMONSTRES_BUILD_TESTS=OFF
+          cmake --build --preset web-release -j
+
+      - uses: actions/configure-pages@v5
+
+      - name: Préparer le site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web-release/site
+
+  publier:
+    needs: compiler
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.publication.outputs.page_url }}
+    steps:
+      - id: publication
+        uses: actions/deploy-pages@v4
