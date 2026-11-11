@@ -38,6 +38,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_rng.cpp
   unit/test_math.cpp
   unit/test_world.cpp
+  unit/test_variants.cpp
   unit/test_save.cpp
   unit/test_debug.cpp
   unit/test_scene.cpp

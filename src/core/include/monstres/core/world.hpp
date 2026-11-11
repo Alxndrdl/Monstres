@@ -6,6 +6,7 @@
 #include "monstres/core/terrain.hpp"
 #include "monstres/core/village.hpp"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -127,6 +128,18 @@ struct SpeciesInfo {
 };
 const SpeciesInfo& species_info(Species species);
 
+// What makes one monster differ from the others of its species (variants,
+// see variants.hpp): one allele per gene of its species (colors, shapes),
+// and two very rare forms. Visual only, except the elemental form, which
+// changes its element.
+inline constexpr size_t kMaxGenes = 3;
+struct Genes {
+  std::array<uint8_t, kMaxGenes> allele{};  // index into each gene's alleles; 0 = the most common
+  bool chromatic = false;                   // unusual colors
+  bool elemental = false;                   // another element than its species
+  bool operator==(const Genes&) const = default;
+};
+
 // What a creature is doing.
 enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly };
 
@@ -138,7 +151,8 @@ struct Creature {
   Vec2 target;         // where it is going
   float target_y = 0;  // flying creatures: height of the target
   Vec2 home;           // wild monsters wander around it
-  uint8_t variant = 0; // color variation, visual only
+  uint8_t variant = 0; // villagers: their look (clothes, hair...), visual only
+  Genes genes{};       // monsters: their variants
   bool operator==(const Creature&) const = default;
 };
 
@@ -159,18 +173,27 @@ struct WizardStats {
 WizardStats wizard_stats(const Wizard& wizard);
 
 // Elements of magic, for monsters (and later spells).
-enum class Element : uint8_t { Fire, Water, Nature, Air, Shadow, Light, Count };
+// Count also means "none" (a monster with a single element).
+enum class Element : uint8_t { Fire, Water, Nature, Air, Shadow, Light, Electric, Normal, Count };
 
 // Base characteristics of a monster species (bestiary). Villagers have none.
 struct MonsterStats {
   uint16_t hp, attack, defense, speed, magic;
   Element element;
-  bool is_monster;  // false for villagers
+  bool is_monster;                    // false for villagers
+  Element element2 = Element::Count;  // second element, if any
 };
 const MonsterStats& monster_stats(Species species);
 
 // Named parts of the world, for maps and the interface.
 enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Count };
+
+// What the player knows of each variant of each species (bestiary): every
+// variant listed by variants.hpp, in the same order.
+enum class Discovery : uint8_t { Unknown, Seen, Captured };
+inline constexpr size_t kMaxVariants = 16;  // per species
+inline constexpr size_t kSpeciesCount = static_cast<size_t>(Species::Count);
+using Dex = std::array<std::array<Discovery, kMaxVariants>, kSpeciesCount>;
 
 struct World {
   uint64_t seed = 0;   // the world's layout: path, objects, decoration
@@ -184,6 +207,7 @@ struct World {
   std::vector<Object> objects;
   std::vector<Creature> creatures;  // creatures[0] is the companion
   Wizard wizard;
+  Dex dex{};           // variants seen and captured
   bool operator==(const World&) const = default;
 };
 

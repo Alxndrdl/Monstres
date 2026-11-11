@@ -8,6 +8,7 @@
 #include "gles3_renderer.hpp"
 #include "monstres/core/debug.hpp"
 #include "monstres/core/save.hpp"
+#include "monstres/core/variants.hpp"
 #include "monstres/core/world.hpp"
 #include "monstres/render/models.hpp"
 #include "monstres/render/terrain_mesh.hpp"
@@ -269,12 +270,14 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_map_json() {
 EMSCRIPTEN_KEEPALIVE const float* monstres_heights() { return g_app->world.ground.heights.data(); }
 
 // Draws a portrait of `size` x `size` pixels: species index, or -1 for the
-// magician. Returns the RGBA pixels (rows from the top), valid until the next call.
-EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_portrait(int species, int variant, int size) {
+// magician; `look` is the genes of a monster (genes_code, as in the JSON).
+// Returns the RGBA pixels (rows from the top), valid until the next call.
+EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_portrait(int species, int look, int size) {
   PortraitSubject subject;
   subject.wizard = species < 0;
   subject.species = static_cast<Species>(std::clamp(species, 0, static_cast<int>(Species::Count) - 1));
-  subject.variant = static_cast<uint8_t>(variant);
+  const Genes genes = genes_from_code(static_cast<uint32_t>(look));
+  if (valid_genes(subject.species, genes)) subject.genes = genes;
   Portrait p = build_portrait(subject, 1.0f);
   const DrawList* lists[] = {&p.list};
   g_app->portrait = g_app->renderer->draw_offscreen(p.view, lists, size, size);

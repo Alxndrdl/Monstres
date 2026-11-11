@@ -33,7 +33,12 @@ namespace monstres {
 //      UTF-8 name, u16 level, u32 xp). Versions 4 to 7 still load: the world
 //      is built anew from their seed, the player keeps its place if it is
 //      free (and lands on the ground), the tick goes on.
-inline constexpr uint32_t kSaveVersion = 8;
+//   9  variants: after each creature its genes (u8 allele per gene, u8 bits
+//      1 chromatic, 2 elemental); after the magician the bestiary (u8 species
+//      count, u8 variants per species, then one u8 Discovery each). Version 8
+//      still loads: the monsters get their genes from the seed, nothing is
+//      discovered but the companion.
+inline constexpr uint32_t kSaveVersion = 9;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

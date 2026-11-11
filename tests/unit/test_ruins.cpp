@@ -160,7 +160,9 @@ TEST_CASE("the menus get their data as JSON") {
   const std::string best = bestiary_json(w);
   CHECK(best.find("\"species\":\"villager\"") == std::string::npos);
   CHECK(best.find("\"species\":\"slime\"") != std::string::npos);
-  CHECK(best.find("\"element\":\"water\"") != std::string::npos);
+  CHECK(best.find("\"elements\":[\"water\"],\"family\":\"ooze\"") != std::string::npos);
+  CHECK(best.find("\"elements\":[\"shadow\",\"air\"],\"family\":\"bird\"") != std::string::npos);  // the crow
+  CHECK(best.find("\"id\":\"ears.pointed\"") != std::string::npos);
   CHECK(best.find("\"count\":1}") != std::string::npos);  // the companion
 
   const std::string map = map_json(w);

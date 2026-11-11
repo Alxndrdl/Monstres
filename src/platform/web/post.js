@@ -130,9 +130,11 @@ window.monstres = {
     return data;
   },
   // Portrait of a species (index in the bestiary order of Species) or of the
-  // magician (species -1), as ImageData of size x size pixels.
-  portrait: (species, size = 256, variant = 0) => {
-    const ptr = _monstres_portrait(species, variant, size);
+  // magician (species -1), as ImageData of size x size pixels. look: the
+  // genes of a monster ("look" in the bestiary and creature JSON), 0 = the
+  // most common one.
+  portrait: (species, size = 256, look = 0) => {
+    const ptr = _monstres_portrait(species, look, size);
     return new ImageData(new Uint8ClampedArray(HEAPU8.slice(ptr, ptr + size * size * 4)), size, size);
   },
   selected: () => JSON.parse(UTF8ToString(_monstres_selected_json())),

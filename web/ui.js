@@ -132,7 +132,11 @@
     kind: panel.querySelector('.kind'),
     description: panel.querySelector('.description'),
     facts: panel.querySelector('.facts'),
+    tags: panel.querySelector('.tags'),
+    variants: panel.querySelector('.variants'),
   };
+  const LORE = window.MonstresLore;
+  let shownLook = null;  // family, elements and variants change only with the creature
   let refresh = 0;
 
   function update() {
@@ -145,12 +149,27 @@
     fields.name.textContent = info.name;
     fields.kind.textContent = info.kind;
     fields.description.textContent = info.description;
+    const look = `${c.index}/${c.look}`;
+    if (look !== shownLook) {
+      shownLook = look;
+      const badge = (text, color) => Object.assign(document.createElement('span'), {
+        className: 'badge', textContent: text, style: `background:${color}`,
+      });
+      fields.tags.replaceChildren(...(c.family ? [badge(LORE.families[c.family] || c.family, 'rgba(255,255,255,0.85)')] : []),
+        ...(c.elements || []).map((id) => badge((LORE.elements[id] || { name: id }).name, (LORE.elements[id] || {}).color || '#ccc')));
+      // Its variants: the rare forms first, then its colors and shapes.
+      const texts = info.variants || {};
+      const ids = [...(c.variants || [])].sort((a, b) => (b.includes('.') ? 0 : 1) - (a.includes('.') ? 0 : 1));
+      const names = ids.map((id) => (id.includes('.') ? '' : '✦ ') + ((texts[id] || {}).name || id));
+      fields.variants.textContent = names.length ? `Variantes : ${names.join(' · ')}` : '';
+    }
     const meters = Math.round(c.distance);
     fields.facts.textContent = `${activity(c)} · ${meters < 1 ? 'tout près' : `à ${meters} m`}`;
   }
 
   function select(index) {
     clearInterval(refresh);
+    shownLook = null;
     if (game) game.select(index);
     panel.hidden = index < 0;
     if (index >= 0) {

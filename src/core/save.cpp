@@ -1,5 +1,7 @@
 #include "monstres/core/save.hpp"
 
+#include "monstres/core/variants.hpp"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -159,12 +161,19 @@ std::vector<uint8_t> serialize(const World& w) {
     out.f32(c.home.x);
     out.f32(c.home.z);
     out.u8(c.variant);
+    for (uint8_t a : c.genes.allele) out.u8(a);
+    out.u8(static_cast<uint8_t>((c.genes.chromatic ? 1 : 0) | (c.genes.elemental ? 2 : 0)));
   }
   const size_t name_bytes = std::min(w.wizard.name.size(), kMaxNameBytes);
   out.u8(static_cast<uint8_t>(name_bytes));
   out.bytes(reinterpret_cast<const uint8_t*>(w.wizard.name.data()), name_bytes);
   out.u16(w.wizard.level);
   out.u32(w.wizard.xp);
+  out.u8(static_cast<uint8_t>(kSpeciesCount));
+  out.u8(static_cast<uint8_t>(kMaxVariants));
+  for (const auto& species : w.dex) {
+    for (const Discovery d : species) out.u8(static_cast<uint8_t>(d));
+  }
   return out.take();
 }
 
@@ -182,6 +191,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   }
   const bool v4 = version == 4;
   const bool before_village = version < 6;  // creatures had no flying height
+  const bool with_genes = version >= 9;     // creatures' variants, and the bestiary's discoveries
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -227,6 +237,15 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       }
       c.species = static_cast<Species>(species);
       c.mind = static_cast<Mind>(mind);
+      if (with_genes) {
+        uint8_t forms = 0;
+        bool genes_ok = true;
+        for (uint8_t& a : c.genes.allele) genes_ok = genes_ok && in.u8(a);
+        if (!genes_ok || !in.u8(forms) || forms > 3) return fail(error, LoadError::Corrupt);
+        c.genes.chromatic = (forms & 1) != 0;
+        c.genes.elemental = (forms & 2) != 0;
+        if (!valid_genes(c.species, c.genes)) return fail(error, LoadError::Corrupt);
+      }
     }
   }
 
@@ -235,6 +254,19 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     if (!in.u8(name_bytes) || name_bytes > kMaxNameBytes || !in.text(w.wizard.name, name_bytes) ||
         !in.u16(w.wizard.level) || !in.u32(w.wizard.xp) || w.wizard.level == 0) {
       return fail(error, LoadError::Corrupt);
+    }
+  }
+  if (with_genes) {
+    uint8_t species_count = 0, variants = 0;
+    if (!in.u8(species_count) || !in.u8(variants) || species_count != kSpeciesCount || variants != kMaxVariants) {
+      return fail(error, LoadError::Corrupt);
+    }
+    for (auto& species : w.dex) {
+      for (Discovery& d : species) {
+        uint8_t v = 0;
+        if (!in.u8(v) || v > static_cast<uint8_t>(Discovery::Captured)) return fail(error, LoadError::Corrupt);
+        d = static_cast<Discovery>(v);
+      }
     }
   }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
@@ -255,6 +287,10 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
                                    [&](const Object& o) { return overlaps(pb, object_box(o)); });
     if (!stuck) grown.player = p;
     w = std::move(grown);
+  } else if (!with_genes) {
+    // Saves from before variants: the monsters get theirs, nothing is discovered yet.
+    assign_genes(w);
+    capture(w, 0);
   }
   return w;
 }

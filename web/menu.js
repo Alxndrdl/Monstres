@@ -36,11 +36,11 @@
 
   // ---- Portraits drawn by the game, kept as images ----
   const portraits = new Map();
-  function portraitUrl(species, size = 256) {
-    const key = `${species}/${size}`;
+  function portraitUrl(species, size = 256, look = 0) {
+    const key = `${species}/${size}/${look}`;
     if (!portraits.has(key)) {
       const canvas = el('canvas', { width: size, height: size });
-      canvas.getContext('2d').putImageData(game.portrait(species, size), 0, 0);
+      canvas.getContext('2d').putImageData(game.portrait(species, size, look), 0, 0);
       portraits.set(key, canvas.toDataURL());
     }
     return portraits.get(key);
@@ -166,6 +166,24 @@
     ['speed', 'Vitesse', 15], ['magic', 'Magie', 15],
   ];
   let chosen = prefs.get('bestiarySpecies', 'companion');
+  let dnaOpen = false;      // the variants of the chosen species instead of its sheet
+  let chosenVariant = null; // variant shown below the grid
+
+  // A strand of DNA: the button to the variants of a species.
+  const DNA_ICON = '<svg class="dna-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" aria-hidden="true"><path d="M7 2c0 6 10 5 10 10S7 16 7 22"/>' +
+    '<path d="M17 2c0 6-10 5-10 10s10 4 10 10"/><path d="M8.6 5.5h6.8M9.6 9h4.8M9.6 15h4.8M8.6 18.5h6.8"/></svg>';
+  const dnaIcon = () => el('span', { innerHTML: DNA_ICON, className: 'dna-icon-box' });
+
+  const elementBadges = (ids) => ids.map((id) => {
+    const element = LORE.elements[id] || { name: id, color: '#ccc' };
+    return el('span', { className: 'badge', textContent: element.name, style: `background:${element.color}` });
+  });
+  const familyBadge = (id) => el('span', { className: 'badge family', textContent: LORE.families[id] || id });
+
+  const variantText = (species, id) => (LORE.species[species].variants || {})[id] || { name: id, description: '' };
+  const known = (e) => e.variants.filter((v) => v.status !== 'unknown').length;
+  const captured = (e) => e.variants.filter((v) => v.status === 'captured').length;
 
   function renderBestiary() {
     const entries = game.bestiary();
@@ -175,11 +193,16 @@
       const info = LORE.species[e.species];
       const item = el('button', { type: 'button', className: 'bestiary-entry' }, [
         el('img', { className: 'portrait', src: portraitUrl(speciesIndex(e.species), 96), alt: '' }),
-        el('span', {}, [el('strong', { textContent: info.name }), el('small', { textContent: info.kind })]),
+        el('span', {}, [
+          el('strong', { textContent: info.name }),
+          el('small', { textContent: info.kind }),
+          el('small', { className: 'dna-count' }, [dnaIcon(), `${known(e)}/${e.variants.length}`]),
+        ]),
       ]);
       item.dataset.species = e.species;
       if (e.species === chosen) item.setAttribute('aria-current', 'true');
       item.addEventListener('click', () => {
+        if (chosen !== e.species) chosenVariant = null;
         chosen = e.species;
         prefs.set('bestiarySpecies', chosen);
         renderBestiary();
@@ -188,18 +211,33 @@
     }));
 
     const e = entries.find((x) => x.species === chosen);
+    if (dnaOpen) renderVariants(e);
+    else renderSheet(e);
+  }
+
+  function renderSheet(e) {
     const info = LORE.species[e.species];
-    const element = LORE.elements[e.element] || { name: e.element, color: '#ccc' };
     const stats = el('dl', { className: 'stats' });
     statList(stats, MONSTER_STATS.map(([key, label, max]) => [label, e[key], max]));
     const count = e.species === 'companion' ? 'Il n’y en a qu’un : le tien.'
       : `Dans ce monde : ${e.count} ${e.count > 1 ? 'individus' : 'individu'}.`;
+    const dna = el('button', { type: 'button', className: 'dna-button', id: 'dna-button' }, [
+      dnaIcon(),
+      el('span', { textContent: 'Variantes' }),
+      el('small', { textContent: `${known(e)}/${e.variants.length} découvertes` }),
+    ]);
+    dna.addEventListener('click', () => {
+      dnaOpen = true;
+      renderBestiary();
+      $('bestiary-detail').querySelector('.dna-back').focus();
+    });
+    $('bestiary-detail').className = 'bestiary-detail';
     $('bestiary-detail').replaceChildren(
       el('img', { className: 'portrait', src: portraitUrl(speciesIndex(e.species)), alt: info.name }),
       el('div', {}, [
         el('h2', { textContent: info.name }),
         el('p', { className: 'kind', textContent: info.kind }),
-        el('span', { className: 'badge', textContent: element.name, style: `background:${element.color}` }),
+        el('div', { className: 'badges' }, [familyBadge(e.family), ...elementBadges(e.elements)]),
         el('p', { className: 'description', textContent: info.description, style: 'margin-top:10px' }),
         el('p', { className: 'facts', textContent: `Habitat : ${info.habitat}` }),
         el('p', {
@@ -208,8 +246,118 @@
             `vitesse : ${e.walkSpeed.toFixed(1).replace('.', ',')} à ${e.runSpeed.toFixed(1).replace('.', ',')} m/s`,
         }),
         el('p', { className: 'facts', textContent: count }),
+        dna,
       ]),
       stats,
+    );
+  }
+
+  const STATUS_TEXT = {
+    unknown: 'Inconnue', seen: 'Aperçue, pas encore capturée', captured: 'Capturée',
+  };
+
+  // Every variant of a species: one row per gene, then the rare forms. Unknown
+  // ones are a "?", seen ones are greyed, captured ones are shown as they are.
+  function renderVariants(e) {
+    const info = LORE.species[e.species];
+    const genes = info.genes || {};
+    const groups = [];
+    for (const v of e.variants) {
+      const key = v.kind === 'chromatic' || v.kind === 'elemental' ? 'rare' : v.id.split('.')[0];
+      let group = groups.find((g) => g.key === key);
+      if (!group) groups.push(group = { key, title: key === 'rare' ? 'Formes rares' : genes[key] || key, items: [] });
+      group.items.push(v);
+    }
+    if (chosenVariant && !e.variants.some((v) => v.id === chosenVariant)) chosenVariant = null;
+
+    const back = el('button', { type: 'button', className: 'dna-back', textContent: '← Fiche' });
+    back.addEventListener('click', () => {
+      dnaOpen = false;
+      renderBestiary();
+    });
+    const infoBox = el('div', { className: 'variant-info', id: 'variant-info' });
+    infoBox.setAttribute('aria-live', 'polite');
+    const cells = [];
+    const showInfo = (v) => {
+      chosenVariant = v.id;
+      for (const c of cells) c.setAttribute('aria-pressed', String(c.dataset.id === v.id));
+      renderVariantInfo(e, v, infoBox);
+    };
+    const rows = groups.map((group) => el('section', { className: 'dna-group' }, [
+      el('h3', { textContent: group.title }),
+      el('div', { className: 'dna-grid' }, group.items.map((v) => {
+        const text = variantText(e.species, v.id);
+        const unknown = v.status === 'unknown';
+        const cell = el('button', {
+          type: 'button', className: 'variant-cell',
+          title: unknown ? 'Variante inconnue' : `${text.name} · ${STATUS_TEXT[v.status]}`,
+        }, unknown ? [el('span', { className: 'unknown', textContent: '?' }), el('small', { textContent: '???' })]
+          : [el('img', { src: portraitUrl(speciesIndex(e.species), 96, v.look), alt: '' }),
+             el('small', { textContent: text.name })]);
+        cell.dataset.id = v.id;
+        cell.dataset.status = v.status;
+        cell.dataset.rarity = v.rarity;
+        cell.setAttribute('aria-pressed', 'false');
+        cell.setAttribute('aria-label', unknown ? 'Variante inconnue' : `${text.name}, ${STATUS_TEXT[v.status]}`);
+        cell.addEventListener('click', () => showInfo(v));
+        cells.push(cell);
+        return cell;
+      })),
+    ]));
+
+    $('bestiary-detail').className = 'bestiary-detail dna';
+    $('bestiary-detail').replaceChildren(
+      el('header', { className: 'dna-header' }, [
+        back,
+        el('div', {}, [
+          el('h2', {}, [dnaIcon(), ` Variantes de ${info.name}`]),
+          el('p', {
+            className: 'facts',
+            textContent: `${known(e)} découvertes sur ${e.variants.length} · ${captured(e)} capturées`,
+          }),
+        ]),
+      ]),
+      ...rows,
+      infoBox,
+    );
+    const first = e.variants.find((v) => v.id === chosenVariant);
+    if (first) showInfo(first);
+    else infoBox.replaceChildren(el('p', {
+      className: 'facts', textContent: 'Touche une variante pour la voir. Les variantes se découvrent en ' +
+        's’approchant à moins de 20 m d’un monstre qui la porte.',
+    }));
+  }
+
+  function renderVariantInfo(e, v, box) {
+    const info = LORE.species[e.species];
+    if (v.status === 'unknown') {
+      box.replaceChildren(el('p', {
+        className: 'facts',
+        textContent: `Variante encore inconnue. Approche-toi à moins de 20 m d’un ${info.name} qui la porte ` +
+          'pour la découvrir.',
+      }));
+      return;
+    }
+    const text = variantText(e.species, v.id);
+    const rarity = LORE.rarities[v.rarity] || { name: v.rarity, color: '#ccc' };
+    const where = v.zones.length ? v.zones.map((z) => LORE.zones[z] || z).join(', ') : 'partout';
+    const geneName = v.kind === 'chromatic' ? 'Forme chromatique' : v.kind === 'elemental' ? 'Forme élémentaire'
+      : (info.genes || {})[v.id.split('.')[0]] || '';
+    box.replaceChildren(
+      el('img', {
+        className: `portrait ${v.status}`, src: portraitUrl(speciesIndex(e.species), 160, v.look), alt: text.name,
+      }),
+      el('div', {}, [
+        el('h3', { textContent: text.name }),
+        el('p', { className: 'kind', textContent: geneName }),
+        el('div', { className: 'badges' }, [
+          el('span', { className: 'badge', textContent: rarity.name, style: `background:${rarity.color}` }),
+          ...(v.kind === 'elemental' ? elementBadges(v.elements) : []),
+        ]),
+        el('p', { className: 'description', textContent: text.description }),
+        el('p', { className: 'facts', textContent: `Où la trouver : ${where}` }),
+        el('p', { className: `facts status ${v.status}`, textContent: STATUS_TEXT[v.status] }),
+      ]),
     );
   }
 

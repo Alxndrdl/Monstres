@@ -1193,6 +1193,54 @@ def fish_fin():
     return m
 
 
+def eye_iris():
+    """An eye whose color is set by the game (tinted): light iris, dark pupil, white highlight."""
+    m = Mesh()
+    light = normalize((0.45, 0.55, -0.7))
+    front = (0.0, 0.0, -1.0)
+
+    def color(n, face):
+        if dot(n, light) > 0.86:
+            return WHITE
+        return EYE_BLACK if dot(n, front) > 0.95 else (0.92, 0.92, 0.92, 1)
+    blob(m, (0, 0, 0), (1, 1, 0.6), 0.0, 900, color)
+    return m
+
+
+def horn():
+    """A horn, antenna or crest feather, tinted by the game: white, 1 m high,
+    base radius 0.25, curving backwards (+Z): its tip is at (0, 1, 0.3)."""
+    m = Mesh()
+    rings = 5
+    seg = 7
+    pts = []
+    for k in range(rings + 1):
+        t = k / rings
+        r = 0.25 * (1 - t) + 0.02 * t
+        cz = 0.3 * t * t
+        pts.append([(r * math.cos(TAU * i / seg), t, cz + r * math.sin(TAU * i / seg)) for i in range(seg)])
+    for k in range(rings):
+        for i in range(seg):
+            j = (i + 1) % seg
+            m.quad_facing(pts[k][i], pts[k + 1][i], pts[k + 1][j], pts[k][j],
+                          shade(WHITE, 0.9 + 0.1 * k / rings),
+                          sub(pts[k][i], (0, pts[k][i][1], 0.3 * (k / rings) ** 2)))
+    tip = (0, 1.04, 0.32)
+    for i in range(seg):
+        a, b = pts[rings][i], pts[rings][(i + 1) % seg]
+        if dot(cross(sub(b, a), sub(tip, a)), sub(add(a, b), (0, 2.0, 0.6))) < 0:
+            a, b = b, a
+        m.tri(a, b, tip, WHITE)
+    return m
+
+
+def bulb():
+    """A white ball of radius 1 (glowing lure, antenna tips), tinted by the game."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (1, 1, 1), 0.0, 990, lambda n, face: shade(WHITE, 0.92 + 0.08 * max(n[1], 0)))
+    return m
+
+
 def all_models():
     models = {
         "cube": cube(),
@@ -1252,6 +1300,9 @@ def all_models():
         "fish_body": fish_body(),
         "fish_tail": fish_tail(),
         "fish_fin": fish_fin(),
+        "eye_iris": eye_iris(),
+        "horn": horn(),
+        "bulb": bulb(),
         "tower": tower(),
         "ruin_wall_low": ruin_wall(False),
         "ruin_wall_high": ruin_wall(True),

@@ -7,6 +7,7 @@ add_library(monstres_core STATIC
   village.cpp
   save.cpp
   debug.cpp
+  variants.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

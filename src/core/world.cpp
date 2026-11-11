@@ -1,5 +1,7 @@
 #include "monstres/core/world.hpp"
 
+#include "monstres/core/variants.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <span>
@@ -638,6 +640,7 @@ void spawn_creatures(World& w) {
     c.body.pos = perch;
     c.target = {perch.x, perch.z};
     c.target_y = perch.y;
+    c.home = {perch.x, perch.z};  // not used to move: where it was born (its variants)
     c.variant = static_cast<uint8_t>(rng.below(256));
     c.timer = static_cast<uint16_t>(3 * rules::kTicksPerSecond + rng.below(8 * rules::kTicksPerSecond));
     w.creatures.push_back(c);
@@ -912,7 +915,7 @@ const MonsterStats& monster_stats(Species species) {
       {34, 6, 8, 3, 9, Element::Nature, true},    // Mushroom
       {22, 7, 4, 13, 5, Element::Air, true},      // Bird
       {0, 0, 0, 0, 0, Element::Light, false},     // Villager: not a monster
-      {24, 8, 5, 12, 9, Element::Shadow, true},   // Crow
+      {24, 8, 5, 12, 9, Element::Shadow, true, Element::Air},  // Crow
       {28, 6, 6, 8, 7, Element::Water, true},     // Fish
   };
   static_assert(std::size(kStats) == static_cast<size_t>(Species::Count));
@@ -1003,6 +1006,8 @@ World new_game(uint64_t seed) {
   settle_objects(w);
   w.player.pos.y = w.ground.height(0, 0);
   spawn_creatures(w);
+  assign_genes(w);
+  capture(w, 0);  // the companion is the player's own
   return w;
 }
 
@@ -1042,6 +1047,7 @@ void step(World& w, const Input& in) {
       default: step_wild(w, s, c); break;
     }
   }
+  discover(w);
 }
 
 }  // namespace monstres

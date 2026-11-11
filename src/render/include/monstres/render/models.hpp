@@ -41,6 +41,7 @@ enum class MeshId : size_t {
   HairShort, HairLong, HairBun, HatCap, HatStraw, HatBeanie,
   CrowBody, CrowWing, CrowLeg,
   FishBody, FishTail, FishFin,
+  EyeIris, Horn, Bulb,  // variants of the monsters (tinted by the game)
   // Ruins of the tower.
   Tower, RuinWallLow, RuinWallHigh, Pillar, FallenPillar, Rubble, RuneStone,
   Ground,  // built at runtime

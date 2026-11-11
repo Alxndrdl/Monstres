@@ -30,15 +30,20 @@ Contrôles :
 - glisser sur l'écran (doigt ou souris) : regarder autour de soi ;
 - bouton en bas à droite, ou Espace : sauter.
 - toucher ou cliquer sur un monstre (ou un villageois) : sa fiche s'affiche en
-  haut à gauche (nom, description, ce qu'il fait, distance) et un anneau doré
-  le marque au sol ; toucher ailleurs ou × la ferme ;
+  haut à gauche (nom, famille, éléments, description, ses variantes, ce qu'il
+  fait, distance) et un anneau doré le marque au sol ; toucher ailleurs ou × la
+  ferme ;
 - livre en haut à gauche (ou touches C, B, M) : le grimoire, qui met le jeu en
   pause, avec trois onglets :
   - Personnage : portrait du magicien, nom (modifiable, enregistré dans la
     sauvegarde), niveau, expérience, caractéristiques, où l'on se trouve ;
-  - Bestiaire : tous les monstres, avec pour chacun un portrait, l'élément,
-    une description, l'habitat, la taille, la vitesse, les caractéristiques et
-    combien vivent dans ce monde ;
+  - Bestiaire : tous les monstres, avec pour chacun un portrait, la famille,
+    le ou les éléments, une description, l'habitat, la taille, la vitesse, les
+    caractéristiques et combien vivent dans ce monde ; le bouton ADN
+    « Variantes » montre toutes ses variantes : « ? » si jamais vue, grisée si
+    aperçue (un monstre qui la porte est passé à moins de 20 m), en clair si
+    capturée ; toucher une variante découverte affiche sa fiche (rareté, où la
+    trouver, description) ;
   - Carte : locale (autour du joueur, avec les créatures proches) ou globale ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (exporter / importer la sauvegarde,
@@ -115,6 +120,27 @@ Les portraits du grimoire sont dessinés par le moteur lui-même, hors écran
 Les caractéristiques des monstres et du magicien sont des règles du jeu
 (`monster_stats`, `wizard_stats` dans `src/core/world.cpp`) ; les noms et
 descriptions, eux, sont dans `web/lore.js`.
+
+## Variantes
+
+Chaque monstre porte des gènes (`src/core/variants.hpp`) : pour chaque gène de
+son espèce (couleur du pelage ou des yeux, forme des oreilles, nombre de
+queues ou d'yeux, cornes, antennes, huppe, nageoires...), un allèle tiré selon
+sa rareté (commune, peu commune, rare) ; certains allèles ne se trouvent que
+dans certaines zones (le chapeau bleu des Champi, dans les ruines). Deux
+formes très rares (1 sur 256 chacune) s'y ajoutent : chromatique (couleurs
+inhabituelles, par exemple le Croa blanc) et élémentaire (un autre élément,
+entouré d'étincelles). Les gènes sont tirés depuis la graine, un flux par
+créature : ils ne changent rien d'autre au monde. Le bestiaire retient pour
+chaque variante si elle est inconnue, aperçue ou capturée (dans la
+sauvegarde) ; le compagnon est capturé dès le départ. Les espèces ont aussi
+une famille (bête, oiseau, poisson, reptile, insecte, végétal, gelée,
+automate) et un ou deux éléments (le Croa est Ombre et Air).
+
+L'apparence d'une variante est construite par `creature_look`
+(`src/render/characters.cpp`) : pièces redimensionnées, ajoutées (`horn`,
+`bulb`, `eye_iris`) ou retirées, couleurs des emplacements de teinte. Les noms
+et descriptions des variantes sont dans `web/lore.js`.
 
 ## Personnages et animations
 

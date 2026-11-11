@@ -1,10 +1,15 @@
 #include "monstres/core/debug.hpp"
 
+#include "monstres/core/variants.hpp"
+
 #include <cmath>
 #include <cstdio>
 #include <iterator>
 
 namespace monstres {
+
+std::string elements_json(Elements e);
+std::string carried_variants_json(Species species, const Genes& genes);
 
 namespace {
 const char* species_name(Species s) {
@@ -56,6 +61,14 @@ std::string creature_json(const World& w, int index) {
   s += std::string(",\"species\":\"") + species_name(c.species) + "\"";
   s += std::string(",\"mind\":\"") + mind_name(c.mind) + "\"";
   s += ",\"variant\":" + std::to_string(c.variant);
+  if (monster_stats(c.species).is_monster) {
+    s += std::string(",\"family\":\"") + family_name(genetics(c.species).family) + "\"";
+    s += ",\"elements\":" + elements_json(creature_elements(c.species, c.genes));
+    s += ",\"look\":" + std::to_string(genes_code(c.genes));
+    s += ",\"variants\":" + carried_variants_json(c.species, c.genes);
+    s += std::string(",\"chromatic\":") + (c.genes.chromatic ? "true" : "false");
+    s += std::string(",\"elemental\":") + (c.genes.elemental ? "true" : "false");
+  }
   s += ",\"x\":" + num(p.x) + ",\"y\":" + num(p.y) + ",\"z\":" + num(p.z);
   s += ",\"distance\":" + num(std::sqrt(dx * dx + dz * dz));
   s += std::string(",\"onGround\":") + (c.body.on_ground ? "true" : "false") + "}";
@@ -73,9 +86,43 @@ const char* zone_name(Zone zone) {
 }
 
 const char* element_name(Element element) {
-  static const char* kNames[] = {"fire", "water", "nature", "air", "shadow", "light"};
+  static const char* kNames[] = {"fire", "water", "nature", "air", "shadow", "light", "electric", "normal"};
+  static_assert(std::size(kNames) == static_cast<size_t>(Element::Count));
   const auto i = static_cast<size_t>(element);
   return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+const char* family_name(Family family) {
+  static const char* kNames[] = {"beast", "bird", "fish", "reptile", "insect", "plant", "ooze", "construct", "none"};
+  static_assert(std::size(kNames) == static_cast<size_t>(Family::Count));
+  const auto i = static_cast<size_t>(family);
+  return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+const char* rarity_name(Rarity rarity) {
+  static const char* kNames[] = {"common", "uncommon", "rare", "veryRare"};
+  static_assert(std::size(kNames) == static_cast<size_t>(Rarity::Count));
+  const auto i = static_cast<size_t>(rarity);
+  return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+std::string elements_json(Elements e) {
+  std::string s = std::string("[\"") + element_name(e.first) + "\"";
+  if (e.second != Element::Count) s += std::string(",\"") + element_name(e.second) + "\"";
+  return s + "]";
+}
+
+// The variants a monster with these genes shows: their identifiers.
+std::string carried_variants_json(Species species, const Genes& genes) {
+  std::string s = "[";
+  bool first = true;
+  for (size_t i = 0; i < variant_count(species); ++i) {
+    if (!has_variant(species, genes, i)) continue;
+    if (!first) s += ',';
+    first = false;
+    s += "\"" + variant_id(species, i) + "\"";
+  }
+  return s + "]";
 }
 
 const char* object_kind_name(ObjectKind kind) {
@@ -137,7 +184,32 @@ std::string bestiary_json(const World& w) {
     s += ",\"hp\":" + std::to_string(st.hp) + ",\"attack\":" + std::to_string(st.attack);
     s += ",\"defense\":" + std::to_string(st.defense) + ",\"speed\":" + std::to_string(st.speed);
     s += ",\"magic\":" + std::to_string(st.magic);
-    s += std::string(",\"element\":\"") + element_name(st.element) + "\"";
+    s += ",\"elements\":" + elements_json(creature_elements(species, {}));
+    s += std::string(",\"family\":\"") + family_name(genetics(species).family) + "\"";
+    s += ",\"variants\":[";
+    const auto& known = w.dex[i];
+    for (size_t v = 0; v < variant_count(species); ++v) {
+      const Variant var = variant_at(species, v);
+      static const char* kKinds[] = {"color", "shape", "chromatic", "elemental"};
+      static const char* kStatus[] = {"unknown", "seen", "captured"};
+      if (v) s += ',';
+      s += "{\"id\":\"" + variant_id(species, v) + "\"";
+      s += std::string(",\"kind\":\"") + kKinds[static_cast<size_t>(var.kind)] + "\"";
+      s += std::string(",\"rarity\":\"") + rarity_name(var.rarity) + "\"";
+      s += ",\"zones\":[";
+      bool first_zone = true;
+      for (size_t z = 0; z < static_cast<size_t>(Zone::Count); ++z) {
+        if (!(var.zones & zone_bit(static_cast<Zone>(z)))) continue;
+        if (!first_zone) s += ',';
+        first_zone = false;
+        s += std::string("\"") + zone_name(static_cast<Zone>(z)) + "\"";
+      }
+      const Genes genes = genes_with(species, v);
+      s += "],\"elements\":" + elements_json(creature_elements(species, genes));
+      s += ",\"look\":" + std::to_string(genes_code(genes));
+      s += std::string(",\"status\":\"") + kStatus[static_cast<size_t>(known[v])] + "\"}";
+    }
+    s += "]";
     s += ",\"height\":" + num(info.shape.height) + ",\"walkSpeed\":" + num(info.walk_speed);
     s += ",\"runSpeed\":" + num(info.run_speed) + ",\"count\":" + std::to_string(count) + "}";
   }

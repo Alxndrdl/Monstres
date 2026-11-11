@@ -260,6 +260,8 @@ test.describe('creature info', () => {
     await expect(panel).toBeVisible();
     await expect(panel.locator('.name')).toHaveText('Pompon');
     await expect(panel.locator('.facts')).toHaveText(/^T’attend · à 1 m$/);  // just behind the player
+    await expect(panel.locator('.tags .badge')).toHaveText(['Bête', 'Feu']);
+    await expect(panel.locator('.variants')).toHaveText('Variantes : Pelage de braise · Oreilles pointues · Une queue');
     expect((await page.evaluate(() => window.monstres.selected())).index).toBe(0);
 
     await page.mouse.click(220, 300);  // grass, no creature there
@@ -336,10 +338,59 @@ test.describe('grimoire', () => {
     await page.locator('.bestiary-entry[data-species="mushroom"]').click();
     const detail = page.locator('#bestiary-detail');
     await expect(detail.locator('h2')).toHaveText('Champi');
-    await expect(detail.locator('.badge')).toHaveText('Nature');
+    await expect(detail.locator('.badge')).toHaveText(['Végétal', 'Nature']);
     await expect(detail).toContainText('Défense');
     await expect(detail).toContainText(/Dans ce monde : \d+ individu/);
     await expect(detail.locator('img')).toHaveAttribute('src', /^data:image\/png/);
+  });
+
+  test('the crow has two elements', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await page.keyboard.press('b');
+    await page.locator('.bestiary-entry[data-species="crow"]').click();
+    await expect(page.locator('#bestiary-detail .badge')).toHaveText(['Oiseau', 'Ombre', 'Air']);
+  });
+
+  test('the variants of a species: unknown, seen (greyed) and captured', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await page.evaluate(() => window.monstres.step(1));  // the monsters near the start are seen
+    const bestiary = await page.evaluate(() => window.monstres.bestiary());
+    const companion = bestiary.find((e) => e.species === 'companion');
+    expect(companion.variants.filter((v) => v.status === 'captured').map((v) => v.id))
+      .toEqual(['fur.ember', 'ears.pointed', 'tails.one']);
+    // A species with seen variants, but none captured.
+    const seenSpecies = bestiary.find((e) => e.species !== 'companion' && e.variants.some((v) => v.status === 'seen'));
+    expect(seenSpecies).toBeTruthy();
+
+    await page.keyboard.press('b');
+    const entry = page.locator(`.bestiary-entry[data-species="${seenSpecies.species}"]`);
+    const seen = seenSpecies.variants.filter((v) => v.status === 'seen').length;
+    await expect(entry.locator('.dna-count')).toHaveText(`${seen}/${seenSpecies.variants.length}`);
+    await entry.click();
+    await page.locator('#dna-button').click();
+    const cells = page.locator('.variant-cell');
+    await expect(cells).toHaveCount(seenSpecies.variants.length);
+    await expect(page.locator('.variant-cell[data-status="unknown"] .unknown').first()).toHaveText('?');
+    await expect(page.locator('.variant-cell[data-status="unknown"]')).toHaveCount(seenSpecies.variants.length - seen);
+    const greyed = page.locator('.variant-cell[data-status="seen"]').first();
+    await expect(greyed.locator('img')).toHaveCSS('filter', 'grayscale(1)');
+    await greyed.click();
+    await expect(page.locator('#variant-info .status')).toHaveText('Aperçue, pas encore capturée');
+    await expect(page.locator('#variant-info h3')).not.toBeEmpty();
+    await expect(page.locator('#variant-info .badge').first()).toHaveText(/Commune|Peu commune|Rare|Très rare/);
+    await page.locator('.variant-cell[data-status="unknown"]').first().click();
+    await expect(page.locator('#variant-info')).toContainText('Variante encore inconnue');
+
+    // The companion's are captured: shown as they are.
+    await page.locator('.bestiary-entry[data-species="companion"]').click();
+    const mine = page.locator('.variant-cell[data-status="captured"]');
+    await expect(mine).toHaveCount(3);
+    await expect(mine.first().locator('img')).toHaveCSS('filter', 'none');
+    await mine.first().click();
+    await expect(page.locator('#variant-info h3')).toHaveText('Pelage de braise');
+    await expect(page.locator('#variant-info .status')).toHaveText('Capturée');
+    await page.locator('.dna-back').click();
+    await expect(page.locator('#bestiary-detail h2')).toHaveText('Pompon');
   });
 
   test('the map shows where the player is, nearby or the whole world', async ({ page }) => {

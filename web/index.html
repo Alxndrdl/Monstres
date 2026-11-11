@@ -83,6 +83,9 @@
     #creature .kind { margin: 0; font-size: 12px; color: #f2c94c; }
     #creature .description { margin: 6px 0; font-size: 13px; }
     #creature .facts { margin: 0; font-size: 12px; color: rgba(255, 255, 255, 0.75); }
+    #creature .tags { margin: 5px 0 0; }
+    #creature .tags:empty, #creature .variants:empty { display: none; }
+    #creature .variants { margin: 5px 0 0; font-size: 12px; color: #9fe0c0; }
     #creature-close {
       position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0;
       border: none; border-radius: 50%; background: transparent; color: #fff; font-size: 18px; cursor: pointer;
@@ -174,6 +177,59 @@
     }
     .facts { margin: 6px 0 0; font-size: 12px; color: rgba(255, 255, 255, 0.72); }
     .bestiary-detail .stats { grid-column: 1 / -1; margin-top: 0; }
+    .badges { display: flex; flex-wrap: wrap; gap: 5px 0; }
+    .badge.family { background: rgba(255, 255, 255, 0.85); }
+
+    /* Variants (DNA). */
+    .dna-icon-box { display: inline-flex; vertical-align: -3px; }
+    .dna-icon { width: 16px; height: 16px; }
+    .bestiary-list .dna-count { display: flex; align-items: center; gap: 3px; color: #9fe0c0; }
+    .bestiary-list .dna-count .dna-icon { width: 12px; height: 12px; }
+    .dna-button, .dna-back {
+      display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; font: inherit; font-weight: 600;
+      color: #fff; cursor: pointer; border-radius: 8px;
+    }
+    .dna-button { margin-top: 12px; background: rgba(120, 220, 170, 0.15); border: 1px solid rgba(120, 220, 170, 0.55); }
+    .dna-button:hover { background: rgba(120, 220, 170, 0.28); }
+    .dna-button small { font-weight: 400; color: rgba(255, 255, 255, 0.7); }
+    .dna-back { flex: none; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.25); }
+    .dna-back:hover { background: rgba(255, 255, 255, 0.14); }
+    .bestiary-detail.dna { display: flex; flex-direction: column; gap: 10px; }
+    .dna-header { display: flex; align-items: center; gap: 14px; }
+    .dna-header h2 { font-size: 19px; }
+    .dna-header .facts { margin: 2px 0 0; }
+    .dna-group h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #f2c94c; }
+    .dna-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .variant-cell {
+      position: relative; width: 92px; padding: 5px 4px 6px; display: flex; flex-direction: column; align-items: center;
+      gap: 3px; font: inherit; color: #fff; cursor: pointer; background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 9px;
+    }
+    .variant-cell:hover { background: rgba(255, 255, 255, 0.1); }
+    .variant-cell[aria-pressed="true"] { border-color: #f2c94c; background: rgba(242, 201, 76, 0.12); }
+    .variant-cell img, .variant-cell .unknown {
+      width: 72px; height: 72px; border-radius: 8px;
+      background: radial-gradient(circle at 50% 40%, rgba(130, 120, 220, 0.45), rgba(40, 36, 80, 0.6));
+    }
+    .variant-cell .unknown {
+      display: grid; place-items: center; font-size: 34px; font-weight: 700; color: rgba(255, 255, 255, 0.35);
+      background: rgba(0, 0, 0, 0.28);
+    }
+    .variant-cell small { font-size: 11px; line-height: 1.2; text-align: center; }
+    .variant-cell[data-status="unknown"] small { color: rgba(255, 255, 255, 0.4); }
+    .variant-cell[data-status="seen"] img, .variant-info .portrait.seen { filter: grayscale(1); opacity: 0.55; }
+    .variant-cell[data-status="seen"] small { color: rgba(255, 255, 255, 0.6); }
+    .variant-cell[data-status="captured"]::after {
+      content: '✓'; position: absolute; top: 3px; right: 6px; font-size: 13px; font-weight: 700; color: #8fd16a;
+    }
+    .variant-cell[data-rarity="veryRare"]:not([data-status="unknown"]) { box-shadow: inset 0 0 0 1px rgba(242, 201, 76, 0.55); }
+    .variant-info { display: flex; gap: 14px; align-items: flex-start; padding: 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); }
+    .variant-info > .facts { margin: 0; }
+    .variant-info .portrait { width: 120px; height: 120px; flex: none; }
+    .variant-info h3 { margin: 0; font-size: 17px; }
+    .variant-info .kind { margin: 2px 0 6px; color: #f2c94c; font-size: 12px; }
+    .variant-info .description { margin: 8px 0 0; font-size: 13px; }
+    .status.captured { color: #8fd16a; font-weight: 600; }
 
     /* Maps. */
     #tab-map { display: flex; flex-direction: column; gap: 10px; }
@@ -192,6 +248,9 @@
       .sheet > .portrait { width: 120px; height: 120px; }
       .bestiary-detail > .portrait { width: 130px; height: 130px; }
       .bestiary-list .portrait { width: 36px; height: 36px; }
+      .variant-cell { width: 74px; }
+      .variant-cell img, .variant-cell .unknown { width: 56px; height: 56px; }
+      .variant-info .portrait { width: 90px; height: 90px; }
     }
     @media (max-width: 600px) {
       .bestiary { grid-template-columns: 1fr; }
@@ -352,7 +411,9 @@
   <div id="creature" class="panel" role="status" aria-live="polite" hidden>
     <p class="name"></p>
     <p class="kind"></p>
+    <div class="tags badges"></div>
     <p class="description"></p>
+    <p class="variants"></p>
     <p class="facts"></p>
     <button id="creature-close" type="button" aria-label="Fermer">×</button>
   </div>

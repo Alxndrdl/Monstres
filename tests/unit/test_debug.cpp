@@ -23,6 +23,8 @@ TEST_CASE("creature_json describes one creature for the info panel") {
   w.creatures.push_back(c);
   CHECK(creature_json(w, 0) ==
         "{\"index\":0,\"species\":\"bird\",\"mind\":\"flee\",\"variant\":3,"
+        "\"family\":\"bird\",\"elements\":[\"air\"],\"look\":0,"
+        "\"variants\":[\"plumage.yellow\",\"crest.none\",\"wings.small\"],\"chromatic\":false,\"elemental\":false,"
         "\"x\":3.0000,\"y\":0.0000,\"z\":-4.0000,\"distance\":5.0000,\"onGround\":true}");
   CHECK(creature_json(w, 1) == "null");
   CHECK(creature_json(w, -1) == "null");

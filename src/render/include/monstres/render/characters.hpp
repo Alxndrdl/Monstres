@@ -4,6 +4,7 @@
 #include "monstres/render/models.hpp"
 #include "monstres/render/renderer.hpp"
 
+#include <array>
 #include <span>
 #include <vector>
 
@@ -24,7 +25,9 @@ struct RigPart {
   Vec3f pivot;          // joint position in the parent's space
   Vec3f scale{1, 1, 1};
   uint8_t tint = 0;     // 0: own colors; n: multiplied by the character's n-th color
+  Quat rest{};          // rotation at rest, relative to the parent (before the pose)
 };
+inline constexpr size_t kMaxRigParts = 16;
 
 // How a part is moved this frame, relative to its rest position.
 struct PartPose {
@@ -33,10 +36,31 @@ struct PartPose {
   Vec3f scale{1, 1, 1};  // multiplies the part's scale (not inherited by children)
 };
 
-// Rest rigs, one per character type. Villagers differ from one another:
-// their rig (hair, hat) depends on the variant.
+// Rest rigs, one per character type, as the most common monster of each
+// species looks. Villagers differ from one another: their rig (hair, hat)
+// depends on the variant (villager_look).
 std::span<const RigPart> player_rig();
-std::span<const RigPart> creature_rig(Species species, uint8_t variant = 0);
+std::span<const RigPart> creature_rig(Species species);
+
+// How one monster looks, from its genes (variants.hpp): its rig, with parts
+// resized, moved, added (horns, a second tail...) or removed, and the colors
+// of its tint slots: 1 body, 2 horns and crests, 3 eyes, 4 glowing parts.
+// Elemental monsters are wrapped in sparks of their element (aura).
+struct CreatureLook {
+  std::array<RigPart, kMaxRigParts> parts{};
+  size_t count = 0;
+  std::array<Color, 4> tints{};
+  bool aura = false;
+  Color aura_color;
+  float extra_height = 0;  // drawn higher than usual (unit size, before the species' scale)
+
+  std::span<const RigPart> rig() const { return {parts.data(), count}; }
+  int add(const RigPart& part) {
+    parts[count] = part;
+    return static_cast<int>(count++);
+  }
+};
+CreatureLook creature_look(Species species, const Genes& genes);
 
 // A villager's look, derived from its variant.
 struct VillagerLook {
@@ -69,7 +93,8 @@ void add_characters(const World& world, float time, DrawList& list);
 struct PortraitSubject {
   bool wizard = false;
   Species species = Species::Companion;
-  uint8_t variant = 0;
+  uint8_t variant = 0;  // villagers
+  Genes genes{};        // monsters
 };
 
 // One figure alone, standing at the origin, turned three-quarters towards
