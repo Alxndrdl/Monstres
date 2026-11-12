@@ -54,6 +54,9 @@ inline constexpr float kDespawnRadius = 80.0f;           // farther than this: e
 inline constexpr uint32_t kPopulationEveryTicks = 30;    // how often squares are checked
 inline constexpr float kSimulationRadius = 80.0f;        // villagers farther away stand still
 inline constexpr uint16_t kKnockedOutTicks = 10 * kTicksPerSecond;  // a beaten monster lies there
+inline constexpr float kTeleporterDiscoverDistance = 6.0f;  // a teleporter this close is known from then on
+inline constexpr float kTeleporterUseDistance = 3.0f;       // standing this close to one: it can be used
+inline constexpr float kTalkDistance = 5.0f;                // to talk to a villager
 }  // namespace rules
 
 // Orders given from the menus (context menu on the right), see battle.hpp.
@@ -65,6 +68,10 @@ enum class Command : uint8_t {
   Summon,   // team[Input::target] comes out of the staff's crystal (or goes back in, if it is out)
   Release,  // team[Input::target] comes out of the crystal and goes back to the wild
   Train,    // the companion trains against the magician, who shields itself (Flee ends it)
+  Teleport, // from the teleporter the player stands at to teleporter Input::target (TeleporterId)
+  QuestAccept,    // the quest Input::target (QuestId), from the villager who gives it
+  QuestGive,      // team[Input::target] is handed to the villager who asked for it
+  QuestComplete,  // the quest Input::target is reported done to its villager
 };
 
 // What the player does during one tick. Integers, so that replays and saved
@@ -114,6 +121,7 @@ enum class ObjectKind : uint8_t {
   CaveMouth,     // a rock arch against the cliff, dark inside (its rocks are Colliders)
   Crystal,       // a cluster of glowing crystals. size.x = scale
   Collider,      // invisible: the solid parts of a gate or a cave. size = half extents
+  Teleporter,    // a circle of standing stones; variant = its TeleporterId. Walked onto (no collision)
   Count
 };
 
@@ -182,6 +190,9 @@ struct Genes {
 };
 
 // What a creature is doing. Battle: fighting the companion (battle.hpp).
+// What ties a creature or a team member to a quest.
+enum class Tag : uint8_t { None, LostPiou };
+
 // KnockedOut: beaten in a battle, it lies on the ground for a while.
 enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly, Battle, KnockedOut };
 
@@ -198,6 +209,9 @@ struct Creature {
   uint8_t level = 1;   // wild monsters: their strength (the companion's is in World::team)
   uint32_t id = 0;     // unique in the world (World::next_id), to follow it while others come and go
   bool released = false;  // let go by the player: beating or capturing it again gives no experience
+  bool beaten = false;    // already beaten once: no more experience from it either
+  uint8_t npc = 0;        // villagers: who it is (Npc), 0: anyone
+  Tag tag = Tag::None;
   bool operator==(const Creature&) const = default;
 };
 
@@ -210,6 +224,8 @@ struct Monster {
   uint16_t level = 1;
   uint32_t xp = 0;     // towards the next level (monster_xp_to_next)
   uint16_t hp = 0;     // hit points left (monster_fight_stats(...).hp at most)
+  Tag tag = Tag::None;
+  bool beaten = false; // captured after being beaten, or let go before: no experience if it goes wild again
   bool operator==(const Monster&) const = default;
 };
 
@@ -344,6 +360,28 @@ struct Population {
   bool operator==(const Population&) const = default;
 };
 
+// The villagers with a name (Creature::npc; their names and words in web/lore.js).
+namespace npc {
+inline constexpr uint8_t kMirabelle = 1;  // lost her Piou (Tag::LostPiou)
+inline constexpr uint8_t kGaspard = 2;    // stands by the village's teleporter, curious about it
+}  // namespace npc
+
+// Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
+// some places. Walking near one makes it known; from one, the player can go
+// to any other known one.
+enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Count };
+inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Count);
+
+// Quests (see quests.hpp).
+enum class QuestId : uint8_t { LostPiou, Teleporters, Count };
+inline constexpr size_t kQuestCount = static_cast<size_t>(QuestId::Count);
+enum class QuestStage : uint8_t { Unknown, Active, Done };
+struct QuestState {
+  QuestStage stage = QuestStage::Unknown;
+  uint8_t progress = 0;  // steps done, as bits (meaning per quest)
+  bool operator==(const QuestState&) const = default;
+};
+
 struct World {
   uint64_t seed = 0;   // the world's layout: path, objects, decoration
   uint64_t tick = 0;
@@ -370,6 +408,10 @@ struct World {
   uint32_t clock = rules::kStartClock;  // time of day: ticks since midnight, < kTicksPerDay
   uint32_t next_id = 1;  // Creature::id of the next creature
   Population population;
+  uint8_t teleporters = 0;  // known teleporters, as bits (1 << TeleporterId)
+  std::array<QuestState, kQuestCount> quests{};
+  uint64_t teleport_tick = 0;  // not saved: the last teleport, for the drawing
+  Vec3 teleport_from;          // not saved: where it left
   bool operator==(const World&) const = default;
 };
 
@@ -424,6 +466,13 @@ void build_ruins(World& world);
 // mouth, crystals, rocks), removing any other object in their way.
 void build_castle(World& world);
 void build_cave(World& world);
+
+// Puts a teleporter in each place (village, ruins, forest, cave, castle),
+// clearing trees and rocks around it if needed.
+void build_teleporters(World& world);
+
+// Where teleporter `id` stands (its center on the ground), or false if this world has none.
+bool teleporter_position(const World& world, TeleporterId id, Vec3& at);
 
 // Which named part of the world (x, z) is in.
 Zone zone_at(const World& world, float x, float z);

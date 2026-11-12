@@ -107,6 +107,33 @@
       border: none; border-radius: 50%; background: transparent; color: #2b1d10; font-size: 18px; cursor: pointer;
     }
 
+    /* Talking to a villager: at the bottom, above the controls. */
+    #dialogue {
+      position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 4;
+      width: min(560px, calc(100% - 300px)); min-width: 280px; padding: 12px 16px;
+      background: rgba(28, 24, 46, 0.94); border: 1px solid rgba(242, 201, 76, 0.55);
+    }
+    #dialogue .dialogue-name { margin: 0 0 4px; font-weight: 700; color: #f2c94c; }
+    #dialogue .dialogue-text { margin: 0 0 10px; font-size: 15px; line-height: 1.45; }
+    #dialogue .dialogue-answers { display: flex; flex-wrap: wrap; gap: 8px; }
+    /* A quest starts or ends, a teleporter is found: a note at the top. */
+    #toast {
+      position: fixed; left: 50%; top: calc(max(12px, env(safe-area-inset-top)) + 4px); transform: translateX(-50%);
+      z-index: 4; padding: 8px 18px; border-radius: 10px; text-align: center; pointer-events: none;
+      background: rgba(20, 24, 40, 0.9); border: 1px solid rgba(127, 224, 255, 0.7);
+    }
+    #toast strong { display: block; color: #7fe0ff; }
+    #toast small { font-size: 13px; }
+    #toast.show { animation: banner-in 0.4s ease-out; }
+    /* The quest journal. */
+    .quest-section { margin: 8px 0 2px; font-size: 12px; font-weight: 700; color: #f2c94c; list-style: none; }
+    .quest-entry small { display: block; font-size: 12px; color: rgba(255, 255, 255, 0.7); }
+    .quest-entry.done strong { color: rgba(255, 255, 255, 0.65); }
+    .quest-steps { margin: 4px 0 10px; padding-left: 20px; }
+    .quest-steps .step { margin: 3px 0; list-style: '○  '; }
+    .quest-steps .step.done { list-style: '✓  '; color: #9fe0c0; }
+    .quest-done { color: #9fe0c0; font-style: italic; }
+
     /* Team sheet: letting a monster go. */
     .release-box { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.12); }
     .release-box p { margin: 4px 0; font-size: 13px; }
@@ -581,6 +608,7 @@
       <div class="tabs" role="tablist">
         <button id="tab-button-character" role="tab" type="button" aria-controls="tab-character" data-tab="character">Personnage</button>
         <button id="tab-button-team" role="tab" type="button" aria-controls="tab-team" data-tab="team">Équipe</button>
+        <button id="tab-button-quests" role="tab" type="button" aria-controls="tab-quests" data-tab="quests">Quêtes</button>
         <button id="tab-button-bestiary" role="tab" type="button" aria-controls="tab-bestiary" data-tab="bestiary">Bestiaire</button>
         <button id="tab-button-map" role="tab" type="button" aria-controls="tab-map" data-tab="map">Carte</button>
         <button id="menu-close" type="button" aria-label="Fermer">×</button>
@@ -612,6 +640,13 @@
             <ul id="team-list" class="bestiary-list"></ul>
           </div>
           <article id="team-detail" class="bestiary-detail" aria-live="polite"></article>
+        </div>
+      </section>
+
+      <section id="tab-quests" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-quests" hidden>
+        <div class="bestiary">
+          <ul id="quest-list" class="bestiary-list"></ul>
+          <article id="quest-detail" class="bestiary-detail" aria-live="polite"></article>
         </div>
       </section>
 
@@ -676,6 +711,14 @@
     </div>
   </div>
   <div id="battle-banner" role="status" aria-live="polite" hidden></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Talking to a villager (dialogue.js). -->
+  <div id="dialogue" class="panel" role="dialog" aria-label="Discussion" hidden>
+    <p class="dialogue-name"></p>
+    <p class="dialogue-text"></p>
+    <div class="dialogue-answers"></div>
+  </div>
   <div id="damage-layer" aria-hidden="true"></div>
 
   <div class="control left">
@@ -731,6 +774,7 @@
   <script src="menu.js"></script>
   <script src="battle.js"></script>
   <script src="team.js"></script>
+  <script src="dialogue.js"></script>
   {{{ SCRIPT }}}
 </body>
 </html>

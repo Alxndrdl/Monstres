@@ -134,10 +134,10 @@ Portrait build_portrait(const PortraitSubject& subject, float aspect);
 // than their size; an object in front (a tree trunk, a house) hides them.
 int pick_creature(const World& world, const View& view, float ndc_x, float ndc_y);
 
-// The signpost under a point of the screen (objects index), or -1: only
-// within kReadDistance of the player, and not hidden by another object.
+// The signpost or teleporter under a point of the screen (objects index),
+// or -1: only within kReadDistance of the player, not hidden by another object.
 inline constexpr float kReadDistance = 25.0f;
-int pick_sign(const World& world, const View& view, float ndc_x, float ndc_y);
+int pick_object(const World& world, const View& view, float ndc_x, float ndc_y);
 
 // Where the middle of creatures[index] is on screen (normalized device
 // coordinates); index -1: the magician. False if there is no such creature

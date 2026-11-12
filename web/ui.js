@@ -271,7 +271,10 @@
     }
     const info = SPECIES[c.species] || { name: c.species, kind: '', description: '' };
     fields.name.textContent = info.name;
-    fields.kind.textContent = c.index === 0 ? `${info.kind} · ton compagnon` : info.kind;
+    const villager = c.npc && LORE.npcs[c.npc] ? LORE.npcs[c.npc].name : null;
+    fields.name.textContent = villager || info.name;
+    fields.kind.textContent = c.index === 0 ? `${info.kind} · ton compagnon`
+      : c.tag === 'lostPiou' ? `${info.kind} · le Piou de Mirabelle` : villager ? 'Villageois' : info.kind;
     fields.description.textContent = info.description;
     const look = `${c.index}/${c.look}`;
     if (look !== shownLook) {
@@ -317,8 +320,8 @@
     signShown = index;
     signPanel.hidden = index < 0;
     if (index < 0) return;
-    const sign = game.sign(index);
-    if (!sign) return;
+    const sign = game.object(index);
+    if (!sign || sign.kind !== 'sign') return;
     const here = sign.zone === 'village' ? LORE.signs.village : LORE.signs.other;
     const lines = sign.places.filter((p) => !(p.zone === sign.zone && p.distance < 25)).map((p) => {
       // North is -Z (the top of the map).
@@ -346,13 +349,17 @@
   }
 
   // Tap or click on the view (see controls.js): the creature there, a
-  // signpost, or nothing.
+  // signpost or a teleporter (its menu: battle.js), or nothing.
   window.addEventListener('monstres-tap', (event) => {
     if (!game || typeof game.pick !== 'function') return;
     const index = game.pick(event.detail.x, event.detail.y);
     select(index);
-    const sign = index < 0 && typeof game.pickSign === 'function' ? game.pickSign(event.detail.x, event.detail.y) : -1;
-    showSign(sign);
+    const object = index < 0 && typeof game.pickObject === 'function' ? game.pickObject(event.detail.x, event.detail.y) : -1;
+    const info = object >= 0 ? game.object(object) : null;
+    showSign(info && info.kind === 'sign' ? object : -1);
+    window.dispatchEvent(new CustomEvent('monstres-object', {
+      detail: { index: info && info.kind === 'teleporter' ? object : -1 },
+    }));
   });
   document.getElementById('creature-close').addEventListener('click', () => select(-1));
   document.getElementById('sign-close').addEventListener('click', () => showSign(-1));

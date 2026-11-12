@@ -9,6 +9,7 @@ add_library(monstres_core STATIC
   debug.cpp
   variants.cpp
   battle.cpp
+  quests.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

@@ -57,8 +57,12 @@
     return !menu.hidden;
   }
 
-  function open(tab = current) {
+  // options.teleport: the map, to choose where to go (from a teleporter).
+  let teleportMode = false;
+  function open(tab = current, options = {}) {
     if (!game) return;
+    teleportMode = !!options.teleport;
+    if (teleportMode) mapMode = 'global';
     menu.hidden = false;
     button.setAttribute('aria-expanded', 'true');
     game.setPaused(true);
@@ -68,13 +72,15 @@
   function close() {
     if (!isOpen()) return;
     menu.hidden = true;
+    teleportMode = false;
     button.setAttribute('aria-expanded', 'false');
     if (document.activeElement && menu.contains(document.activeElement)) document.activeElement.blur();
     if (game) game.setPaused(false);
   }
 
   function show(tab) {
-    if (!['character', 'team', 'bestiary', 'map'].includes(tab)) tab = 'character';
+    if (!['character', 'team', 'quests', 'bestiary', 'map'].includes(tab)) tab = 'character';
+    if (tab !== 'map') teleportMode = false;
     current = tab;
     prefs.set('menuTab', tab);
     for (const t of tabs) {
@@ -85,6 +91,7 @@
     }
     if (tab === 'character') renderCharacter();
     else if (tab === 'team') renderTeam();
+    else if (tab === 'quests') renderQuests();
     else if (tab === 'bestiary') renderBestiary();
     else renderMap();
   }
@@ -99,7 +106,7 @@
 
   // Keyboard: Escape closes; C, E, B and M open a tab (not while typing a name).
   // By letter, not by key position: M is not at the same place on AZERTY.
-  const SHORTCUTS = { c: 'character', e: 'team', b: 'bestiary', m: 'map' };
+  const SHORTCUTS = { c: 'character', e: 'team', j: 'quests', b: 'bestiary', m: 'map' };
   window.addEventListener('keydown', (event) => {
     const typing = event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(event.target.tagName);
     if (event.key === 'Escape' && isOpen()) {
@@ -287,6 +294,55 @@
       stats,
       el('section', { className: 'moves-box' }, [el('h3', { textContent: 'Attaques' }), moves]),
       releaseBox(m, teamSize),
+    );
+  }
+
+  // ---- Quests: the journal ----
+  let chosenQuest = prefs.get('questId', null);
+
+  function renderQuests() {
+    const quests = game.quests().filter((q) => q.stage !== 'unknown');
+    const list = $('quest-list');
+    if (!quests.length) {
+      list.replaceChildren(el('li', { className: 'facts', textContent: 'Aucune quête pour l’instant.' }));
+      $('quest-detail').replaceChildren(el('p', { className: 'facts',
+        textContent: 'Parle aux villageois : certains ont besoin d’aide. Touche-les, puis « Parler ».' }));
+      return;
+    }
+    if (!quests.some((q) => q.id === chosenQuest)) chosenQuest = (quests.find((q) => q.stage === 'active') || quests[0]).id;
+    const section = (title, items) => (items.length ? [el('li', { className: 'quest-section', textContent: title }),
+      ...items.map((q) => {
+        const info = LORE.quests[q.id];
+        const item = el('button', { type: 'button', className: `bestiary-entry quest-entry ${q.stage}` }, [
+          el('span', {}, [el('strong', { textContent: info.title }),
+            el('small', { textContent: q.stage === 'done' ? 'Terminée' : q.ready ? 'À rapporter' : 'En cours' })]),
+        ]);
+        item.dataset.quest = q.id;
+        if (q.id === chosenQuest) item.setAttribute('aria-current', 'true');
+        item.addEventListener('click', () => {
+          chosenQuest = q.id;
+          prefs.set('questId', q.id);
+          renderQuests();
+        });
+        return el('li', {}, [item]);
+      })] : []);
+    list.replaceChildren(...section('En cours', quests.filter((q) => q.stage === 'active')),
+      ...section('Terminées', quests.filter((q) => q.stage === 'done')));
+    const q = quests.find((x) => x.id === chosenQuest);
+    const info = LORE.quests[q.id];
+    const giver = (LORE.npcs[info.giver] || { name: '?' }).name;
+    const steps = Object.entries(info.steps).map(([id, label]) => el('li', {
+      className: q.steps[id] ? 'step done' : 'step', textContent: label,
+    }));
+    $('quest-detail').className = 'bestiary-detail quest';
+    $('quest-detail').replaceChildren(
+      el('h2', { textContent: info.title }),
+      el('p', { className: 'kind', textContent: `Demandée par ${giver} · ${q.stage === 'done' ? 'terminée' : 'en cours'}` }),
+      el('p', { className: 'description', textContent: info.summary }),
+      el('h3', { textContent: 'Étapes' }),
+      el('ol', { className: 'quest-steps' }, steps),
+      el('p', { className: 'facts', textContent: `Récompense : ${info.xp} points d’expérience pour ton magicien, et pour ton compagnon.` }),
+      ...(q.stage === 'done' ? [el('p', { className: 'quest-done', textContent: info.done })] : []),
     );
   }
 
@@ -613,6 +669,17 @@
     crow: '#2a2a36', fish: '#4aa8ff',
   };
 
+  let teleportTargets = [];  // where to click on the map, in teleport mode
+  canvas.addEventListener('click', (event) => {
+    if (!teleportMode) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    const target = teleportTargets.find((t) => Math.hypot(t.x - x, t.y - y) < 18);
+    if (!target) return;
+    game.teleportTo(target.id);
+    close();  // the game goes on: the teleport happens with the next tick
+  });
+
   function renderMap() {
     if (!game) return;
     const data = game.map();
@@ -624,7 +691,8 @@
 
     const s = game.state();
     const p = s.player;
-    $('map-where').textContent = `Tu te trouves : ${LORE.zones[p.zone] || p.zone}`;
+    $('map-where').textContent = teleportMode ? 'Choisis un téléporteur où aller.'
+      : `Tu te trouves : ${LORE.zones[p.zone] || p.zone}`;
     const dpr = window.devicePixelRatio || 1;
     const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
     if (!cssW || !cssH) return;
@@ -682,6 +750,22 @@
     if (data.forest) label(LORE.zones.forest, data.forest.x, data.forest.z, labelSize);
     if (data.cave) label(LORE.zones.cave, data.cave.x, data.cave.z, labelSize);
     if (data.castle) label(LORE.zones.castle, data.castle.x, data.castle.z - data.castle.r - (global ? 6 : 3), labelSize);
+
+    // The teleporters found (the ones reachable from here, in teleport mode: brighter, larger).
+    teleportTargets = [];
+    for (const t of game.teleporters().list) {
+      if (!t.known) continue;
+      const reachable = teleportMode && t.reachable;
+      const r = reachable ? 11 : 6;
+      ctx.beginPath();
+      ctx.arc(X(t.x), Y(t.z), r, 0, Math.PI * 2);
+      ctx.fillStyle = reachable ? 'rgba(127, 224, 255, 0.95)' : 'rgba(127, 224, 255, 0.6)';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#1b3d52';
+      ctx.stroke();
+      if (reachable) teleportTargets.push({ id: t.id, x: X(t.x), y: Y(t.z) });
+    }
 
     // The player: an arrow pointing where it goes.
     const angle = Math.atan2(p.facingZ, p.facingX);

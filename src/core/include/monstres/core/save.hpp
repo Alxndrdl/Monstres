@@ -61,7 +61,13 @@ namespace monstres {
 //      any monster (Pompon can be let go). Versions 4 to 13 still load: the
 //      world is built anew from their seed, the player starts at the
 //      crossroads with its magician, team, bestiary and time of day.
-inline constexpr uint32_t kSaveVersion = 14;
+//  15  teleporters and quests: each creature's flags byte also tells whether
+//      it was beaten (2), then its villager number (u8) and quest tag (u8);
+//      each team member's tag (u8) and whether it was beaten (u8); at the
+//      end the known teleporters (u8 bits), the number of quests (u8) and per
+//      quest its stage and progress (u8 each). Version 14 still loads: the
+//      teleporters are built where they go, the villagers get their names.
+inline constexpr uint32_t kSaveVersion = 15;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

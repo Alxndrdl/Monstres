@@ -128,14 +128,22 @@ window.monstres = {
     return _monstres_pick(x, y);
   },
   select: (index) => _monstres_select(index),
-  // The signpost at a point of the canvas (CSS pixels): its index, or -1; and what it says.
-  pickSign: (clientX, clientY) => {
+  // The signpost or teleporter at a point of the canvas (CSS pixels): its
+  // index, or -1; and what it is (a signpost: what it says).
+  pickObject: (clientX, clientY) => {
     const rect = Module.canvas.getBoundingClientRect();
     const x = ((clientX - rect.left) / rect.width) * 2 - 1;
     const y = 1 - ((clientY - rect.top) / rect.height) * 2;
-    return _monstres_pick_sign(x, y);
+    return _monstres_pick_object(x, y);
   },
-  sign: (index) => JSON.parse(UTF8ToString(_monstres_sign_json(index))),
+  object: (index) => JSON.parse(UTF8ToString(_monstres_object_json(index))),
+  // Teleporters (known, reachable) and quests; what the player does with them.
+  teleporters: () => JSON.parse(UTF8ToString(_monstres_teleporters_json())),
+  quests: () => JSON.parse(UTF8ToString(_monstres_quests_json())),
+  teleportTo: (id) => _monstres_command(7, id),
+  acceptQuest: (quest) => _monstres_command(8, quest),
+  giveMonster: (slot) => _monstres_command(9, slot),
+  completeQuest: (quest) => _monstres_command(10, quest),
   // Frame profiler (settings menu): where the time of the frames goes, every half second.
   setProfiling: (on) => _monstres_set_profiling(on ? 1 : 0),
   profile: () => JSON.parse(UTF8ToString(_monstres_profile_json())),

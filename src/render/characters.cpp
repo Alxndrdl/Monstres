@@ -319,7 +319,8 @@ CreatureLook creature_look(Species species, const Genes& g) {
       break;
     }
     case Species::Bird: {
-      static constexpr Color kPlumages[] = {{1, 1, 1, 1}, {0.6f, 0.9f, 3.2f, 1}, {1.0f, 0.75f, 1.9f, 1}};
+      static constexpr Color kPlumages[] = {{1, 1, 1, 1}, {0.6f, 0.9f, 3.2f, 1}, {1.0f, 0.75f, 1.9f, 1},
+                                            {0.3f, 1.12f, 1.75f, 1}};  // emerald
       look.tints[0] = body_tint(g, kPlumages, {0.8f, 1.0f, 3.1f, 1}, {0.45f, 0.5f, 1.4f, 1});
       look.tints[1] = times(kFeatherColor, look.tints[0], 0.85f);
       if (g.allele[2] == 1) {  // a crest of three feathers
@@ -952,6 +953,9 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
       const bool violet = o.variant % 2 == 0;
       offer(o.pos.x, o.pos.y + 0.6f * o.size.x, o.pos.z, 3.0f + 3.0f * o.size.x,
             scaled(violet ? Color{0.75f, 0.45f, 1.0f, 1} : Color{0.4f, 0.85f, 1.0f, 1}, 0.35f + 0.9f * night));
+    }
+    if (o.kind == ObjectKind::Teleporter && ((w.teleporters >> o.variant) & 1u)) {
+      offer(o.pos.x, o.pos.y + 0.8f, o.pos.z, 5.0f, scaled({0.45f, 0.9f, 1.0f, 1}, 0.2f + 0.9f * night));
     }
     if (o.kind == ObjectKind::CastleGate) {  // its two torches
       const SinCos sc = sincos16(o.yaw);

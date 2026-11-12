@@ -1257,6 +1257,26 @@ def crystal():
     return m
 
 
+def teleporter():
+    """A teleporter: a round stone platform (radius 1.5, 0.12 high, walked
+    onto: no collision) with a ring of runes, and three standing stones
+    around it at radius 1.8. The game lays a glowing circle of runes on top."""
+    m = Mesh()
+    frustum(m, identity, 1.55, 1.5, 0.12, 18, RUIN_DARK, top_cap=shade(RUIN_STONE, 0.95))
+    for i in range(18):
+        a = TAU * (i + 0.5) / 18
+        box(m, (1.15 * math.cos(a), 0.125, 1.15 * math.sin(a)), (0.08, 0.01, 0.08), RUNE if i % 3 else RUNE_VIOLET)
+    for k in range(3):
+        a = TAU * (0.25 + k / 3)
+        c = (1.85 * math.cos(a), 0.0, 1.85 * math.sin(a))
+        blob(m, (c[0], 0.85, c[2]), (0.28, 0.88, 0.22), 0.07, 2700 + k, jitter(RUIN_STONE, 2710 + k, 0.1))
+        inward = normalize((-c[0], 0, -c[2]))
+        for j in range(3):
+            y = 0.6 + 0.35 * j
+            box(m, (c[0] + inward[0] * 0.2, y, c[2] + inward[2] * 0.2), (0.06, 0.05, 0.06), RUNE if j % 2 else RUNE_VIOLET)
+    return m
+
+
 def lowpoly_blob(m, center, radii, seed, base):
     """A 20-faced ball: the far version of a crown of leaves."""
     t = (1 + math.sqrt(5)) / 2
@@ -1628,6 +1648,7 @@ def all_models():
         "castle_keep": castle_keep(),
         "cave_mouth": cave_mouth(),
         "crystal": crystal(),
+        "teleporter": teleporter(),
         "tree_far": tree_far(),
         "pine_far": pine_far(),
         "sparkle": sparkle(),

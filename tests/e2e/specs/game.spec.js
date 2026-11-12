@@ -321,7 +321,7 @@ test.describe('grimoire', () => {
     await expect(menu).toBeHidden();
     await page.locator('#menu-button').click();
     await expect(menu).toBeVisible();
-    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Bestiaire', 'Carte']);
+    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Quêtes', 'Bestiaire', 'Carte']);
     const tick = (await state(page)).tick;
     await page.waitForTimeout(500);
     expect((await state(page)).tick).toBe(tick);  // paused
@@ -660,6 +660,54 @@ test.describe('battles', () => {
 });
 
 test.describe('the bigger world', () => {
+  test('talking to Mirabelle gives a quest, found in the journal', async ({ page }) => {
+    await openGame(page, '?seed=3&new&frozen');
+    // Next to her, then her menu (the context menu is driven by a tap: select through the page).
+    const i = await page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 1; i < m.state().creatures.length; i++) {
+        m.select(i);
+        const c = m.selected();
+        if (c && c.npc === 1) { m.teleport(c.x + 2, c.z); m.step(1); return i; }
+      }
+      return -1;
+    });
+    expect(i).toBeGreaterThan(0);
+    await page.evaluate((i) => window.monstresDialogue.open(window.monstres.selected()), i);
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Mirabelle');
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('émeraude');
+    await page.locator('#accept-quest').click();
+    await page.evaluate(() => window.monstres.step(1));
+    await expect(page.locator('#toast')).toContainText('Nouvelle quête');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('j');
+    await expect(page.locator('#quest-detail h2')).toHaveText('Le Piou de Mirabelle');
+    await expect(page.locator('#quest-detail .step')).toHaveCount(2);
+    // Showing her Pompon: not even a Piou.
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.monstresDialogue.open(window.monstres.selected()));
+    await page.getByRole('button', { name: 'Montrer un monstre' }).click();
+    await page.locator('#present-0').click();
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('même pas un Piou');
+  });
+
+  test('teleporters: found by walking near, then a trip through the map', async ({ page }) => {
+    await openGame(page, '?seed=3&new&frozen');
+    const tps = await page.evaluate(() => window.monstres.teleporters().list);
+    const castle = tps.find((t) => t.place === 'castle');
+    const village = tps.find((t) => t.place === 'village');
+    await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(2); }, [castle.x, castle.z]);
+    await expect(page.locator('#toast')).toContainText('Téléporteur découvert');
+    await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(2); }, [village.x, village.z]);
+    const here = await page.evaluate(() => window.monstres.teleporters());
+    expect(here.list.find((t) => t.place === 'castle').reachable).toBe(true);
+    await page.evaluate(() => window.monstresMenu.open('map', { teleport: true }));
+    await expect(page.locator('#map-where')).toContainText('Choisis un téléporteur');
+    await page.evaluate(() => window.monstresMenu.close());
+    await page.evaluate((id) => { window.monstres.teleportTo(id); window.monstres.step(1); }, castle.id);
+    expect((await state(page)).player.zone).toBe('castle');
+  });
+
   test('a signpost of the village says where the places are', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     const sign = await page.evaluate(() => window.monstres.map().objects.find((o) => o[0] === 'sign'));
@@ -670,7 +718,7 @@ test.describe('the bigger world', () => {
     }, [sign[1], sign[2]]);
     const at = await page.evaluate(() => {
       for (let y = 60; y < 560; y += 6) {
-        for (let x = 60; x < 760; x += 6) if (window.monstres.pickSign(x, y) >= 0) return { x, y };
+        for (let x = 60; x < 760; x += 6) if (window.monstres.pickObject(x, y) >= 0 && window.monstres.object(window.monstres.pickObject(x, y)).kind === 'sign') return { x, y };
       }
       return null;
     });

@@ -660,3 +660,35 @@ TEST_CASE("a dodge without moving is a jump on the spot") {
   CHECK(highest > 0.6f);
   CHECK(std::hypot(w.creatures[0].body.pos.x - start.x, w.creatures[0].body.pos.z - start.z) < 0.05f);  // not back
 }
+
+TEST_CASE("a monster beaten once gives no more experience, captured or beaten again") {
+  World w = arena();
+  engage(w);
+  w.battle.dealt[0] = 20;
+  w.battle.enemy_hp = 1;
+  w.creatures[0].body.pos = {0, 0, -2.2f};
+  step(w, attack_input(1));
+  REQUIRE(w.battle.outcome == BattleOutcome::Victory);
+  CHECK(w.battle.outcome_xp > 0);
+  CHECK(w.creatures[1].beaten);
+  run(w, Input{}, rules::kKnockedOutTicks + 2);  // up again
+  // Beaten again: nothing.
+  w.creatures[1].body.pos = {0, 0, -3};
+  engage(w);
+  w.battle.dealt[0] = 20;
+  w.battle.enemy_hp = 1;
+  w.creatures[0].body.pos = {0, 0, -2.2f};
+  step(w, attack_input(1));
+  REQUIRE(w.battle.outcome == BattleOutcome::Victory);
+  CHECK(w.battle.outcome_xp == 0u);
+  // Captured: nothing either, and it is remembered (let go again: still nothing).
+  run(w, Input{}, rules::kKnockedOutTicks + 2);
+  w.creatures[1].body.pos = {0, 0, -3};
+  engage(w);
+  w.battle.dealt[0] = 20;
+  w.battle.enemy_hp = 1;
+  step(w, command(Command::Capture));
+  REQUIRE(w.battle.outcome == BattleOutcome::Captured);
+  CHECK(w.battle.outcome_xp == 0u);
+  CHECK(w.team.back().beaten);
+}

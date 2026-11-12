@@ -70,6 +70,7 @@ window.MonstresLore = {
         'plumage.yellow': { name: 'Plumage jaune', description: 'Jaune comme un bouton d’or.' },
         'plumage.blue': { name: 'Plumage bleu', description: 'Bleu-gris, la couleur du ciel avant l’aube.' },
         'plumage.pink': { name: 'Plumage rose', description: 'Un rose saumon assez rare dans les prairies.' },
+        'plumage.emerald': { name: 'Plumage émeraude', description: 'Un vert profond qui chatoie au soleil : à peine un Piou sur cent.' },
         'crest.none': { name: 'Sans huppe', description: 'Une tête toute ronde.' },
         'crest.crest': { name: 'Huppé', description: 'Trois plumes dressées sur la tête, qu’il hérisse quand il a peur.' },
         'wings.small': { name: 'Petites ailes', description: 'Des ailes courtes : il préfère courir.' },
@@ -184,6 +185,64 @@ window.MonstresLore = {
     cave: 'Grotte aux Cristaux',
     castle: 'Château de Corbeval',
   },
+  // Teleporters, by place (src/core: TeleporterId).
+  teleporters: {
+    village: 'Village', ruins: 'Ruines de la Tour', forest: 'Forêt des Murmures', cave: 'Grotte aux Cristaux',
+    castle: 'Château de Corbeval',
+  },
+
+  // The villagers with a name (Creature::npc), and what they say (web/dialogue.js).
+  npcs: {
+    1: { name: 'Mirabelle', chatter: ['Je fais les plus belles confitures de mirabelles du pays, tu sais.'] },
+    2: { name: 'Gaspard', chatter: ['Ces runes… On dirait qu’elles respirent.'] },
+    3: { name: 'Lison', chatter: ['Les Gloubi aiment la pluie : ils sautent dans les flaques en riant.',
+      'Ma grand-mère disait que le magicien de la Tour parlait aux étoiles.'] },
+    4: { name: 'Bastien', chatter: ['Ne t’approche pas trop des corbeaux du château : ils sont bien plus forts que ceux d’ici.',
+      'Le soir, les Champi de la forêt brillent comme des lanternes.'] },
+    5: { name: 'Odette', chatter: ['Le puits n’a jamais tari, même pendant la grande sécheresse.',
+      'Un Bloup a sauté dans mon seau ce matin ! Je l’ai remis au lac, bien sûr.'] },
+    6: { name: 'Félix', chatter: ['Personne n’est entré dans la grotte aux Cristaux depuis des années. On dit qu’elle chante la nuit.',
+      'Un vieux Piou peut voler jusqu’au château sans s’arrêter.'] },
+    7: { name: 'Rosalie', chatter: ['Les monstres sont plus forts loin du village. Prends soin du tien !',
+      'Il paraît qu’il existe des monstres aux couleurs jamais vues : on les dit chromatiques.'] },
+    8: { name: 'Anatole', chatter: ['De mon temps, le château de Corbeval avait un seigneur. Maintenant, il n’y a plus que des monstres.',
+      'Le sentier traverse tout le pays, du nord au sud. Suis-le, tu ne te perdras pas.'] },
+  },
+  // What the other villagers say about the quests (any of them, see web/dialogue.js).
+  rumors: {
+    lostPiou: ['Mirabelle a perdu son Piou… La pauvre, elle le cherche partout.',
+      'Le Piou de Mirabelle a un plumage vert émeraude. Je n’en avais jamais vu de pareil !',
+      'Il paraît qu’un Piou tout vert rôde autour du village. Ce serait celui de Mirabelle ?'],
+    lostPiouDone: ['Merci d’avoir retrouvé le Piou de Mirabelle ! Elle ne le quitte plus.',
+      'Mirabelle a fait des confitures pour fêter le retour de son Piou. Tu devrais goûter !',
+      'Tu es le magicien qui a retrouvé Émeraude ? Bravo !'],
+    teleporters: ['Gaspard ne quitte plus le cercle de pierres, sur la place. Il se demande à quoi il sert.',
+      'Gaspard dit qu’il a vu le même cercle de pierres près du château.',
+      'Ces vieilles pierres à runes, sur la place… Gaspard est persuadé qu’elles sont magiques.'],
+    teleportersDone: ['Gaspard raconte à tout le monde que tu as disparu dans un éclair de lumière !',
+      'Alors ces cercles de pierres mènent d’un endroit à l’autre ? Quelle merveille !'],
+  },
+  // The quests (src/core/quests.hpp): the journal, in the grimoire.
+  quests: {
+    lostPiou: {
+      title: 'Le Piou de Mirabelle', giver: 1, xp: 60,
+      summary: 'Mirabelle, au village, a perdu son Piou. Il a un plumage émeraude, une couleur très rare. Il rôde sans doute autour du village.',
+      steps: { find: 'Trouver le Piou au plumage émeraude et le capturer', bring: 'Le rendre à Mirabelle' },
+      done: 'Mirabelle a retrouvé son Piou, Émeraude. Il ne la quitte plus.',
+    },
+    teleporters: {
+      title: 'Les cercles de pierres', giver: 2, xp: 40,
+      summary: 'Gaspard se demande à quoi sert le cercle de pierres de la place du village. Il en a vu un pareil près du château.',
+      steps: {
+        discover: 'Trouver le cercle de pierres près du château',
+        go: 'Aller du village au château par le cercle de pierres',
+        back: 'Revenir au village de la même façon',
+        tell: 'Raconter tout à Gaspard',
+      },
+      done: 'Les cercles de pierres sont des téléporteurs ! Gaspard n’en revient pas.',
+    },
+  },
+
   // What the signposts say (web/ui.js adds the way to each place).
   signs: {
     village: 'Bienvenue au village !',

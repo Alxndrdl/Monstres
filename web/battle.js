@@ -16,7 +16,12 @@
 
   let game = null;
   let selected = -1;  // creature touched (ui.js)
-  window.addEventListener('monstres-selection', (event) => { selected = event.detail.index; });
+  let object = -1;    // teleporter touched (ui.js)
+  window.addEventListener('monstres-selection', (event) => {
+    selected = event.detail.index;
+    if (selected >= 0) object = -1;
+  });
+  window.addEventListener('monstres-object', (event) => { object = event.detail.index; });
 
   // ---- Buttons ----
   const root = document.documentElement;
@@ -82,6 +87,8 @@
       'stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
     stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+    teleport: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round"><ellipse cx="12" cy="18" rx="8" ry="3"/><path d="M12 15V3M8 7l4-4 4 4"/></svg>',
   };
 
   const action = (id, label, enabled, onClick) => {
@@ -100,6 +107,7 @@
     inBattle: 'Un combat est déjà en cours.',
     noCompanion: 'Invoque d’abord un monstre de ton équipe (à gauche).',
     knockedOut: 'K.O. : il se repose. Laisse-le tranquille un moment.',
+    owned: 'C’est le Piou de Mirabelle : il reste avec elle.',
   };
   // Under the capture button: why it cannot be used yet.
   const CAPTURE_NOTES = {
@@ -140,7 +148,19 @@
       };
     } else {
       const c = selected >= 0 && game.selected();
-      if (!c) {
+      const t = !c && object >= 0 ? game.object(object) : null;
+      if (t && t.kind === 'teleporter') {
+        const reachable = game.teleporters().list.filter((x) => x.reachable).length;
+        key = `teleporter/${t.id}/${t.known}/${t.here}/${reachable}`;
+        build = () => {
+          contextTitle.replaceChildren('Téléporteur ', el('small', { textContent: LORE.teleporters[t.place] }));
+          contextActions.replaceChildren(action('teleport', 'Se téléporter', t.here && reachable > 0,
+            () => window.monstresMenu.open('map', { teleport: true })));
+          contextNote.textContent = !t.known ? 'Un étrange cercle de pierres à runes. Approche-toi…'
+            : !t.here ? 'Mets-toi au milieu du cercle de pierres.'
+              : reachable ? 'Choisis où aller sur la carte.' : 'Il ne mène nulle part… Trouve un autre cercle de pierres.';
+        };
+      } else if (!c) {
         key = 'none';
       } else if (c.index === 0) {  // the companion
         key = `companion/${c.train}`;
@@ -150,11 +170,11 @@
           contextNote.textContent = 'Contrôle-le comme en combat, contre ton magicien.';
         };
       } else if (c.species === 'villager') {
-        key = `villager/${c.index}`;
+        key = `villager/${c.index}/${c.talk}`;
         build = () => {
-          contextTitle.textContent = 'Villageois';
-          contextActions.replaceChildren(action('talk', 'Parler', false, () => {}));
-          contextNote.textContent = 'Bientôt : parler aux villageois.';
+          contextTitle.textContent = (LORE.npcs[c.npc] || { name: 'Villageois' }).name;
+          contextActions.replaceChildren(action('talk', 'Parler', !!c.talk, () => window.monstresDialogue.open(game.selected())));
+          contextNote.textContent = c.talk ? '' : 'Approche-toi pour lui parler.';
         };
       } else {
         key = `monster/${c.index}/${c.engage}`;

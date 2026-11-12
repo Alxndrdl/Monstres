@@ -1,6 +1,7 @@
 #include "monstres/core/save.hpp"
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
@@ -166,7 +167,9 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u8(static_cast<uint8_t>((c.genes.chromatic ? 1 : 0) | (c.genes.elemental ? 2 : 0)));
     out.u8(c.level);
     out.u32(c.id);
-    out.u8(c.released ? 1 : 0);
+    out.u8(static_cast<uint8_t>((c.released ? 1 : 0) | (c.beaten ? 2 : 0)));
+    out.u8(c.npc);
+    out.u8(static_cast<uint8_t>(c.tag));
   }
   const size_t name_bytes = std::min(w.wizard.name.size(), kMaxNameBytes);
   out.u8(static_cast<uint8_t>(name_bytes));
@@ -186,6 +189,8 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u16(m.level);
     out.u32(m.xp);
     out.u16(m.hp);
+    out.u8(static_cast<uint8_t>(m.tag));
+    out.u8(m.beaten ? 1 : 0);
   }
   out.u32(w.clock);
   out.u8(w.active < 0 ? 0xff : static_cast<uint8_t>(w.active));
@@ -194,6 +199,12 @@ std::vector<uint8_t> serialize(const World& w) {
   for (size_t k = 0; k < kPopulationCellCount; ++k) {
     out.u8(w.population.active[k]);
     out.u16(w.population.visits[k]);
+  }
+  out.u8(w.teleporters);
+  out.u8(static_cast<uint8_t>(kQuestCount));
+  for (const QuestState& q : w.quests) {
+    out.u8(static_cast<uint8_t>(q.stage));
+    out.u8(q.progress);
   }
   return out.take();
 }
@@ -218,6 +229,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   const bool with_clock = version >= 12;   // time of day
   const bool with_active = version >= 13;  // which team member is out of the crystal
   const bool grown = version >= 14;        // the bigger world: creatures have ids, squares are lived in
+  const bool with_quests = version >= 15;  // teleporters, quests, named villagers
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -272,9 +284,17 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       }
       if (with_team && (!in.u8(c.level) || c.level == 0)) return fail(error, LoadError::Corrupt);
       if (grown) {
-        uint8_t released = 0;
-        if (!in.u32(c.id) || !in.u8(released) || released > 1) return fail(error, LoadError::Corrupt);
-        c.released = released == 1;
+        uint8_t flags = 0;
+        if (!in.u32(c.id) || !in.u8(flags) || flags > (with_quests ? 3 : 1)) return fail(error, LoadError::Corrupt);
+        c.released = (flags & 1) != 0;
+        c.beaten = (flags & 2) != 0;
+      }
+      if (with_quests) {
+        uint8_t tag = 0;
+        if (!in.u8(c.npc) || !in.u8(tag) || tag > static_cast<uint8_t>(Tag::LostPiou)) {
+          return fail(error, LoadError::Corrupt);
+        }
+        c.tag = static_cast<Tag>(tag);
       }
     }
   }
@@ -311,6 +331,10 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       bool ok = in.u8(species);
       for (uint8_t& a : m.genes.allele) ok = ok && in.u8(a);
       ok = ok && in.u8(forms) && in.u16(m.level) && in.u32(m.xp) && in.u16(m.hp);
+      uint8_t tag = 0, beaten = 0;
+      if (with_quests) ok = ok && in.u8(tag) && in.u8(beaten) && tag <= static_cast<uint8_t>(Tag::LostPiou) && beaten <= 1;
+      m.tag = static_cast<Tag>(tag);
+      m.beaten = beaten == 1;
       if (!ok || species >= static_cast<uint8_t>(Species::Count) || forms > 2 || m.level == 0) {
         return fail(error, LoadError::Corrupt);
       }
@@ -347,6 +371,19 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       if (c.id == 0 || c.id >= w.next_id) return fail(error, LoadError::Corrupt);
     }
   }
+  if (with_quests) {
+    uint8_t quests = 0;
+    if (!in.u8(w.teleporters) || w.teleporters >= (1u << kTeleporterCount) || !in.u8(quests) || quests != kQuestCount) {
+      return fail(error, LoadError::Corrupt);
+    }
+    for (QuestState& q : w.quests) {
+      uint8_t stage = 0;
+      if (!in.u8(stage) || stage > static_cast<uint8_t>(QuestStage::Done) || !in.u8(q.progress)) {
+        return fail(error, LoadError::Corrupt);
+      }
+      q.stage = static_cast<QuestStage>(stage);
+    }
+  }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
 
   if (!grown) {
@@ -378,6 +415,26 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       bigger.creatures[0].genes = w.creatures[0].genes;
     }
     w = std::move(bigger);
+  } else if (!with_quests) {
+    // Version 14: the teleporters are built (trees and rocks around them give
+    // way), the villagers get their names, Gaspard goes to the village's teleporter.
+    const size_t before = w.objects.size();
+    build_teleporters(w);
+    for (size_t i = before; i < w.objects.size(); ++i) {
+      Object& o = w.objects[i];
+      o.pos.y = w.ground.height(o.pos.x, o.pos.z) - 0.05f;
+    }
+    uint8_t n = 0;
+    for (Creature& c : w.creatures) {
+      if (c.species != Species::Villager || n >= rules::kVillagers) continue;
+      c.npc = ++n;
+      Vec3 t;
+      if (c.npc == npc::kGaspard && teleporter_position(w, TeleporterId::Village, t)) {
+        c.home = {t.x, t.z};
+        c.body.pos = {t.x + 2.4f, w.ground.height(t.x + 2.4f, t.z), t.z};
+        c.mind = Mind::Idle;
+      }
+    }
   }
   return w;
 }

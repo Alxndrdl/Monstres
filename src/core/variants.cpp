@@ -42,7 +42,8 @@ constexpr Genetics kGenetics[] = {
     // Bird: Piou.
     {Family::Bird, 4,
      {{kSex,
-       {"plumage", Color, 3, {{{"yellow", Common}, {"blue", Uncommon}, {"pink", Uncommon}}}},
+       // Emerald: about 1 Piou in 128 (Mirabelle's is one of them).
+       {"plumage", Color, 4, {{{"yellow", Common}, {"blue", Uncommon}, {"pink", Uncommon}, {"emerald", VeryRare}}}},
        {"crest", Shape, 2, {{{"none", Common}, {"crest", Uncommon}}}},
        {"wings", Shape, 2, {{{"small", Common}, {"large", Rare}}}}}},
      Element::Electric},
@@ -67,10 +68,10 @@ static_assert(std::size(kGenetics) == kSpeciesCount);
 
 uint32_t weight(Rarity r) {
   switch (r) {
-    case Common: return 100;
-    case Uncommon: return 30;
-    case Rare: return 8;
-    default: return 2;
+    case Common: return 400;
+    case Uncommon: return 120;
+    case Rare: return 32;
+    default: return 5;  // with a common and two uncommon: 1 in 129
   }
 }
 

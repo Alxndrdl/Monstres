@@ -46,6 +46,10 @@ Contrôles :
   avec son propre compagnon ;
 - toucher un panneau du village (à moins de 25 m) : ce qui y est écrit, avec
   la direction (flèche, nord en haut) et la distance de chaque lieu du monde ;
+- toucher un villageois puis « Parler » (à moins de 5 m) : la discussion
+  s'affiche en bas de l'écran (voir Quêtes) ;
+- toucher un téléporteur (cercle de pierres à runes) : « Se téléporter » quand
+  on se tient au milieu, puis choisir sa destination sur la carte ;
 - livre en haut à gauche (ou touches C, E, B, M) : le grimoire, qui met le jeu en
   pause, avec quatre onglets :
   - Personnage : portrait du magicien, nom (modifiable, enregistré dans la
@@ -55,6 +59,9 @@ Contrôles :
     de vie, caractéristiques à son niveau, famille, éléments, variantes et ses
     trois attaques ; « Relâcher » (confirmé une seconde fois) le rend à la
     nature : il sort du cristal et s'en va ;
+  - Quêtes (touche J) : le journal, les quêtes en cours puis terminées ;
+    chacune avec qui l'a demandée, son histoire, ses étapes (cochées une fois
+    faites) et sa récompense ;
   - Bestiaire : tous les monstres, avec pour chacun un portrait, la famille,
     le ou les éléments, une description, l'habitat, la taille, la vitesse, les
     caractéristiques et combien vivent dans ce monde ; le bouton ADN
@@ -143,6 +150,39 @@ joueur a avancé de 16 m ; l'herbe et les petits objets rétrécissent jusqu'à
 disparaître avant le bord (dans le shader), si bien que rien n'apparaît d'un
 coup.
 
+## Quêtes, villageois et téléporteurs
+
+Règles dans `src/core/quests.hpp` / `quests.cpp`, dialogues dans
+`web/dialogue.js`, textes dans `web/lore.js` (`npcs`, `rumors`, `quests`).
+Les huit villageois ont un nom (`Creature::npc`) : Mirabelle, Gaspard, Lison,
+Bastien, Odette, Félix, Rosalie et Anatole. Les autres parlent de la vie du
+pays, et des quêtes en cours ou finies (« Mirabelle a perdu son Piou… »,
+« Gaspard ne quitte plus le cercle de pierres… », puis des remerciements).
+
+Téléporteurs : un cercle de pierres à runes au village, aux ruines, dans la
+forêt, devant la grotte et devant le château. S'en approcher (6 m) le fait
+connaître pour toujours : ses runes s'allument et tournent, une note le
+signale. Debout au milieu d'un téléporteur connu, on peut aller vers
+n'importe quel autre déjà découvert, en le choisissant sur la carte
+(`Command::Teleport`) ; le compagnon suit.
+
+Le Piou de Mirabelle : Mirabelle a perdu son Piou au plumage émeraude, une
+couleur très rare (environ un Piou sur 128). Il rôde à une trentaine de
+mètres du village et y revient chaque fois qu'on approche tant qu'il n'est pas
+capturé. Lui parler propose la quête ; lui « montrer un monstre » : un autre
+Piou n'est pas le sien (même émeraude : elle reconnaîtrait le sien entre
+mille), un autre monstre n'est même pas un Piou. Rendu, il reste ensuite à
+côté d'elle (on ne peut plus le combattre). Récompense : 60 XP au magicien,
+40 au compagnon.
+
+Les cercles de pierres : Gaspard, à côté du téléporteur du village, se
+demande à quoi il sert ; il en a vu un près du château. Il faut trouver
+celui du château, aller du village au château par téléporteur, revenir, puis
+tout lui raconter. Récompense : 40 XP au magicien, 25 au compagnon.
+
+Un monstre déjà battu une fois, ou relâché, ne rapporte plus d'expérience,
+ni en le battant de nouveau ni en le capturant (et même relâché ensuite).
+
 ## Modèles 3D
 
 Les modèles sont des fichiers glTF binaires (`assets/models/*.glb`) : le jeu
@@ -198,8 +238,8 @@ rappelle, et plus aucun monstre ne suit le magicien. Pendant un combat, on
 peut échanger le compagnon, pas le rappeler. Depuis la fiche d'équipe du
 grimoire, « Relâcher » rend un monstre à la nature (il en faut toujours un
 dans l'équipe, et pas pendant un combat) : il sort du cristal, ou quitte le
-magicien s'il le suivait, et s'enfuit vivre sa vie. Le recapturer ou le battre
-ne rapporte plus d'expérience. Un faisceau de lumière de la
+magicien s'il le suivait, et s'enfuit vivre sa vie (un Bloup retourne au
+lac). Le recapturer ou le battre ne rapporte plus d'expérience. Un faisceau de lumière de la
 couleur de l'élément du monstre relie le cristal au monstre, qui apparaît ou
 disparaît dans la lumière (0,4 s). Un monstre capturé est d'abord retenu par
 un cercle de runes (0,3 s), puis rejoint le cristal de la même façon

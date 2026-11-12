@@ -114,6 +114,7 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::CaveMouth: return MeshId::CaveMouth;
     case ObjectKind::Crystal: return MeshId::Crystal;
     case ObjectKind::Collider: return MeshId::Count;  // invisible
+    case ObjectKind::Teleporter: return MeshId::Teleporter;
     default:                return MeshId::Crate;
   }
 }
@@ -269,6 +270,7 @@ void add_object(DrawList& list, const World& w, const Object& o, bool near = tru
     case ObjectKind::CastleTower: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.2f, 3.2f, 0, 0.75f); break;
     case ObjectKind::CastleKeep: add_ground_shadow(list, w, o.pos.x, o.pos.z, 6.2f, 6.2f, yaw, 0.75f); break;
     case ObjectKind::Crystal: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.5f * s.x, 0.5f * s.x, 0, 0.5f); break;
+    case ObjectKind::Teleporter: add_ground_shadow(list, w, o.pos.x, o.pos.z, 2.3f, 2.3f, 0, 0.6f); break;
     default: break;
   }
   auto& shadows = list.batches[static_cast<size_t>(MeshId::Shadow)];
@@ -436,6 +438,53 @@ void add_mountains(const World& w, DrawList& list) {
     in.sz = width * (0.8f + 0.4f * rand01(w.seed, 10400 + u));
     in.sy = 30.0f + 36.0f * rand01(w.seed, 10500 + u);
     add(list, mesh_offset(MeshId::Mountain0, u % kMountainVariants), in);
+  }
+}
+
+// Teleporters: a circle of runes on the stones, bright and turning once the
+// teleporter is known, sparks rising from it; a column of light where the
+// player just left and arrived.
+void add_teleporter_effects(const World& w, float time, DrawList& list) {
+  for (const Object& o : w.objects) {
+    if (o.kind != ObjectKind::Teleporter) continue;
+    const float dx = o.pos.x - w.player.pos.x, dz = o.pos.z - w.player.pos.z;
+    if (dx * dx + dz * dz > 120.0f * 120.0f) continue;
+    const bool known = (w.teleporters >> o.variant) & 1u;
+    Instance seal;
+    seal.x = o.pos.x;
+    seal.y = o.pos.y + 0.2f;
+    seal.z = o.pos.z;
+    seal.rotation = quat_yaw(known ? time * 0.6f : 0.0f);
+    seal.sx = seal.sz = 1.3f;
+    seal.tint = known ? Color{0.7f, 1.6f, 2.0f, 0.85f} : Color{0.6f, 0.7f, 0.8f, 0.25f};
+    add(list, MeshId::RuneCircle, seal);
+    if (!known) continue;
+    for (int i = 0; i < 8; ++i) {
+      const float t = std::fmod(time * 0.5f + static_cast<float>(i) / 8, 1.0f);
+      const float a = kTau * static_cast<float>(i) / 8 + time * 0.8f;
+      Instance spark;
+      spark.x = o.pos.x + std::cos(a) * 1.1f;
+      spark.z = o.pos.z + std::sin(a) * 1.1f;
+      spark.y = o.pos.y + 0.2f + 2.2f * t;
+      spark.sx = spark.sy = spark.sz = 0.06f * (1 - 0.5f * t);
+      spark.rotation = quat_yaw(a);
+      spark.tint = {0.9f, 1.7f, 2.0f, std::min(1.0f, t * 5) * (1 - t)};
+      add(list, MeshId::Sparkle, spark);
+    }
+  }
+  if (w.teleport_tick > 0 && w.tick - w.teleport_tick < 40) {
+    const float t = static_cast<float>(w.tick - w.teleport_tick) / 40.0f;
+    for (const Vec3 at : {w.teleport_from, w.player.pos}) {
+      Instance column;
+      column.x = at.x;
+      column.y = at.y + 2.0f;
+      column.z = at.z;
+      column.sx = column.sz = 0.7f * (1 - t) + 0.1f;
+      column.sy = 2.4f;
+      column.rotation = quat_yaw(time * 3);
+      column.tint = {0.9f, 1.7f, 2.0f, 0.6f * (1 - t)};
+      add(list, MeshId::Sparkle, column);
+    }
   }
 }
 
@@ -740,6 +789,7 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected) {
 
   add_characters(w, time, list);
   add_village_effects(w, time, list);
+  add_teleporter_effects(w, time, list);
 
   // A golden ring, gently pulsing, at the feet of the selected creature.
   if (selected >= 0 && static_cast<size_t>(selected) < w.creatures.size()) {
@@ -903,15 +953,17 @@ int pick_creature(const World& w, const View& view, float ndc_x, float ndc_y) {
   return best;
 }
 
-int pick_sign(const World& w, const View& view, float ndc_x, float ndc_y) {
+int pick_object(const World& w, const View& view, float ndc_x, float ndc_y) {
   const Ray ray = screen_ray(view, ndc_x, ndc_y);
   int best = -1;
   float best_t = 2;
   for (size_t i = 0; i < w.objects.size(); ++i) {
     const Object& o = w.objects[i];
-    if (o.kind != ObjectKind::Sign) continue;
-    // The planks, wider than the post (easier to tap).
-    const Box b{{o.pos.x - 0.7f, o.pos.y, o.pos.z - 0.7f}, {o.pos.x + 0.7f, o.pos.y + 1.9f, o.pos.z + 0.7f}};
+    if (o.kind != ObjectKind::Sign && o.kind != ObjectKind::Teleporter) continue;
+    // A signpost's planks, wider than the post (easier to tap); a teleporter's circle and stones.
+    const float r = o.kind == ObjectKind::Sign ? 0.7f : 2.0f;
+    const float h = o.kind == ObjectKind::Sign ? 1.9f : 1.8f;
+    const Box b{{o.pos.x - r, o.pos.y, o.pos.z - r}, {o.pos.x + r, o.pos.y + h, o.pos.z + r}};
     const float t = ray_box(ray, b);
     if (t >= 0 && t < best_t) {
       best_t = t;

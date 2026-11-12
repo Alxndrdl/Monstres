@@ -1,6 +1,7 @@
 #include "monstres/core/world.hpp"
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
@@ -149,6 +150,10 @@ void generate_objects(World& w) {
   const float limit = rules::kWorldHalfSize - 3.0f;
   const float gap = rules::kObjectGap;
   PlacementGrid grid(w.objects);
+  std::vector<Vec2> teleporters;  // a clearing around each
+  for (const Object& o : w.objects) {
+    if (o.kind == ObjectKind::Teleporter) teleporters.push_back({o.pos.x, o.pos.z});
+  }
   // First everywhere, then more trees in the forest.
   const struct {
     uint32_t count;
@@ -189,8 +194,12 @@ void generate_objects(World& w) {
         if (center - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
       }
 
-      // Keep the village, the lake, the ruins, the castle and the cave clear.
+      // Keep the village, the lake, the ruins, the castle, the cave and the teleporters clear.
       if (in_a_place(w, o.pos.x, o.pos.z)) continue;
+      const bool by_teleporter = std::any_of(teleporters.begin(), teleporters.end(), [&](Vec2 t) {
+        return (t.x - o.pos.x) * (t.x - o.pos.x) + (t.z - o.pos.z) * (t.z - o.pos.z) < 4.5f * 4.5f;
+      });
+      if (by_teleporter) continue;
 
       // Keep the path clear.
       const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
@@ -534,7 +543,7 @@ void step_villager(World& w, const Surroundings& s, Creature& c) {
     } else {
       c.mind = Mind::Wander;
       c.timer = 10 * rules::kTicksPerSecond;
-      const float r = rules::kVillageRadius - 4.0f;
+      const float r = c.npc == npc::kGaspard ? 2.5f : rules::kVillageRadius - 4.0f;  // he stays by the teleporter
       c.target = {c.home.x + random_range(w.rng, -r, r), c.home.z + random_range(w.rng, -r, r)};
     }
   } else {
@@ -827,6 +836,33 @@ void populate_cell(World& w, int index) {
 
 }  // namespace
 
+namespace {
+
+// Mirabelle's lost Piou roams near the village until it is caught: it is
+// there whenever its square is lived in (a new one each time it was gone).
+void keep_lost_piou(World& w) {
+  if (w.village.lake.radius_x <= 0 || w.quests[static_cast<size_t>(QuestId::LostPiou)].stage == QuestStage::Done) return;
+  const Vec2 lost = lost_piou_home(w);
+  const auto k = static_cast<size_t>(cell_index(lost.x, lost.z));
+  if (!w.population.active[k] || lost_piou_exists(w)) return;
+  Creature c = make_lost_piou(w, w.population.visits[k]);
+  // On free ground near its spot.
+  for (int attempt = 0; attempt < 16; ++attempt) {
+    const SinCos sc = sincos16(static_cast<Angle16>(attempt * 4096));
+    const float r = 1.5f * static_cast<float>(attempt);
+    c.body.pos = {lost.x + sc.cos * r, 0, lost.z + sc.sin * r};
+    c.body.pos.y = w.ground.height(c.body.pos.x, c.body.pos.z);
+    if (!inside_any_object(w, c.body, species_info(c.species).shape) &&
+        !in_lake(w.village.lake, c.body.pos.x, c.body.pos.z, 1.0f)) {
+      break;
+    }
+  }
+  c.home = {c.body.pos.x, c.body.pos.z};
+  add_creature(w, c);
+}
+
+}  // namespace
+
 size_t add_creature(World& w, Creature c) {
   c.id = w.next_id++;
   w.creatures.push_back(c);
@@ -863,12 +899,14 @@ void update_population(World& w) {
       for (size_t i = w.creatures.size(); i-- > 1;) {
         const Creature& c = w.creatures[i];
         const bool fighting = w.battle.phase != BattlePhase::None && w.battle.enemy == i;
-        if (monster_stats(c.species).is_monster && !fighting && cell_index(c.home.x, c.home.z) == index) {
+        const bool owned = c.tag == Tag::LostPiou && w.quests[static_cast<size_t>(QuestId::LostPiou)].stage == QuestStage::Done;
+        if (monster_stats(c.species).is_monster && !fighting && !owned && cell_index(c.home.x, c.home.z) == index) {
           remove_creature(w, i);
         }
       }
     }
   }
+  keep_lost_piou(w);
 }
 
 void spawn_creatures(World& w) {
@@ -895,6 +933,15 @@ void spawn_creatures(World& w) {
       c.variant = static_cast<uint8_t>(rng.below(256));
       c.home = center;
       c.timer = static_cast<uint16_t>(rng.below(4 * rules::kTicksPerSecond));
+      c.npc = static_cast<uint8_t>(n + 1);
+      Vec3 teleporter;
+      if (c.npc == npc::kGaspard && teleporter_position(w, TeleporterId::Village, teleporter)) {
+        // Gaspard stands by the teleporter, wondering what it is.
+        const SinCos sc = sincos16(static_cast<Angle16>(attempt * 9000));
+        const float x = teleporter.x + sc.cos * 2.4f, z = teleporter.z + sc.sin * 2.4f;
+        c.home = {teleporter.x, teleporter.z};
+        c.body.pos = {x, w.ground.height(x, z), z};
+      }
       if (inside_any_object(w, c.body, species_info(c.species).shape)) continue;
       if (in_lake(w.village.lake, c.body.pos.x, c.body.pos.z, 1.0f)) continue;
       add_creature(w, c);
@@ -1278,6 +1325,68 @@ void build_cave(World& w) {
   }
 }
 
+void build_teleporters(World& w) {
+  struct Place {
+    TeleporterId id;
+    Vec2 spot;   // where it should be
+    Vec2 away;   // where to look further if that is taken
+    bool exists;
+  };
+  const Vec2 vc = w.village.center;
+  const float lake_side = w.village.lake.center.x > vc.x ? 1.0f : -1.0f;
+  const float ruins_side = w.ruins.center.x > vc.x ? 1.0f : -1.0f;
+  const Place places[] = {
+      // On the village square, on the side away from the lake.
+      {TeleporterId::Village, {vc.x - lake_side * 7.0f, vc.z + 6.0f}, {-lake_side, 0}, w.village.lake.radius_x > 0},
+      // Before the ruins' entrance, towards the path.
+      {TeleporterId::Ruins, {w.ruins.center.x - ruins_side * 20.0f, w.ruins.center.z - 5.0f}, {0, -1}, w.ruins.radius > 0},
+      {TeleporterId::Forest, w.forest.center, {0, 1}, w.forest.radius_x > 0},
+      // Out of the ravine of the cave.
+      {TeleporterId::Cave, {w.cave.mouth.x + w.cave.facing.x * 12.0f, w.cave.mouth.z + 4.0f}, w.cave.facing,
+       w.cave.radius > 0},
+      // Before the castle's gate, beside the way in.
+      {TeleporterId::Castle, {w.castle.center.x + w.castle.facing.x * (rules::kCastleHalf + 8.0f), w.castle.center.z + 5.0f},
+       w.castle.facing, w.castle.radius > 0},
+  };
+  for (const Place& p : places) {
+    if (!p.exists) continue;
+    // The first free spot along `away` (its stones need about 2 m around);
+    // in the village, around the square, between the well and the houses.
+    Vec2 at = p.spot;
+    for (int step = 0; step < 24; ++step) {
+      Vec2 candidate{p.spot.x + p.away.x * 2.0f * static_cast<float>(step % 12),
+                     p.spot.z + p.away.z * 2.0f * static_cast<float>(step % 12)};
+      if (p.id == TeleporterId::Village) {  // two rings around the square, every 30°
+        const SinCos sc = sincos16(static_cast<Angle16>((step % 12) * 5461));
+        const float r = step < 12 ? 6.0f : 7.5f;
+        candidate = {vc.x - lake_side * sc.cos * r, vc.z + sc.sin * r};
+      }
+      Object probe = village_object(ObjectKind::Collider, candidate, 0);
+      probe.size = {1.5f, 0.5f, 1.5f};
+      if (can_place(w, probe, 0.2f, true)) {
+        at = candidate;
+        break;
+      }
+    }
+    // Trees and rocks around it give way.
+    std::erase_if(w.objects, [&](const Object& o) {
+      const float dx = o.pos.x - at.x, dz = o.pos.z - at.z;
+      return o.kind <= ObjectKind::Crate && dx * dx + dz * dz < 4.5f * 4.5f;
+    });
+    w.objects.push_back(village_object(ObjectKind::Teleporter, at, 0, static_cast<uint8_t>(p.id)));
+  }
+}
+
+bool teleporter_position(const World& w, TeleporterId id, Vec3& at) {
+  for (const Object& o : w.objects) {
+    if (o.kind == ObjectKind::Teleporter && o.variant == static_cast<uint8_t>(id)) {
+      at = {o.pos.x, w.ground.height(o.pos.x, o.pos.z), o.pos.z};
+      return true;
+    }
+  }
+  return false;
+}
+
 Zone zone_at(const World& w, float x, float z) {
   if (in_lake(w.village.lake, x, z, 1.5f)) return Zone::Lake;
   if (w.village.lake.radius_x > 0 && in_village(w.village, x, z, 2.0f)) return Zone::Village;
@@ -1341,7 +1450,7 @@ bool is_round(ObjectKind kind) {
          kind == ObjectKind::Bush || kind == ObjectKind::HouseHut || kind == ObjectKind::Well ||
          kind == ObjectKind::Barrel || kind == ObjectKind::Lamp || kind == ObjectKind::Tower ||
          kind == ObjectKind::Pillar || kind == ObjectKind::Rubble || kind == ObjectKind::CastleTower ||
-         kind == ObjectKind::Crystal;
+         kind == ObjectKind::Crystal || kind == ObjectKind::Teleporter;
 }
 
 Box object_box(const Object& o) {
@@ -1375,7 +1484,8 @@ Box object_box(const Object& o) {
     case ObjectKind::CastleTower:  half = {2.2f, 4.5f, 2.2f}; break;
     case ObjectKind::CastleKeep:   half = {4.5f, 6.0f, 4.5f}; break;
     case ObjectKind::CastleGate:   // solid through its Colliders
-    case ObjectKind::CaveMouth:    half = {0, 0, 0}; break;
+    case ObjectKind::CaveMouth:
+    case ObjectKind::Teleporter:   half = {0, 0, 0}; break;  // walked onto
     case ObjectKind::Crystal:      half = {0.35f * s.x, 0.5f * s.x, 0.35f * s.x}; break;
     default:                half = s; break;  // Crate, Collider
   }
@@ -1409,6 +1519,7 @@ World new_game(uint64_t seed) {
   build_ruins(w);
   build_castle(w);
   build_cave(w);
+  build_teleporters(w);
   generate_objects(w);
   settle_objects(w);
   w.player.pos.y = w.ground.height(0, 0);
@@ -1446,9 +1557,42 @@ void step_knocked_out(World& w, const Surroundings& s, Creature& c) {
 
 }  // namespace
 
+namespace {
+
+// Mirabelle's Piou, back with her: it stays at her side.
+void step_pet(World& w, const Surroundings& s, Creature& c) {
+  const int owner = npc_index(w, npc::kMirabelle);
+  if (owner < 0) return;
+  const Body& o = w.creatures[static_cast<size_t>(owner)].body;
+  const Vec2 spot{o.pos.x - o.facing_z * 0.9f, o.pos.z + o.facing_x * 0.9f};  // on her left
+  float dx, dz;
+  const float d = direction_to(c.body.pos.x, c.body.pos.z, spot, dx, dz);
+  const SpeciesInfo& info = species_info(c.species);
+  c.home = {o.pos.x, o.pos.z};
+  if (d > 0.5f) {
+    c.mind = Mind::Follow;
+    move_body(s, c.body, info.shape, dx, dz, d > 4 ? info.run_speed : info.walk_speed, false, info.jump_speed);
+  } else {
+    c.mind = Mind::Idle;
+    move_body(s, c.body, info.shape, 0, 0, 0, false, info.jump_speed);
+    float tx, tz;
+    if (direction_to(c.body.pos.x, c.body.pos.z, {o.pos.x, o.pos.z}, tx, tz) > 0.1f) {
+      c.body.facing_x = tx;
+      c.body.facing_z = tz;
+    }
+  }
+  if (d > rules::kCompanionTeleportDistance) {  // left behind: back at once
+    c.body.pos = {spot.x, w.ground.height(spot.x, spot.z), spot.z};
+    if (inside_any_object(w, c.body, info.shape)) c.body.pos = o.pos;
+  }
+}
+
+}  // namespace
+
 void step(World& w, const Input& in) {
   ++w.tick;
   w.clock = (w.clock + 1) % rules::kTicksPerDay;
+  quest_command(w, in);   // teleports, quests accepted or done
   battle_command(w, in);  // may start or end a battle, or remove a captured monster
   const BattlePhase phase = w.battle.phase;
   // The companion is steered by the joystick (fighting or training).
@@ -1511,6 +1655,10 @@ void step(World& w, const Input& in) {
       step_knocked_out(w, s, c);
       continue;
     }
+    if (c.tag == Tag::LostPiou && w.quests[static_cast<size_t>(QuestId::LostPiou)].stage == QuestStage::Done) {
+      step_pet(w, s, c);
+      continue;
+    }
     switch (c.species) {
       case Species::Companion: step_companion(w, s, c); break;
       case Species::Villager:
@@ -1530,6 +1678,7 @@ void step(World& w, const Input& in) {
   battle_resolve(w);
   team_regen(w);
   discover(w);
+  quests_step(w);
   if (w.tick % rules::kPopulationEveryTicks == 0) update_population(w);
 }
 

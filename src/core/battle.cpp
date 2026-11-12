@@ -118,7 +118,9 @@ Element move_element(const Move& m, Species species, const Genes& genes) {
   return m.elemental ? creature_elements(species, genes).first : Element::Normal;
 }
 
-void grant_xp(Monster& m, uint32_t xp) {
+}  // namespace
+
+void grant_monster_xp(Monster& m, uint32_t xp) {
   m.xp += xp;
   while (m.level < 100 && m.xp >= monster_xp_to_next(m.level)) {
     m.xp -= monster_xp_to_next(m.level);
@@ -136,6 +138,8 @@ void grant_wizard_xp(Wizard& wiz, uint32_t xp) {
   }
 }
 
+namespace {
+
 // Ends the battle. `xp`: the experience of a victory, shared by the team
 // members by the hit points each dealt (xp * dealt / (1 + all dealt)).
 void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
@@ -152,7 +156,7 @@ void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
       const uint64_t share = (2u * uint64_t{xp} * b.dealt[slot] + (1 + total)) / (2 * (1 + total));
       Monster& m = w.team[slot];
       b.outcome_gains.push_back({static_cast<uint8_t>(slot), static_cast<uint32_t>(share), m.level, m.xp});
-      grant_xp(m, static_cast<uint32_t>(share));
+      grant_monster_xp(m, static_cast<uint32_t>(share));
     }
     b.outcome_wizard_xp = xp / 2;
     grant_wizard_xp(w.wizard, xp / 2);
@@ -168,8 +172,8 @@ void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
   b.outcome_xp = xp;
 }
 
-// A monster let go by the player gives nothing when beaten or caught again.
-uint32_t reward(World& w) { return enemy(w).released ? 0u : 8u * enemy(w).level; }
+// A monster beaten once, or let go by the player, gives nothing when beaten or caught again.
+uint32_t reward(World& w) { return enemy(w).released || enemy(w).beaten ? 0u : 8u * enemy(w).level; }
 
 void end_training(World& w) {
   Battle& b = w.battle;
@@ -298,6 +302,8 @@ void release(World& w, size_t slot) {
   c.genes = m.genes;
   c.level = static_cast<uint8_t>(std::min<uint16_t>(m.level, 255));
   c.released = true;
+  c.beaten = m.beaten;
+  c.tag = m.tag;
   const bool out = static_cast<int>(slot) == w.active;
   c.body = out ? w.creatures[0].body : beside_player(w, m.species);
   // Away from the player, towards its new home.
@@ -406,13 +412,16 @@ EngageCheck can_engage(const World& w, size_t index) {
   if (w.battle.phase != BattlePhase::None) return EngageCheck::InBattle;
   if (!active_monster(w)) return EngageCheck::NoCompanion;
   if (c.mind == Mind::KnockedOut) return EngageCheck::KnockedOut;
+  if (c.tag == Tag::LostPiou && w.quests[static_cast<size_t>(QuestId::LostPiou)].stage == QuestStage::Done) {
+    return EngageCheck::Owned;
+  }
   const float dx = c.body.pos.x - w.player.pos.x, dz = c.body.pos.z - w.player.pos.z;
   if (dx * dx + dz * dz > rules::kEngageDistance * rules::kEngageDistance) return EngageCheck::TooFar;
   return EngageCheck::Ok;
 }
 
 const char* engage_check_name(EngageCheck check) {
-  static const char* kNames[] = {"ok", "notMonster", "tooFar", "inBattle", "noCompanion", "knockedOut"};
+  static const char* kNames[] = {"ok", "notMonster", "tooFar", "inBattle", "noCompanion", "knockedOut", "owned"};
   const auto i = static_cast<size_t>(check);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
@@ -465,6 +474,11 @@ void battle_command(World& w, const Input& in) {
     case Command::Release:
       release(w, in.target);
       break;
+    case Command::Teleport:
+    case Command::QuestAccept:
+    case Command::QuestGive:
+    case Command::QuestComplete:
+      break;  // quests.cpp
     case Command::Flee:
       if (b.phase == BattlePhase::Training) {
         end_training(w);
@@ -491,6 +505,8 @@ void battle_command(World& w, const Input& in) {
       m.genes = e.genes;
       m.level = e.level;
       m.hp = b.enemy_hp;
+      m.tag = e.tag;
+      m.beaten = e.beaten || e.released;
       capture(w, index);
       w.went_in = {w.tick, true, e.species, e.genes, e.body};  // runes, then into the crystal
       end_battle(w, BattleOutcome::Captured, reward(w));
@@ -670,6 +686,7 @@ void battle_resolve(World& w) {
     foe.timer = rules::kKnockedOutTicks;
     foe.body.speed = 0;
     end_battle(w, BattleOutcome::Victory, reward(w));
+    foe.beaten = true;  // after its reward: the next time, none
   } else if (monstres::ally(w).hp == 0) {
     foe.mind = Mind::Idle;
     foe.timer = 2 * rules::kTicksPerSecond;

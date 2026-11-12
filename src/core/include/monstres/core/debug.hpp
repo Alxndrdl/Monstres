@@ -56,4 +56,17 @@ std::string battle_json(const World& world);
 // nearest first. "null" if it is not a signpost.
 std::string sign_json(const World& world, int index);
 
+// What objects[index] is, for the context menu: a signpost (sign_json) or a
+// teleporter (its place, whether it is known, whether the player stands at
+// it); "null" for anything else.
+std::string object_json(const World& world, int index);
+
+// Every teleporter: place, position, known, reachable from here; and the
+// one the player stands at ("here", -1: none).
+std::string teleporters_json(const World& world);
+
+// The quests: stage (unknown, active, done), whether all steps are done
+// ("ready"), and each step; "near": the player can talk to its villager.
+std::string quests_json(const World& world);
+
 }  // namespace monstres

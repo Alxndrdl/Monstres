@@ -377,10 +377,12 @@ EMSCRIPTEN_KEEPALIVE void monstres_parry() { g_app->parry_buffer = kJumpBufferTi
 
 // Context menu: 1 engage creatures[target], 2 flee (or stop training),
 // 3 capture, 6 train; team bar: 4 summon (or recall) team[target]; team
-// sheet: 5 release team[target] (Command).
+// sheet: 5 release team[target]; map: 7 teleport to teleporter target;
+// dialogues: 8 accept quest target, 9 give team[target], 10 report quest
+// target (Command).
 // Applied with the next tick (right away when frozen, for tests).
 EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
-  if (command < 1 || command > 6 || target < 0 || target > 65535) return;
+  if (command < 1 || command > 10 || target < 0 || target > 65535) return;
   g_app->command = static_cast<Command>(command);
   g_app->command_target = static_cast<uint16_t>(target);
   if (g_app->frozen) {
@@ -458,13 +460,23 @@ EMSCRIPTEN_KEEPALIVE int monstres_pick(float ndc_x, float ndc_y) {
   return g_app->selected;
 }
 
-// The signpost under a point of the canvas (objects index), or -1.
-EMSCRIPTEN_KEEPALIVE int monstres_pick_sign(float ndc_x, float ndc_y) {
-  return pick_sign(g_app->world, current_view(*g_app, 0), ndc_x, ndc_y);
+// The signpost or teleporter under a point of the canvas (objects index), or -1.
+EMSCRIPTEN_KEEPALIVE int monstres_pick_object(float ndc_x, float ndc_y) {
+  return pick_object(g_app->world, current_view(*g_app, 0), ndc_x, ndc_y);
 }
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_sign_json(int index) {
-  g_app->json = sign_json(g_app->world, index);
+EMSCRIPTEN_KEEPALIVE const char* monstres_object_json(int index) {
+  g_app->json = object_json(g_app->world, index);
+  return g_app->json.c_str();
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_teleporters_json() {
+  g_app->json = teleporters_json(g_app->world);
+  return g_app->json.c_str();
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_quests_json() {
+  g_app->json = quests_json(g_app->world);
   return g_app->json.c_str();
 }
 

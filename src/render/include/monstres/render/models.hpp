@@ -45,7 +45,7 @@ enum class MeshId : size_t {
   // Ruins of the tower.
   Tower, RuinWallLow, RuinWallHigh, Pillar, FallenPillar, Rubble, RuneStone,
   // The castle and the cave.
-  CastleWall, CastleTower, CastleGate, CastleKeep, CaveMouth, Crystal,
+  CastleWall, CastleTower, CastleGate, CastleKeep, CaveMouth, Crystal, Teleporter,
   // Seen from afar (simplified).
   TreeFar, PineFar,
   Ground,  // built at runtime

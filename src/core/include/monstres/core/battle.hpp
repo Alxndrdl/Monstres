@@ -66,6 +66,10 @@ uint32_t monster_xp_to_next(uint16_t level);
 // Hit points dealt by `move` of an attacker with these characteristics.
 uint16_t move_damage(const Move& move, const FightStats& attacker, const FightStats& defender);
 
+// Experience for a team member (levels up, hit points grow) or the magician.
+void grant_monster_xp(Monster& monster, uint32_t xp);
+void grant_wizard_xp(Wizard& wizard, uint32_t xp);
+
 // The companion as a new team member (new game, old saves).
 Monster starting_companion(const Genes& genes);
 
@@ -77,6 +81,7 @@ enum class EngageCheck : uint8_t {
   InBattle,
   NoCompanion,  // no monster out of the crystal
   KnockedOut,   // already beaten, it lies there
+  Owned,        // someone's (Mirabelle's Piou, back with her)
 };
 EngageCheck can_engage(const World& world, size_t index);
 const char* engage_check_name(EngageCheck check);

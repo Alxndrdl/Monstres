@@ -1,6 +1,7 @@
 #include "monstres/core/debug.hpp"
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
@@ -74,7 +75,13 @@ std::string creature_json(const World& w, int index) {
     s += ",\"level\":" + std::to_string(index == 0 && active_monster(w) ? active_monster(w)->level : c.level);
     s += std::string(",\"engage\":\"") + engage_check_name(can_engage(w, static_cast<size_t>(index))) + "\"";
     s += std::string(",\"released\":") + (c.released ? "true" : "false");
+    s += std::string(",\"beaten\":") + (c.beaten ? "true" : "false");
+    if (c.tag == Tag::LostPiou) s += ",\"tag\":\"lostPiou\"";
     if (index == 0) s += std::string(",\"train\":") + (can_train(w) ? "true" : "false");
+  }
+  if (c.npc) {
+    s += ",\"npc\":" + std::to_string(c.npc);
+    s += std::string(",\"talk\":") + (near_npc(w, c.npc) ? "true" : "false");
   }
   s += ",\"x\":" + num(p.x) + ",\"y\":" + num(p.y) + ",\"z\":" + num(p.z);
   s += ",\"distance\":" + num(std::sqrt(dx * dx + dz * dz));
@@ -138,7 +145,7 @@ const char* object_kind_name(ObjectKind kind) {
                                  "crate",  "cottage", "chimney", "hut",       "fence",        "sign",
                                  "well",   "barrel", "lamp",     "tower",     "ruinWall",     "pillar",
                                  "fallenPillar", "rubble", "runeStone", "castleWall", "castleTower", "castleGate",
-                                 "castleKeep", "caveMouth", "crystal", "collider"};
+                                 "castleKeep", "caveMouth", "crystal", "collider", "teleporter"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -225,6 +232,78 @@ std::string bestiary_json(const World& w) {
   return s + "]";
 }
 
+namespace {
+
+const char* teleporter_name(TeleporterId id) {
+  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle"};
+  static_assert(std::size(kNames) == kTeleporterCount);
+  return kNames[static_cast<size_t>(id)];
+}
+
+const char* quest_name(QuestId id) {
+  static const char* kNames[] = {"lostPiou", "teleporters"};
+  static_assert(std::size(kNames) == kQuestCount);
+  return kNames[static_cast<size_t>(id)];
+}
+
+}  // namespace
+
+std::string teleporters_json(const World& w) {
+  std::string s = "{\"here\":" + std::to_string(teleporter_here(w)) + ",\"list\":[";
+  bool first = true;
+  for (size_t k = 0; k < kTeleporterCount; ++k) {
+    const auto id = static_cast<TeleporterId>(k);
+    Vec3 at;
+    if (!teleporter_position(w, id, at)) continue;
+    if (!first) s += ',';
+    first = false;
+    s += "{\"id\":" + std::to_string(k) + ",\"place\":\"" + teleporter_name(id) + "\",\"x\":" + num(at.x) +
+         ",\"z\":" + num(at.z) + ",\"known\":" + (teleporter_known(w, id) ? "true" : "false") +
+         ",\"reachable\":" + (can_teleport(w, id) ? "true" : "false") + "}";
+  }
+  return s + "]}";
+}
+
+std::string quests_json(const World& w) {
+  static const char* kStages[] = {"unknown", "active", "done"};
+  std::string s = "[";
+  for (size_t k = 0; k < kQuestCount; ++k) {
+    const auto id = static_cast<QuestId>(k);
+    const QuestState& q = w.quests[k];
+    if (k) s += ',';
+    s += std::string("{\"id\":\"") + quest_name(id) + "\",\"stage\":\"" + kStages[static_cast<size_t>(q.stage)] + "\"";
+    const bool done = q.stage == QuestStage::Done;
+    const bool ready = quest_ready(w, id);
+    s += std::string(",\"ready\":") + (ready ? "true" : "false") + ",\"steps\":{";
+    if (id == QuestId::LostPiou) {
+      s += std::string("\"find\":") + (done || ready ? "true" : "false");
+      s += std::string(",\"bring\":") + (done ? "true" : "false");
+      s += std::string(",\"near\":") + (near_npc(w, npc::kMirabelle) ? "true" : "false");
+    } else {
+      s += std::string("\"discover\":") + (teleporter_known(w, TeleporterId::Castle) ? "true" : "false");
+      s += std::string(",\"go\":") + ((q.progress & kWentToCastle) || done ? "true" : "false");
+      s += std::string(",\"back\":") + ((q.progress & kCameBack) || done ? "true" : "false");
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
+      s += std::string(",\"near\":") + (near_npc(w, npc::kGaspard) ? "true" : "false");
+    }
+    s += "}}";
+  }
+  return s + "]";
+}
+
+std::string object_json(const World& w, int index) {
+  if (index < 0 || static_cast<size_t>(index) >= w.objects.size()) return "null";
+  const Object& o = w.objects[static_cast<size_t>(index)];
+  if (o.kind == ObjectKind::Sign) return sign_json(w, index);
+  if (o.kind != ObjectKind::Teleporter || o.variant >= kTeleporterCount) return "null";
+  const auto id = static_cast<TeleporterId>(o.variant);
+  const float dx = o.pos.x - w.player.pos.x, dz = o.pos.z - w.player.pos.z;
+  return "{\"kind\":\"teleporter\",\"index\":" + std::to_string(index) + ",\"id\":" + std::to_string(o.variant) +
+         ",\"place\":\"" + teleporter_name(id) + "\",\"known\":" + (teleporter_known(w, id) ? "true" : "false") +
+         ",\"here\":" + (teleporter_here(w) == static_cast<int>(o.variant) ? "true" : "false") +
+         ",\"distance\":" + num(std::sqrt(dx * dx + dz * dz)) + "}";
+}
+
 std::string sign_json(const World& w, int index) {
   if (index < 0 || static_cast<size_t>(index) >= w.objects.size()) return "null";
   const Object& o = w.objects[static_cast<size_t>(index)];
@@ -247,7 +326,7 @@ std::string sign_json(const World& w, int index) {
     return std::sqrt(dx * dx + dz * dz);
   };
   std::sort(places.begin(), places.end(), [&](const Place& a, const Place& b) { return distance(a) < distance(b); });
-  std::string s = "{\"index\":" + std::to_string(index) + ",\"x\":" + num(o.pos.x) + ",\"z\":" + num(o.pos.z);
+  std::string s = "{\"kind\":\"sign\",\"index\":" + std::to_string(index) + ",\"x\":" + num(o.pos.x) + ",\"z\":" + num(o.pos.z);
   s += std::string(",\"zone\":\"") + zone_name(zone_at(w, o.pos.x, o.pos.z)) + "\",\"places\":[";
   for (size_t i = 0; i < places.size(); ++i) {
     const Place& p = places[i];
@@ -392,6 +471,7 @@ std::string team_json(const World& w) {
     s += ",\"look\":" + std::to_string(genes_code(m.genes));
     s += ",\"variants\":" + carried_variants_json(m.species, m.genes);
     s += std::string(",\"female\":") + (m.genes.allele[0] == 1 ? "true" : "false");
+    if (m.tag == Tag::LostPiou) s += ",\"tag\":\"lostPiou\"";
     s += ",\"moves\":" + moves_json(m.species, m.genes, st) + "}";
   }
   return s + "]";
