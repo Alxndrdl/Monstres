@@ -165,6 +165,8 @@ std::vector<uint8_t> serialize(const World& w) {
     for (uint8_t a : c.genes.allele) out.u8(a);
     out.u8(static_cast<uint8_t>((c.genes.chromatic ? 1 : 0) | (c.genes.elemental ? 2 : 0)));
     out.u8(c.level);
+    out.u32(c.id);
+    out.u8(c.released ? 1 : 0);
   }
   const size_t name_bytes = std::min(w.wizard.name.size(), kMaxNameBytes);
   out.u8(static_cast<uint8_t>(name_bytes));
@@ -187,6 +189,12 @@ std::vector<uint8_t> serialize(const World& w) {
   }
   out.u32(w.clock);
   out.u8(w.active < 0 ? 0xff : static_cast<uint8_t>(w.active));
+  out.u32(w.next_id);
+  out.u8(static_cast<uint8_t>(rules::kPopulationCells));
+  for (size_t k = 0; k < kPopulationCellCount; ++k) {
+    out.u8(w.population.active[k]);
+    out.u16(w.population.visits[k]);
+  }
   return out.take();
 }
 
@@ -209,6 +217,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   const bool with_team = version >= 11;    // levels of the monsters, and the team
   const bool with_clock = version >= 12;   // time of day
   const bool with_active = version >= 13;  // which team member is out of the crystal
+  const bool grown = version >= 14;        // the bigger world: creatures have ids, squares are lived in
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -222,10 +231,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     return fail(error, LoadError::Corrupt);
   }
   w.rng = Rng::from_raw(rng_state, rng_inc);
-  w.path = make_path(w.seed);
-  w.village = make_village_layout(w.seed, w.path);
-  w.ruins = make_ruins_layout(w.seed, w.path);
-  w.ground = make_heightmap(w.seed, w.path, w.village, w.ruins);
+  build_layouts(w);
 
   w.objects.resize(count);
   const auto valid_size = [](float v) { return v >= 0 && v <= kMaxObjectSize; };
@@ -249,7 +255,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       const bool ok = in.u8(species) && read_body(in, c.body, true) && in.u8(mind) && in.u16(c.timer) &&
                       in.f32(c.target.x) && in.f32(c.target.z) && (before_village || in.f32(c.target_y)) &&
                       in.f32(c.home.x) && in.f32(c.home.z) && in.u8(c.variant);
-      if (!ok || species >= static_cast<uint8_t>(Species::Count) || mind > static_cast<uint8_t>(Mind::Battle)) {
+      if (!ok || species >= static_cast<uint8_t>(Species::Count) || mind > static_cast<uint8_t>(Mind::KnockedOut)) {
         return fail(error, LoadError::Corrupt);
       }
       c.species = static_cast<Species>(species);
@@ -265,6 +271,11 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
         if (!valid_genes(c.species, c.genes)) return fail(error, LoadError::Corrupt);
       }
       if (with_team && (!in.u8(c.level) || c.level == 0)) return fail(error, LoadError::Corrupt);
+      if (grown) {
+        uint8_t released = 0;
+        if (!in.u32(c.id) || !in.u8(released) || released > 1) return fail(error, LoadError::Corrupt);
+        c.released = released == 1;
+      }
     }
   }
 
@@ -311,7 +322,9 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
         return fail(error, LoadError::Corrupt);
       }
     }
-    if (w.team[0].species != Species::Companion || w.creatures.empty()) return fail(error, LoadError::Corrupt);
+    if ((!grown && w.team[0].species != Species::Companion) || w.creatures.empty()) {
+      return fail(error, LoadError::Corrupt);
+    }
   }
   if (with_clock && (!in.u32(w.clock) || w.clock >= rules::kTicksPerDay)) return fail(error, LoadError::Corrupt);
   if (with_active) {
@@ -322,43 +335,49 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       return fail(error, LoadError::Corrupt);
     }
   }
+  if (grown) {
+    uint8_t cells = 0;
+    if (!in.u32(w.next_id) || !in.u8(cells) || cells != rules::kPopulationCells) return fail(error, LoadError::Corrupt);
+    for (size_t k = 0; k < kPopulationCellCount; ++k) {
+      if (!in.u8(w.population.active[k]) || !in.u16(w.population.visits[k]) || w.population.active[k] > 1) {
+        return fail(error, LoadError::Corrupt);
+      }
+    }
+    for (const Creature& c : w.creatures) {
+      if (c.id == 0 || c.id >= w.next_id) return fail(error, LoadError::Corrupt);
+    }
+  }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
 
-  if (version < 8) {
-    // Saves from the smaller world: the world is built anew from the seed
-    // (it grew, the path and everything along it moved). The player keeps
-    // its place if it is free, the time goes on.
-    World grown = new_game(w.seed);
-    grown.tick = w.tick;
-    grown.rng = w.rng;
-    Body p = w.player;
-    p.pos.y = std::max(p.pos.y, grown.ground.height(p.pos.x, p.pos.z));
-    p.on_ground = false;  // falls onto the ground if it is now lower
-    const Box pb = player_box(p);
-    const bool stuck = in_lake(grown.village.lake, p.pos.x, p.pos.z, 0.5f) ||
-                       std::any_of(grown.objects.begin(), grown.objects.end(),
-                                   [&](const Object& o) { return overlaps(pb, object_box(o)); });
-    if (!stuck) grown.player = p;
-    w = std::move(grown);
-  } else if (without_sex) {
-    // Every monster of a version 9 save gets a sex, from the seed.
-    for (size_t i = 1; i < w.creatures.size(); ++i) {
-      Creature& c = w.creatures[i];
-      if (genetics(c.species).gene_count == 0) continue;
-      Rng rng(w.seed ^ 0x534558ULL, i);  // "SEX"
-      c.genes.allele[0] = static_cast<uint8_t>(rng.below(2));
+  if (!grown) {
+    // Saves from the smaller worlds: the world is built anew from the seed
+    // (it grew: the path, the places and everything along them moved). The
+    // player starts again at the crossroads, with all it gained: its
+    // magician, its team, its bestiary, the time of day.
+    World bigger = new_game(w.seed);
+    bigger.tick = w.tick;
+    bigger.rng = w.rng;
+    bigger.clock = w.clock;
+    if (version >= 8) bigger.wizard = w.wizard;
+    if (with_genes) {
+      bigger.dex = w.dex;
+      if (without_sex) capture(bigger, 0);  // the companion's sex was not listed yet
     }
-    capture(w, 0);
-  } else if (!with_genes) {
-    // Saves from before variants: the monsters get theirs, nothing is discovered yet.
-    assign_genes(w);
-    capture(w, 0);
-  }
-  if (!with_team && version >= 8) {
-    // Saves from before battles: the monsters get a level, the companion
-    // starts the team.
-    assign_levels(w);
-    w.team = {starting_companion(w.creatures.empty() ? Genes{} : w.creatures[0].genes)};
+    if (with_team) {
+      bigger.team = w.team;
+      bigger.active = w.active;
+      if (w.active >= 0) {
+        Creature& c = bigger.creatures[0];
+        const Monster& m = w.team[static_cast<size_t>(w.active)];
+        c.species = m.species;
+        c.genes = m.genes;
+        c.level = static_cast<uint8_t>(std::min<uint16_t>(m.level, 255));
+      }
+    } else if (!w.creatures.empty()) {
+      bigger.team = {starting_companion(w.creatures[0].genes)};
+      bigger.creatures[0].genes = w.creatures[0].genes;
+    }
+    w = std::move(bigger);
   }
   return w;
 }

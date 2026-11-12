@@ -78,6 +78,8 @@ static_assert(sizeof(Instance) == 16 * sizeof(float), "uploaded as-is to the GPU
 inline constexpr float kLit = 0;      // shaded by the sun, the sky and the lights around
 inline constexpr float kWater = 1;    // waves and reflections
 inline constexpr float kGlowing = 2;  // gives its own light: as bright by night as by day
+inline constexpr float kFadeNear = 3; // lit, shrinks away between View::fade_near_* (grass, flowers)
+inline constexpr float kFadeFar = 4;  // lit, shrinks away between View::fade_far_* (small things)
 
 // Vertex colors with this alpha (opaque meshes: windows, lanterns) light up
 // at night (View::night).
@@ -135,6 +137,10 @@ struct View {
   PointLight lights[kMaxPointLights];
   size_t light_count = 0;
   float fog_start = 45, fog_end = 320;
+  // Where kFadeNear and kFadeFar instances shrink away: from (fade_x, fade_z), between start and end meters.
+  float fade_x = 0, fade_z = 0;
+  float fade_near_start = 1e6f, fade_near_end = 2e6f;
+  float fade_far_start = 1e6f, fade_far_end = 2e6f;
   float time = 0;  // seconds, drives the wind
   bool sky = true;  // false: no sky, the background stays transparent (portraits)
 };
@@ -142,6 +148,18 @@ struct View {
 struct Frame {
   int pixel_width = 0;
   int pixel_height = 0;
+};
+
+// What the last frame cost the renderer (see Renderer::set_profiling).
+// Triangles are counted by group of meshes (models.hpp, mesh_group).
+inline constexpr size_t kMeshGroups = 6;
+struct RenderStats {
+  uint32_t draw_calls = 0;
+  uint64_t instances = 0;
+  uint64_t triangles = 0;
+  uint64_t triangles_by_group[kMeshGroups] = {};
+  uint64_t uploaded_bytes = 0;  // instance data sent to the GPU
+  double gpu_ms = -1;           // GPU time of a recent frame, -1: unknown (no timer on this device)
 };
 
 class Renderer {
@@ -153,6 +171,12 @@ public:
   // Draws the sky, then every list (all opaque batches, then all transparent ones).
   virtual void draw(const View& view, std::span<const DrawList* const> lists) = 0;
   virtual void end_frame() = 0;
+  // Counting and timing (a little slower): stats() describes the last frame.
+  virtual void set_profiling(bool on) { (void)on; }
+  virtual const RenderStats& stats() const {
+    static const RenderStats none;
+    return none;
+  }
   // Draws the lists into an image of width x height pixels instead of the
   // screen (portraits for the menus), antialiased. Returns RGBA bytes, rows
   // from the top; transparent where nothing was drawn when view.sky is false.

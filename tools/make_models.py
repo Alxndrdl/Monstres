@@ -1035,6 +1035,261 @@ def rune_stone():
     return m
 
 
+CASTLE_STONE = (0.70, 0.67, 0.62, 1)
+CASTLE_DARK = (0.30, 0.28, 0.30, 1)
+BANNER_RED = (0.72, 0.16, 0.20, 1)
+CAVE_ROCK = (0.50, 0.48, 0.47, 1)
+CAVE_DARK = (0.08, 0.08, 0.10, 1)
+CRYSTAL_VIOLET = (0.78, 0.55, 1.0, 1)
+CRYSTAL_CYAN = (0.55, 0.92, 1.0, 1)
+
+
+def stone_box(m, center, half, seed, color=CASTLE_STONE):
+    box(m, center, half, shade(color, 0.88 + 0.2 * hash01(seed, int(center[0] * 13 + center[1] * 7 + center[2] * 3))))
+
+
+def merlons(m, y, points, half, seed):
+    """Crenellations: one block per point (x, z), `half` = half extents."""
+    for k, (x, z) in enumerate(points):
+        stone_box(m, (x, y + half[1], z), half, seed + k)
+
+
+def banner(m, top, facing_z, color=BANNER_RED, width=0.55, height=1.3):
+    """A hanging banner on a wall facing -Z (facing_z = -1) or +Z, with a golden band."""
+    x, y, z = top
+    box(m, (x, y - height / 2, z + facing_z * 0.03), (width, height / 2, 0.02), color)
+    box(m, (x, y - height * 0.72, z + facing_z * 0.05), (width, 0.06, 0.012), GOLD)
+    m.tri((x - width, y - height, z + facing_z * 0.03), (x + width, y - height, z + facing_z * 0.03),
+          (x, y - height - 0.35, z + facing_z * 0.03), color, normal=(0, 0, facing_z))
+
+
+def castle_wall():
+    """4 m of curtain wall along X, 1.2 m thick (front, outside, at -Z), the
+    walk at 4.4 m and merlons up to 5 m. Collision: half 2 x 2.5 x 0.6."""
+    m = Mesh()
+    stone_box(m, (0, 0.25, 0), (2.0, 0.25, 0.62), 2000, CASTLE_DARK)
+    for row in range(5):
+        for k in range(4):
+            off = 0.5 if row % 2 else 0.0
+            x0 = -2.0 + k * 1.0 + off
+            x1 = min(x0 + 1.0, 2.0)
+            x0 = max(x0, -2.0)
+            if row % 2 and k == 3:
+                x1 = 2.0
+            stone_box(m, ((x0 + x1) / 2, 0.5 + row * 0.78 + 0.39, 0), ((x1 - x0) / 2 - 0.01, 0.38, 0.6), 2001 + row * 10)
+        if row % 2 and True:
+            stone_box(m, (-1.75, 0.5 + row * 0.78 + 0.39, 0), (0.24, 0.38, 0.6), 2050 + row)
+    merlons(m, 4.4, [(-1.6, -0.45), (-0.55, -0.45), (0.55, -0.45), (1.6, -0.45)], (0.3, 0.3, 0.15), 2100)
+    stone_box(m, (0, 4.5, 0.48), (2.0, 0.1, 0.12), 2110)  # low parapet inside
+    box(m, (0.0, 2.6, -0.61), (0.07, 0.42, 0.02), CASTLE_DARK)  # an arrow slit
+    if hash01(2120, 0) < 2:
+        blob(m, (1.3, 0.6, -0.62), (0.6, 0.7, 0.18), 0.25, 2121, jitter(IVY, 2122, 0.12))
+    return m
+
+
+def castle_tower():
+    """A round corner tower, radius 2.2 m, 8.4 m high, merlons up to 9.6 m at
+    radius 1.95 (crows land on them, see crow_perches in src/core/world.cpp),
+    a red flag on a pole. Collision: half 2.2 x 4.5."""
+    m = Mesh()
+    segments = 14
+    frustum(m, identity, 2.3, 2.2, 0.5, segments, CASTLE_DARK)
+    rows = 10
+    for row in range(rows):
+        y0 = 0.5 + row * (7.9 / rows)
+        stone_ring(m, y0, 7.9 / rows, 2.2 - 0.04 * row / rows, 2.2 - 0.04 * (row + 1) / rows, segments, 2200 + row,
+                   CASTLE_STONE, phase=(row % 2) * TAU / 28)
+    frustum(m, translate(0, 8.35, 0), 2.32, 2.32, 0.25, segments, CASTLE_STONE, top_cap=shade(CASTLE_DARK, 1.3))
+    for i in range(8):
+        a = TAU * i / 8
+        c = (1.95 * math.cos(a), 9.0, -1.95 * math.sin(a))
+        box(m, c, (0.3, 0.6, 0.3), shade(CASTLE_STONE, 0.9 + 0.15 * hash01(2230, i)))
+    for i, (a, y) in enumerate(((0.8, 3.0), (2.6, 5.2), (4.4, 3.8), (5.6, 6.4))):  # arrow slits
+        n = (math.cos(a), 0, math.sin(a))
+        box(m, (2.21 * n[0], y, 2.21 * n[2]), (0.06 + 0.04 * abs(n[2]), 0.4, 0.06 + 0.04 * abs(n[0])), CASTLE_DARK)
+    box(m, (0, 10.2, 0), (0.05, 1.8, 0.05), TIMBER)  # the flag
+    for k in range(4):
+        x0, x1 = 0.05 + k * 0.28, 0.05 + (k + 1) * 0.28
+        wave = 0.08 * math.sin(k * 1.4)
+        m.quad((x0, 11.6, wave), (x1, 11.6, wave), (x1, 11.0, wave), (x0, 11.0, wave), BANNER_RED)
+        m.quad((x0, 11.0, wave), (x1, 11.0, wave), (x1, 11.6, wave), (x0, 11.6, wave), shade(BANNER_RED, 0.8))
+    return m
+
+
+def castle_gate():
+    """The gatehouse: 8 m along X, 3 m deep, 7.5 m high (merlons to 8.1 m),
+    front (outside) at -Z. The passage in the middle is 3.2 m wide and 4.2 m
+    high, under an arch, its portcullis raised. Solid parts (Colliders, see
+    build_castle): x in [-4, -1.6] and [1.6, 4] up to 7.5 m, and over the
+    passage from 4.2 to 7.5 m."""
+    m = Mesh()
+    for side in (-1, 1):
+        for row in range(9):
+            stone_box(m, (side * 2.8, row * 0.833 + 0.416, 0), (1.2, 0.41, 1.5), 2300 + row * 2 + (side > 0))
+    stone_box(m, (0, 5.85, 0), (1.6, 1.65, 1.5), 2320)
+    # The arch: stones under the lintel, thinner towards the middle.
+    for k in range(9):
+        x = -1.6 + (k + 0.5) * 3.2 / 9
+        y = 3.4 + 0.8 * math.sqrt(max(0.0, 1 - (x / 1.6) ** 2))
+        h = 4.2 - y
+        if h > 0.02:
+            box(m, (x, y + h / 2 + 0.0, -1.2), (1.6 / 9, h / 2, 0.3), shade(CASTLE_STONE, 0.95 + 0.1 * hash01(2330, k)))
+            box(m, (x, y + h / 2 + 0.0, 1.2), (1.6 / 9, h / 2, 0.3), shade(CASTLE_STONE, 0.95 + 0.1 * hash01(2331, k)))
+    # The raised portcullis: dark bars just under the lintel.
+    for k in range(7):
+        box(m, (-1.35 + k * 0.45, 4.1, -0.4), (0.04, 0.1, 0.04), METAL)
+    box(m, (0, 4.17, -0.4), (1.5, 0.04, 0.05), METAL)
+    merlons(m, 7.5, [(x, -1.25) for x in (-3.6, -2.4, -1.2, 0.0, 1.2, 2.4, 3.6)], (0.3, 0.3, 0.2), 2340)
+    merlons(m, 7.5, [(x, 1.25) for x in (-3.6, -1.2, 1.2, 3.6)], (0.3, 0.3, 0.2), 2350)
+    banner(m, (-2.8, 6.8, -1.5), -1)
+    banner(m, (2.8, 6.8, -1.5), -1)
+    for side in (-1, 1):  # torches by the passage
+        box(m, (side * 1.9, 3.0, -1.55), (0.06, 0.18, 0.06), TIMBER)
+        box(m, (side * 1.9, 3.25, -1.6), (0.1, 0.1, 0.1), LIT_LANTERN)
+    return m
+
+
+def castle_keep():
+    """The keep: 9 x 9 m, 11.4 m high, merlons to 12 m, a turret on each
+    corner up to 12.6 m (crows land on two of them). Door at -Z (towards the
+    gate), lit windows. Collision: half 4.5 x 6 x 4.5."""
+    m = Mesh()
+    stone_box(m, (0, 0.3, 0), (4.55, 0.3, 4.55), 2400, CASTLE_DARK)
+    rows = 12
+    for row in range(rows):
+        y = 0.6 + row * (10.8 / rows)
+        stone_box(m, (0, y + 10.8 / rows / 2, 0), (4.5, 10.8 / rows / 2 - 0.005, 4.5), 2401 + row)
+    stone_box(m, (0, 11.25, 0), (4.6, 0.15, 4.6), 2420)
+    pts = []
+    for k in range(5):
+        u = -3.0 + 1.5 * k
+        pts += [(u, -4.35), (u, 4.35), (-4.35, u), (4.35, u)]
+    merlons(m, 11.4, pts, (0.25, 0.3, 0.25), 2430)
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            frustum(m, translate(sx * 3.95, 9.0, sz * 3.95), 0.8, 0.8, 3.6, 8, shade(CASTLE_STONE, 1.05),
+                    top_cap=CASTLE_DARK)
+            frustum(m, translate(sx * 3.95, 12.6, sz * 3.95), 0.95, 0.0, 1.4, 8, ROOF_SLATE, bottom_cap=CASTLE_DARK)
+    door(m, (0, 1.6, -4.5), 0.8, 1.0, (0, 0, -1))
+    box(m, (0, 2.75, -4.52), (0.9, 0.12, 0.05), CASTLE_DARK)
+    for y in (4.4, 7.6):
+        for x in (-2.2, 2.2):
+            window(m, (x, y, -4.5), 0.35, 0.6, (0, 0, -1))
+            window(m, (x, y, 4.5), 0.35, 0.6, (0, 0, 1))
+            window(m, (4.5, y, x), 0.35, 0.6, (1, 0, 0))
+            window(m, (-4.5, y, x), 0.35, 0.6, (-1, 0, 0))
+    banner(m, (0, 9.6, -4.52), -1, width=0.8, height=2.4)
+    return m
+
+
+def cave_mouth():
+    """A rock arch against a cliff, front (outside) at -Z, 9.2 m wide. Inside,
+    a dark hollow 4.4 m wide (x in [-2.2, 2.2]), 3.8 m high, from z = -1.2 to
+    4.6. Solid parts (Colliders, see build_cave): x in [-4.7, -2.1] and
+    [2.1, 4.7], the back from z = 4.5, the roof from 3.8 m."""
+    m = Mesh()
+
+    def clamp_out(center, lo=None, hi=None):
+        def reshape(p):
+            q = list(p)
+            for k in range(3):
+                if lo and lo[k] is not None:
+                    q[k] = max(q[k], lo[k] - center[k])
+                if hi and hi[k] is not None:
+                    q[k] = min(q[k], hi[k] - center[k])
+            return tuple(q)
+        return reshape
+
+    rock = lambda seed: jitter(CAVE_ROCK, seed, 0.14)
+    for side in (-1, 1):
+        c = (side * 3.5, 3.2, 1.8)
+        lim = (None, None, None)
+        blob(m, c, (1.5, 3.6, 3.4), 0.18, 2500 + (side > 0), rock(2510 + (side > 0)),
+             reshape=clamp_out(c, lo=(2.2 if side > 0 else None, 0.0, None), hi=(-2.2 if side < 0 else None, None, None)))
+        c2 = (side * 3.8, 1.0, -1.3)
+        blob(m, c2, (1.0, 1.1, 0.8), 0.25, 2520 + (side > 0), rock(2530 + (side > 0)),
+             reshape=clamp_out(c2, lo=(2.25 if side > 0 else None, 0.0, None), hi=(-2.25 if side < 0 else None, None, None)))
+    c = (0, 5.4, 1.8)
+    blob(m, c, (4.2, 1.5, 3.4), 0.15, 2540, rock(2541), reshape=clamp_out(c, lo=(None, 3.85, None)))
+    c = (0, 3.2, 6.0)
+    blob(m, c, (3.4, 3.6, 1.6), 0.15, 2550, rock(2551), reshape=clamp_out(c, lo=(None, 0.0, 4.65)))
+    # The dark inside: walls, ceiling and floor, darker towards the back.
+    def shade_at(z):
+        t = min(max((z + 1.2) / 5.8, 0.0), 1.0)
+        return mix(shade(CAVE_ROCK, 0.45), CAVE_DARK, t ** 0.6)
+    zs = [-1.2, 0.3, 1.8, 3.2, 4.65]
+    for z0, z1 in zip(zs, zs[1:]):
+        c0, c1 = shade_at(z0), shade_at(z1)
+        # Left wall (facing +X), right wall (facing -X), ceiling (facing down), floor (facing up).
+        m.tri((-2.19, 0, z0), (-2.19, 3.82, z1), (-2.19, 3.82, z0), None, colors=[c0, c1, c0], normal=(1, 0, 0))
+        m.tri((-2.19, 0, z0), (-2.19, 0, z1), (-2.19, 3.82, z1), None, colors=[c0, c1, c1], normal=(1, 0, 0))
+        m.tri((2.19, 0, z0), (2.19, 3.82, z0), (2.19, 3.82, z1), None, colors=[c0, c0, c1], normal=(-1, 0, 0))
+        m.tri((2.19, 0, z0), (2.19, 3.82, z1), (2.19, 0, z1), None, colors=[c0, c1, c1], normal=(-1, 0, 0))
+        m.tri((-2.2, 3.81, z0), (2.2, 3.81, z0), (2.2, 3.81, z1), None, colors=[c0, c0, c1], normal=(0, -1, 0))
+        m.tri((-2.2, 3.81, z0), (2.2, 3.81, z1), (-2.2, 3.81, z1), None, colors=[c0, c1, c1], normal=(0, -1, 0))
+        f0, f1 = shade(c0, 1.4), shade(c1, 1.4)
+        m.tri((-2.2, 0.04, z0), (2.2, 0.04, z1), (2.2, 0.04, z0), None, colors=[f0, f1, f0], normal=(0, 1, 0))
+        m.tri((-2.2, 0.04, z0), (-2.2, 0.04, z1), (2.2, 0.04, z1), None, colors=[f0, f1, f1], normal=(0, 1, 0))
+    cb = shade_at(4.65)
+    m.quad((-2.2, 0, 4.64), (-2.2, 3.82, 4.64), (2.2, 3.82, 4.64), (2.2, 0, 4.64), cb)
+    for k in range(6):  # pebbles
+        x = -1.6 + 3.2 * hash01(2560, k)
+        z = -0.6 + 4.6 * hash01(2561, k)
+        blob(m, (x, 0.08, z), (0.18, 0.1, 0.15), 0.3, 2562 + k, jitter(shade(CAVE_ROCK, 0.7), 2570 + k, 0.1))
+    return m
+
+
+def crystal():
+    """A cluster of five glowing crystals, about 1 m high, origin at the base
+    (made to glow by the game). Collision: half 0.35 x 0.5 (times its scale)."""
+    m = Mesh()
+    shards = [((0, 0, 0), 1.0, 0.18, 0.0, 0.0), ((0.22, 0, 0.1), 0.65, 0.13, 0.35, 0.3),
+              ((-0.2, 0, 0.12), 0.7, 0.14, -0.3, 0.2), ((0.05, 0, -0.22), 0.55, 0.12, 0.1, -0.4),
+              ((-0.12, 0, -0.1), 0.45, 0.1, -0.2, -0.3)]
+    for k, (base, height, r, tx, tz) in enumerate(shards):
+        color = CRYSTAL_VIOLET if k % 2 == 0 else CRYSTAL_CYAN
+
+        def t(p, base=base, tx=tx, tz=tz):
+            return (base[0] + p[0] + tx * p[1] * 0.4, base[1] + p[1], base[2] + p[2] + tz * p[1] * 0.4)
+        frustum(m, t, r, r * 0.9, height * 0.75, 6, color)
+        frustum(m, lambda p, t=t, height=height: t((p[0], p[1] + height * 0.75, p[2])), r * 0.9, 0, height * 0.3, 6,
+                shade(color, 1.2))
+    return m
+
+
+def lowpoly_blob(m, center, radii, seed, base):
+    """A 20-faced ball: the far version of a crown of leaves."""
+    t = (1 + math.sqrt(5)) / 2
+    verts = [normalize(v) for v in [(-1, t, 0), (1, t, 0), (-1, -t, 0), (1, -t, 0), (0, -1, t), (0, 1, t),
+                                    (0, -1, -t), (0, 1, -t), (t, 0, -1), (t, 0, 1), (-t, 0, -1), (-t, 0, 1)]]
+    faces = [(0, 11, 5), (0, 5, 1), (0, 1, 7), (0, 7, 10), (0, 10, 11), (1, 5, 9), (5, 11, 4),
+             (11, 10, 2), (10, 7, 6), (7, 1, 8), (3, 9, 4), (3, 4, 2), (3, 2, 6), (3, 6, 8),
+             (3, 8, 9), (4, 9, 5), (2, 4, 11), (6, 2, 10), (8, 6, 7), (9, 8, 1)]
+    placed = [add(center, mulv(v, radii)) for v in verts]
+    for f, (ia, ib, ic) in enumerate(faces):
+        a, b, c = placed[ia], placed[ib], placed[ic]
+        n = cross(sub(b, a), sub(c, a))
+        if dot(n, sub(mul(add(add(a, b), c), 1 / 3), center)) < 0:
+            b, c = c, b
+        m.tri(a, b, c, shade(base, 0.9 + 0.2 * hash01(seed, f)))
+
+
+def tree_far():
+    """The tree seen from afar: same size, a few triangles."""
+    m = Mesh()
+    frustum(m, identity, 0.2, 0.13, 2.3, 4, BARK)
+    lowpoly_blob(m, (0, 2.95, 0), (1.75, 1.45, 1.75), 2600, LEAVES)
+    return m
+
+
+def pine_far():
+    """The pine seen from afar: one cone."""
+    m = Mesh()
+    frustum(m, identity, 0.18, 0.12, 1.0, 4, BARK)
+    frustum(m, translate(0, 0.8, 0), 1.35, 0, 3.6, 6, shade(NEEDLES, 1.05), bottom_cap=shade(NEEDLES, 0.7))
+    return m
+
+
 def sparkle():
     """A small magic spark (radius 1), transparent; tinted and faded by the game."""
     m = Mesh(transparent=True)
@@ -1367,6 +1622,14 @@ def all_models():
         "fallen_pillar": fallen_pillar(),
         "rubble": rubble(),
         "rune_stone": rune_stone(),
+        "castle_wall": castle_wall(),
+        "castle_tower": castle_tower(),
+        "castle_gate": castle_gate(),
+        "castle_keep": castle_keep(),
+        "cave_mouth": cave_mouth(),
+        "crystal": crystal(),
+        "tree_far": tree_far(),
+        "pine_far": pine_far(),
         "sparkle": sparkle(),
         "rune_circle": rune_circle(),
     }

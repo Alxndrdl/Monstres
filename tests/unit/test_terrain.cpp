@@ -25,7 +25,7 @@ void for_each_triangle(const MeshData& m, F f) {
 }  // namespace
 
 TEST_CASE("the path crosses the world and passes by the spawn point") {
-  for (uint64_t seed = 0; seed < 20; ++seed) {
+  for (uint64_t seed = 0; seed < kManySeeds; ++seed) {
     CAPTURE(seed);
     const Path path = make_path(seed);
     REQUIRE(path.points.size() > 50);
@@ -58,9 +58,9 @@ TEST_CASE("distance_to_path measures to the center line") {
 }
 
 TEST_CASE("no object is placed on the path") {
-  for (uint64_t seed = 0; seed < 20; ++seed) {
+  for (uint64_t seed = 0; seed < kManySeeds; ++seed) {
     CAPTURE(seed);
-    const World w = new_game(seed);
+    const World& w = cached_game(seed);
     CHECK(w.path == make_path(seed));
     for (const Object& o : w.objects) {
       CHECK(distance_to_path(w.path, o.pos.x, o.pos.z) > rules::kPathHalfWidth + 0.3f);
@@ -69,10 +69,10 @@ TEST_CASE("no object is placed on the path") {
 }
 
 TEST_CASE("the ground mesh covers the world up to the horizon and faces up") {
-  const World w = new_game(3);
+  const World& w = cached_game(3);
   const MeshData ground = build_ground_mesh(w);
   CHECK_FALSE(ground.transparent);
-  const auto cells = static_cast<size_t>(2 * terrain::kDetailHalfSize);
+  const auto cells = static_cast<size_t>(2 * terrain::kDetailHalfSize / Heightmap::kCellSize);
   CHECK(ground.vertex_count() == cells * cells * 6 + 24);
   float max_x = 0;
   bool all_up = true;
@@ -85,7 +85,7 @@ TEST_CASE("the ground mesh covers the world up to the horizon and faces up") {
 }
 
 TEST_CASE("the ground has grass and patches of earth, the same for a seed") {
-  const World w = new_game(3);
+  const World& w = cached_game(3);
   const MeshData a = build_ground_mesh(w);
   CHECK(a.vertices == build_ground_mesh(w).vertices);
   float min_green = 1, max_green = 0;
@@ -98,7 +98,7 @@ TEST_CASE("the ground has grass and patches of earth, the same for a seed") {
 }
 
 TEST_CASE("the path mesh is a ribbon on the path, with soft edges") {
-  const World w = new_game(3);
+  const World& w = cached_game(3);
   const MeshData path = build_path_mesh(w);
   CHECK(path.transparent);
   REQUIRE(path.vertex_count() > 0);

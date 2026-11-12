@@ -2,8 +2,10 @@
 # sanitizers in native-debug) and as WebAssembly under Node (web presets:
 # emcmake sets CMAKE_CROSSCOMPILING_EMULATOR to node, so ctest just works).
 #
-#   ctest --preset native-debug             all tests
+#   ctest --preset native-debug             all tests (sanitizers: thorough, slower)
+#   ctest --preset native-release           all tests, fast (no sanitizers)
 #   ctest --preset native-debug -L unit     only one category
+#   ctest --preset native-debug -R world    only the tests of one file (unit_world)
 
 include(FetchContent)
 FetchContent_Declare(doctest
@@ -30,8 +32,14 @@ function(monstres_add_tests name label)
     target_link_options(${name} PRIVATE
       -sENVIRONMENT=node -sNODERAWFS=1 -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1)
   endif()
-  add_test(NAME ${name} COMMAND ${name})
-  set_tests_properties(${name} PROPERTIES LABELS ${label})
+  # One ctest test per source file: ctest runs them side by side (-j), and a
+  # failure names its file. doctest picks the file's cases (--source-file).
+  foreach(source ${ARGN})
+    get_filename_component(stem "${source}" NAME_WE)
+    string(REPLACE "test_" "" stem "${stem}")
+    add_test(NAME ${label}_${stem} COMMAND ${name} "--source-file=*${source}")
+    set_tests_properties(${label}_${stem} PROPERTIES LABELS ${label})
+  endforeach()
 endfunction()
 
 monstres_add_tests(monstres_unit_tests unit
@@ -51,6 +59,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_village.cpp
   unit/test_relief.cpp
   unit/test_ruins.cpp
+  unit/test_population.cpp
 )
 
 monstres_add_tests(monstres_functional_tests functional

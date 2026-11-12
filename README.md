@@ -4,7 +4,7 @@ Petit jeu en C++ compilé en WebAssembly avec Emscripten, rendu WebGL2
 (OpenGL ES 3.0), installable en PWA et jouable hors ligne.
 
 Le joueur est un apprenti magicien (robe étoilée, chapeau pointu, bâton à
-cristal lumineux) qui parcourt un monde magique de 150 m de côté avec son
+cristal lumineux) qui parcourt un monde magique de 280 m de côté avec son
 compagnon Pompon, un renard des braises tout rond qui le suit et saute derrière
 lui. Dans les prairies vallonnées vivent des monstres sauvages : Gloubi la
 gelée sauteuse, Champi le champignon qui se dandine et Piou l'oiseau qui
@@ -21,6 +21,15 @@ la tour abandonnée d'un ancien magicien (visible de loin), les restes d'une
 enceinte, une colonnade à moitié effondrée, des éboulis et quatre pierres à
 runes qui brillent encore, entourées d'étincelles magiques.
 
+À l'ouest ou à l'est (de l'autre côté du sentier que les ruines), la forêt
+des Murmures : arbres et sapins serrés, quelques géants, sous-bois sombre,
+Champi et Piou. Tout au nord, la grotte aux Cristaux : une colline rocheuse
+aux falaises abruptes, une ravine qui mène à une arche de pierre, un creux
+sombre éclairé par des cristaux lumineux. Tout au sud, sur une butte, le
+château de Corbeval : remparts crénelés, quatre tours à drapeau, une porte
+fortifiée qu'on franchit, un donjon aux fenêtres éclairées la nuit. Plus on
+s'éloigne du départ, plus les monstres sont forts.
+
 Partout : herbes qui ondulent au vent, fleurs, arbres, sapins, rochers,
 troncs, souches et buissons ; forêt au-delà des bords, montagnes enneigées,
 nuages, ciel et soleil.
@@ -33,7 +42,10 @@ Contrôles :
   haut à gauche (nom, famille, éléments, description, ses variantes, niveau,
   ce qu'il fait, distance) et un anneau doré le marque au sol ; toucher
   ailleurs ou × la ferme. Le menu contextuel, à droite, propose ce qu'on peut
-  faire avec lui : « Combattre » un monstre (voir Combats) ;
+  faire avec lui : « Combattre » un monstre (voir Combats), « S'entraîner »
+  avec son propre compagnon ;
+- toucher un panneau du village (à moins de 25 m) : ce qui y est écrit, avec
+  la direction (flèche, nord en haut) et la distance de chaque lieu du monde ;
 - livre en haut à gauche (ou touches C, E, B, M) : le grimoire, qui met le jeu en
   pause, avec quatre onglets :
   - Personnage : portrait du magicien, nom (modifiable, enregistré dans la
@@ -41,7 +53,8 @@ Contrôles :
   - Équipe : les monstres de l'équipe (le compagnon d'abord, 6 au plus) ;
     toucher l'un d'eux affiche sa fiche complète : niveau, expérience, points
     de vie, caractéristiques à son niveau, famille, éléments, variantes et ses
-    trois attaques ;
+    trois attaques ; « Relâcher » (confirmé une seconde fois) le rend à la
+    nature : il sort du cristal et s'en va ;
   - Bestiaire : tous les monstres, avec pour chacun un portrait, la famille,
     le ou les éléments, une description, l'habitat, la taille, la vitesse, les
     caractéristiques et combien vivent dans ce monde ; le bouton ADN
@@ -52,8 +65,9 @@ Contrôles :
   - Carte : locale (autour du joueur, avec les créatures proches) ou globale ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (exporter / importer la sauvegarde,
-  afficher les FPS ; ce choix est retenu par le navigateur) et options de
-  debug : un curseur pour choisir l'heure de la journée, et « Figer l'heure ».
+  afficher les FPS et le détail du temps de calcul, voir Performances ; ces
+  choix sont retenus par le navigateur) et options de debug : un curseur pour
+  choisir l'heure de la journée, et « Figer l'heure ».
 
 Sur ordinateur, les touches sont rappelées sous le joystick et le bouton ;
 elles s'adaptent à la disposition du clavier quand le navigateur le permet.
@@ -89,9 +103,10 @@ scripts/test.sh                     lance tous les tests
 ## Relief
 
 Le sol est une carte de hauteurs (`src/core/heightmap.cpp`) : une grille de
-1 m tirée de la graine du monde (collines, plus hautes vers les bords ; plat
+2 m tirée de la graine du monde (collines, plus hautes vers les bords ; plat
 autour du village ; fond du lac creusé ; petites bosses atténuées le long du
-sentier). Entre deux points, le sol est fait de deux triangles par case,
+sentier ; buttes à sommet plat pour les ruines et le château ; colline de la
+grotte aux falaises infranchissables, entaillée d'une ravine jusqu'à l'arche). Entre deux points, le sol est fait de deux triangles par case,
 exactement ceux que dessine le moteur : on marche sur ce qu'on voit. Les
 pentes de plus de 45° (`kMaxWalkSlope`) ne se montent pas à pied, il faut
 sauter. Les objets sont posés sur le sol (légèrement enfoncés), l'herbe, les
@@ -103,6 +118,30 @@ générateur aléatoire PCG32 à graine, sinus/cosinus maison
 (`src/core/include/monstres/core/math.hpp`) et `-ffp-contract=off`. Une même
 partie donne exactement le même état en natif et en WebAssembly ; les tests de
 régression le vérifient.
+
+## Un monde vivant autour du joueur
+
+Le monde est découpé en carrés de 40 m (`update_population`,
+`src/core/world.cpp`). Les monstres sauvages d'un carré apparaissent quand le
+joueur s'en approche (à moins de 50 m) et disparaissent quand il s'en éloigne
+(au-delà de 80 m) : seuls les environs du joueur sont simulés. En revenant,
+d'autres monstres sont là (tirés de la graine, du carré et du nombre de
+visites). Espèces et niveaux dépendent des lieux : 1 à 3 dans la prairie, 2 à
+4 en forêt, 3 à 5 aux ruines, 4 à 6 à la grotte, 5 à 7 au château ; corbeaux
+sur les toits et les tours, poissons dans le lac. Les villageois restent au
+village (immobiles quand le joueur est loin). Un monstre en combat ne
+disparaît jamais. Chaque créature a un identifiant (`Creature::id`) pour la
+suivre pendant que d'autres vont et viennent.
+
+L'affichage suit le même principe (`build_landscape`,
+`src/render/scene.cpp`) : autour du joueur (64 m), tout est dessiné avec les
+ombres, et l'herbe et les fleurs poussent (56 m) ; au-delà, seuls les points
+marquants restent (maisons, tours, remparts, grands rochers, ruines) et les
+arbres et sapins sont remplacés par des modèles très simplifiés (`tree_far`,
+28 triangles au lieu de 332). Le paysage détaillé est reconstruit quand le
+joueur a avancé de 16 m ; l'herbe et les petits objets rétrécissent jusqu'à
+disparaître avant le bord (dans le shader), si bien que rien n'apparaît d'un
+coup.
 
 ## Modèles 3D
 
@@ -156,7 +195,11 @@ gauche de l'écran, une icône par monstre (niveau, points de vie) :
 toucher un monstre resté dans le cristal l'invoque à la place du compagnon,
 qui y retourne (le nouveau prend sa place exacte) ; toucher le compagnon le
 rappelle, et plus aucun monstre ne suit le magicien. Pendant un combat, on
-peut échanger le compagnon, pas le rappeler. Un faisceau de lumière de la
+peut échanger le compagnon, pas le rappeler. Depuis la fiche d'équipe du
+grimoire, « Relâcher » rend un monstre à la nature (il en faut toujours un
+dans l'équipe, et pas pendant un combat) : il sort du cristal, ou quitte le
+magicien s'il le suivait, et s'enfuit vivre sa vie. Le recapturer ou le battre
+ne rapporte plus d'expérience. Un faisceau de lumière de la
 couleur de l'élément du monstre relie le cristal au monstre, qui apparaît ou
 disparaît dans la lumière (0,4 s). Un monstre capturé est d'abord retenu par
 un cercle de runes (0,3 s), puis rejoint le cristal de la même façon
@@ -194,7 +237,8 @@ avant : vers l'ennemi, sur les côtés : on tourne autour), le magicien attend.
 
 Boutons en bas à droite pendant un combat :
 - esquive (le bouton de saut, Espace) : un bond rapide dans la direction du
-  déplacement (en arrière à l'arrêt), pendant lequel on ne peut pas être touché ;
+  déplacement (à l'arrêt : un saut sur place), pendant lequel on ne peut pas
+  être touché ;
 - au-dessus, trois attaques (touches 1, 2, 3) : une attaque rapide au corps à
   corps, qu'on peut enchaîner, et deux attaques spéciales avec un temps de
   recharge (un projectile de son élément, une onde tout autour de lui) ;
@@ -206,12 +250,46 @@ l'onde, boule qui grossit) : c'est le moment d'esquiver ou de parer. Dans le
 menu contextuel : « Fuir » (le compagnon revient vers le joueur, puis le
 combat s'arrête et le joueur reprend la main) et « Capturer », possible quand
 l'ennemi n'a plus que 25 % de ses points de vie (trait doré sur sa barre) : il
-rejoint l'équipe. Une victoire ou une capture donne de l'expérience au
-compagnon (niveaux) et au magicien. Un compagnon K.O. revient avec 1 point de
-vie ; hors combat, l'équipe regagne 1 point de vie par seconde. Les monstres
-sauvages ont un niveau (1 à 3, 3 à 5 dans les ruines). Pas de forces ni de
+rejoint l'équipe. Une victoire ou une capture rapporte 8 points
+d'expérience par niveau de l'ennemi, partagés entre les monstres de l'équipe
+qui ont combattu selon les dégâts infligés par chacun : XP × dégâts du monstre
+/ (1 + dégâts de toute l'équipe), arrondi ; le magicien en gagne la moitié.
+L'écran de victoire montre la barre d'expérience de chacun qui se remplit,
+niveau après niveau, puis la caméra quitte doucement le compagnon pour revenir
+au magicien (elle glisse aussi au début et à la fin des combats). Le monstre
+battu reste allongé K.O. (étoiles au-dessus de la tête) une dizaine de
+secondes, puis se relève et rentre chez lui. Un compagnon K.O. revient avec 1
+point de vie ; hors combat, l'équipe regagne 1 point de vie par seconde. Les
+monstres sauvages ont un niveau selon leur lieu (voir plus haut).
+
+Entraînement : toucher son compagnon puis « S'entraîner ». On le contrôle comme
+en combat, mais face au magicien, qui lève son bâton et se protège d'un
+bouclier de lumière : chaque coup s'y brise (le nombre affiché est ce que
+l'attaque aurait infligé à un monstre de même niveau), personne n'est blessé.
+« Arrêter l'entraînement » (ou rappeler le compagnon) y met fin. Pas de forces ni de
 faiblesses entre éléments pour l'instant. Les combats ne sont pas sauvegardés :
 une partie rechargée pendant un combat reprend sans lui.
+
+## Performances
+
+Paramètres → « Afficher les FPS » puis « Détail du temps de calcul » : un
+panneau montre, sur la dernière demi-seconde, le temps moyen et le pire d'une
+image, et où il passe :
+- processeur (le jeu en WebAssembly) : logique du jeu (pas de simulation par
+  image), scène (personnages, animations, effets), caméra et lumières, envoi au
+  GPU (appels WebGL), reconstruction du paysage, sauvegarde ;
+- carte graphique : son temps de dessin, quand le navigateur le mesure
+  (extension `EXT_disjoint_timer_query_webgl2`, souvent absente sur
+  téléphone) ; sinon « hors du jeu » : attente de l'écran, du GPU et du
+  reste de la page ;
+- les triangles dessinés par catégorie (sol, herbe, décor, personnages,
+  ombres et effets, ciel), les appels de dessin, les objets, les pixels
+  (taille × densité de l'écran), les lumières, les créatures simulées, les
+  données envoyées au GPU ;
+- une phrase qui dit ce qui limite le plus (processeur ou carte graphique).
+
+Mesures faites dans `src/platform/web/main.cpp` (`Profile`) et le rendu
+(`RenderStats`).
 
 ## Personnages et animations
 
@@ -236,15 +314,25 @@ python3 -m http.server 8080 --directory build/web-debug/site
 Puis ouvrir http://localhost:8080. Paramètres d'URL utiles : `?seed=42`,
 `?new` (ignore la sauvegarde), `?frozen` (le temps ne s'écoule pas, pour les
 tests). Dans la console : `monstres.state()`, `monstres.input.move(0, 1)`,
-`monstres.step(60)`, `monstres.setCamera(yaw, pitch)`.
+`monstres.step(60)`, `monstres.setCamera(yaw, pitch)`, `monstres.teleport(x, z)`.
 
 ## Tests
 
 ```bash
-scripts/test.sh            # natif + WebAssembly + navigateurs
+scripts/test.sh --quick    # rapide : natif optimisé + site + Chromium seul
+scripts/test.sh            # complet : sanitizers, WebAssembly, trois navigateurs
 scripts/test.sh --no-e2e   # sans les navigateurs
+ctest --preset native-release         # tous les tests natifs, en quelques secondes
 ctest --preset native-debug -L unit   # une seule catégorie : unit, functional, regression
+ctest --preset native-debug -R world  # un seul fichier (unit_world)
 ```
+
+Chaque fichier de tests est un test ctest à part : ctest les lance côte à
+côte (7 au plus, réglé dans `CMakePresets.json`). Les sanitizers (ASan, UBSan)
+rendent le jeu environ 40 fois plus lent : sous eux, les plus longues parties
+aléatoires sont raccourcies (`kSanitized`, `tests/support/test_helpers.hpp`)
+et les mondes générés sont mis en cache par graine (`cached_game`) ; la
+version optimisée joue tout en entier.
 
 Après un changement **voulu** des règles, régénérer les références puis relire
 le diff avant de valider :

@@ -35,21 +35,47 @@ float hills(uint64_t seed, float x, float z) {
 
 constexpr float kKnollHeight = 3.0f;  // the tower's knoll, above the hills around it
 
-// knoll_top: height of the flat top of the tower's knoll (see make_heightmap).
-float relief(uint64_t seed, const Path& path, const VillageLayout& village, const RuinsLayout& ruins,
-             float knoll_top, float x, float z) {
+constexpr float kCastleKnollHeight = 4.5f;
+
+// A knoll with a flat top of radius `flat_radius` at height `top`, gentle slopes out to `outer`.
+float add_knoll(float h, Vec2 center, float x, float z, float top, float height, float flat_radius, float outer) {
+  const float rx = x - center.x, rz = z - center.z;
+  const float d = std::sqrt(rx * rx + rz * rz);
+  const float flat = 1 - smooth(flat_radius, outer, d);
+  const float knoll = height * (1 - smooth(4.0f, outer, d));
+  return h + knoll + (top - (h + knoll)) * flat;
+}
+
+// knoll_top, castle_top: heights of the flat tops of the knolls (see make_heightmap).
+float relief(uint64_t seed, const Path& path, const Places& places, float knoll_top, float castle_top, float x,
+             float z) {
+  const VillageLayout& village = places.village;
+  const RuinsLayout& ruins = places.ruins;
   // Three octaves of hills; the smallest bumps fade out along the path.
   const float near_path = 1 - smooth(1.5f, 7.0f, distance_to_path(path, x, z, 7.0f));
   float h = hills(seed, x, z) + (value_noise(seed + 42, x, z, 6.0f) - 0.5f) * 0.8f * (1 - near_path);
 
   if (ruins.radius > 0) {
-    // A knoll with a flat top where the tower stands, gentle slopes around.
-    const float rx = x - ruins.center.x, rz = z - ruins.center.z;
-    const float d = std::sqrt(rx * rx + rz * rz);
-    const float top = knoll_top;
-    const float flat = 1 - smooth(11.0f, ruins.radius + 17, d);  // the enclosure (±9 m) stands level
-    const float knoll = kKnollHeight * (1 - smooth(4.0f, ruins.radius + 17, d));
-    h = h + knoll + (top - (h + knoll)) * flat;
+    // A knoll with a flat top where the tower stands (the enclosure, ±9 m, stands level).
+    h = add_knoll(h, ruins.center, x, z, knoll_top, kKnollHeight, 11.0f, ruins.radius + 17);
+  }
+  if (places.castle.radius > 0) {
+    // A higher one for the castle: its walls (±14 m) stand level.
+    h = add_knoll(h, places.castle.center, x, z, castle_top, kCastleKnollHeight, rules::kCastleHalf + 5.0f,
+                  places.castle.radius + 32);
+  }
+  if (const CaveLayout& cave = places.cave; cave.radius > 0) {
+    // The rocky hill: cliffs all around, a lumpy top; in front of the mouth,
+    // a passage stays at the level of the ground outside.
+    const float cx = x - cave.center.x, cz = z - cave.center.z;
+    const float d = std::sqrt(cx * cx + cz * cz);
+    const float rise = (rules::kCaveHillHeight + 2.5f * value_noise(seed + 43, x, z, 7.0f)) *
+                       (1 - smooth(cave.radius - 8.0f, cave.radius, d));
+    const float mx = x - cave.mouth.x, mz = z - cave.mouth.z;
+    const float along = mx * cave.facing.x + mz * cave.facing.z;  // outwards
+    const float across = std::fabs(-mx * cave.facing.z + mz * cave.facing.x);
+    const float passage = (1 - smooth(2.6f, 3.6f, across)) * (1 - smooth(5.5f, 6.5f, -along));
+    h += rise * (1 - passage);
   }
 
   // Hills rise around the playable area, then the relief fades out far
@@ -65,7 +91,7 @@ float relief(uint64_t seed, const Path& path, const VillageLayout& village, cons
     const Lake& lake = village.lake;
     const float lx = (x - lake.center.x) / lake.radius_x, lz = (z - lake.center.z) / lake.radius_z;
     const float lake_depth = 1 - std::sqrt(lx * lx + lz * lz);  // 0 at the shore, 1 in the middle
-    h *= std::min(smooth(rules::kVillageRadius + 1, rules::kVillageRadius + 12, to_village),
+    h *= std::min(smooth(rules::kVillageRadius + 3, rules::kVillageRadius + 15, to_village),
                   smooth(0.1f, 1.3f, -lake_depth));
     if (lake_depth > 0) h = -kLakeDepth * std::min(1.0f, lake_depth * 2.5f);
   }
@@ -87,8 +113,8 @@ float value_noise(uint64_t seed, float x, float z, float cell) {
 
 float Heightmap::height(float x, float z) const {
   if (heights.empty()) return 0;
-  const float fx = std::clamp(x + rules::kReliefHalfSize, 0.0f, static_cast<float>(kCells));
-  const float fz = std::clamp(z + rules::kReliefHalfSize, 0.0f, static_cast<float>(kCells));
+  const float fx = std::clamp((x + rules::kReliefHalfSize) / kCellSize, 0.0f, static_cast<float>(kCells));
+  const float fz = std::clamp((z + rules::kReliefHalfSize) / kCellSize, 0.0f, static_cast<float>(kCells));
   const int i = std::min(static_cast<int>(fx), kCells - 1);
   const int j = std::min(static_cast<int>(fz), kCells - 1);
   const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
@@ -98,21 +124,24 @@ float Heightmap::height(float x, float z) const {
 }
 
 Vec3 Heightmap::normal(float x, float z) const {
-  const float gx = (height(x + 0.5f, z) - height(x - 0.5f, z));
-  const float gz = (height(x, z + 0.5f) - height(x, z - 0.5f));
+  constexpr float k = kCellSize / 2;
+  const float gx = (height(x + k, z) - height(x - k, z)) / kCellSize;
+  const float gz = (height(x, z + k) - height(x, z - k)) / kCellSize;
   const float len = std::sqrt(gx * gx + 1 + gz * gz);
   return {-gx / len, 1 / len, -gz / len};
 }
 
-Heightmap make_heightmap(uint64_t seed, const Path& path, const VillageLayout& village, const RuinsLayout& ruins) {
+Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) {
   Heightmap m;
   m.heights.resize(static_cast<size_t>(Heightmap::kPoints * Heightmap::kPoints));
-  const float knoll_top = hills(seed, ruins.center.x, ruins.center.z) + kKnollHeight;
+  const float knoll_top = hills(seed, places.ruins.center.x, places.ruins.center.z) + kKnollHeight;
+  const float castle_top = hills(seed, places.castle.center.x, places.castle.center.z) + kCastleKnollHeight;
   for (int i = 0; i < Heightmap::kPoints; ++i) {
     for (int j = 0; j < Heightmap::kPoints; ++j) {
-      const float x = static_cast<float>(i) - rules::kReliefHalfSize;
-      const float z = static_cast<float>(j) - rules::kReliefHalfSize;
-      m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] = relief(seed, path, village, ruins, knoll_top, x, z);
+      const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
+      const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
+      m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] =
+          relief(seed, path, places, knoll_top, castle_top, x, z);
     }
   }
   return m;

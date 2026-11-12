@@ -62,7 +62,7 @@ TEST_CASE("each object is drawn with the mesh of its kind, with a shadow") {
 }
 
 TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mountains") {
-  const World w = new_game(42);
+  const World& w = cached_game(42);
   DrawList list;
   build_landscape(w, list);
 
@@ -83,17 +83,25 @@ TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mount
     }
   }
 
-  // Extra trees only outside the playable area.
+  // Extra trees only outside the playable area; far from the player, simplified.
   size_t world_trees = 0;
   for (const Object& o : w.objects) world_trees += o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine;
   size_t border_trees = 0;
-  for (MeshId id : {MeshId::Tree, MeshId::Pine}) {
+  for (MeshId id : {MeshId::Tree, MeshId::Pine, MeshId::TreeFar, MeshId::PineFar}) {
     for (const Instance& t : batch(list, id)) {
       if (std::max(std::fabs(t.x), std::fabs(t.z)) > rules::kWorldHalfSize + 1) ++border_trees;
     }
   }
-  CHECK(border_trees > 60);
-  CHECK(batch(list, MeshId::Tree).size() + batch(list, MeshId::Pine).size() == world_trees + border_trees);
+  CHECK(border_trees > 200);
+  size_t drawn = 0;
+  for (MeshId id : {MeshId::Tree, MeshId::Pine, MeshId::TreeFar, MeshId::PineFar}) drawn += batch(list, id).size();
+  CHECK(drawn == world_trees + border_trees);
+  for (MeshId id : {MeshId::Tree, MeshId::Pine}) {  // full trees near the player only
+    for (const Instance& t : batch(list, id)) {
+      CHECK(std::hypot(t.x - w.player.pos.x, t.z - w.player.pos.z) < landscape::kDetailRadius + landscape::kStep);
+    }
+  }
+  CHECK(batch(list, MeshId::TreeFar).size() > batch(list, MeshId::Tree).size());
 
   size_t mountains = 0;
   for (size_t i = 0; i < kMountainVariants; ++i) {
@@ -106,7 +114,7 @@ TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mount
 }
 
 TEST_CASE("the landscape depends on the world only") {
-  const World w = new_game(9);
+  const World& w = cached_game(9);
   DrawList a, b;
   build_landscape(w, a);
   build_landscape(w, b);
@@ -134,7 +142,7 @@ TEST_CASE("the player's shadow shrinks while jumping and falls on what is below"
 }
 
 TEST_CASE("clouds drift with time and stay in the sky") {
-  const World w = new_game(1);
+  const World& w = cached_game(1);
   DrawList at0, at10;
   build_dynamic(w, 0, at0);
   build_dynamic(w, 10, at10);

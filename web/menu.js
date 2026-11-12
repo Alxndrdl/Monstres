@@ -201,10 +201,51 @@
       return el('li', {}, [item]);
     }));
     $('team-count').textContent = `${team.length}/6 monstres`;
-    renderMember(team[chosenMember]);
+    renderMember(team[chosenMember], team.length);
   }
 
-  function renderMember(m) {
+  // Letting a monster go back to the wild: asked twice, done once the grimoire is closed.
+  let releasing = -1;  // slot waiting for the confirmation
+  function releaseBox(m, teamSize) {
+    const name = LORE.species[m.species].name;
+    const phase = game.battle().phase;
+    const box = el('section', { className: 'release-box' });
+    if (teamSize < 2) {
+      box.append(el('p', { className: 'facts', textContent: 'Ton seul monstre ne peut pas être relâché.' }));
+      return box;
+    }
+    if (phase !== 'none') {
+      box.append(el('p', { className: 'facts', textContent: 'Pas pendant un combat ou un entraînement.' }));
+      return box;
+    }
+    if (releasing !== m.slot) {
+      const button = el('button', { type: 'button', className: 'button danger', id: 'release', textContent: 'Relâcher' });
+      button.addEventListener('click', () => {
+        releasing = m.slot;
+        renderTeam();
+      });
+      box.append(button, el('p', { className: 'facts', textContent: 'Il sort du cristal et retourne vivre dans la nature.' }));
+      return box;
+    }
+    const yes = el('button', { type: 'button', className: 'button danger', id: 'release-confirm', textContent: `Oui, relâcher ${name}` });
+    const no = el('button', { type: 'button', className: 'button', id: 'release-cancel', textContent: 'Non' });
+    yes.addEventListener('click', () => {
+      releasing = -1;
+      game.release(m.slot);
+      chosenMember = 0;
+      prefs.set('teamSlot', 0);
+      close();  // to see it go
+    });
+    no.addEventListener('click', () => {
+      releasing = -1;
+      renderTeam();
+    });
+    box.append(el('p', { textContent: `Relâcher ${name} ? Il ne reviendra pas, et le recapturer ne rapportera pas d’expérience.` }),
+      el('div', { className: 'row' }, [yes, no]));
+    return box;
+  }
+
+  function renderMember(m, teamSize) {
     const info = LORE.species[m.species];
     const texts = info.variants || {};
     const stats = el('dl', { className: 'stats' });
@@ -245,6 +286,7 @@
       ]),
       stats,
       el('section', { className: 'moves-box' }, [el('h3', { textContent: 'Attaques' }), moves]),
+      releaseBox(m, teamSize),
     );
   }
 
@@ -451,7 +493,7 @@
 
   // ---- Maps ----
   const canvas = $('map-canvas');
-  const PX_PER_M = 4;           // resolution of the drawn terrain
+  const PX_PER_M = 2;           // resolution of the drawn terrain
   const LOCAL_PX_PER_M = 7;     // zoom of the local map (CSS pixels per meter)
   let mapMode = prefs.get('mapMode', 'local');
   let base = null;              // { seed key, image (canvas), data }
@@ -474,13 +516,16 @@
     sign: '#8a6a44', barrel: '#8a6a44', lamp: '#555',
     tower: '#9a958c', ruinWall: '#8f8a82', pillar: '#a8a39a', fallenPillar: '#a8a39a', rubble: '#7f7a74',
     runeStone: '#7fe0ff',
+    castleWall: '#9d978e', castleTower: '#a8a298', castleGate: '#8f897f', castleKeep: '#b0aaa0',
+    caveMouth: '#2a2630', crystal: '#c79bff',
   };
 
   function heightAt(data, x, z) {
     const n = data.points;
     if (!n) return 0;
-    const fx = Math.min(Math.max(x + data.relief, 0), n - 1.001);
-    const fz = Math.min(Math.max(z + data.relief, 0), n - 1.001);
+    const cell = data.cell || 1;
+    const fx = Math.min(Math.max((x + data.relief) / cell, 0), n - 1.001);
+    const fz = Math.min(Math.max((z + data.relief) / cell, 0), n - 1.001);
     const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
     const h = (a, b) => data.heights[a * n + b];
     const top = h(i, j) + (h(i + 1, j) - h(i, j)) * tx;
@@ -496,14 +541,21 @@
     const ctx = image.getContext('2d');
     const pixels = ctx.createImageData(size, size);
     const lake = data.lake, village = data.village, ruins = data.ruins;
+    const forest = data.forest, cave = data.cave, castle = data.castle;
     for (let py = 0; py < size; ++py) {
       for (let px = 0; px < size; ++px) {
         const x = -R + (px + 0.5) / PX_PER_M, z = -R + (py + 0.5) / PX_PER_M;
         const h = heightAt(data, x, z);
         const t = Math.min(Math.max((h + 4) / 12, 0), 1);
         let r = 78 + 70 * t, g = 128 + 46 * t, b = 62 + 30 * t;
+        if (forest) {  // darker under the trees
+          const fx = (x - forest.x) / forest.rx, fz = (z - forest.z) / forest.rz;
+          if (fx * fx + fz * fz < 1) { r *= 0.8; g *= 0.88; b *= 0.8; }
+        }
+        if (cave && Math.hypot(x - cave.x, z - cave.z) < cave.r) { const k = Math.min(1, (h + 2) / 14); r = 110 + 50 * k; g = 106 + 46 * k; b = 104 + 44 * k; }
         if (village && Math.hypot(x - village.x, z - village.z) < 7) { r = 168; g = 142; b = 104; }
         if (ruins && Math.max(Math.abs(x - ruins.x), Math.abs(z - ruins.z)) < 8.5) { r = 150; g = 146; b = 136; }
+        if (castle && Math.max(Math.abs(x - castle.x), Math.abs(z - castle.z)) < castle.r) { r = 156; g = 150; b = 140; }
         if (lake) {
           const dx = (x - lake.x) / lake.rx, dz = (z - lake.z) / lake.rz;
           const d = dx * dx + dz * dz;
@@ -511,8 +563,8 @@
           if (d < 1 && h < data.waterLevel) { const k = Math.min(1, (data.waterLevel - h) / 1.2); r = 80 - 30 * k; g = 150 - 40 * k; b = 196 - 20 * k; }
         }
         // Light from the north-west, shading the slopes.
-        const shade = 1 + 0.9 * ((heightAt(data, x - 0.5, z) - heightAt(data, x + 0.5, z)) +
-                                 (heightAt(data, x, z - 0.5) - heightAt(data, x, z + 0.5)));
+        const shade = 1 + 0.45 * ((heightAt(data, x - 1, z) - heightAt(data, x + 1, z)) +
+                                  (heightAt(data, x, z - 1) - heightAt(data, x, z + 1)));
         const outside = Math.max(Math.abs(x), Math.abs(z)) > data.world ? 0.72 : 1;
         const k = Math.min(Math.max(shade, 0.6), 1.35) * outside;
         const o = (py * size + px) * 4;
@@ -539,7 +591,7 @@
     for (const [kind, x, z, hx, hz] of objects) {
       ctx.fillStyle = OBJECT_COLORS[kind] || '#777';
       if (kind === 'tree' || kind === 'pine' || kind === 'bush' || kind === 'tower' || kind === 'hut' ||
-          kind === 'well' || kind === 'rubble' || kind === 'stump') {
+          kind === 'well' || kind === 'rubble' || kind === 'stump' || kind === 'castleTower' || kind === 'crystal') {
         ctx.beginPath();
         ctx.arc(toPx(x), toPx(z), Math.max(hx, 0.3) * PX_PER_M, 0, Math.PI * 2);
         ctx.fill();
@@ -627,6 +679,9 @@
     if (data.village) label(LORE.zones.village, data.village.x, data.village.z - (global ? 12 : 9), labelSize);
     if (data.lake) label(LORE.zones.lake, data.lake.x, data.lake.z + (global ? data.lake.rz + 5 : 0), labelSize - 1);
     if (data.ruins) label(LORE.zones.ruins, data.ruins.x, data.ruins.z - (global ? 9 : 12), labelSize);
+    if (data.forest) label(LORE.zones.forest, data.forest.x, data.forest.z, labelSize);
+    if (data.cave) label(LORE.zones.cave, data.cave.x, data.cave.z, labelSize);
+    if (data.castle) label(LORE.zones.castle, data.castle.x, data.castle.z - data.castle.r - (global ? 6 : 3), labelSize);
 
     // The player: an arrow pointing where it goes.
     const angle = Math.atan2(p.facingZ, p.facingX);

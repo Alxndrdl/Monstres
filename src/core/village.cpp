@@ -45,6 +45,59 @@ RuinsLayout make_ruins_layout(uint64_t seed, const Path& path) {
   return r;
 }
 
+ForestLayout make_forest_layout(uint64_t, const Path& path, const RuinsLayout& ruins) {
+  ForestLayout f;
+  // On the other side of the path than the ruins (whose side is from the seed).
+  const float side = ruins.radius > 0 && ruins.center.x > path_x_at(path, ruins.center.z) ? -1.0f : 1.0f;
+  f.center = {side * rules::kForestX, rules::kForestZ};
+  f.radius_x = rules::kForestRadiusX;
+  f.radius_z = rules::kForestRadiusZ;
+  return f;
+}
+
+bool in_forest(const ForestLayout& f, float x, float z, float margin) {
+  if (f.radius_x <= 0) return false;
+  const float rx = f.radius_x + margin, rz = f.radius_z + margin;
+  if (rx <= 0 || rz <= 0) return false;
+  const float dx = (x - f.center.x) / rx, dz = (z - f.center.z) / rz;
+  return dx * dx + dz * dz < 1.0f;
+}
+
+CaveLayout make_cave_layout(uint64_t seed, const Path& path) {
+  CaveLayout c;
+  Rng rng(seed ^ 0x4341564543415645ULL, 23);  // own stream
+  const float side = rng.below(2) ? 1.0f : -1.0f;
+  c.center = {path_x_at(path, rules::kCaveZ) + side * rules::kCaveX, rules::kCaveZ};
+  c.radius = rules::kCaveHillRadius;
+  c.facing = {-side, 0};  // towards the path
+  c.mouth = {c.center.x + c.facing.x * (c.radius - 6.0f), c.center.z};  // a ravine leads to it
+  return c;
+}
+
+bool in_cave_hill(const CaveLayout& c, float x, float z, float margin) {
+  if (c.radius <= 0) return false;
+  const float dx = x - c.center.x, dz = z - c.center.z;
+  const float r = c.radius + margin;
+  return dx * dx + dz * dz < r * r;
+}
+
+CastleLayout make_castle_layout(uint64_t seed, const Path& path) {
+  CastleLayout c;
+  Rng rng(seed ^ 0x434153544C452121ULL, 29);  // own stream
+  const float side = rng.below(2) ? 1.0f : -1.0f;
+  c.center = {path_x_at(path, rules::kCastleZ) + side * rules::kCastleX, rules::kCastleZ};
+  c.radius = rules::kCastleRadius;
+  c.facing = {-side, 0};  // the gate towards the path
+  return c;
+}
+
+bool in_castle(const CastleLayout& c, float x, float z, float margin) {
+  if (c.radius <= 0) return false;
+  const float dx = x - c.center.x, dz = z - c.center.z;
+  const float r = c.radius + margin;
+  return dx * dx + dz * dz < r * r;
+}
+
 bool in_ruins(const RuinsLayout& r, float x, float z, float margin) {
   if (r.radius <= 0) return false;
   const float dx = x - r.center.x, dz = z - r.center.z;

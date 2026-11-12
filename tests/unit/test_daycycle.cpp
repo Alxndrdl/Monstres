@@ -12,7 +12,7 @@ using namespace monstres;
 TEST_CASE("an hour lasts a minute, a day 24 minutes, and a new game starts in the morning") {
   CHECK(rules::kTicksPerHour == 60u * 60u);
   CHECK(rules::kTicksPerDay == 24u * 60u * 60u);
-  World w = new_game(3);
+  World w = cached_game(3);
   CHECK(hour_of_day(w) == doctest::Approx(8.0f));
   run(w, Input{}, rules::kTicksPerHour);  // one minute
   CHECK(hour_of_day(w) == doctest::Approx(9.0f));
@@ -22,13 +22,14 @@ TEST_CASE("an hour lasts a minute, a day 24 minutes, and a new game starts in th
 }
 
 TEST_CASE("the time of day is saved") {
-  World w = new_game(3);
+  World w = cached_game(3);
   w.clock = 22 * rules::kTicksPerHour + 5;
   const auto loaded = deserialize(serialize(w));
   REQUIRE(loaded.has_value());
   CHECK(loaded->clock == w.clock);
   std::vector<uint8_t> bytes = serialize(w);
-  bytes[bytes.size() - 2] = 0xff;  // past the end of the day (the clock, before the active member)
+  // Past the end of the day: the clock's last byte, before the active member, the next id and the squares.
+  bytes[bytes.size() - 1 - (1 + 4 + 1 + 3 * kPopulationCellCount)] = 0xff;
   CHECK_FALSE(deserialize(bytes).has_value());
 }
 
@@ -50,7 +51,7 @@ TEST_CASE("the sky: bright by day, dark at night, the sun up by day and the moon
 }
 
 TEST_CASE("at night the lanterns, the staff and glowing monsters give light") {
-  World w = new_game(42);
+  World w = cached_game(42);
   PointLight lights[kMaxPointLights];
   CHECK(world_lights(w, 0, 0, 0, 0, lights) == 0);  // by day: none
   const bool has_lamp = std::any_of(w.objects.begin(), w.objects.end(), [](const Object& o) { return o.kind == ObjectKind::Lamp; });
@@ -74,7 +75,7 @@ TEST_CASE("at night the lanterns, the staff and glowing monsters give light") {
   slime.species = Species::Slime;
   slime.genes.allele[3] = 2;  // antennae
   slime.body.pos = {3, 0, 3};
-  one.creatures.push_back(slime);
+  add_creature(one, slime);
   CHECK(world_lights(one, 0, 0, 1, 0, lights) == 2);  // the staff, the slime
   one.creatures[0].genes.allele[3] = 0;
   CHECK(world_lights(one, 0, 0, 1, 0, lights) == 1);

@@ -44,9 +44,16 @@ std::string map_json(const World& world);
 // three attacks (identifier, shape, element, power, cooldown in seconds).
 std::string team_json(const World& world);
 
-// The battle going on ("phase": "fight", "flee" or "none"), with both sides
-// (hit points, state, cooldowns left in seconds, last hits) and whether the
-// enemy can be captured; and how the last battle ended ("outcome").
+// The battle going on ("phase": "fight", "flee", "training" or "none"),
+// with both sides (hit points, state, cooldowns left in seconds, last
+// hits; when training the magician's shield) and whether the enemy can be
+// captured; and how the last battle ended ("outcome"), with the experience
+// each team member earned ("gains": levels and experience before and after).
 std::string battle_json(const World& world);
+
+// What a signpost (objects[index]) shows: where the places of the world
+// are from it ("places": zone, offset dx/dz in meters, distance), the
+// nearest first. "null" if it is not a signpost.
+std::string sign_json(const World& world, int index);
 
 }  // namespace monstres

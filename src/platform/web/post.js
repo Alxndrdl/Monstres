@@ -107,6 +107,11 @@ window.monstres = {
   // Team bar (web/team.js): team member `slot` out of the crystal, where the
   // companion is (it goes back in); the one already out goes back in.
   summon: (slot) => _monstres_command(4, slot),
+  // Team sheet (web/menu.js): let team[slot] go back to the wild.
+  release: (slot) => _monstres_command(5, slot),
+  // Context menu on the companion: train against the magician (stopTraining ends it).
+  train: () => _monstres_command(6, 0),
+  stopTraining: () => _monstres_command(2, 0),
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),
   holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),
@@ -123,6 +128,17 @@ window.monstres = {
     return _monstres_pick(x, y);
   },
   select: (index) => _monstres_select(index),
+  // The signpost at a point of the canvas (CSS pixels): its index, or -1; and what it says.
+  pickSign: (clientX, clientY) => {
+    const rect = Module.canvas.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const y = 1 - ((clientY - rect.top) / rect.height) * 2;
+    return _monstres_pick_sign(x, y);
+  },
+  sign: (index) => JSON.parse(UTF8ToString(_monstres_sign_json(index))),
+  // Frame profiler (settings menu): where the time of the frames goes, every half second.
+  setProfiling: (on) => _monstres_set_profiling(on ? 1 : 0),
+  profile: () => JSON.parse(UTF8ToString(_monstres_profile_json())),
 
   // Game menus (web/menu.js).
   setPaused: (paused) => _monstres_set_paused(paused ? 1 : 0),
@@ -164,6 +180,8 @@ window.monstres = {
   state: () => JSON.parse(UTF8ToString(_monstres_state_json())),
   // Runs ticks with the current input; useful with ?frozen in tests.
   step: (ticks = 1) => _monstres_debug_step(ticks),
+  // Debug: the player (and its companion) at (x, z).
+  teleport: (x, z) => _monstres_debug_teleport(x, z),
   saveNow: () => {
     _monstres_save_now();
     return monstresSync();

@@ -689,9 +689,52 @@ void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body) {
   }
 }
 
+// Turns what was added to the list since `before` around `pivot` by `q`, then lifts it.
+void turn_added(DrawList& list, const std::array<size_t, kMeshCount>& before, Vec3 pivot, Quat q, float lift) {
+  for (size_t m = 0; m < kMeshCount; ++m) {
+    auto& batch = list.batches[m];
+    for (size_t i = before[m]; i < batch.size(); ++i) {
+      Instance& in = batch[i];
+      float x = in.x - pivot.x, y = in.y - pivot.y, z = in.z - pivot.z;
+      rotate(q, x, y, z);
+      in.x = pivot.x + x;
+      in.y = pivot.y + y + lift;
+      in.z = pivot.z + z;
+      in.rotation = q * in.rotation;
+    }
+  }
+}
+
+// Knocked out: lying on its side (a fish belly up), eyes shut, stars turning above.
+void lie_knocked_out(DrawList& list, const std::array<size_t, kMeshCount>& before, const Creature& c, float time) {
+  const BodyShape& shape = species_info(c.species).shape;
+  const bool fish = c.species == Species::Fish;
+  const Quat roll = quat_axis(c.body.facing_x, 0, c.body.facing_z, fish ? kTau / 2 : kTau / 4);
+  turn_added(list, before, c.body.pos, roll, fish ? shape.height * 0.9f : shape.half_width * 0.85f);
+  const float top = c.body.pos.y + (fish ? shape.height : shape.half_width * 2.0f) + 0.25f;
+  for (int k = 0; k < 3; ++k) {
+    const float a = time * 3 + kTau * static_cast<float>(k) / 3;
+    Instance star;
+    star.x = c.body.pos.x + std::cos(a) * 0.3f;
+    star.y = top + 0.05f * std::sin(time * 4 + static_cast<float>(k));
+    star.z = c.body.pos.z + std::sin(a) * 0.3f;
+    star.sx = star.sy = star.sz = 0.07f;
+    star.rotation = quat_yaw(a);
+    star.tint = {2.0f, 1.9f, 0.6f, 1};
+    star.material = kGlowing;
+    list.batches[static_cast<size_t>(MeshId::Sparkle)].push_back(star);
+  }
+}
+
 void add_characters(const World& w, float time, DrawList& list) {
   std::vector<PartPose> poses;
   pose_player(w.player, time, poses);
+  if (w.battle.phase == BattlePhase::Training) {
+    // The staff held out in front: it keeps the shield up.
+    poses[kArmR].rotation = quat_x(1.3f) * quat_z(0.12f);
+    const Quat arm = poses[kArmR].rotation;
+    poses[kStaff].rotation = Quat{-arm.x, -arm.y, -arm.z, arm.w} * quat_x(0.35f);
+  }
   add_rig(list, player_rig(), poses, w.player, kCrystalGlow, 1, kPlayerGlowSlot);
   add_body_shadow(w, w.player, kPlayerShape, 0.5f, list);
 
@@ -712,12 +755,23 @@ void add_characters(const World& w, float time, DrawList& list) {
       CreatureLook look = creature_look(c.species, c.genes);
       Body body = c.body;
       battle_pose(w, i, look, body);
-      if (i == 0 && w.came_out_tick > 0 && w.tick - w.came_out_tick < kSummonTicks) {
-        // Just summoned: it grows out of the light.
-        const float t = static_cast<float>(w.tick - w.came_out_tick) / kSummonTicks;
+      const bool released = i > 0 && c.id == w.released_id && w.released_tick > 0;
+      const uint64_t came_out = i == 0 ? w.came_out_tick : released ? w.released_tick : 0;
+      if (came_out > 0 && w.tick - came_out < kSummonTicks) {
+        // Just summoned (or let go): it grows out of the light.
+        const float t = static_cast<float>(w.tick - came_out) / kSummonTicks;
         materialize(look, creature_elements(c.species, c.genes).first, t);
       }
+      const bool knocked_out = c.mind == Mind::KnockedOut;
+      std::array<size_t, kMeshCount> before{};
+      if (knocked_out) {
+        for (size_t m = 0; m < kMeshCount; ++m) before[m] = list.batches[m].size();
+        for (size_t k = 0; k < look.count; ++k) {
+          if (is_eye(look.parts[k].mesh)) poses[k].scale.y = 0.12f;
+        }
+      }
       add_rig(list, look.rig(), poses, body, look.tints, rig_scale(c.species) * look.size, kMonsterGlowSlot);
+      if (knocked_out) lie_knocked_out(list, before, c, time);
       if (look.aura) {
         const BodyShape& shape = species_info(c.species).shape;
         add_aura(list, c.body, (shape.half_width * 1.5f + 0.1f) * look.size, shape.height * 1.2f * look.size,
@@ -799,6 +853,19 @@ void add_burst(DrawList& list, Vec3 at, Color color, float t, float radius) {
 void add_crystal_effects(const World& w, float time, DrawList& list) {
   const Vec3 crystal = crystal_position(w.player);
 
+  // Let go: out of the crystal one last time.
+  if (w.released_tick > 0 && w.tick - w.released_tick < kSummonTicks) {
+    const int index = find_creature(w, w.released_id);
+    if (index > 0) {
+      const Creature& c = w.creatures[static_cast<size_t>(index)];
+      const float t = static_cast<float>(w.tick - w.released_tick) / kSummonTicks;
+      const Color glow = element_glow(creature_elements(c.species, c.genes).first);
+      const float h = species_info(c.species).shape.height * 0.5f;
+      add_beam(list, crystal, {c.body.pos.x, c.body.pos.y + h, c.body.pos.z}, glow, 1 - t * t, time);
+      add_burst(list, {c.body.pos.x, c.body.pos.y + 0.1f, c.body.pos.z}, glow, t, 0.9f);
+    }
+  }
+
   // Summoned: the beam reaches where it appears.
   if (w.came_out_tick > 0 && w.tick - w.came_out_tick < kSummonTicks && w.active >= 0 && !w.creatures.empty()) {
     const Creature& c = w.creatures[0];
@@ -868,6 +935,7 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
   const auto offer = [&](float lx, float ly, float lz, float radius, Color color) {
     if (color.r + color.g + color.b < 0.01f) return;
     const float dx = lx - x, dz = lz - z;
+    if (dx * dx + dz * dz > kLightReach * kLightReach) return;  // too far to matter
     found.push_back({{lx, ly, lz, radius, color}, dx * dx + dz * dz});
   };
 
@@ -879,6 +947,20 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
 
   for (const Object& o : w.objects) {
     if (o.kind == ObjectKind::Lamp) offer(o.pos.x, o.pos.y + 2.2f, o.pos.z, 8.0f, scaled({1.0f, 0.68f, 0.32f, 1}, 1.5f * night));
+    // Crystals glow in the dark of the cave, and at night.
+    if (o.kind == ObjectKind::Crystal) {
+      const bool violet = o.variant % 2 == 0;
+      offer(o.pos.x, o.pos.y + 0.6f * o.size.x, o.pos.z, 3.0f + 3.0f * o.size.x,
+            scaled(violet ? Color{0.75f, 0.45f, 1.0f, 1} : Color{0.4f, 0.85f, 1.0f, 1}, 0.35f + 0.9f * night));
+    }
+    if (o.kind == ObjectKind::CastleGate) {  // its two torches
+      const SinCos sc = sincos16(o.yaw);
+      for (float side : {-1.9f, 1.9f}) {
+        const float lx = side, lz = -1.7f;
+        offer(o.pos.x + lx * sc.cos + lz * sc.sin, o.pos.y + 3.3f, o.pos.z - lx * sc.sin + lz * sc.cos, 7.0f,
+              scaled({1.0f, 0.62f, 0.28f, 1}, 1.4f * night));
+      }
+    }
   }
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     const Creature& c = w.creatures[i];

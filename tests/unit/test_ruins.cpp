@@ -20,7 +20,7 @@ size_t count(const World& w, ObjectKind kind) {
 TEST_CASE("the ruins stand beside the path, south of the start, with their tower") {
   for (uint64_t seed = 0; seed < 12; ++seed) {
     CAPTURE(seed);
-    const World w = new_game(seed);
+    const World& w = cached_game(seed);
     const RuinsLayout& r = w.ruins;
     REQUIRE(r.radius > 0);
     CHECK(r.center.z == Approx(rules::kRuinsZ));
@@ -48,7 +48,7 @@ TEST_CASE("the ruins stand beside the path, south of the start, with their tower
 }
 
 TEST_CASE("the tower's door faces the path, the courtyard opens towards it") {
-  const World w = new_game(5);
+  const World& w = cached_game(5);
   const Object& tower = *std::find_if(w.objects.begin(), w.objects.end(),
                                       [](const Object& o) { return o.kind == ObjectKind::Tower; });
   const SinCos sc = sincos16(tower.yaw);
@@ -66,16 +66,16 @@ TEST_CASE("the tower's door faces the path, the courtyard opens towards it") {
 }
 
 TEST_CASE("crows can land on the tower") {
-  const World w = new_game(3);
+  const World& w = cached_game(3);
   const auto perches = crow_perches(w);
   const size_t high = static_cast<size_t>(std::count_if(perches.begin(), perches.end(), [&](const Vec3& p) {
-    return p.y > w.ground.height(p.x, p.z) + 9;
+    return p.y > w.ground.height(p.x, p.z) + 9 && in_ruins(w.ruins, p.x, p.z);
   }));
   CHECK(high == 3);
 }
 
 TEST_CASE("places of the world are named") {
-  const World w = new_game(4);
+  const World& w = cached_game(4);
   CHECK(zone_at(w, w.village.center.x, w.village.center.z) == Zone::Village);
   CHECK(zone_at(w, w.village.lake.center.x, w.village.lake.center.z) == Zone::Lake);
   CHECK(zone_at(w, w.ruins.center.x, w.ruins.center.z) == Zone::Ruins);
@@ -86,7 +86,7 @@ TEST_CASE("places of the world are named") {
 }
 
 TEST_CASE("walking south along the path leads to the ruins") {
-  World w = new_game(7);
+  World w = cached_game(7);
   for (int i = 0; i < 12 * rules::kTicksPerSecond && zone_at(w, w.player.pos.x, w.player.pos.z) != Zone::Ruins; ++i) {
     // Steer towards the tower, like a player would.
     const float dx = w.ruins.center.x - w.player.pos.x, dz = w.ruins.center.z - w.player.pos.z;
@@ -97,7 +97,7 @@ TEST_CASE("walking south along the path leads to the ruins") {
 }
 
 TEST_CASE("the magician's name, level and experience are saved") {
-  World w = new_game(9);
+  World w = cached_game(9);
   w.wizard.name = "Élian l'Étoilé";
   w.wizard.level = 3;
   w.wizard.xp = 42;
@@ -150,7 +150,7 @@ TEST_CASE("every monster has stats, villagers are not monsters") {
 }
 
 TEST_CASE("the menus get their data as JSON") {
-  World w = new_game(11);
+  World w = cached_game(11);
   w.wizard.name = "Zoé \"la Brave\"";
   const std::string wiz = wizard_json(w);
   CHECK(wiz.find("\"name\":\"Zoé \\\"la Brave\\\"\"") != std::string::npos);  // quotes escaped
@@ -166,7 +166,10 @@ TEST_CASE("the menus get their data as JSON") {
   CHECK(best.find("\"count\":1}") != std::string::npos);  // the companion
 
   const std::string map = map_json(w);
-  CHECK(map.find("\"points\":201") != std::string::npos);
+  CHECK(map.find("\"points\":171") != std::string::npos);
+  CHECK(map.find("\"castle\":{") != std::string::npos);
+  CHECK(map.find("\"cave\":{") != std::string::npos);
+  CHECK(map.find("\"forest\":{") != std::string::npos);
   CHECK(map.find("\"ruins\":{") != std::string::npos);
   CHECK(map.find("[\"tower\",") != std::string::npos);
   CHECK(map.find("\"lake\":{") != std::string::npos);

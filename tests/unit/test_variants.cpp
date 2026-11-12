@@ -153,7 +153,7 @@ TEST_CASE("elements: two for the crow, another one in the elemental form") {
 }
 
 TEST_CASE("the companion's variants are captured from the start, the others are discovered when close") {
-  World w = new_game(42);
+  World w = cached_game(42);
   const auto& companion = w.dex[static_cast<size_t>(Species::Companion)];
   for (size_t i = 0; i < variant_count(Species::Companion); ++i) {
     CHECK(companion[i] == (has_variant(Species::Companion, Genes{}, i) ? Discovery::Captured : Discovery::Unknown));
@@ -204,7 +204,7 @@ TEST_CASE("the companion's variants are captured from the start, the others are 
 }
 
 TEST_CASE("step discovers the monsters within 20 m") {
-  World w = new_game(42);
+  World w = cached_game(42);
   step(w, Input{});
   for (const Creature& c : w.creatures) {
     if (!monster_stats(c.species).is_monster) continue;
@@ -217,16 +217,19 @@ TEST_CASE("step discovers the monsters within 20 m") {
 }
 
 TEST_CASE("genes and discoveries are saved") {
-  World w = new_game(7);
-  w.creatures[3].genes = {{1, 1, 1, 0}, true, false};
-  capture(w, 3);
+  World w = cached_game(7);
+  size_t slime = 1;
+  while (slime < w.creatures.size() && w.creatures[slime].species != Species::Slime) ++slime;
+  REQUIRE(slime < w.creatures.size());
+  w.creatures[slime].genes = {{1, 1, 1, 0}, true, false};
+  capture(w, slime);
   const auto loaded = deserialize(serialize(w));
   REQUIRE(loaded.has_value());
   CHECK(*loaded == w);
 
   // A gene out of range is refused.
   World bad = w;
-  bad.creatures[3].genes.allele[0] = 3;
+  bad.creatures[slime].genes.allele[0] = 3;
   CHECK_FALSE(deserialize(serialize(bad)).has_value());
 }
 

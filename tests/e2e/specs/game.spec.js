@@ -9,12 +9,16 @@ test('the game starts in a 3D world', async ({ page }) => {
   expect(s.tick).toBe(0);
   expect(s.player).toMatchObject({ x: 0, z: 0, onGround: true });
   expect(s.player.y).toBe(s.player.ground);  // standing on the hills
-  expect(s.objects).toBeGreaterThan(150);  // nature + village
+  expect(s.objects).toBeGreaterThan(1500);  // nature, village, ruins, castle, cave
   expect(s.creatures[0].species).toBe('companion');
   const bySpecies = {};
   for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
-  expect(bySpecies).toMatchObject({ companion: 1, villager: 8, crow: 5, fish: 4 });
-  expect(bySpecies.slime + bySpecies.mushroom + bySpecies.bird).toBe(40);
+  expect(bySpecies).toMatchObject({ companion: 1, villager: 8 });
+  expect(bySpecies.crow).toBeGreaterThan(0);
+  expect(bySpecies.fish).toBeGreaterThan(0);
+  // Wild monsters only around the player (the rest of the world is empty until it goes there).
+  expect(bySpecies.slime + bySpecies.mushroom + bySpecies.bird).toBeGreaterThan(15);
+  expect(bySpecies.slime + bySpecies.mushroom + bySpecies.bird).toBeLessThan(80);
   await expect(page.locator('#message')).toBeHidden();
 });
 
@@ -441,8 +445,28 @@ test.describe('grimoire', () => {
 });
 
 test.describe('battles', () => {
-  // Seed 42: a bird (creature 3) pecks about 10 m from the start.
-  const BIRD = 3;
+  // Seed 42: the nearest bird pecks about 10 m from the start.
+  let BIRD = -1;
+  test.beforeEach(async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    BIRD = await page.evaluate(() => {
+      const s = window.monstres.state();
+      let best = -1;
+      let bestDistance = 1e9;
+      s.creatures.forEach((c, i) => {
+        const d = Math.hypot(c.x - s.player.x, c.z - s.player.z);
+        if (c.species === 'bird' && d < bestDistance) { best = i; bestDistance = d; }
+      });
+      // A few steps from it (birds run away from closer).
+      const b = s.creatures[best];
+      if (bestDistance > 10) {
+        window.monstres.teleport(b.x + 6, b.z + 6);
+        window.monstres.step(1);
+      }
+      return best;
+    });
+    expect(BIRD).toBeGreaterThan(0);
+  });
   async function lookAtBird(page) {
     await page.evaluate((i) => {
       const s = window.monstres.state();
@@ -452,7 +476,6 @@ test.describe('battles', () => {
   }
 
   test('the context menu starts a battle; the battle buttons replace the jump', async ({ page }) => {
-    await openGame(page, '?seed=42&new&frozen');
     await expect(page.locator('#context')).toBeHidden();
     await lookAtBird(page);
     const at = await page.evaluate((i) => window.monstres.creatureOnScreen(i), BIRD);
@@ -490,7 +513,6 @@ test.describe('battles', () => {
   });
 
   test('the team bar recalls the companion into the crystal and summons it back', async ({ page }) => {
-    await openGame(page, '?seed=42&new&frozen');
     const icon = page.locator('.team-icon[data-slot="0"]');
     await expect(page.locator('.team-icon')).toHaveCount(1);
     await expect(icon).toHaveAttribute('aria-pressed', 'true');
@@ -499,12 +521,8 @@ test.describe('battles', () => {
     expect((await state(page)).active).toBe(-1);
     expect(await page.evaluate(() => window.monstres.pick(...Object.values(window.monstres.creatureOnScreen(0) || { x: 0, y: 0 })))).not.toBe(0);
     // Without a companion out, no battle.
-    await page.evaluate(() => {
-      const s = window.monstres.state();
-      const c = s.creatures[3];
-      window.monstres.setCamera(Math.atan2(-(c.x - s.player.x), -(c.z - s.player.z)), 0.35);
-    });
-    const at = await page.evaluate(() => window.monstres.creatureOnScreen(3));
+    await lookAtBird(page);
+    const at = await page.evaluate((i) => window.monstres.creatureOnScreen(i), BIRD);
     await page.mouse.click(at.x, at.y);
     await expect(page.locator('#action-fight')).toBeDisabled();
     await expect(page.locator('#context .context-note')).toContainText('Invoque');
@@ -514,8 +532,7 @@ test.describe('battles', () => {
     await expect(page.locator('#action-fight')).toBeEnabled();
   });
 
-  test('a weakened monster is captured and joins the team', async ({ page }) => {
-    await openGame(page, '?seed=42&new&frozen');
+  test('a weakened monster is captured and joins the team, and can be let go', async ({ page }) => {
     await page.evaluate((i) => window.monstres.engage(i), BIRD);
     // Fight until it is weak enough (or beaten: then try again).
     const result = await page.evaluate(() => {
@@ -525,7 +542,9 @@ test.describe('battles', () => {
         if (b.phase !== 'fight') return b.outcome.result;
         if (b.capture === 'ok') return 'weak';
         m.input.move(0, b.enemy.hp * 4 > b.enemy.maxHp ? 1 : 0);
-        if (b.enemy.hp * 3 > b.enemy.maxHp) m.input.attack(1);
+        if (b.enemy.fighter.state === 'windup') m.input.parry();  // its attacks are shown first
+        else if (b.enemy.hp * 2 > b.enemy.maxHp && b.ally.fighter.cooldowns[1] === 0) m.input.attack(2);
+        else if (b.enemy.hp * 3 > b.enemy.maxHp) m.input.attack(1);
         m.step(4);
       }
       return 'timeout';
@@ -534,6 +553,10 @@ test.describe('battles', () => {
     await expect(page.locator('#action-capture')).toBeEnabled();
     await page.locator('#action-capture').click();
     await expect(page.locator('#battle-banner')).toContainText('Piou capturé');
+    // The experience Pompon earned, on its bar.
+    await expect(page.locator('#battle-banner .xp-card')).toHaveCount(1);
+    await expect(page.locator('#battle-banner .xp-card')).toContainText('Pompon');
+    await expect(page.locator('#battle-banner .xp-gain')).toContainText('XP');
     await expect(page.locator('.fighter.enemy')).toBeHidden();
 
     // The team bar: Pompon is out; the bird takes its place, then goes back in.
@@ -562,5 +585,128 @@ test.describe('battles', () => {
     await expect(page.locator('#team-detail h2')).toHaveText('Pompon');
     await expect(page.locator('#team-detail')).toContainText('Boule de braise');
     await expect(page.locator('#team-detail')).toContainText('Niveau 3');
+
+    // Letting the bird go: asked twice; it comes out of the crystal and leaves.
+    await page.locator('#team-list li').nth(1).locator('button').click();
+    await page.locator('#release').click();
+    await expect(page.locator('#release-confirm')).toContainText('Piou');
+    const before = (await state(page)).creatures.length;
+    await page.locator('#release-confirm').click();
+    await expect(page.locator('#game-menu')).toBeHidden();
+    await page.evaluate(() => window.monstres.step(2));
+    await expect(page.locator('.team-icon')).toHaveCount(1);
+    const after = await state(page);
+    expect(after.creatures.length).toBe(before + 1);
+    expect(after.creatures[after.creatures.length - 1].species).toBe('bird');
+    // Pompon alone cannot be let go.
+    await page.keyboard.press('e');
+    await expect(page.locator('#release')).toHaveCount(0);
+    await expect(page.locator('#team-detail .release-box')).toContainText('seul monstre');
+  });
+
+  test('a beaten monster lies knocked out; the victory shows the experience', async ({ page }) => {
+    await page.evaluate((i) => window.monstres.engage(i), BIRD);
+    const result = await page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 0; i < 600; i++) {
+        const b = m.battle();
+        if (b.phase !== 'fight') return b.outcome.result;
+        m.input.move(0, 1);
+        m.input.attack(1 + (i % 3));
+        m.step(4);
+      }
+      return 'timeout';
+    });
+    expect(result).toBe('victory');
+    await expect(page.locator('#battle-banner')).toContainText('Victoire');
+    await expect(page.locator('#battle-banner .xp-card')).toHaveCount(1);
+    const outcome = (await page.evaluate(() => window.monstres.battle())).outcome;
+    expect(outcome.gains[0].xp).toBeGreaterThan(0);
+    expect((await state(page)).creatures[BIRD].mind).toBe('knockedOut');
+    await page.evaluate((i) => window.monstres.select(i), BIRD);
+    expect((await page.evaluate(() => window.monstres.selected())).engage).toBe('knockedOut');
+  });
+
+  test('training: the companion attacks the magician, who shields itself', async ({ page }) => {
+    await page.evaluate(() => { window.monstres.setCamera(Math.PI, 0.3); window.monstres.step(30); });
+    const at = await page.evaluate(() => window.monstres.creatureOnScreen(0));
+    await page.mouse.click(at.x, at.y);
+    await expect(page.locator('#action-train')).toBeEnabled();
+    await page.locator('#action-train').click();
+    await page.evaluate(() => window.monstres.step(1));
+    expect((await page.evaluate(() => window.monstres.battle())).phase).toBe('training');
+    await expect(page.locator('#attack-1')).toBeVisible();
+    await expect(page.locator('.fighter.enemy')).toBeHidden();  // no hit points: no one is hurt
+    const hp = (await page.evaluate(() => window.monstres.team()))[0].hp;
+    await page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 0; i < 12; i++) {
+        m.input.move(0, 1);
+        m.step(6);
+        m.input.move(0, 0);
+        m.input.attack(1);
+        m.step(4);
+      }
+    });
+    const b = await page.evaluate(() => window.monstres.battle());
+    expect(b.shield.parriedTick).toBeGreaterThan(0);
+    expect(b.shield.lastDamage).toBeGreaterThan(0);
+    expect((await page.evaluate(() => window.monstres.team()))[0].hp).toBe(hp);
+    await page.locator('#action-stop').click();
+    await page.evaluate(() => window.monstres.step(1));
+    expect((await page.evaluate(() => window.monstres.battle())).phase).toBe('none');
+    await expect(page.locator('#attack-1')).toBeHidden();
+  });
+});
+
+test.describe('the bigger world', () => {
+  test('a signpost of the village says where the places are', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const sign = await page.evaluate(() => window.monstres.map().objects.find((o) => o[0] === 'sign'));
+    await page.evaluate(([x, z]) => {
+      window.monstres.teleport(x, z + 4);
+      window.monstres.setCamera(0, 0.25);
+      window.monstres.step(2);
+    }, [sign[1], sign[2]]);
+    const at = await page.evaluate(() => {
+      for (let y = 60; y < 560; y += 6) {
+        for (let x = 60; x < 760; x += 6) if (window.monstres.pickSign(x, y) >= 0) return { x, y };
+      }
+      return null;
+    });
+    expect(at).not.toBeNull();
+    await page.mouse.click(at.x, at.y);
+    await expect(page.locator('#sign')).toBeVisible();
+    await expect(page.locator('#sign .sign-title')).toHaveText('Bienvenue au village !');
+    await expect(page.locator('#sign')).toContainText('Château de Corbeval');
+    await expect(page.locator('#sign')).toContainText('Grotte aux Cristaux');
+    await page.locator('#sign-close').click();
+    await expect(page.locator('#sign')).toBeHidden();
+  });
+
+  test('far from the start, the monsters of the start are gone, others live there', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const near = (s) => s.creatures.filter((c, i) => i > 0 && ['slime', 'mushroom', 'bird'].includes(c.species) &&
+      Math.hypot(c.x, c.z) < 18).length;
+    expect(near(await state(page))).toBeGreaterThan(1);
+    const castle = await page.evaluate(() => window.monstres.map().castle);
+    await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(31); }, [castle.x, castle.z]);
+    const far = await state(page);
+    expect(near(far)).toBe(0);
+    expect(far.player.zone).toBe('castle');
+    expect(far.creatures.filter((c) => Math.hypot(c.x - far.player.x, c.z - far.player.z) < 60).length).toBeGreaterThan(3);
+  });
+
+  test('the frame detail shows where the time goes', async ({ page }) => {
+    await openGame(page, '?seed=42&new');
+    await page.locator('#settings-button').click();
+    await page.locator('#show-fps').check();
+    await page.locator('#show-profile').check();
+    await expect(page.locator('#fps .profile-section').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('#fps')).toContainText('Logique du jeu');
+    await expect(page.locator('#fps')).toContainText('Triangles');
+    const p = await page.evaluate(() => window.monstres.profile());
+    expect(p.triangles).toBeGreaterThan(1000);
+    expect(p.drawCalls).toBeGreaterThan(10);
   });
 });

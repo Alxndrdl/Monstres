@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <span>
+#include <tuple>
 #include <utility>
 
 namespace monstres {
@@ -33,9 +34,19 @@ ObjectKind pick_kind(Rng& rng) {
   return ObjectKind::Crate;
 }
 
-Object random_object(Rng& rng, float x, float z) {
+// In the forest: mostly trees.
+ObjectKind pick_forest_kind(Rng& rng) {
+  const uint32_t r = rng.below(100);
+  if (r < 46) return ObjectKind::Tree;
+  if (r < 83) return ObjectKind::Pine;
+  if (r < 90) return ObjectKind::Bush;
+  if (r < 95) return ObjectKind::Log;
+  return ObjectKind::Stump;
+}
+
+Object random_object(Rng& rng, float x, float z, bool forest = false) {
   Object o;
-  o.kind = pick_kind(rng);
+  o.kind = forest ? pick_forest_kind(rng) : pick_kind(rng);
   o.pos = {x, 0, z};
   switch (o.kind) {
     case ObjectKind::Tree: {
@@ -94,52 +105,107 @@ Box footprint(const Object& o) {
   return b;
 }
 
+// Footprints of placed objects, by cells of a grid: a new object is tested
+// against its neighbours only.
+class PlacementGrid {
+public:
+  static constexpr float kCell = 8.0f;
+  static constexpr float kHalf = rules::kWorldHalfSize + 8.0f;
+  static constexpr int kCells = static_cast<int>(2 * kHalf / kCell) + 1;
+
+  explicit PlacementGrid(const std::vector<Object>& objects) : cells_(static_cast<size_t>(kCells * kCells)) {
+    for (const Object& o : objects) add(o);
+  }
+  void add(const Object& o) {
+    const Box b = footprint(o);
+    each_cell(b, [&](std::vector<Box>& cell) { cell.push_back(b); });
+  }
+  bool overlaps_any(const Box& b) {
+    bool hit = false;
+    each_cell(b, [&](std::vector<Box>& cell) {
+      hit = hit || std::any_of(cell.begin(), cell.end(), [&](const Box& other) { return overlaps(b, other); });
+    });
+    return hit;
+  }
+
+private:
+  static int cell_of(float v) { return std::clamp(static_cast<int>((v + kHalf) / kCell), 0, kCells - 1); }
+  template <typename F>
+  void each_cell(const Box& b, F f) {
+    for (int i = cell_of(b.min.x); i <= cell_of(b.max.x); ++i) {
+      for (int j = cell_of(b.min.z); j <= cell_of(b.max.z); ++j) f(cells_[static_cast<size_t>(i * kCells + j)]);
+    }
+  }
+  std::vector<std::vector<Box>> cells_;
+};
+
+// Whether (x, z) belongs to a place built by hand (no random trees or rocks there).
+bool in_a_place(const World& w, float x, float z) {
+  return in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.5f) || in_ruins(w.ruins, x, z, 2.0f) ||
+         in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f);
+}
+
 void generate_objects(World& w) {
   const float limit = rules::kWorldHalfSize - 3.0f;
   const float gap = rules::kObjectGap;
-  uint32_t nature = 0;  // the village is already there
-  for (int attempt = 0; attempt < 50000 && nature < rules::kObjectCount; ++attempt) {
-    const float x = random_range(w.rng, -limit, limit);
-    const float z = random_range(w.rng, -limit, limit);
-    const Object o = random_object(w.rng, x, z);
-
-    // Keep the spawn area clear.
-    const Box b = footprint(o);
-    const float dx = std::max({b.min.x, -b.max.x, 0.0f});
-    const float dz = std::max({b.min.z, -b.max.z, 0.0f});
-    if (dx * dx + dz * dz < rules::kSpawnClearRadius * rules::kSpawnClearRadius) continue;
-
-    // Not on a slope too steep for its size (a flat rock would float).
-    if (!w.ground.empty()) {
-      const Box box = object_box(o);
-      const float center = w.ground.height(o.pos.x, o.pos.z);
-      float lowest = center;
-      for (float cx : {box.min.x, box.max.x}) {
-        for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+  PlacementGrid grid(w.objects);
+  // First everywhere, then more trees in the forest.
+  const struct {
+    uint32_t count;
+    int attempts;
+    bool forest;
+  } passes[] = {{rules::kObjectCount, 60000, false}, {rules::kForestTrees, 30000, true}};
+  for (const auto& pass : passes) {
+    if (pass.forest && w.forest.radius_x <= 0) continue;
+    uint32_t nature = 0;  // the village is already there
+    for (int attempt = 0; attempt < pass.attempts && nature < pass.count; ++attempt) {
+      float x = random_range(w.rng, -limit, limit);
+      float z = random_range(w.rng, -limit, limit);
+      if (pass.forest) {  // somewhere in the forest's ellipse
+        const float u = random_range(w.rng, -1, 1), v = random_range(w.rng, -1, 1);
+        x = std::clamp(w.forest.center.x + u * w.forest.radius_x, -limit, limit);
+        z = std::clamp(w.forest.center.z + v * w.forest.radius_z, -limit, limit);
+        if (!in_forest(w.forest, x, z)) continue;
       }
-      if (center - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
-    }
+      Object o = random_object(w.rng, x, z, pass.forest);
+      if (pass.forest && (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine) && w.rng.below(60) == 0) {
+        o.size = o.size * 1.7f;  // an old giant
+      }
 
-    // Keep the village, the lake and the ruins clear.
-    if (in_village(w.village, o.pos.x, o.pos.z, 2.0f) || in_lake(w.village.lake, o.pos.x, o.pos.z, 2.5f) ||
-        in_ruins(w.ruins, o.pos.x, o.pos.z, 2.0f)) {
-      continue;
-    }
+      // Keep the spawn area clear.
+      const Box b = footprint(o);
+      const float dx = std::max({b.min.x, -b.max.x, 0.0f});
+      const float dz = std::max({b.min.z, -b.max.z, 0.0f});
+      if (dx * dx + dz * dz < rules::kSpawnClearRadius * rules::kSpawnClearRadius) continue;
 
-    // Keep the path clear.
-    const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
-    const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
-    if (distance_to_path(w.path, o.pos.x, o.pos.z, keep_off + 1) < keep_off) continue;
+      // Not on a slope too steep for its size (a flat rock would float).
+      if (!w.ground.empty()) {
+        const Box box = object_box(o);
+        const float center = w.ground.height(o.pos.x, o.pos.z);
+        float lowest = center;
+        for (float cx : {box.min.x, box.max.x}) {
+          for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+        }
+        if (center - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
+      }
 
-    // Keep a gap between objects so the player can always walk between them.
-    Box wide = b;
-    wide.min = wide.min - Vec3{gap, 0, gap};
-    wide.max = wide.max + Vec3{gap, 0, gap};
-    const bool collides = std::any_of(w.objects.begin(), w.objects.end(),
-                                      [&](const Object& other) { return overlaps(wide, footprint(other)); });
-    if (!collides) {
-      w.objects.push_back(o);
-      ++nature;
+      // Keep the village, the lake, the ruins, the castle and the cave clear.
+      if (in_a_place(w, o.pos.x, o.pos.z)) continue;
+
+      // Keep the path clear.
+      const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
+      const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
+      if (distance_to_path(w.path, o.pos.x, o.pos.z, keep_off + 1) < keep_off) continue;
+
+      // Keep a gap between objects so the player can always walk between them.
+      Box wide = b;
+      wide.min = wide.min - Vec3{gap, 0, gap};
+      wide.max = wide.max + Vec3{gap, 0, gap};
+      if (!grid.overlaps_any(wide)) {
+        w.objects.push_back(o);
+        grid.add(o);
+        ++nature;
+      }
     }
   }
 }
@@ -529,9 +595,12 @@ void step_crow(World& w, const std::vector<Vec3>& perches, Creature& c) {
   const float horizontal = std::min(step, d);
   b.pos.x += dir_x * horizontal;
   b.pos.z += dir_z * horizontal;
-  const float wanted_y = d > 2.5f ? c.target_y + 3.0f : c.target_y;
+  // Over the hills, never through them.
+  const float floor = w.ground.height(b.pos.x, b.pos.z);
+  const float wanted_y = d > 2.5f ? std::max(c.target_y, floor) + 3.0f : c.target_y;
   const float climb = 3.0f * rules::kDt;
   b.pos.y += std::clamp(wanted_y - b.pos.y, -climb, climb);
+  b.pos.y = std::max(b.pos.y, floor);
   if (d > 0) {
     b.facing_x = dir_x;
     b.facing_z = dir_z;
@@ -619,87 +688,221 @@ const SpeciesInfo& species_info(Species species) {
   return kSpecies[i < static_cast<size_t>(Species::Count) ? i : 0];
 }
 
+namespace {
+
+// Levels of the wild monsters, by where they live (stronger far from the start).
+uint8_t level_in(Zone zone, Rng& rng) {
+  uint8_t base = 1;
+  switch (zone) {
+    case Zone::Forest: base = 2; break;
+    case Zone::Ruins: base = 3; break;
+    case Zone::Cave: base = 4; break;
+    case Zone::Castle: base = 5; break;
+    default: break;
+  }
+  return static_cast<uint8_t>(base + rng.below(3));
+}
+
+// Which monster lives in a zone (birds, slimes and mushrooms; crows and fish have their own places).
+Species species_in(Zone zone, Rng& rng) {
+  const uint32_t r = rng.below(100);
+  switch (zone) {
+    case Zone::Forest: return r < 50 ? Species::Mushroom : r < 80 ? Species::Bird : Species::Slime;
+    case Zone::Cave: return r < 60 ? Species::Slime : Species::Mushroom;
+    case Zone::Castle: return r < 45 ? Species::Bird : r < 75 ? Species::Slime : Species::Mushroom;
+    default: return r < 34 ? Species::Slime : r < 67 ? Species::Mushroom : Species::Bird;
+  }
+}
+
+// Chances (out of 100) that a try puts a monster there.
+uint32_t density_in(Zone zone) {
+  switch (zone) {
+    case Zone::Village: return 0;  // villagers only
+    case Zone::Lake: return 0;     // fish, see below
+    case Zone::Meadow: return 35;
+    default: return 50;
+  }
+}
+
+Box cell_rect(int index, float& x0, float& z0) {
+  const int i = index / rules::kPopulationCells, j = index % rules::kPopulationCells;
+  x0 = -rules::kWorldHalfSize + rules::kPopulationCell * static_cast<float>(i);
+  z0 = -rules::kWorldHalfSize + rules::kPopulationCell * static_cast<float>(j);
+  return {{x0, 0, z0}, {x0 + rules::kPopulationCell, 0, z0 + rules::kPopulationCell}};
+}
+
+int cell_index(float x, float z) {
+  const int n = rules::kPopulationCells;
+  const int i = std::clamp(static_cast<int>((x + rules::kWorldHalfSize) / rules::kPopulationCell), 0, n - 1);
+  const int j = std::clamp(static_cast<int>((z + rules::kWorldHalfSize) / rules::kPopulationCell), 0, n - 1);
+  return i * n + j;
+}
+
+float distance_to_rect(const Box& r, float x, float z) {
+  const float dx = std::max({r.min.x - x, 0.0f, x - r.max.x});
+  const float dz = std::max({r.min.z - z, 0.0f, z - r.max.z});
+  return std::sqrt(dx * dx + dz * dz);
+}
+
+bool near_player(const World& w, float x, float z, float distance) {
+  const float dx = x - w.player.pos.x, dz = z - w.player.pos.z;
+  return dx * dx + dz * dz < distance * distance;
+}
+
+// The wild monsters of one square, new ones every time it is lived in again.
+void populate_cell(World& w, int index) {
+  float x0, z0;
+  cell_rect(index, x0, z0);
+  const auto k = static_cast<size_t>(index);
+  Rng rng(w.seed ^ 0x504F50554C415445ULL, static_cast<uint64_t>(index) * 65536u + w.population.visits[k]);
+  const float limit = rules::kWorldHalfSize - 3.0f;
+  auto random_in_cell = [&](float& x, float& z) {
+    x = random_range(rng, x0, x0 + rules::kPopulationCell);
+    z = random_range(rng, z0, z0 + rules::kPopulationCell);
+  };
+  auto finish = [&](Creature& c, Zone zone) {
+    c.home = {c.body.pos.x, c.body.pos.z};
+    c.genes = genetics(c.species).gene_count > 0 ? roll_genes(c.species, zone, rng) : Genes{};
+    c.level = level_in(zone, rng);
+    c.variant = static_cast<uint8_t>(rng.below(256));
+    add_creature(w, c);
+  };
+
+  // Birds, slimes and mushrooms, on the ground.
+  for (int attempt = 0; attempt < 12; ++attempt) {
+    float x, z;
+    random_in_cell(x, z);
+    const Zone zone = zone_at(w, x, z);
+    const uint32_t roll = rng.below(100);
+    const Species species = species_in(zone, rng);
+    const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
+    const uint16_t timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
+    if (roll >= density_in(zone) || std::fabs(x) > limit || std::fabs(z) > limit) continue;
+    if (near_player(w, x, z, rules::kMonsterSpawnMinDistance)) continue;
+    if (in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 1.0f)) {
+      continue;
+    }
+    Creature c;
+    c.species = species;
+    c.body.pos = {x, w.ground.height(x, z), z};
+    c.body.facing_x = sc.sin;
+    c.body.facing_z = sc.cos;
+    c.timer = timer;
+    if (inside_any_object(w, c.body, species_info(species).shape)) continue;
+    finish(c, zone);
+  }
+
+  // Fish, where the lake is (tries all over it: some fall in this square).
+  const Lake& lake = w.village.lake;
+  for (int attempt = 0, fish = 0; lake.radius_x > 0 && attempt < 10 && fish < 3; ++attempt) {
+    const float x = random_range(rng, lake.center.x - lake.radius_x, lake.center.x + lake.radius_x);
+    const float z = random_range(rng, lake.center.z - lake.radius_z, lake.center.z + lake.radius_z);
+    const uint16_t timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
+    if (cell_index(x, z) != index || !in_lake(lake, x, z, -1.5f) || near_player(w, x, z, 3.0f)) continue;
+    Creature c;
+    c.species = Species::Fish;
+    c.body.pos = {x, rules::kSwimLevel, z};
+    c.timer = timer;
+    finish(c, Zone::Lake);
+    ++fish;
+  }
+
+  // Crows, on the roofs and towers of the square.
+  int crows = 0;
+  for (const Vec3& perch : crow_perches(w)) {
+    if (cell_index(perch.x, perch.z) != index || crows >= 3) continue;
+    const bool here = rng.below(100) < 40;
+    const uint16_t timer = static_cast<uint16_t>(3 * rules::kTicksPerSecond + rng.below(8 * rules::kTicksPerSecond));
+    if (!here || near_player(w, perch.x, perch.z, 6.0f)) continue;
+    Creature c;
+    c.species = Species::Crow;
+    c.body.pos = perch;
+    c.target = {perch.x, perch.z};
+    c.target_y = perch.y;
+    c.timer = timer;
+    finish(c, zone_at(w, perch.x, perch.z));  // home: where it was born (its variants), not where it goes
+    ++crows;
+  }
+}
+
+}  // namespace
+
+size_t add_creature(World& w, Creature c) {
+  c.id = w.next_id++;
+  w.creatures.push_back(c);
+  return w.creatures.size() - 1;
+}
+
+void remove_creature(World& w, size_t index) {
+  if (index == 0 || index >= w.creatures.size()) return;
+  w.creatures.erase(w.creatures.begin() + static_cast<std::ptrdiff_t>(index));
+  if (w.battle.phase != BattlePhase::None && w.battle.enemy > index) --w.battle.enemy;
+}
+
+int find_creature(const World& w, uint32_t id) {
+  for (size_t i = 0; i < w.creatures.size(); ++i) {
+    if (w.creatures[i].id == id) return static_cast<int>(i);
+  }
+  return -1;
+}
+
+void update_population(World& w) {
+  if (w.ground.empty()) return;  // hand-made worlds (tests) have only the creatures put there
+  for (int index = 0; index < static_cast<int>(kPopulationCellCount); ++index) {
+    float x0, z0;
+    const Box rect = cell_rect(index, x0, z0);
+    const float d = distance_to_rect(rect, w.player.pos.x, w.player.pos.z);
+    const auto k = static_cast<size_t>(index);
+    if (!w.population.active[k] && d < rules::kSpawnRadius) {
+      w.population.active[k] = 1;
+      ++w.population.visits[k];
+      populate_cell(w, index);
+    } else if (w.population.active[k] && d > rules::kDespawnRadius) {
+      // Far away: its wild monsters are gone (not one in a battle).
+      w.population.active[k] = 0;
+      for (size_t i = w.creatures.size(); i-- > 1;) {
+        const Creature& c = w.creatures[i];
+        const bool fighting = w.battle.phase != BattlePhase::None && w.battle.enemy == i;
+        if (monster_stats(c.species).is_monster && !fighting && cell_index(c.home.x, c.home.z) == index) {
+          remove_creature(w, i);
+        }
+      }
+    }
+  }
+}
+
 void spawn_creatures(World& w) {
   Rng rng(w.seed ^ 0x4352454154555245ULL, 11);  // own stream: objects stay the same
   w.creatures.clear();
+  w.population = {};
 
   Creature companion;
   companion.species = Species::Companion;
   companion.body.pos = {0.8f, w.ground.height(0.8f, 1.2f), 1.2f};  // just behind the player, on the right
   companion.home = {0.8f, 1.2f};
-  w.creatures.push_back(companion);
-
-  const float limit = rules::kWorldHalfSize - 3.0f;
-  for (int attempt = 0; attempt < 5000 && w.creatures.size() < 1 + rules::kWildMonsters; ++attempt) {
-    Creature c;
-    c.species = static_cast<Species>(1 + rng.below(3));
-    c.body.pos = {random_range(rng, -limit, limit), 0, random_range(rng, -limit, limit)};
-    c.body.pos.y = w.ground.height(c.body.pos.x, c.body.pos.z);
-    c.variant = static_cast<uint8_t>(rng.below(256));
-    const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
-    c.body.facing_x = sc.sin;
-    c.body.facing_z = sc.cos;
-    const float d2 = c.body.pos.x * c.body.pos.x + c.body.pos.z * c.body.pos.z;
-    if (d2 < rules::kMonsterSpawnMinDistance * rules::kMonsterSpawnMinDistance) continue;
-    if (inside_any_object(w, c.body, species_info(c.species).shape)) continue;
-    if (in_village(w.village, c.body.pos.x, c.body.pos.z, 2.0f) ||
-        in_lake(w.village.lake, c.body.pos.x, c.body.pos.z, 2.0f)) {
-      continue;
-    }
-    c.home = {c.body.pos.x, c.body.pos.z};
-    c.timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
-    w.creatures.push_back(c);
-  }
+  add_creature(w, companion);
 
   const bool has_village = w.village.lake.radius_x > 0;
-  if (!has_village) return;
-
-  // Villagers, around the village square.
-  const Vec2 center = w.village.center;
-  for (uint32_t n = 0, attempt = 0; n < rules::kVillagers && attempt < 2000; ++attempt) {
-    Creature c;
-    c.species = Species::Villager;
-    const float r = rules::kVillageRadius - 4.0f;
-    c.body.pos = {center.x + random_range(rng, -r, r), 0, center.z + random_range(rng, -r, r)};
-    c.body.pos.y = w.ground.height(c.body.pos.x, c.body.pos.z);
-    c.variant = static_cast<uint8_t>(rng.below(256));
-    c.home = center;
-    c.timer = static_cast<uint16_t>(rng.below(4 * rules::kTicksPerSecond));
-    if (inside_any_object(w, c.body, species_info(c.species).shape)) continue;
-    if (in_lake(w.village.lake, c.body.pos.x, c.body.pos.z, 1.0f)) continue;
-    w.creatures.push_back(c);
-    ++n;
+  if (has_village) {
+    // Villagers, around the village square.
+    const Vec2 center = w.village.center;
+    for (uint32_t n = 0, attempt = 0; n < rules::kVillagers && attempt < 2000; ++attempt) {
+      Creature c;
+      c.species = Species::Villager;
+      const float r = rules::kVillageRadius - 4.0f;
+      c.body.pos = {center.x + random_range(rng, -r, r), 0, center.z + random_range(rng, -r, r)};
+      c.body.pos.y = w.ground.height(c.body.pos.x, c.body.pos.z);
+      c.variant = static_cast<uint8_t>(rng.below(256));
+      c.home = center;
+      c.timer = static_cast<uint16_t>(rng.below(4 * rules::kTicksPerSecond));
+      if (inside_any_object(w, c.body, species_info(c.species).shape)) continue;
+      if (in_lake(w.village.lake, c.body.pos.x, c.body.pos.z, 1.0f)) continue;
+      add_creature(w, c);
+      ++n;
+    }
   }
-
-  // Crows, perched on roofs.
-  const std::vector<Vec3> perches = crow_perches(w);
-  for (uint32_t n = 0; n < rules::kCrows && n < perches.size(); ++n) {
-    Creature c;
-    c.species = Species::Crow;
-    const Vec3 perch = perches[(n * 3 + rng.below(3)) % perches.size()];
-    c.body.pos = perch;
-    c.target = {perch.x, perch.z};
-    c.target_y = perch.y;
-    c.home = {perch.x, perch.z};  // not used to move: where it was born (its variants)
-    c.variant = static_cast<uint8_t>(rng.below(256));
-    c.timer = static_cast<uint16_t>(3 * rules::kTicksPerSecond + rng.below(8 * rules::kTicksPerSecond));
-    w.creatures.push_back(c);
-  }
-
-  // Fish, in the lake.
-  const Lake& lake = w.village.lake;
-  for (uint32_t n = 0, attempt = 0; n < rules::kFish && attempt < 1000; ++attempt) {
-    Creature c;
-    c.species = Species::Fish;
-    c.body.pos = {lake.center.x + random_range(rng, -lake.radius_x, lake.radius_x), rules::kSwimLevel,
-                  lake.center.z + random_range(rng, -lake.radius_z, lake.radius_z)};
-    if (!in_lake(lake, c.body.pos.x, c.body.pos.z, -1.5f)) continue;
-    c.home = {c.body.pos.x, c.body.pos.z};
-    c.variant = static_cast<uint8_t>(rng.below(256));
-    c.timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
-    w.creatures.push_back(c);
-    ++n;
-  }
+  // The wild monsters around the player.
+  update_population(w);
 }
 
 namespace {
@@ -849,6 +1052,10 @@ void settle_objects(World& w) {
     for (float x : {b.min.x, b.max.x}) {
       for (float z : {b.min.z, b.max.z}) lowest = std::min(lowest, w.ground.height(x, z));
     }
+    if (o.kind == ObjectKind::Collider) {  // from its lowest point, raised by its variant (decimeters)
+      o.pos.y = lowest + static_cast<float>(o.variant) / 10.0f;
+      continue;
+    }
     // A low object on a slope (a flat rock) would vanish into the ground:
     // sink it at most 40 % of its height, an edge may then float a little.
     o.pos.y = std::max(lowest - kSink, center - kSink - 0.4f * (b.max.y - b.min.y));
@@ -933,10 +1140,151 @@ void build_ruins(World& w) {
   }
 }
 
+namespace {
+
+// The quarter turn whose front (local -Z) faces `dir` (a unit vector along X or Z).
+Angle16 yaw_facing(Vec2 dir) {
+  Angle16 best = 0;
+  float best_dot = -2;
+  for (Angle16 yaw : {Angle16{0}, Angle16{16384}, Angle16{32768}, Angle16{49152}}) {
+    const Vec2 f = front_of(yaw);
+    if (f.x * dir.x + f.z * dir.z > best_dot) {
+      best_dot = f.x * dir.x + f.z * dir.z;
+      best = yaw;
+    }
+  }
+  return best;
+}
+
+// An invisible solid box: center (lx, lz) and half extents in the space of
+// `o` (turned with it), from `bottom` meters above the ground.
+Object collider(const Object& o, float lx, float lz, Vec3 half, float bottom = 0) {
+  const Vec2 p = local_to_world(o, lx, lz);
+  Object c = village_object(ObjectKind::Collider, p, o.yaw, static_cast<uint8_t>(std::lround(bottom * 10)));
+  c.size = half;
+  return c;
+}
+
+}  // namespace
+
+void build_castle(World& w) {
+  const CastleLayout& k = w.castle;
+  if (k.radius <= 0) return;
+  Rng rng(w.seed ^ 0x4B45455054555252ULL, 31);  // own stream
+  std::erase_if(w.objects, [&](const Object& o) { return in_castle(k, o.pos.x, o.pos.z, 1.0f); });
+  const Vec2 c = k.center;
+  const Vec2 f = k.facing;            // through the gate (along X)
+  const Vec2 side{-f.z, f.x};         // along the gate's wall
+  constexpr float h = rules::kCastleHalf;
+  auto at = [&](float along_f, float along_side) {
+    return Vec2{c.x + f.x * along_f + side.x * along_side, c.z + f.z * along_f + side.z * along_side};
+  };
+  // Four corner towers, a little out of the corners (clear of the walls).
+  for (float a : {-h - 0.3f, h + 0.3f}) {
+    for (float b : {-h - 0.3f, h + 0.3f}) {
+      w.objects.push_back(village_object(ObjectKind::CastleTower, at(a, b), 0, static_cast<uint8_t>(rng.below(256))));
+    }
+  }
+  // The walls, 4 m stretches between the towers; the gatehouse in the middle of the front.
+  const Angle16 front_yaw = yaw_facing(f);
+  for (int wall = 0; wall < 4; ++wall) {
+    for (int n = 0; n < 6; ++n) {
+      const float along = -10.0f + 4.0f * static_cast<float>(n);
+      const bool gate_side = wall == 0;
+      if (gate_side && (n == 2 || n == 3)) continue;
+      const float sign = wall % 2 == 0 ? 1.0f : -1.0f;
+      const bool across = wall < 2;  // the front and back walls run along `side`
+      const Vec2 pos = across ? at(sign * h, along) : at(along, sign * h);
+      const Vec2 outward = across ? Vec2{f.x * sign, f.z * sign} : Vec2{side.x * sign, side.z * sign};
+      w.objects.push_back(village_object(ObjectKind::CastleWall, pos, yaw_facing(outward), static_cast<uint8_t>(rng.below(256))));
+    }
+  }
+  const Object gate = village_object(ObjectKind::CastleGate, at(h, 0), front_yaw);
+  w.objects.push_back(gate);
+  // The gatehouse's solid parts: both sides, and above the passage (see castle_gate in tools/make_models.py).
+  w.objects.push_back(collider(gate, -2.75f, 0, {1.13f, 3.75f, 1.5f}));
+  w.objects.push_back(collider(gate, 2.75f, 0, {1.13f, 3.75f, 1.5f}));
+  w.objects.push_back(collider(gate, 0, 0, {1.58f, 1.65f, 1.5f}, 4.2f));
+  // The keep, its door towards the gate, and a few things in the courtyard.
+  w.objects.push_back(village_object(ObjectKind::CastleKeep, at(-3.0f, 0), front_yaw));
+  for (int n = 0; n < 4; ++n) {
+    const float along = n < 2 ? 5.5f : -9.5f;
+    const float across = (n % 2 ? 1.0f : -1.0f) * (n < 2 ? 9.5f : 10.0f);
+    const Object barrel = village_object(ObjectKind::Barrel, at(along, across), static_cast<Angle16>(rng.below(65536)));
+    w.objects.push_back(barrel);
+  }
+  for (float across : {-2.6f, 2.6f}) w.objects.push_back(village_object(ObjectKind::Lamp, at(h + 3.0f, across), 0));
+}
+
+void build_cave(World& w) {
+  const CaveLayout& cave = w.cave;
+  if (cave.radius <= 0) return;
+  Rng rng(w.seed ^ 0x47524F5454452121ULL, 37);  // own stream
+  std::erase_if(w.objects, [&](const Object& o) { return in_cave_hill(cave, o.pos.x, o.pos.z, 3.0f); });
+  // The mouth, its back in the cliff, and its solid rocks (see cave_mouth in tools/make_models.py).
+  const Object mouth = village_object(ObjectKind::CaveMouth, cave.mouth, yaw_facing(cave.facing));
+  w.objects.push_back(mouth);
+  w.objects.push_back(collider(mouth, -3.4f, 2.0f, {1.3f, 3.3f, 3.2f}));
+  w.objects.push_back(collider(mouth, 3.4f, 2.0f, {1.3f, 3.3f, 3.2f}));
+  w.objects.push_back(collider(mouth, 0, 5.0f, {2.05f, 1.85f, 0.45f}));
+  w.objects.push_back(collider(mouth, 0, 1.95f, {2.05f, 1.4f, 2.5f}, 3.8f));
+  // Glowing crystals inside, and around the hill.
+  auto crystal = [&](Vec2 p, float scale) {
+    const auto yaw = static_cast<Angle16>(rng.below(65536));  // one draw per statement: same order everywhere
+    const auto variant = static_cast<uint8_t>(rng.below(256));
+    Object o = village_object(ObjectKind::Crystal, p, yaw, variant);
+    o.size = {scale, scale, scale};
+    if (!can_place(w, o, 0.2f, true)) return false;
+    w.objects.push_back(o);
+    return true;
+  };
+  // Inside: against the walls, clear of the back (its collider starts at 4.1 m).
+  for (const auto& [lx, lz, scale] : {std::tuple{-1.45f, 3.3f, 0.8f}, std::tuple{1.55f, 2.9f, 0.6f},
+                                       std::tuple{-1.6f, 1.2f, 0.45f}}) {
+    const auto yaw = static_cast<Angle16>(rng.below(65536));
+    const auto variant = static_cast<uint8_t>(rng.below(256));
+    Object o = village_object(ObjectKind::Crystal, local_to_world(mouth, lx, lz), yaw, variant);
+    o.size = {scale, scale, scale};
+    w.objects.push_back(o);
+  }
+  for (int n = 0, attempt = 0; n < 10 && attempt < 100; ++attempt) {
+    const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
+    const float d = cave.radius + random_range(rng, 0.5f, 3.0f);
+    const float scale = random_range(rng, 0.4f, 0.9f);
+    const Vec2 p{cave.center.x + sc.cos * d, cave.center.z + sc.sin * d};
+    if (sc.cos * cave.facing.x + sc.sin * cave.facing.z > 0.85f) continue;  // keep the ravine free
+    if (crystal(p, scale)) ++n;
+  }
+  // Big rocks fallen from the cliffs.
+  for (int n = 0, attempt = 0; n < 16 && attempt < 200; ++attempt) {
+    const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
+    const float d = cave.radius + random_range(rng, 1.5f, 6.0f);
+    const auto yaw = static_cast<Angle16>(rng.below(4) << 14);
+    const auto variant = static_cast<uint8_t>(rng.below(256));
+    Object o = village_object(ObjectKind::Rock, {cave.center.x + sc.cos * d, cave.center.z + sc.sin * d}, yaw, variant);
+    const float sx = random_range(rng, 1.0f, 2.2f), sy = random_range(rng, 0.8f, 1.8f), sz = random_range(rng, 1.0f, 2.2f);
+    o.size = {sx, sy, sz};
+    if (sc.cos * cave.facing.x + sc.sin * cave.facing.z > 0.8f) continue;  // keep the ravine free
+    // Not on a slope too steep for it (it would float).
+    const Box box = object_box(o);
+    float lowest = w.ground.height(o.pos.x, o.pos.z);
+    for (float cx : {box.min.x, box.max.x}) {
+      for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+    }
+    if (w.ground.height(o.pos.x, o.pos.z) - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
+    if (!can_place(w, o, 0.6f, true)) continue;
+    w.objects.push_back(o);
+    ++n;
+  }
+}
+
 Zone zone_at(const World& w, float x, float z) {
   if (in_lake(w.village.lake, x, z, 1.5f)) return Zone::Lake;
   if (w.village.lake.radius_x > 0 && in_village(w.village, x, z, 2.0f)) return Zone::Village;
   if (in_ruins(w.ruins, x, z, 3.0f)) return Zone::Ruins;
+  if (in_castle(w.castle, x, z, 3.0f)) return Zone::Castle;
+  if (in_cave_hill(w.cave, x, z, 10.0f)) return Zone::Cave;
+  if (in_forest(w.forest, x, z)) return Zone::Forest;
   return Zone::Meadow;
 }
 
@@ -980,6 +1328,8 @@ std::vector<Vec3> crow_perches(const World& w) {
         add(o, -1.075f, 10.5f, 1.862f);
         add(o, -1.075f, 10.5f, -1.862f);
         break;
+      case ObjectKind::CastleTower: add(o, 1.75f, 9.6f, 0); add(o, -1.75f, 9.6f, 0); break;  // merlons
+      case ObjectKind::CastleKeep: add(o, -4.0f, 12.6f, -4.0f); add(o, 4.0f, 12.6f, 4.0f); break;
       default: break;
     }
   }
@@ -990,7 +1340,8 @@ bool is_round(ObjectKind kind) {
   return kind == ObjectKind::Tree || kind == ObjectKind::Pine || kind == ObjectKind::Stump ||
          kind == ObjectKind::Bush || kind == ObjectKind::HouseHut || kind == ObjectKind::Well ||
          kind == ObjectKind::Barrel || kind == ObjectKind::Lamp || kind == ObjectKind::Tower ||
-         kind == ObjectKind::Pillar || kind == ObjectKind::Rubble;
+         kind == ObjectKind::Pillar || kind == ObjectKind::Rubble || kind == ObjectKind::CastleTower ||
+         kind == ObjectKind::Crystal;
 }
 
 Box object_box(const Object& o) {
@@ -1019,7 +1370,14 @@ Box object_box(const Object& o) {
     case ObjectKind::FallenPillar: half = {1.5f, 0.38f, 0.38f}; break;
     case ObjectKind::Rubble:       half = {0.75f, 0.3f, 0.75f}; break;
     case ObjectKind::RuneStone:    half = {0.35f, 0.95f, 0.18f}; break;
-    default:                half = s; break;  // Crate
+    // Castle and cave: matching the models of tools/make_models.py.
+    case ObjectKind::CastleWall:   half = {1.99f, 2.5f, 0.6f}; break;  // stretches side by side do not overlap
+    case ObjectKind::CastleTower:  half = {2.2f, 4.5f, 2.2f}; break;
+    case ObjectKind::CastleKeep:   half = {4.5f, 6.0f, 4.5f}; break;
+    case ObjectKind::CastleGate:   // solid through its Colliders
+    case ObjectKind::CaveMouth:    half = {0, 0, 0}; break;
+    case ObjectKind::Crystal:      half = {0.35f * s.x, 0.5f * s.x, 0.35f * s.x}; break;
+    default:                half = s; break;  // Crate, Collider
   }
   if (!is_round(o.kind) && ((o.yaw >> 14) & 1)) std::swap(half.x, half.z);  // turned 90° or 270°
   const Vec3 center = o.pos + Vec3{0, half.y, 0};
@@ -1031,33 +1389,70 @@ bool overlaps(const Box& a, const Box& b) {
          a.min.z < b.max.z && a.max.z > b.min.z;
 }
 
+void build_layouts(World& w) {
+  w.path = make_path(w.seed);
+  w.village = make_village_layout(w.seed, w.path);
+  w.ruins = make_ruins_layout(w.seed, w.path);
+  w.forest = make_forest_layout(w.seed, w.path, w.ruins);
+  w.cave = make_cave_layout(w.seed, w.path);
+  w.castle = make_castle_layout(w.seed, w.path);
+  w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle});
+}
+
 World new_game(uint64_t seed) {
   World w;
   w.seed = seed;
   w.rng = Rng(seed);
-  w.path = make_path(seed);
-  w.village = make_village_layout(seed, w.path);
-  w.ruins = make_ruins_layout(seed, w.path);
-  w.ground = make_heightmap(seed, w.path, w.village, w.ruins);
+  build_layouts(w);
   // Objects are placed as if on flat ground, then set on the relief.
   build_village(w);
   build_ruins(w);
+  build_castle(w);
+  build_cave(w);
   generate_objects(w);
   settle_objects(w);
   w.player.pos.y = w.ground.height(0, 0);
   spawn_creatures(w);
-  assign_genes(w);
-  assign_levels(w);
   capture(w, 0);  // the companion is the player's own
   w.team = {starting_companion(w.creatures[0].genes)};
   return w;
 }
+
+namespace {
+
+// A beaten monster lies on the ground (a crow falls from the air, a fish
+// floats), then gets up and runs home, or flies away.
+void step_knocked_out(World& w, const Surroundings& s, Creature& c) {
+  if (c.species != Species::Fish) move_body(s, c.body, species_info(c.species).shape, 0, 0, 0, false, 0);
+  c.body.speed = 0;
+  if (c.timer > 0 && --c.timer > 0) return;
+  switch (c.species) {
+    case Species::Crow:
+      c.mind = Mind::Idle;  // takes off at once
+      c.timer = 0;
+      break;
+    case Species::Fish:
+      c.mind = Mind::Idle;
+      c.timer = rules::kTicksPerSecond;
+      break;
+    default:
+      c.mind = Mind::Flee;
+      c.target = c.home;
+      c.timer = 4 * rules::kTicksPerSecond;
+      break;
+  }
+  (void)w;
+}
+
+}  // namespace
 
 void step(World& w, const Input& in) {
   ++w.tick;
   w.clock = (w.clock + 1) % rules::kTicksPerDay;
   battle_command(w, in);  // may start or end a battle, or remove a captured monster
   const BattlePhase phase = w.battle.phase;
+  // The companion is steered by the joystick (fighting or training).
+  const bool steered = phase == BattlePhase::Fight || phase == BattlePhase::Training;
 
   // Joystick -> direction on the ground, relative to the camera (in a fight:
   // to the line from the companion to its enemy).
@@ -1096,7 +1491,8 @@ void step(World& w, const Input& in) {
       c.body.pos = w.player.pos;
       continue;
     }
-    if (phase == BattlePhase::Fight && (i == 0 || i == w.battle.enemy)) {
+    const bool foe = phase == BattlePhase::Fight && i == w.battle.enemy;
+    if ((steered && i == 0) || foe) {
       const Steer st = i == 0 ? battle_ally(w, in, dir_x, dir_z) : battle_foe(w);
       const SpeciesInfo& info = species_info(c.species);
       if (i != 0 && holds_its_place(c.species)) continue;  // on its perch, in the air or in the lake
@@ -1111,9 +1507,18 @@ void step(World& w, const Input& in) {
       step_companion(w, s, c);
       continue;
     }
+    if (c.mind == Mind::KnockedOut) {
+      step_knocked_out(w, s, c);
+      continue;
+    }
     switch (c.species) {
       case Species::Companion: step_companion(w, s, c); break;
-      case Species::Villager: step_villager(w, s, c); break;
+      case Species::Villager:
+        // Far from the player, the village stands still.
+        if (near_player(w, c.body.pos.x, c.body.pos.z, rules::kSimulationRadius)) {
+          step_villager(w, s, c);
+        }
+        break;
       case Species::Crow:
         if (perches.empty()) perches = crow_perches(w);
         step_crow(w, perches, c);
@@ -1125,6 +1530,7 @@ void step(World& w, const Input& in) {
   battle_resolve(w);
   team_regen(w);
   discover(w);
+  if (w.tick % rules::kPopulationEveryTicks == 0) update_population(w);
 }
 
 }  // namespace monstres

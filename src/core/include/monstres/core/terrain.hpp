@@ -7,8 +7,8 @@ namespace monstres {
 
 namespace rules {
 inline constexpr float kPathHalfWidth = 1.1f;  // the dirt path is 2.2 m wide
-inline constexpr float kPathExtent = 80.0f;    // it runs from z = -84 to z = +84 (past the edges)
-inline constexpr float kPathMaxX = 16.0f;      // and winds at most this far from x = 0
+inline constexpr float kPathExtent = 146.0f;   // it runs from z = -150 to z = +150 (past the edges)
+inline constexpr float kPathMaxX = 22.0f;      // and winds at most this far from x = 0
 }
 
 struct Vec2 {

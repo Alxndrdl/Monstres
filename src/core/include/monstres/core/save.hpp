@@ -52,7 +52,16 @@ namespace monstres {
 //  13  the team member out of the crystal (u8 index in the team, 0xff:
 //      none), after the time of day; creatures[0] is that monster. Older
 //      saves: Pompon is out.
-inline constexpr uint32_t kSaveVersion = 13;
+//  14  the world grew again (280 m wide: forest, cave, castle; the ground
+//      on a 2 m grid) and only the squares near the player are lived in:
+//      after each creature's level its id (u32) and whether it was let go
+//      by the player (u8); after the active member the next id (u32), the
+//      number of squares per side (u8) and per square whether it is lived
+//      in (u8) and how many times it was (u16). The first team member may be
+//      any monster (Pompon can be let go). Versions 4 to 13 still load: the
+//      world is built anew from their seed, the player starts at the
+//      crossroads with its magician, team, bestiary and time of day.
+inline constexpr uint32_t kSaveVersion = 14;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

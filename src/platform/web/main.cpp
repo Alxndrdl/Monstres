@@ -39,6 +39,20 @@ constexpr uint64_t kAutosaveEveryTicks = 5 * rules::kTicksPerSecond;
 constexpr int kJumpBufferTicks = 6;  // a jump pressed just before landing still counts
 constexpr int kMaxTicksPerFrame = 10;
 
+// Where the time of a frame goes (settings menu, "détail du temps de calcul"):
+// sums and worst values over half a second.
+enum ProfilePart { kSim, kSave, kLandscape, kScene, kView, kDraw, kWasm, kInterval, kProfileParts };
+struct Profile {
+  bool on = false;
+  double since = 0;  // start of the current half second
+  int frames = 0;
+  int ticks = 0;
+  int landscape_builds = 0;
+  double sum[kProfileParts] = {};
+  double worst[kProfileParts] = {};
+  std::string json = "null";  // the last half second
+};
+
 struct App {
   World world;
   std::unique_ptr<Renderer> renderer;
@@ -57,6 +71,10 @@ struct App {
   bool frozen = false;           // ?frozen: no automatic ticks (tests, screenshots)
   bool redraw = true;            // frozen mode only redraws when something changed
   int selected = -1;             // creature shown in the info panel (-1: none)
+  uint32_t selected_id = 0;      // its Creature::id: creatures come and go, indices move
+  Vec2 landscape_center{1e9f, 1e9f};  // where the detailed landscape was built around
+  uint64_t camera_tick = 0;      // the camera moved on until this tick
+  Profile profile;
   bool paused = false;           // a game menu is open: time stands still
   std::vector<uint8_t> portrait; // last portrait drawn for the page (RGBA)
   int canvas_w = 0, canvas_h = 0;
@@ -111,14 +129,23 @@ void tick(App& app, const Input& in) {
   if (in.parry && ally.state == FighterState::Parry) app.parry_buffer = 0;
   if (app.parry_buffer > 0) --app.parry_buffer;
   app.command = Command::None;
-  if (w.creatures.size() != creatures) app.selected = -1;  // a captured monster left the world
+  // Creatures come and go: follow the selected one by its id.
+  if (w.creatures.size() != creatures && app.selected >= 0) app.selected = find_creature(w, app.selected_id);
   if (w.battle.phase == BattlePhase::Fight) app.selected = -1;  // the enemy has its own ring
 }
 
-// In a fight the camera stays behind the companion, facing its enemy.
+void select(App& app, int index) {
+  const bool valid = index >= 0 && static_cast<size_t>(index) < app.world.creatures.size();
+  app.selected = valid ? index : -1;
+  app.selected_id = valid ? app.world.creatures[static_cast<size_t>(index)].id : 0;
+  app.redraw = true;
+}
+
+// In a fight the camera stays behind the companion, facing its enemy (or the magician, when training).
 void follow_battle(App& app, double dt_ms) {
   float fx, fz;
-  if (app.world.battle.phase != BattlePhase::Fight || !battle_forward(app.world, fx, fz)) return;
+  const BattlePhase phase = app.world.battle.phase;
+  if ((phase != BattlePhase::Fight && phase != BattlePhase::Training) || !battle_forward(app.world, fx, fz)) return;
   const float target = std::atan2(-fx, -fz);  // forward = (-sin yaw, -cos yaw)
   const float k = std::min(1.0f, static_cast<float>(dt_ms) * 0.012f);
   Camera& c = app.camera;
@@ -127,11 +154,24 @@ void follow_battle(App& app, double dt_ms) {
   app.redraw = true;
 }
 
+// The detailed landscape follows the player (see build_landscape).
+bool update_landscape(App& app) {
+  const Vec2 center = landscape_center(app.world.player.pos.x, app.world.player.pos.z);
+  if (center == app.landscape_center) return false;
+  app.landscape_center = center;
+  build_landscape(app.world, app.landscape, center);
+  app.redraw = true;
+  return true;
+}
+
 // Call whenever app.world is replaced (new game, loaded or imported save).
 void world_changed(App& app) {
   app.redraw = true;
   app.selected = -1;
-  build_landscape(app.world, app.landscape);
+  app.camera.smooth = false;  // straight to its subject
+  app.camera_tick = app.world.tick;
+  app.landscape_center = {1e9f, 1e9f};
+  update_landscape(app);
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), build_ground_mesh(app.world));
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), build_path_mesh(app.world));
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), build_water_mesh(app.world));
@@ -172,12 +212,64 @@ View current_view(const App& app, float time) {
   return build_view(app.world, app.camera, aspect, time);
 }
 
+// Half a second of measures, as JSON for the page.
+void profile_report(App& app, double now, int pw, int ph) {
+  Profile& p = app.profile;
+  const double span = now - p.since;
+  if (span < 500 || p.frames == 0) return;
+  static const char* kNames[] = {"sim", "save", "landscape", "scene", "view", "draw", "wasm", "interval"};
+  std::string s = "{\"frames\":" + std::to_string(p.frames) + ",\"seconds\":" + std::to_string(span / 1000);
+  s += ",\"ticks\":" + std::to_string(p.ticks) + ",\"landscapeBuilds\":" + std::to_string(p.landscape_builds);
+  s += ",\"avg\":{";
+  for (int i = 0; i < kProfileParts; ++i) {
+    s += std::string(i ? "," : "") + "\"" + kNames[i] + "\":" + std::to_string(p.sum[i] / p.frames);
+  }
+  s += "},\"worst\":{";
+  for (int i = 0; i < kProfileParts; ++i) s += std::string(i ? "," : "") + "\"" + kNames[i] + "\":" + std::to_string(p.worst[i]);
+  const RenderStats& r = app.renderer->stats();
+  s += "},\"drawCalls\":" + std::to_string(r.draw_calls) + ",\"instances\":" + std::to_string(r.instances);
+  s += ",\"triangles\":" + std::to_string(r.triangles) + ",\"trianglesBy\":{";
+  static const char* kGroups[] = {"terrain", "vegetation", "scenery", "characters", "effects", "sky"};
+  for (size_t g = 0; g < kMeshGroups; ++g) {
+    s += std::string(g ? "," : "") + "\"" + kGroups[g] + "\":" + std::to_string(r.triangles_by_group[g]);
+  }
+  s += "},\"uploadedKiB\":" + std::to_string(r.uploaded_bytes / 1024);
+  s += ",\"gpuMs\":" + (r.gpu_ms >= 0 ? std::to_string(r.gpu_ms) : std::string("null"));
+  s += ",\"pixels\":[" + std::to_string(pw) + "," + std::to_string(ph) + "]";
+  s += ",\"dpr\":" + std::to_string(emscripten_get_device_pixel_ratio());
+  size_t lights = 0;
+  {
+    const View v = current_view(app, 0);
+    lights = v.light_count;
+  }
+  s += ",\"lights\":" + std::to_string(lights);
+  s += ",\"creatures\":" + std::to_string(app.world.creatures.size());
+  s += ",\"objects\":" + std::to_string(app.world.objects.size()) + "}";
+  p.json = s;
+  const bool on = p.on;
+  p = {};
+  p.on = on;
+  p.since = now;
+  p.json = s;
+}
+
 void frame(void* user) {
   App& app = *static_cast<App*>(user);
 
   const double now = emscripten_get_now();
   double dt = now - app.last_time;
   app.last_time = now;
+  Profile& prof = app.profile;
+  const bool profiling = prof.on;
+  double mark = now;
+  // Time since `mark`, added to a part of the profile.
+  const auto measure = [&](ProfilePart part) {
+    if (!profiling) return;
+    const double t = emscripten_get_now();
+    prof.sum[part] += t - mark;
+    prof.worst[part] = std::max(prof.worst[part], t - mark);
+    mark = t;
+  };
 
   if (app.paused) app.accumulator = 0;
   if (!app.frozen && !app.paused) {
@@ -185,10 +277,25 @@ void frame(void* user) {
     while (app.accumulator >= kTickMs) {
       app.accumulator -= kTickMs;
       tick(app, current_input(app));
+      if (profiling) ++prof.ticks;
     }
+    measure(kSim);
     if (app.world.tick - app.last_saved_tick >= kAutosaveEveryTicks) write_save(app);
+    measure(kSave);
   }
-  if (!app.paused) follow_battle(app, dt);
+  if (!app.paused) {
+    follow_battle(app, dt);
+    // The camera moves on with the game's time (so that ?frozen pictures are stable).
+    const uint64_t ticks = app.world.tick - std::min(app.camera_tick, app.world.tick);
+    app.camera_tick = app.world.tick;
+    if (ticks > 0 || !app.camera.smooth) {
+      update_camera(app.camera, app.world, static_cast<float>(ticks) / rules::kTicksPerSecond);
+      app.redraw = true;
+    }
+  }
+  mark = emscripten_get_now();
+  if (update_landscape(app) && profiling) ++prof.landscape_builds;
+  measure(kLandscape);
 
   double css_w = 0, css_h = 0;
   emscripten_get_element_css_size("#canvas", &css_w, &css_h);
@@ -207,12 +314,25 @@ void frame(void* user) {
 
   // Time follows the simulation, so ?frozen screenshots are reproducible.
   const float time = static_cast<float>(app.world.tick) / rules::kTicksPerSecond;
+  mark = emscripten_get_now();
   build_dynamic(app.world, time, app.dynamic, app.selected);
+  measure(kScene);
   const View view = current_view(app, time);
+  measure(kView);
   const DrawList* lists[] = {&app.landscape, &app.dynamic};
   app.renderer->begin_frame({pw, ph});
   app.renderer->draw(view, lists);
   app.renderer->end_frame();
+  measure(kDraw);
+  if (profiling) {
+    const double wasm = emscripten_get_now() - now;
+    prof.sum[kWasm] += wasm;
+    prof.worst[kWasm] = std::max(prof.worst[kWasm], wasm);
+    prof.sum[kInterval] += dt;
+    prof.worst[kInterval] = std::max(prof.worst[kInterval], dt);
+    ++prof.frames;
+    profile_report(app, emscripten_get_now(), pw, ph);
+  }
 }
 
 }  // namespace
@@ -231,7 +351,8 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_move(float x, float y) {
 EMSCRIPTEN_KEEPALIVE void monstres_look(float delta_yaw, float delta_pitch) {
   Camera& c = g_app->camera;
   g_app->redraw = true;
-  if (g_app->world.battle.phase == BattlePhase::Fight) delta_yaw = 0;  // locked on the enemy
+  const BattlePhase phase = g_app->world.battle.phase;
+  if (phase == BattlePhase::Fight || phase == BattlePhase::Training) delta_yaw = 0;  // locked on the enemy
   c.yaw = std::remainder(c.yaw + delta_yaw, static_cast<float>(2 * kPi));
   c.pitch = std::clamp(c.pitch + delta_pitch, kMinPitch, kMaxPitch);
 }
@@ -254,11 +375,12 @@ EMSCRIPTEN_KEEPALIVE void monstres_attack(int slot) {
 
 EMSCRIPTEN_KEEPALIVE void monstres_parry() { g_app->parry_buffer = kJumpBufferTicks; }
 
-// Context menu: 1 engage creatures[target], 2 flee, 3 capture; team bar:
-// 4 summon (or recall) team[target] (Command).
+// Context menu: 1 engage creatures[target], 2 flee (or stop training),
+// 3 capture, 6 train; team bar: 4 summon (or recall) team[target]; team
+// sheet: 5 release team[target] (Command).
 // Applied with the next tick (right away when frozen, for tests).
 EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
-  if (command < 1 || command > 4 || target < 0 || target > 65535) return;
+  if (command < 1 || command > 6 || target < 0 || target > 65535) return;
   g_app->command = static_cast<Command>(command);
   g_app->command_target = static_cast<uint16_t>(target);
   if (g_app->frozen) {
@@ -311,13 +433,51 @@ EMSCRIPTEN_KEEPALIVE double monstres_debug_step(int ticks) {
 
 EMSCRIPTEN_KEEPALIVE void monstres_save_now() { write_save(*g_app); }
 
+// Debug (tests, screenshots): puts the player at (x, z) on the ground, its
+// companion beside it; the squares around fill with monsters.
+EMSCRIPTEN_KEEPALIVE void monstres_debug_teleport(float x, float z) {
+  World& w = g_app->world;
+  const float limit = rules::kWorldHalfSize - 1;
+  x = std::clamp(x, -limit, limit);
+  z = std::clamp(z, -limit, limit);
+  w.player.pos = {x, w.ground.height(x, z), z};
+  w.player.velocity_y = 0;
+  if (!w.creatures.empty()) {
+    Body& c = w.creatures[0].body;
+    c.pos = {x + 0.8f, w.ground.height(x + 0.8f, z + 1.2f), z + 1.2f};
+  }
+  update_population(w);
+  g_app->camera.smooth = false;
+  g_app->redraw = true;
+}
+
 // Selects the creature under a point of the canvas (normalized device
 // coordinates, -1..1, y up), or nothing. Returns its index or -1.
 EMSCRIPTEN_KEEPALIVE int monstres_pick(float ndc_x, float ndc_y) {
-  g_app->selected = pick_creature(g_app->world, current_view(*g_app, 0), ndc_x, ndc_y);
-  g_app->redraw = true;
+  select(*g_app, pick_creature(g_app->world, current_view(*g_app, 0), ndc_x, ndc_y));
   return g_app->selected;
 }
+
+// The signpost under a point of the canvas (objects index), or -1.
+EMSCRIPTEN_KEEPALIVE int monstres_pick_sign(float ndc_x, float ndc_y) {
+  return pick_sign(g_app->world, current_view(*g_app, 0), ndc_x, ndc_y);
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_sign_json(int index) {
+  g_app->json = sign_json(g_app->world, index);
+  return g_app->json.c_str();
+}
+
+// Frame profiler (settings menu): on or off, and the last half second as JSON ("null" before).
+EMSCRIPTEN_KEEPALIVE void monstres_set_profiling(int on) {
+  Profile& p = g_app->profile;
+  p = {};
+  p.on = on != 0;
+  p.since = emscripten_get_now();
+  g_app->renderer->set_profiling(p.on);
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_profile_json() { return g_app->profile.json.c_str(); }
 
 // Game menus: time stands still while one is open (saved when it opens).
 EMSCRIPTEN_KEEPALIVE void monstres_set_paused(int paused) {
@@ -371,11 +531,7 @@ EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_portrait(int species, int look, int
   return g_app->portrait.data();
 }
 
-EMSCRIPTEN_KEEPALIVE void monstres_select(int index) {
-  const bool valid = index >= 0 && static_cast<size_t>(index) < g_app->world.creatures.size();
-  g_app->selected = valid ? index : -1;
-  g_app->redraw = true;
-}
+EMSCRIPTEN_KEEPALIVE void monstres_select(int index) { select(*g_app, index); }
 
 // The selected creature as JSON (see creature_json), or "null".
 EMSCRIPTEN_KEEPALIVE const char* monstres_selected_json() {

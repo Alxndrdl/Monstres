@@ -17,6 +17,9 @@ constexpr Color kLakeBed{0.36f, 0.42f, 0.36f, 1};
 constexpr Color kSquare{0.58f, 0.50f, 0.38f, 1};  // trodden earth of the village square
 constexpr Color kSlope{0.50f, 0.44f, 0.34f, 1};   // bare earth and stones on steep slopes
 constexpr Color kPaving{0.60f, 0.58f, 0.54f, 1};  // old flagstones of the ruins' courtyard
+constexpr Color kForestFloor{0.27f, 0.40f, 0.20f, 1};  // shaded grass and moss under the trees
+constexpr Color kCastlePaving{0.58f, 0.56f, 0.53f, 1};
+constexpr Color kCaveRock{0.46f, 0.44f, 0.43f, 1};
 
 Color lerp(Color a, Color b, float t) {
   t = std::clamp(t, 0.0f, 1.0f);
@@ -82,6 +85,25 @@ Color ground_color(const World& w, float x, float z) {
     c = lerp(c, kSand, smooth(-0.18f, -0.02f, depth));
     c = lerp(c, kLakeBed, smooth(0.08f, 0.35f, depth));
   }
+  if (w.forest.radius_x > 0) {
+    // Under the trees: darker grass and moss, fading out at the edge of the forest.
+    const float fx = (x - w.forest.center.x) / w.forest.radius_x, fz = (z - w.forest.center.z) / w.forest.radius_z;
+    const float inside = 1 - smooth(0.75f, 1.05f, std::sqrt(fx * fx + fz * fz));
+    c = lerp(c, kForestFloor, inside * (0.55f + 0.3f * value_noise(w.seed + 33, x, z, 5.0f)));
+  }
+  if (w.castle.radius > 0) {
+    // The castle's courtyard: flagstones.
+    const float dx = x - w.castle.center.x, dz = z - w.castle.center.z;
+    const float inside = 1 - smooth(rules::kCastleHalf - 1.0f, rules::kCastleHalf + 1.5f, std::max(std::fabs(dx), std::fabs(dz)));
+    const Color stone = lerp(kCastlePaving, kEarth, 0.2f * value_noise(w.seed + 34, x, z, 1.5f));
+    c = lerp(c, stone, inside * 0.85f);
+  }
+  if (w.cave.radius > 0) {
+    // The cave's hill: grey rock, a little grass on top.
+    const float dx = x - w.cave.center.x, dz = z - w.cave.center.z;
+    const float rock = 1 - smooth(w.cave.radius - 1.0f, w.cave.radius + 2.0f, std::sqrt(dx * dx + dz * dz));
+    c = lerp(c, lerp(kCaveRock, kGrassDark, 0.35f * smooth(0.55f, 0.8f, value_noise(w.seed + 35, x, z, 4.0f))), rock * 0.9f);
+  }
   if (w.ruins.radius > 0) {
     // The courtyard of the ruins: worn flagstones, grass growing through.
     const float dx = x - w.ruins.center.x, dz = z - w.ruins.center.z;
@@ -100,21 +122,35 @@ float ground_height(const World& w, float x, float z) { return w.ground.height(x
 MeshData build_ground_mesh(const World& world) {
   MeshData m;
   const float d = terrain::kDetailHalfSize;
-  const int cells = static_cast<int>(2 * d);
-  // Fine grid: 1 m cells, colors at the corners.
+  constexpr float kCell = Heightmap::kCellSize;
+  const int cells = static_cast<int>(2 * d / kCell);
+  // The grid of the relief (Heightmap), colors at the corners: each point once.
+  const int points = cells + 1;
+  struct Point {
+    float y;
+    Color c;
+    Vec3 n;
+  };
+  std::vector<Point> grid(static_cast<size_t>(points * points));
+  for (int i = 0; i < points; ++i) {
+    for (int j = 0; j < points; ++j) {
+      const float x = -d + kCell * static_cast<float>(i), z = -d + kCell * static_cast<float>(j);
+      grid[static_cast<size_t>(i * points + j)] = {ground_height(world, x, z), ground_color(world, x, z),
+                                                  world.ground.normal(x, z)};
+    }
+  }
+  m.vertices.reserve(static_cast<size_t>(cells * cells) * 6 * MeshData::kFloatsPerVertex + 1000);
   for (int i = 0; i < cells; ++i) {
     for (int j = 0; j < cells; ++j) {
-      const float x0 = -d + static_cast<float>(i), x1 = x0 + 1;
-      const float z0 = -d + static_cast<float>(j), z1 = z0 + 1;
-      const Color c00 = ground_color(world, x0, z0), c10 = ground_color(world, x1, z0);
-      const Color c01 = ground_color(world, x0, z1), c11 = ground_color(world, x1, z1);
-      const float h00 = ground_height(world, x0, z0), h10 = ground_height(world, x1, z0);
-      const float h01 = ground_height(world, x0, z1), h11 = ground_height(world, x1, z1);
-      const Vec3 n00 = world.ground.normal(x0, z0), n10 = world.ground.normal(x1, z0);
-      const Vec3 n01 = world.ground.normal(x0, z1), n11 = world.ground.normal(x1, z1);
+      const float x0 = -d + kCell * static_cast<float>(i), x1 = x0 + kCell;
+      const float z0 = -d + kCell * static_cast<float>(j), z1 = z0 + kCell;
+      const Point& p00 = grid[static_cast<size_t>(i * points + j)];
+      const Point& p10 = grid[static_cast<size_t>((i + 1) * points + j)];
+      const Point& p01 = grid[static_cast<size_t>(i * points + j + 1)];
+      const Point& p11 = grid[static_cast<size_t>((i + 1) * points + j + 1)];
       // Counter-clockwise seen from above; the same triangles as Heightmap::height.
-      vertex(m, x0, h00, z0, c00, n00); vertex(m, x0, h01, z1, c01, n01); vertex(m, x1, h11, z1, c11, n11);
-      vertex(m, x0, h00, z0, c00, n00); vertex(m, x1, h11, z1, c11, n11); vertex(m, x1, h10, z0, c10, n10);
+      vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x0, p01.y, z1, p01.c, p01.n); vertex(m, x1, p11.y, z1, p11.c, p11.n);
+      vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x1, p11.y, z1, p11.c, p11.n); vertex(m, x1, p10.y, z0, p10.c, p10.n);
     }
   }
   // Coarse skirt from the fine grid out to the horizon (4 trapezoids).

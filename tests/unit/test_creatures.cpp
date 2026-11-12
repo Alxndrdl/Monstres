@@ -33,9 +33,9 @@ Creature& first_of(World& w, Species species) {
 }  // namespace
 
 TEST_CASE("a new game has the companion next to the player and wild monsters around") {
-  for (uint64_t seed = 0; seed < 20; ++seed) {
+  for (uint64_t seed = 0; seed < kManySeeds; ++seed) {
     CAPTURE(seed);
-    const World w = new_game(seed);
+    const World& w = cached_game(seed);
     REQUIRE(!w.creatures.empty());
     CHECK(w.creatures[0].species == Species::Companion);
     CHECK(distance_xz(w.creatures[0].body, w.player) < 2.0f);
@@ -43,13 +43,17 @@ TEST_CASE("a new game has the companion next to the player and wild monsters aro
     for (size_t i = 1; i < w.creatures.size(); ++i) {
       const Creature& c = w.creatures[i];
       CHECK(c.species != Species::Companion);
-      CHECK(distance_xz(c.body, w.player) >= rules::kMonsterSpawnMinDistance);
+      CHECK(c.id > 0);
+      if (c.species != Species::Villager) CHECK(distance_xz(c.body, w.player) >= rules::kMonsterSpawnMinDistance);
       if (c.species <= Species::Bird) {
         ++wild;
         CHECK(c.home.x == c.body.pos.x);
+        // Only around the player: in the squares near it.
+        CHECK(distance_xz(c.body, w.player) < rules::kSpawnRadius + rules::kPopulationCell * 1.42f);
       }
     }
-    CHECK(wild == rules::kWildMonsters);
+    CHECK(wild >= 15);
+    CHECK(wild <= 80);
     check_invariants(w);
   }
 }
@@ -57,13 +61,13 @@ TEST_CASE("a new game has the companion next to the player and wild monsters aro
 TEST_CASE("every wild species appears") {
   int counts[static_cast<int>(Species::Count)] = {};
   for (uint64_t seed = 0; seed < 5; ++seed) {
-    for (const Creature& c : new_game(seed).creatures) ++counts[static_cast<int>(c.species)];
+    for (const Creature& c : cached_game(seed).creatures) ++counts[static_cast<int>(c.species)];
   }
   for (int count : counts) CHECK(count > 0);
 }
 
 TEST_CASE("creatures do not change the object layout") {
-  World w = new_game(77);
+  World w = cached_game(77);
   const auto objects = w.objects;
   spawn_creatures(w);
   CHECK(w.objects == objects);
@@ -101,26 +105,27 @@ TEST_CASE("the companion jumps to follow the player onto a crate") {
 }
 
 TEST_CASE("wild monsters wander around their home") {
-  World w = new_game(5);
+  World w = cached_game(5);
   w.player.pos = {0, 0, 0};
   std::vector<Vec3> start;
   for (const Creature& c : w.creatures) start.push_back(c.body.pos);
   run(w, move(0, 0), 60 * rules::kTicksPerSecond);  // the player stays at the spawn point
-  int moved = 0;
+  int moved = 0, wild = 0;
   for (size_t i = 1; i < w.creatures.size(); ++i) {
     const Creature& c = w.creatures[i];
     if (c.species > Species::Bird) continue;  // the village and the lake have their own tests
     CAPTURE(i);
+    ++wild;
     const float dx = c.body.pos.x - c.home.x, dz = c.body.pos.z - c.home.z;
     CHECK(std::sqrt(dx * dx + dz * dz) < rules::kWanderRadius * 1.5f + 1.0f);
     if (!(c.body.pos == start[i])) ++moved;
   }
-  CHECK(moved >= static_cast<int>(rules::kWildMonsters) - 2);
+  CHECK(moved >= wild - 2);
   check_invariants(w);
 }
 
 TEST_CASE("slimes only move while hopping") {
-  World w = new_game(5);
+  World w = cached_game(5);
   Creature& slime = first_of(w, Species::Slime);
   const size_t index = static_cast<size_t>(&slime - w.creatures.data());
   int hops = 0;
@@ -136,7 +141,7 @@ TEST_CASE("slimes only move while hopping") {
 }
 
 TEST_CASE("birds run away from the player") {
-  World w = new_game(5);
+  World w = cached_game(5);
   Creature& bird = first_of(w, Species::Bird);
   const size_t index = static_cast<size_t>(&bird - w.creatures.data());
   // Put the player right next to it.
@@ -150,7 +155,7 @@ TEST_CASE("birds run away from the player") {
 }
 
 TEST_CASE("creatures keep the rules during long games") {
-  World w = new_game(31);
+  World w = cached_game(31);
   Rng inputs(8);
   for (int t = 0; t < 3000; ++t) {
     step(w, move(static_cast<int8_t>(static_cast<int>(inputs.below(255)) - 127), 100,

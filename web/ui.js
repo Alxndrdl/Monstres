@@ -55,6 +55,7 @@
   window.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (!menu.hidden) setMenu(false);
+    else if (!signPanel.hidden) showSign(-1);
     else if (!panel.hidden) select(-1);
   });
 
@@ -97,28 +98,113 @@
     hourValue.textContent = clockText(hour);
   }, 500);
 
-  // ---- Frames per second ----
+  // ---- Frames per second, and where their time goes ----
   const fpsBox = document.getElementById('fps');
   const fpsCheck = document.getElementById('show-fps');
+  const detailCheck = document.getElementById('show-profile');
   let fpsFrames = 0;
   let fpsSince = 0;
   let fpsLoop = 0;
+  let fpsText = '… FPS';
+  let detail = false;
 
   function countFrame(now) {
     if (!fpsSince) fpsSince = now;
     ++fpsFrames;
     if (now - fpsSince >= 500) {
-      fpsBox.textContent = `${Math.round((fpsFrames * 1000) / (now - fpsSince))} FPS`;
+      fpsText = `${Math.round((fpsFrames * 1000) / (now - fpsSince))} FPS`;
       fpsFrames = 0;
       fpsSince = now;
+      if (detail) renderProfile();
+      else fpsBox.textContent = fpsText;
     }
     fpsLoop = requestAnimationFrame(countFrame);
+  }
+
+  const ms = (v) => `${v < 10 ? v.toFixed(1) : Math.round(v)} ms`;
+  const thousands = (n) => (n >= 10000 ? `${Math.round(n / 1000)} k` : n >= 1000 ? `${(n / 1000).toFixed(1)} k` : `${n}`);
+  const PARTS = [
+    ['sim', 'Logique du jeu', 'simulation : déplacements, monstres, combats'],
+    ['scene', 'Scène', 'personnages, animations et effets, refaits à chaque image'],
+    ['view', 'Caméra et lumières', ''],
+    ['draw', 'Envoi au GPU', 'commandes WebGL, données des instances'],
+    ['landscape', 'Paysage', 'reconstruit quand tu avances de 16 m'],
+    ['save', 'Sauvegarde', 'toutes les 5 s'],
+  ];
+  const GROUPS = { terrain: 'Sol, chemin, eau', vegetation: 'Herbe, fleurs', scenery: 'Décor (arbres, maisons…)',
+    characters: 'Personnages', effects: 'Ombres, effets', sky: 'Nuages, montagnes' };
+
+  function row(label, value, ratio, title, worst) {
+    const bar = document.createElement('span');
+    bar.className = 'profile-bar';
+    bar.style.width = `${Math.min(100, Math.max(0, ratio * 100))}%`;
+    const line = document.createElement('div');
+    line.className = 'profile-row';
+    line.title = title || '';
+    const name = document.createElement('span');
+    name.textContent = label;
+    const v = document.createElement('b');
+    v.textContent = value;
+    const w = document.createElement('small');
+    w.textContent = worst || '';
+    line.append(name, v, w, bar);
+    return line;
+  }
+
+  // The last half second, measured by the game (see monstres_profile_json).
+  function renderProfile() {
+    const p = game && typeof game.profile === 'function' ? game.profile() : null;
+    const head = document.createElement('div');
+    head.className = 'profile-head';
+    head.textContent = fpsText;
+    if (!p) {
+      fpsBox.replaceChildren(head, document.createTextNode('Mesure en cours…'));
+      return;
+    }
+    const frame = p.avg.interval;
+    head.textContent = `${fpsText} · ${ms(frame)} par image (pire ${ms(p.worst.interval)})`;
+    const rows = [];
+    const section = (text) => Object.assign(document.createElement('div'), { className: 'profile-section', textContent: text });
+    rows.push(section(`Processeur (jeu, WebAssembly) : ${ms(p.avg.wasm)}`));
+    for (const [key, label, title] of PARTS) {
+      let extra = '';
+      if (key === 'sim') extra = ` · ${(p.ticks / p.frames).toFixed(1)} pas/image`;
+      if (key === 'landscape' && p.landscapeBuilds) extra = ` · ${p.landscapeBuilds}×`;
+      rows.push(row(label, ms(p.avg[key]), frame ? p.avg[key] / frame : 0, title, `pire ${ms(p.worst[key])}${extra}`));
+    }
+    const gpu = p.gpuMs;
+    rows.push(section(gpu === null ? 'Carte graphique : temps non mesurable sur ce navigateur' : `Carte graphique : ${ms(gpu)}`));
+    if (gpu !== null) rows.push(row('Dessin (GPU)', ms(gpu), frame ? gpu / frame : 0, 'sommets et pixels'));
+    const rest = Math.max(0, frame - p.avg.wasm);
+    rows.push(row('Hors du jeu', ms(rest), frame ? rest / frame : 0,
+      'attente de l’écran (vsync), du GPU, et le reste de la page (interface, navigateur)'));
+    rows.push(section(`Triangles : ${thousands(p.triangles)} · ${p.drawCalls} appels · ${thousands(p.instances)} objets`));
+    const most = Math.max(1, ...Object.values(p.trianglesBy));
+    for (const [key, label] of Object.entries(GROUPS)) {
+      rows.push(row(label, thousands(p.trianglesBy[key] || 0), (p.trianglesBy[key] || 0) / most));
+    }
+    const [w, h] = p.pixels;
+    rows.push(section('Écran'));
+    rows.push(row('Pixels', `${w}×${h}`, 0, 'taille du dessin (écran × densité)', `×${(+p.dpr).toFixed(2)} · ${thousands(w * h)}`));
+    rows.push(row('Lumières', `${p.lights}`, p.lights / 12, 'lanternes, cristaux… (12 au plus)'));
+    rows.push(row('Créatures', `${p.creatures}`, 0, 'simulées autour de toi', `${p.objects} objets`));
+    rows.push(row('Envoyé au GPU', `${p.uploadedKiB} Kio`, 0, 'données des instances (personnages, effets ; paysage quand il change)'));
+    // What limits the frame rate, in a few words.
+    let hint;
+    if (p.avg.interval < 18) hint = 'Fluide : rien ne freine.';
+    else if (gpu !== null && gpu > p.avg.wasm) hint = 'Limité par la carte graphique : moins de pixels ou de triangles aideraient.';
+    else if (p.avg.wasm > rest) hint = `Limité par le processeur : surtout « ${PARTS.reduce((a, b) => (p.avg[b[0]] > p.avg[a[0]] ? b : a))[1]} ».`;
+    else hint = 'Le jeu attend : sans doute la carte graphique (pixels, triangles) ou le navigateur.';
+    rows.push(Object.assign(document.createElement('div'), { className: 'profile-hint', textContent: hint }));
+    fpsBox.replaceChildren(head, ...rows);
   }
 
   function showFps(on) {
     fpsBox.hidden = !on;
     fpsCheck.checked = on;
+    detailCheck.disabled = !on;
     cancelAnimationFrame(fpsLoop);
+    setDetail(on && detailCheck.checked);
     if (on) {
       fpsBox.textContent = '… FPS';
       fpsFrames = 0;
@@ -126,14 +212,27 @@
       fpsLoop = requestAnimationFrame(countFrame);
     }
   }
+  function setDetail(on) {
+    detail = on;
+    fpsBox.classList.toggle('detail', on);
+    whenReady(() => {
+      if (typeof window.monstres.setProfiling === 'function') window.monstres.setProfiling(on);
+    });
+  }
   fpsCheck.addEventListener('change', () => {
     showFps(fpsCheck.checked);
     prefs.set('showFps', fpsCheck.checked);
   });
+  detailCheck.addEventListener('change', () => {
+    setDetail(detailCheck.checked && fpsCheck.checked);
+    prefs.set('showProfile', detailCheck.checked);
+  });
+  detailCheck.checked = prefs.get('showProfile', false) === true;
   showFps(prefs.get('showFps', false) === true);
 
   // ---- Creature info ----
   const SPECIES = window.MonstresLore.species;  // web/lore.js
+  const LORE = window.MonstresLore;
 
   function activity(c) {
     if (c.species === 'fish') {
@@ -146,6 +245,7 @@
       case 'greet': return 'Te salue';
       case 'flee': return 'S’enfuit';
       case 'battle': return 'Se bat !';
+      case 'knockedOut': return 'K.O.';
       case 'wander': return 'Se promène';
       default: return c.index === 0 ? 'T’attend' : 'Se repose';
     }
@@ -160,7 +260,6 @@
     tags: panel.querySelector('.tags'),
     variants: panel.querySelector('.variants'),
   };
-  const LORE = window.MonstresLore;
   let shownLook = null;  // family, elements and variants change only with the creature
   let refresh = 0;
 
@@ -190,7 +289,8 @@
     }
     const meters = Math.round(c.distance);
     const level = c.level && c.species !== 'villager' ? `Niveau ${c.level} · ` : '';
-    fields.facts.textContent = `${level}${activity(c)} · ${meters < 1 ? 'tout près' : `à ${meters} m`}`;
+    const released = c.released ? ' · relâché' : '';
+    fields.facts.textContent = `${level}${activity(c)}${released} · ${meters < 1 ? 'tout près' : `à ${meters} m`}`;
   }
 
   function select(index) {
@@ -205,10 +305,55 @@
     }
   }
 
-  // Tap or click on the view (see controls.js): the creature there, or nothing.
+  // ---- Signposts: what they say ----
+  const signPanel = document.getElementById('sign');
+  const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
+  const COMPASS = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest'];
+  let signShown = -1;
+  let signWatch = 0;
+
+  function showSign(index) {
+    clearInterval(signWatch);
+    signShown = index;
+    signPanel.hidden = index < 0;
+    if (index < 0) return;
+    const sign = game.sign(index);
+    if (!sign) return;
+    const here = sign.zone === 'village' ? LORE.signs.village : LORE.signs.other;
+    const lines = sign.places.filter((p) => !(p.zone === sign.zone && p.distance < 25)).map((p) => {
+      // North is -Z (the top of the map).
+      const angle = Math.atan2(p.dx, -p.dz);
+      const k = ((Math.round(angle / (Math.PI / 4)) % 8) + 8) % 8;
+      const li = document.createElement('li');
+      const arrow = document.createElement('span');
+      arrow.className = 'sign-arrow';
+      arrow.textContent = ARROWS[k];
+      arrow.title = COMPASS[k];
+      const name = document.createElement('span');
+      name.textContent = LORE.zones[p.zone] || p.zone;
+      const far = document.createElement('small');
+      far.textContent = `${Math.round(p.distance / 5) * 5} m`;
+      li.append(arrow, name, far);
+      return li;
+    });
+    signPanel.querySelector('.sign-title').textContent = here;
+    signPanel.querySelector('.sign-places').replaceChildren(...lines);
+    // Walking away puts it back.
+    signWatch = setInterval(() => {
+      const s = game.state().player;
+      if (Math.hypot(s.x - sign.x, s.z - sign.z) > 30) showSign(-1);
+    }, 500);
+  }
+
+  // Tap or click on the view (see controls.js): the creature there, a
+  // signpost, or nothing.
   window.addEventListener('monstres-tap', (event) => {
     if (!game || typeof game.pick !== 'function') return;
-    select(game.pick(event.detail.x, event.detail.y));
+    const index = game.pick(event.detail.x, event.detail.y);
+    select(index);
+    const sign = index < 0 && typeof game.pickSign === 'function' ? game.pickSign(event.detail.x, event.detail.y) : -1;
+    showSign(sign);
   });
   document.getElementById('creature-close').addEventListener('click', () => select(-1));
+  document.getElementById('sign-close').addEventListener('click', () => showSign(-1));
 })();

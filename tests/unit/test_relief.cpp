@@ -19,22 +19,30 @@ World world_on(F f) {
   for (int i = 0; i < Heightmap::kPoints; ++i) {
     for (int j = 0; j < Heightmap::kPoints; ++j) {
       w.ground.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] =
-          f(static_cast<float>(i) - rules::kReliefHalfSize, static_cast<float>(j) - rules::kReliefHalfSize);
+          f(static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize,
+            static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize);
     }
   }
   w.player.pos.y = w.ground.height(0, 0);
   return w;
 }
 
-// Steepest slope between neighboring grid points inside the playable area.
-float steepest_slope(const Heightmap& m, float half_size) {
+// Steepest slope between neighboring grid points inside the playable area
+// (but the cliffs of the cave's hill, made to stop walkers).
+float steepest_slope(const World& w, float half_size) {
+  const Heightmap& m = w.ground;
+  constexpr float cell = Heightmap::kCellSize;
   float steepest = 0;
-  const int lo = static_cast<int>(rules::kReliefHalfSize - half_size);
-  const int hi = static_cast<int>(rules::kReliefHalfSize + half_size);
+  const int lo = static_cast<int>((rules::kReliefHalfSize - half_size) / cell);
+  const int hi = static_cast<int>((rules::kReliefHalfSize + half_size) / cell);
   for (int i = lo; i < hi; ++i) {
     for (int j = lo; j < hi; ++j) {
-      steepest = std::max({steepest, std::fabs(m.at(i + 1, j) - m.at(i, j)), std::fabs(m.at(i, j + 1) - m.at(i, j)),
-                           std::fabs(m.at(i + 1, j + 1) - m.at(i, j)) / std::sqrt(2.0f)});
+      const float x = static_cast<float>(i) * cell - rules::kReliefHalfSize;
+      const float z = static_cast<float>(j) * cell - rules::kReliefHalfSize;
+      if (in_cave_hill(w.cave, x, z, 3.0f)) continue;
+      steepest = std::max({steepest, std::fabs(m.at(i + 1, j) - m.at(i, j)) / cell,
+                           std::fabs(m.at(i, j + 1) - m.at(i, j)) / cell,
+                           std::fabs(m.at(i + 1, j + 1) - m.at(i, j)) / (cell * std::sqrt(2.0f))});
     }
   }
   return steepest;
@@ -48,7 +56,7 @@ TEST_CASE("the relief depends on the seed only, and has real hills") {
   CHECK_FALSE(a.ground == c.ground);
   for (uint64_t seed = 0; seed < 10; ++seed) {
     CAPTURE(seed);
-    const World w = new_game(seed);
+    const World& w = cached_game(seed);
     float lo = 1e9f, hi = -1e9f;
     for (float x = -40; x <= 40; x += 2) {
       for (float z = -40; z <= 40; z += 2) {
@@ -63,17 +71,35 @@ TEST_CASE("the relief depends on the seed only, and has real hills") {
 }
 
 TEST_CASE("every slope of the playable area can be walked up") {
-  for (uint64_t seed = 0; seed < 20; ++seed) {
+  for (uint64_t seed = 0; seed < kManySeeds; ++seed) {
     CAPTURE(seed);
-    const World w = new_game(seed);
-    CHECK(steepest_slope(w.ground, rules::kWorldHalfSize) < rules::kMaxWalkSlope * 0.9f);
+    const World& w = cached_game(seed);
+    CHECK(steepest_slope(w, rules::kWorldHalfSize) < rules::kMaxWalkSlope * 0.9f);
+  }
+}
+
+TEST_CASE("the cave's hill has cliffs all around, but a ravine leads to its mouth") {
+  for (uint64_t seed = 0; seed < 4; ++seed) {
+    CAPTURE(seed);
+    const World& w = cached_game(seed);
+    const CaveLayout& cave = w.cave;
+    REQUIRE(cave.radius > 0);
+    const float outside = w.ground.height(cave.mouth.x + cave.facing.x * 8, cave.mouth.z + cave.facing.z * 8);
+    CHECK(w.ground.height(cave.center.x, cave.center.z) > outside + 6.0f);  // a high hill
+    // The ravine: from outside to the mouth, the ground stays low.
+    for (float d = 0; d <= 8; d += 1) {
+      CHECK(w.ground.height(cave.mouth.x + cave.facing.x * d, cave.mouth.z + cave.facing.z * d) < outside + 1.5f);
+    }
+    // Beside it, the cliff.
+    const float side = w.ground.height(cave.mouth.x - cave.facing.z * 7, cave.mouth.z + cave.facing.x * 7);
+    CHECK(side > outside + 4.0f);
   }
 }
 
 TEST_CASE("the village and its shore are flat, the lake bed is sunken") {
   for (uint64_t seed = 0; seed < 10; ++seed) {
     CAPTURE(seed);
-    const World w = new_game(seed);
+    const World& w = cached_game(seed);
     const Vec2 c = w.village.center;
     for (float dx = -rules::kVillageRadius; dx <= rules::kVillageRadius; dx += 1) {
       for (float dz = -rules::kVillageRadius; dz <= rules::kVillageRadius; dz += 1) {
@@ -89,7 +115,7 @@ TEST_CASE("the village and its shore are flat, the lake bed is sunken") {
 }
 
 TEST_CASE("the ground is drawn where bodies walk") {
-  const World w = new_game(2);
+  const World& w = cached_game(2);
   const MeshData ground = build_ground_mesh(w);
   size_t checked = 0;
   for (size_t t = 0; t < ground.vertices.size(); t += 3 * MeshData::kFloatsPerVertex) {
@@ -97,6 +123,7 @@ TEST_CASE("the ground is drawn where bodies walk") {
     const float* b = &ground.vertices[t + MeshData::kFloatsPerVertex];
     const float* c = &ground.vertices[t + 2 * MeshData::kFloatsPerVertex];
     if (std::fabs(a[0]) > rules::kWorldHalfSize || std::fabs(a[2]) > rules::kWorldHalfSize) continue;
+    if (in_cave_hill(w.cave, a[0], a[2], 3.0f)) continue;  // cliffs
     if (t % (97 * 3 * MeshData::kFloatsPerVertex) != 0) continue;  // a sample is enough
     // The middle of the triangle is on the plane through its corners.
     const float mx = (a[0] + b[0] + c[0]) / 3, my = (a[1] + b[1] + c[1]) / 3, mz = (a[2] + b[2] + c[2]) / 3;
@@ -127,23 +154,18 @@ TEST_CASE("walking up and down a gentle slope keeps the feet on the ground") {
   CHECK(w.player.pos.y == Approx(0));
 }
 
-TEST_CASE("a slope steeper than 45 degrees stops walkers, a jump gets over a small one") {
-  // A ledge rising 1.6 m over one meter.
-  World w = world_on([](float x, float) { return x <= -2 ? 1.6f : 0.0f; });
+TEST_CASE("a slope steeper than 45 degrees stops walkers") {
+  // A ledge rising 2.6 m over one cell (2 m).
+  World w = world_on([](float x, float) { return x <= -2 ? 2.6f : 0.0f; });
   w.player.pos = {0, 0, 0};
   run(w, move(-127, 0), 2 * rules::kTicksPerSecond);
   CHECK(w.player.pos.x > -1.2f);  // stopped at the foot
-  CHECK(w.player.pos.y < 0.5f);
+  CHECK(w.player.pos.y < 1.5f);
   CHECK(w.player.on_ground);
 
-  // 1.15 m over one meter: too steep to walk up, low enough to jump onto.
+  // 1.15 m over one cell: a slope, walked up.
   World low = world_on([](float x, float) { return x <= -2 ? 1.15f : 0.0f; });
   low.player.pos = {0, 0, 0};
-  run(low, move(-127, 0), rules::kTicksPerSecond / 2);
-  CHECK(low.player.pos.x > -1.2f);
-  // With a short run-up, a jump lands on top.
-  low.player.pos = {-0.3f, 0, 0};
-  step(low, move(-127, 0, 0, true));
   run(low, move(-127, 0), rules::kTicksPerSecond);
   CHECK(low.player.pos.x < -3);
   CHECK(low.player.pos.y == Approx(1.15f));
@@ -152,7 +174,7 @@ TEST_CASE("a slope steeper than 45 degrees stops walkers, a jump gets over a sma
 TEST_CASE("creatures and the companion stay on the hills") {
   for (uint64_t seed = 0; seed < 3; ++seed) {
     CAPTURE(seed);
-    World w = new_game(seed);
+    World w = cached_game(seed);
     // Walk around in circles for a while, through hills.
     for (int i = 0; i < 20 * rules::kTicksPerSecond; ++i) {
       step(w, move(90, 90, static_cast<Angle16>(i * 40)));

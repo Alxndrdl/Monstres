@@ -5,9 +5,9 @@ using namespace monstres;
 using doctest::Approx;
 
 TEST_CASE("new_game builds a valid world") {
-  for (uint64_t seed = 0; seed < 30; ++seed) {
+  for (uint64_t seed = 0; seed < kManySeeds; ++seed) {
     CAPTURE(seed);
-    const World w = new_game(seed);
+    const World& w = cached_game(seed);
     CHECK(w.tick == 0);
     CHECK(w.player.pos == Vec3{0, w.ground.height(0, 0), 0});  // standing on the ground
     CHECK(w.player.on_ground);
@@ -21,6 +21,7 @@ TEST_CASE("new_game builds a valid world") {
       // Resting on the ground: slightly sunk, but more than half of it out.
       const float height = b.max.y - b.min.y;
       CHECK(b.min.y == Approx(o.pos.y));
+      if (o.kind == ObjectKind::Collider) continue;  // raised: the roof of a gate or a cave
       CHECK(o.pos.y < w.ground.height(o.pos.x, o.pos.z));
       CHECK(o.pos.y >= w.ground.height(o.pos.x, o.pos.z) - 0.05f - 0.4f * height - 1e-4f);
       for (float x : {b.min.x, b.max.x}) {
@@ -29,9 +30,11 @@ TEST_CASE("new_game builds a valid world") {
       CHECK(b.max.x <= rules::kWorldHalfSize);
       CHECK(b.min.x >= -rules::kWorldHalfSize);
       if (!is_round(o.kind)) CHECK((o.yaw & 0x3FFF) == 0);  // boxy objects turn by quarters
-      for (size_t j = i + 1; j < w.objects.size(); ++j) {
-        CHECK_FALSE(overlaps(b, object_box(w.objects[j])));
-      }
+    }
+    std::vector<Box> boxes;
+    for (const Object& o : w.objects) boxes.push_back(object_box(o));
+    for (const auto& [i, j] : overlapping_pairs(boxes)) {
+      FAIL_CHECK("objects " << i << " and " << j << " overlap, at " << w.objects[i].pos << " and " << w.objects[j].pos);
     }
     check_invariants(w);
   }
@@ -40,7 +43,7 @@ TEST_CASE("new_game builds a valid world") {
 TEST_CASE("the world has every kind of object") {
   int counts[static_cast<int>(ObjectKind::Count)] = {};
   for (uint64_t seed = 0; seed < 10; ++seed) {
-    for (const Object& o : new_game(seed).objects) ++counts[static_cast<int>(o.kind)];
+    for (const Object& o : cached_game(seed).objects) ++counts[static_cast<int>(o.kind)];
   }
   for (int count : counts) CHECK(count > 0);
   // Trees are the most common.
@@ -157,7 +160,7 @@ TEST_CASE("the player slides along an object when walking diagonally into it") {
 
 TEST_CASE("the world has edges") {
   World w = empty_world();
-  run(w, forward(), 20 * rules::kTicksPerSecond);
+  run(w, forward(), 30 * rules::kTicksPerSecond);
   CHECK(w.player.pos.z == Approx(-(rules::kWorldHalfSize - rules::kPlayerHalfWidth)));
 }
 

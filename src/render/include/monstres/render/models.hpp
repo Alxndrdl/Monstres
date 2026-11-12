@@ -44,6 +44,10 @@ enum class MeshId : size_t {
   EyeIris, Horn, Bulb,  // variants of the monsters (tinted by the game)
   // Ruins of the tower.
   Tower, RuinWallLow, RuinWallHigh, Pillar, FallenPillar, Rubble, RuneStone,
+  // The castle and the cave.
+  CastleWall, CastleTower, CastleGate, CastleKeep, CaveMouth, Crystal,
+  // Seen from afar (simplified).
+  TreeFar, PineFar,
   Ground,  // built at runtime
   // Transparent, drawn last, in this order:
   Path,    // built at runtime
@@ -59,6 +63,24 @@ inline constexpr size_t kMeshCount = static_cast<size_t>(MeshId::Count);
 inline constexpr size_t kRockVariants = 4;
 inline constexpr size_t kCloudVariants = 3;
 inline constexpr size_t kMountainVariants = 2;
+
+// What a mesh is, for the frame statistics (RenderStats::triangles_by_group).
+enum class MeshGroup : uint8_t { Terrain, Vegetation, Scenery, Characters, Effects, Sky };
+inline MeshGroup mesh_group(MeshId id) {
+  switch (id) {
+    case MeshId::Ground: case MeshId::Path: case MeshId::Water: return MeshGroup::Terrain;
+    case MeshId::GrassShort: case MeshId::GrassTall: case MeshId::Flower: return MeshGroup::Vegetation;
+    case MeshId::Cloud0: case MeshId::Cloud1: case MeshId::Cloud2: case MeshId::Mountain0: case MeshId::Mountain1:
+      return MeshGroup::Sky;
+    case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::RuneCircle:
+      return MeshGroup::Effects;
+    default: break;
+  }
+  const auto i = static_cast<size_t>(id);
+  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::BirdLeg)) return MeshGroup::Characters;
+  if (i >= static_cast<size_t>(MeshId::VillagerTorso) && i <= static_cast<size_t>(MeshId::Bulb)) return MeshGroup::Characters;
+  return MeshGroup::Scenery;
+}
 
 inline MeshId mesh_offset(MeshId first, size_t i) {
   return static_cast<MeshId>(static_cast<size_t>(first) + i);

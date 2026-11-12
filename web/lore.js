@@ -180,6 +180,14 @@ window.MonstresLore = {
     village: 'Village',
     lake: 'Lac du village',
     ruins: 'Ruines de la Tour',
+    forest: 'Forêt des Murmures',
+    cave: 'Grotte aux Cristaux',
+    castle: 'Château de Corbeval',
+  },
+  // What the signposts say (web/ui.js adds the way to each place).
+  signs: {
+    village: 'Bienvenue au village !',
+    other: 'Un vieux panneau de bois.',
   },
 };
 

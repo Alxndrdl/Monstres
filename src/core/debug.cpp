@@ -3,6 +3,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/variants.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <iterator>
@@ -20,7 +21,7 @@ const char* species_name(Species s) {
 }
 
 const char* mind_name(Mind m) {
-  static const char* kNames[] = {"idle", "wander", "flee", "follow", "greet", "fly", "battle"};
+  static const char* kNames[] = {"idle", "wander", "flee", "follow", "greet", "fly", "battle", "knockedOut"};
   const auto i = static_cast<size_t>(m);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
@@ -72,6 +73,8 @@ std::string creature_json(const World& w, int index) {
     s += std::string(",\"elemental\":") + (c.genes.elemental ? "true" : "false");
     s += ",\"level\":" + std::to_string(index == 0 && active_monster(w) ? active_monster(w)->level : c.level);
     s += std::string(",\"engage\":\"") + engage_check_name(can_engage(w, static_cast<size_t>(index))) + "\"";
+    s += std::string(",\"released\":") + (c.released ? "true" : "false");
+    if (index == 0) s += std::string(",\"train\":") + (can_train(w) ? "true" : "false");
   }
   s += ",\"x\":" + num(p.x) + ",\"y\":" + num(p.y) + ",\"z\":" + num(p.z);
   s += ",\"distance\":" + num(std::sqrt(dx * dx + dz * dz));
@@ -84,7 +87,8 @@ std::string creature_json(const World& w, int index) {
 namespace monstres {
 
 const char* zone_name(Zone zone) {
-  static const char* kNames[] = {"meadow", "village", "lake", "ruins"};
+  static const char* kNames[] = {"meadow", "village", "lake", "ruins", "forest", "cave", "castle"};
+  static_assert(std::size(kNames) == static_cast<size_t>(Zone::Count));
   const auto i = static_cast<size_t>(zone);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
@@ -133,7 +137,8 @@ const char* object_kind_name(ObjectKind kind) {
   static const char* kNames[] = {"tree",   "pine",   "rock",     "log",       "stump",        "bush",
                                  "crate",  "cottage", "chimney", "hut",       "fence",        "sign",
                                  "well",   "barrel", "lamp",     "tower",     "ruinWall",     "pillar",
-                                 "fallenPillar", "rubble", "runeStone"};
+                                 "fallenPillar", "rubble", "runeStone", "castleWall", "castleTower", "castleGate",
+                                 "castleKeep", "caveMouth", "crystal", "collider"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -220,9 +225,43 @@ std::string bestiary_json(const World& w) {
   return s + "]";
 }
 
+std::string sign_json(const World& w, int index) {
+  if (index < 0 || static_cast<size_t>(index) >= w.objects.size()) return "null";
+  const Object& o = w.objects[static_cast<size_t>(index)];
+  if (o.kind != ObjectKind::Sign) return "null";
+  struct Place {
+    Zone zone;
+    Vec2 at;
+  };
+  std::vector<Place> places;
+  if (w.village.lake.radius_x > 0) {
+    places.push_back({Zone::Village, w.village.center});
+    places.push_back({Zone::Lake, w.village.lake.center});
+  }
+  if (w.ruins.radius > 0) places.push_back({Zone::Ruins, w.ruins.center});
+  if (w.forest.radius_x > 0) places.push_back({Zone::Forest, w.forest.center});
+  if (w.cave.radius > 0) places.push_back({Zone::Cave, w.cave.mouth});
+  if (w.castle.radius > 0) places.push_back({Zone::Castle, w.castle.center});
+  const auto distance = [&](const Place& p) {
+    const float dx = p.at.x - o.pos.x, dz = p.at.z - o.pos.z;
+    return std::sqrt(dx * dx + dz * dz);
+  };
+  std::sort(places.begin(), places.end(), [&](const Place& a, const Place& b) { return distance(a) < distance(b); });
+  std::string s = "{\"index\":" + std::to_string(index) + ",\"x\":" + num(o.pos.x) + ",\"z\":" + num(o.pos.z);
+  s += std::string(",\"zone\":\"") + zone_name(zone_at(w, o.pos.x, o.pos.z)) + "\",\"places\":[";
+  for (size_t i = 0; i < places.size(); ++i) {
+    const Place& p = places[i];
+    if (i) s += ',';
+    s += std::string("{\"zone\":\"") + zone_name(p.zone) + "\",\"dx\":" + num(p.at.x - o.pos.x) +
+         ",\"dz\":" + num(p.at.z - o.pos.z) + ",\"distance\":" + num(distance(p)) + "}";
+  }
+  return s + "]}";
+}
+
 std::string map_json(const World& w) {
   std::string s = "{\"relief\":" + num(rules::kReliefHalfSize) + ",\"world\":" + num(rules::kWorldHalfSize);
   s += ",\"points\":" + std::to_string(w.ground.empty() ? 0 : Heightmap::kPoints);
+  s += ",\"cell\":" + num(Heightmap::kCellSize);
   s += ",\"waterLevel\":" + num(rules::kWaterLevel);
   const Lake& l = w.village.lake;
   s += ",\"lake\":" + (l.radius_x > 0 ? "{\"x\":" + num(l.center.x) + ",\"z\":" + num(l.center.z) +
@@ -235,6 +274,19 @@ std::string map_json(const World& w) {
   s += ",\"ruins\":" + (r.radius > 0 ? "{\"x\":" + num(r.center.x) + ",\"z\":" + num(r.center.z) +
                                          ",\"r\":" + num(r.radius) + "}"
                                    : std::string("null"));
+  const ForestLayout& f = w.forest;
+  s += ",\"forest\":" + (f.radius_x > 0 ? "{\"x\":" + num(f.center.x) + ",\"z\":" + num(f.center.z) +
+                                          ",\"rx\":" + num(f.radius_x) + ",\"rz\":" + num(f.radius_z) + "}"
+                                    : std::string("null"));
+  const CaveLayout& c = w.cave;
+  s += ",\"cave\":" + (c.radius > 0 ? "{\"x\":" + num(c.center.x) + ",\"z\":" + num(c.center.z) +
+                                        ",\"r\":" + num(c.radius) + ",\"mouthX\":" + num(c.mouth.x) +
+                                        ",\"mouthZ\":" + num(c.mouth.z) + "}"
+                                  : std::string("null"));
+  const CastleLayout& k = w.castle;
+  s += ",\"castle\":" + (k.radius > 0 ? "{\"x\":" + num(k.center.x) + ",\"z\":" + num(k.center.z) +
+                                          ",\"r\":" + num(rules::kCastleHalf) + "}"
+                                    : std::string("null"));
   s += ",\"path\":[";
   for (size_t i = 0; i < w.path.points.size(); ++i) {
     if (i) s += ',';
@@ -243,8 +295,10 @@ std::string map_json(const World& w) {
   s += "],\"objects\":[";
   for (size_t i = 0; i < w.objects.size(); ++i) {
     const Object& o = w.objects[i];
-    const Box b = object_box(o);
-    if (i) s += ',';
+    Box b = object_box(o);
+    if (o.kind == ObjectKind::CastleGate) b = {o.pos - Vec3{4, 0, 4}, o.pos + Vec3{4, 0, 4}};  // its colliders
+    if (o.kind == ObjectKind::Collider) continue;
+    if (s.back() != '[') s += ',';
     // Trees: the crown, not the trunk.
     const float crown = o.kind == ObjectKind::Tree ? 1.2f * o.size.x : o.kind == ObjectKind::Pine ? 1.0f * o.size.x : 0;
     s += std::string("[\"") + object_kind_name(o.kind) + "\"," + num(o.pos.x) + "," + num(o.pos.z) + ",";
@@ -343,15 +397,68 @@ std::string team_json(const World& w) {
   return s + "]";
 }
 
+namespace {
+
+// Who earned what in the last battle: levels and experience before and after.
+std::string gains_json(const World& w) {
+  std::string s = "[";
+  for (size_t i = 0; i < w.battle.outcome_gains.size(); ++i) {
+    const XpGain& g = w.battle.outcome_gains[i];
+    if (i) s += ',';
+    uint16_t level = g.level_before;
+    uint32_t xp = g.xp_before + g.xp;
+    while (level < 100 && xp >= monster_xp_to_next(level)) xp -= monster_xp_to_next(level++);
+    const Monster* m = g.slot < w.team.size() ? &w.team[g.slot] : nullptr;
+    s += "{\"slot\":" + std::to_string(g.slot) + ",\"xp\":" + std::to_string(g.xp);
+    if (m) {
+      s += std::string(",\"species\":\"") + species_name(m->species) + "\",\"look\":" + std::to_string(genes_code(m->genes));
+    }
+    s += ",\"levelBefore\":" + std::to_string(g.level_before) + ",\"xpBefore\":" + std::to_string(g.xp_before);
+    s += ",\"levelAfter\":" + std::to_string(level) + ",\"xpAfter\":" + std::to_string(xp);
+    // How its bar fills, level by level: [level, from, to, needed].
+    s += ",\"steps\":[";
+    uint16_t l = g.level_before;
+    uint32_t from = g.xp_before, left = g.xp;
+    for (int n = 0; n < 100; ++n) {
+      const uint32_t need = monster_xp_to_next(l);
+      const uint32_t to = l < 100 ? std::min(need, from + left) : from;
+      if (n) s += ',';
+      s += "[" + std::to_string(l) + "," + std::to_string(from) + "," + std::to_string(to) + "," + std::to_string(need) + "]";
+      if (to < need || l >= 100) break;
+      left -= to - from;
+      from = 0;
+      ++l;
+    }
+    s += "]}";
+  }
+  return s + "]";
+}
+
+const char* phase_name(BattlePhase p) {
+  static const char* kNames[] = {"none", "fight", "flee", "training"};
+  return kNames[static_cast<size_t>(p)];
+}
+
+}  // namespace
+
 std::string battle_json(const World& w) {
   const Battle& b = w.battle;
-  std::string s = std::string("{\"phase\":\"") +
-                  (b.phase == BattlePhase::Fight ? "fight" : b.phase == BattlePhase::Flee ? "flee" : "none") + "\"";
+  std::string s = std::string("{\"phase\":\"") + phase_name(b.phase) + "\"";
   s += ",\"tick\":" + std::to_string(w.tick);
   s += std::string(",\"outcome\":{\"result\":\"") + outcome_name(b.outcome) + "\",\"tick\":" +
        std::to_string(b.outcome_tick) + ",\"xp\":" + std::to_string(b.outcome_xp) + ",\"species\":\"" +
-       species_name(b.outcome_species) + "\"}";
-  if (b.phase != BattlePhase::None && active_monster(w)) {
+       species_name(b.outcome_species) + "\",\"gains\":" + gains_json(w) +
+       ",\"wizardXp\":" + std::to_string(b.outcome_wizard_xp) + "}";
+  if (b.phase == BattlePhase::Training && active_monster(w)) {
+    const Monster& a = *active_monster(w);
+    s += ",\"ally\":{\"species\":\"" + std::string(species_name(a.species)) + "\"";
+    s += ",\"level\":" + std::to_string(a.level) + ",\"hp\":" + std::to_string(a.hp);
+    s += ",\"maxHp\":" + std::to_string(monster_fight_stats(a.species, a.level).hp);
+    s += ",\"moves\":" + moves_json(a.species, a.genes, monster_fight_stats(a.species, a.level));
+    s += ",\"fighter\":" + fighter_json(w, b.ally, species_moves(a.species), true) + "}";
+    s += ",\"shield\":{\"parriedTick\":" + std::to_string(b.foe.parried_tick) +
+         ",\"lastDamage\":" + std::to_string(b.foe.last_damage) + "}";
+  } else if (b.phase != BattlePhase::None && active_monster(w)) {
     const Creature& e = w.creatures[b.enemy];
     const Monster& a = *active_monster(w);
     s += ",\"enemy\":{\"index\":" + std::to_string(b.enemy) + ",\"species\":\"" + species_name(e.species) + "\"";

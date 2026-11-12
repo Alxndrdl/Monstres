@@ -7,7 +7,10 @@
 namespace monstres {
 
 // Battles: the companion fights one wild monster, controlled by the player
-// (the player's magician waits). Started from the context menu (Command::
+// (the player's magician waits). The victory's experience is shared by the
+// team members who fought, by the hit points each dealt; the beaten
+// monster lies knocked out for a while. Training (Command::Train) works the
+// same way against the magician, who shields itself: no one is hurt. Started from the context menu (Command::
 // Engage), ended by a victory, a defeat, a capture, or by fleeing (the
 // companion runs back to the player first).
 //
@@ -18,7 +21,6 @@ namespace monstres {
 // whose bite was parried. No elemental strengths or weaknesses yet.
 
 namespace rules {
-inline constexpr size_t kTeamSize = 6;
 inline constexpr uint16_t kCompanionStartLevel = 3;
 inline constexpr float kEngageDistance = 15.0f;     // from the player to the monster
 inline constexpr float kBattleLeash = 25.0f;        // companion this far from the enemy: the battle ends
@@ -67,9 +69,6 @@ uint16_t move_damage(const Move& move, const FightStats& attacker, const FightSt
 // The companion as a new team member (new game, old saves).
 Monster starting_companion(const Genes& genes);
 
-// Levels of the wild monsters, from the seed (stronger in the ruins).
-void assign_levels(World& world);
-
 // Can a battle against creatures[index] start now?
 enum class EngageCheck : uint8_t {
   Ok,
@@ -77,11 +76,15 @@ enum class EngageCheck : uint8_t {
   TooFar,
   InBattle,
   NoCompanion,  // no monster out of the crystal
+  KnockedOut,   // already beaten, it lies there
 };
 EngageCheck can_engage(const World& world, size_t index);
 const char* engage_check_name(EngageCheck check);
 
 bool can_capture(const World& world);
+
+// Can the companion start training against the magician now?
+bool can_train(const World& world);
 
 // Direction the companion faces the enemy (unit vector on the ground):
 // the battle camera looks along it, forward on the joystick goes along it.
@@ -104,7 +107,7 @@ bool holds_its_place(Species species);
 void summon(World& world, size_t slot);
 
 // Steps of a tick, called by step() in this order:
-void battle_command(World& world, const Input& input);  // Engage, Flee, Capture
+void battle_command(World& world, const Input& input);  // Engage, Flee, Capture, Summon, Release, Train
 Steer battle_ally(World& world, const Input& input, float dir_x, float dir_z);  // Fight phase
 Steer battle_foe(World& world);                         // Fight phase
 void battle_resolve(World& world);  // projectiles, timers, victory or defeat (after moving)

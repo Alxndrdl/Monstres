@@ -110,6 +110,8 @@ inline constexpr uint8_t kMonsterGlowSlot = 4;
 // The small lights a world gives at this time (lanterns at night, the
 // staff's crystal, glowing monsters, battle projectiles), the nearest to
 // (x, z) first, at most kMaxPointLights. `night`: 0 by day, 1 at night.
+// Lights farther than kLightReach from (x, z) are left out.
+inline constexpr float kLightReach = 60.0f;
 size_t world_lights(const World& world, float x, float z, float night, float time, PointLight* out);
 
 // The player, the companion and the wild monsters, with their shadows.

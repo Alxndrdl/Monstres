@@ -15,7 +15,7 @@ constexpr size_t kFirstObject = 40 + 12 + 4 + 1 + 8 + 4 + 4;
 constexpr size_t kObjectSize = 1 + 12 + 12 + 2 + 1;
 
 World some_game() {
-  World w = new_game(2024);
+  World w = cached_game(2024);
   for (int i = 0; i < 300; ++i) {
     step(w, move(static_cast<int8_t>(i % 255 - 127), 100, static_cast<Angle16>(i * 300), i % 50 == 0));
   }
@@ -35,7 +35,7 @@ TEST_CASE("a world survives serialize + deserialize unchanged") {
 TEST_CASE("every new world can be saved and loaded back") {
   for (uint64_t seed = 0; seed < 25; ++seed) {
     CAPTURE(seed);
-    const World w = new_game(seed);
+    const World& w = cached_game(seed);
     LoadError error = LoadError::None;
     const auto loaded = deserialize(serialize(w), &error);
     CHECK(error == LoadError::None);
@@ -144,13 +144,11 @@ TEST_CASE("a version 4 save (before creatures) loads and gets its creatures") {
   LoadError error = LoadError::None;
   const auto loaded = deserialize(v4, &error);
   REQUIRE(loaded.has_value());
-  CHECK(loaded->player.pos == original.player.pos);
+  const World fresh = new_game(original.seed);
+  CHECK(loaded->player.pos == fresh.player.pos);  // the world was built anew: back at the start
   CHECK(loaded->creatures[0].species == Species::Companion);
-  World fresh = *loaded;
-  spawn_creatures(fresh);
-  assign_genes(fresh);
-  assign_levels(fresh);
   CHECK(fresh.creatures == loaded->creatures);  // the same creatures as a new game with this seed
+  CHECK(loaded->tick == original.tick);
   // The village is there too, and nothing else is in its way.
   const bool has_houses = std::any_of(loaded->objects.begin(), loaded->objects.end(),
                                       [](const Object& o) { return o.kind == ObjectKind::HouseCottage ||

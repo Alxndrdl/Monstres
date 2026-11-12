@@ -35,16 +35,19 @@ TEST_CASE("climbing a staircase of boxes by jumping") {
   check_invariants(w);
 }
 
+// Under the sanitizers, shorter games (the release build plays them in full).
+const std::string kRandomTicks = kSanitized ? " 1200" : " 3000";
+
 TEST_CASE("the same seed and inputs always give the same game") {
-  const Replay r = parse_replay("seed 99\nrandom 5 3000");
+  const Replay r = parse_replay("seed 99\nrandom 5" + kRandomTicks);
   CHECK(play(r) == play(r));
 }
 
 TEST_CASE("saving and loading in the middle of a game changes nothing") {
-  const Replay r = parse_replay("seed 11\nrandom 77 3000");
+  const Replay r = parse_replay("seed 11\nrandom 77" + kRandomTicks);
   const World uninterrupted = play(r);
 
-  World w = new_game(r.seed);
+  World w = cached_game(r.seed);
   for (size_t i = 0; i < r.inputs.size(); ++i) {
     if (i % 250 == 0) {
       auto loaded = deserialize(serialize(w));
@@ -57,10 +60,12 @@ TEST_CASE("saving and loading in the middle of a game changes nothing") {
 }
 
 TEST_CASE("game rules hold during long random games") {
-  for (uint64_t seed = 1; seed <= 8; ++seed) {
+  const uint64_t seeds = kSanitized ? 3 : 8;
+  const std::string ticks = kSanitized ? " 1500" : " 4000";
+  for (uint64_t seed = 1; seed <= seeds; ++seed) {
     CAPTURE(seed);
-    World w = new_game(seed);
-    const Replay r = parse_replay("random " + std::to_string(seed * 31) + " 4000");
+    World w = cached_game(seed);
+    const Replay r = parse_replay("random " + std::to_string(seed * 31) + ticks);
     for (size_t t = 0; t < r.inputs.size(); ++t) {
       step(w, r.inputs[t]);
       if (t % 5 == 0) check_invariants(w);

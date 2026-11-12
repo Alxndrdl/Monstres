@@ -1,10 +1,13 @@
 #include "gles3_renderer.hpp"
 
+#include "monstres/render/models.hpp"
+
 #include <GLES3/gl3.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <unordered_map>
 #include <vector>
 
@@ -24,6 +27,9 @@ layout(location = 5) in vec4 iScale;
 layout(location = 6) in vec4 iTint;
 uniform mat4 uViewProjection;
 uniform float uTime;
+uniform vec2 uFadeCenter;
+uniform vec2 uFadeNear;  // grass, flowers: shrink away between these distances
+uniform vec2 uFadeFar;   // small things
 out vec3 vNormal;
 out vec3 vWorld;
 out vec4 vColor;
@@ -32,7 +38,14 @@ vec3 rotate(vec4 q, vec3 v) {
   return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
 }
 void main() {
-  vec3 local = aPos * iScale.xyz;
+  float material = iScale.w;
+  float fade = 1.0;
+  if (material > 2.5) {
+    vec2 range = material > 3.5 ? uFadeFar : uFadeNear;
+    fade = 1.0 - smoothstep(range.x, range.y, distance(iPosWind.xz, uFadeCenter));
+    material = 0.0;  // then lit as usual
+  }
+  vec3 local = aPos * iScale.xyz * fade;
   // Normals of a non-uniformly scaled mesh: divide by the scale.
   vNormal = rotate(iRotation, aNormal / iScale.xyz);
   vec3 world = rotate(iRotation, local) + iPosWind.xyz;
@@ -44,7 +57,7 @@ void main() {
   }
   vWorld = world;
   vColor = aColor * iTint;
-  vMaterial = iScale.w;
+  vMaterial = material;
   gl_Position = uViewProjection * vec4(world, 1.0);
 }
 )";
@@ -92,7 +105,7 @@ void main() {
     // Windows and lanterns: lit from inside at night.
     color = mix(color, vec3(1.0, 0.78, 0.42) * 1.15, uNight);
     alpha = 1.0;
-  } else if (vMaterial > 0.5) {
+  } else if (vMaterial > 0.5) {  // water
     // Small moving waves: sky reflection at grazing angles and sun glints.
     vec3 wave = normalize(vec3(sin(vWorld.x * 1.7 + uTimeFs * 1.3) * 0.06 + sin(vWorld.z * 2.3 - uTimeFs) * 0.04,
                                1.0,
@@ -221,6 +234,9 @@ public:
     u_light_count_ = glGetUniformLocation(mesh_program_, "uLightCount");
     u_light_pos_ = glGetUniformLocation(mesh_program_, "uLightPos");
     u_light_colors_ = glGetUniformLocation(mesh_program_, "uLightColors");
+    u_fade_center_ = glGetUniformLocation(mesh_program_, "uFadeCenter");
+    u_fade_near_ = glGetUniformLocation(mesh_program_, "uFadeNear");
+    u_fade_far_ = glGetUniformLocation(mesh_program_, "uFadeFar");
     u_sky_moon_ = glGetUniformLocation(sky_program_, "uMoon");
     u_sky_night_ = glGetUniformLocation(sky_program_, "uNight");
     u_fog_ = glGetUniformLocation(mesh_program_, "uFog");
@@ -285,6 +301,12 @@ public:
     glViewport(0, 0, frame.pixel_width, frame.pixel_height);
     glDepthMask(GL_TRUE);
     glClear(GL_DEPTH_BUFFER_BIT);
+    if (profiling_) {
+      const double gpu = stats_.gpu_ms;
+      stats_ = {};
+      stats_.gpu_ms = gpu;
+      begin_gpu_timer();
+    }
   }
 
   void draw(const View& view, std::span<const DrawList* const> lists) override {
@@ -317,6 +339,9 @@ public:
     }
     glUniform3f(u_fog_, view.fog.r, view.fog.g, view.fog.b);
     glUniform2f(u_fog_range_, view.fog_start, view.fog_end);
+    glUniform2f(u_fade_center_, view.fade_x, view.fade_z);
+    glUniform2f(u_fade_near_, view.fade_near_start, view.fade_near_end);
+    glUniform2f(u_fade_far_, view.fade_far_start, view.fade_far_end);
     glEnable(GL_DEPTH_TEST);
     for (const DrawList* list : lists) {
       if (list->cached) update_cache(*list);
@@ -341,9 +366,18 @@ public:
             glBindBuffer(GL_ARRAY_BUFFER, instance_vbo_);
             glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)),
                          instances.data(), GL_STREAM_DRAW);
+            stats_.uploaded_bytes += instances.size() * sizeof(Instance);
           }
           point_instance_attributes();
           glDrawArraysInstanced(GL_TRIANGLES, 0, m.vertex_count, static_cast<GLsizei>(instances.size()));
+          if (profiling_) {
+            const uint64_t triangles = static_cast<uint64_t>(m.vertex_count / 3) * instances.size();
+            ++stats_.draw_calls;
+            stats_.instances += instances.size();
+            stats_.triangles += triangles;
+            const auto group = static_cast<size_t>(mesh_group(static_cast<MeshId>(std::min(i, kMeshCount - 1))));
+            if (group < kMeshGroups) stats_.triangles_by_group[group] += triangles;
+          }
         }
       }
     }
@@ -352,7 +386,22 @@ public:
     glDisable(GL_BLEND);
   }
 
-  void end_frame() override {}
+  void end_frame() override {
+    if (profiling_) end_gpu_timer();
+  }
+
+  void set_profiling(bool on) override {
+    profiling_ = on;
+    if (on && !timer_checked_) {
+      timer_checked_ = true;
+      // EXT_disjoint_timer_query(_webgl2): measures the GPU time of a frame, where the browser allows it.
+      const char* extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+      timer_available_ = extensions && std::strstr(extensions, "disjoint_timer_query") != nullptr;
+    }
+    if (!on) stats_ = {};
+  }
+
+  const RenderStats& stats() const override { return stats_; }
 
   std::vector<uint8_t> draw_offscreen(const View& view, std::span<const DrawList* const> lists, int width,
                                       int height) override {
@@ -443,9 +492,38 @@ private:
       glBindBuffer(GL_ARRAY_BUFFER, c.buffers[i]);
       glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(list.batches[i].size() * sizeof(Instance)),
                    list.batches[i].data(), GL_STATIC_DRAW);
+      stats_.uploaded_bytes += list.batches[i].size() * sizeof(Instance);
     }
     c.version = list.version;
     c.valid = true;
+  }
+
+  // GPU time: one query at a time, read back a few frames later.
+  static constexpr GLenum kTimeElapsed = 0x88BF;  // GL_TIME_ELAPSED_EXT
+  static constexpr GLenum kGpuDisjoint = 0x8FBB;  // GL_GPU_DISJOINT_EXT
+  void begin_gpu_timer() {
+    if (!timer_available_) return;
+    if (timer_query_ && timer_running_) return;
+    if (timer_query_ && !timer_running_) {  // the last one: done?
+      GLuint ready = 0;
+      glGetQueryObjectuiv(timer_query_, GL_QUERY_RESULT_AVAILABLE, &ready);
+      if (!ready) return;
+      GLuint ns = 0;
+      glGetQueryObjectuiv(timer_query_, GL_QUERY_RESULT, &ns);
+      GLint disjoint = 0;
+      glGetIntegerv(kGpuDisjoint, &disjoint);
+      if (!disjoint) stats_.gpu_ms = static_cast<double>(ns) / 1e6;
+    }
+    if (!timer_query_) glGenQueries(1, &timer_query_);
+    glBeginQuery(kTimeElapsed, timer_query_);
+    timer_running_ = true;
+    timer_this_frame_ = true;
+  }
+  void end_gpu_timer() {
+    if (!timer_this_frame_) return;
+    glEndQuery(kTimeElapsed);
+    timer_running_ = false;
+    timer_this_frame_ = false;
   }
 
   static void release(GpuMesh& m) {
@@ -461,8 +539,14 @@ private:
   GLint u_opaque_pass_ = -1;
   GLint u_light_color_ = -1, u_ambient_sky_ = -1, u_ambient_ground_ = -1, u_night_ = -1;
   GLint u_light_count_ = -1, u_light_pos_ = -1, u_light_colors_ = -1, u_sky_moon_ = -1, u_sky_night_ = -1;
+  GLint u_fade_center_ = -1, u_fade_near_ = -1, u_fade_far_ = -1;
   GLuint sky_vao_ = 0;
   GLuint instance_vbo_ = 0;
+  bool profiling_ = false;
+  bool timer_checked_ = false, timer_available_ = false;
+  bool timer_running_ = false, timer_this_frame_ = false;
+  GLuint timer_query_ = 0;
+  RenderStats stats_;
   std::vector<GpuMesh> meshes_;
   struct Cache {
     bool valid = false;

@@ -20,23 +20,21 @@ namespace monstres {
 namespace rules {
 inline constexpr int32_t kTicksPerSecond = 60;
 inline constexpr float kDt = 1.0f / kTicksPerSecond;
-inline constexpr float kWorldHalfSize = 75.0f;  // the playable ground spans [-75, 75] on X and Z
+inline constexpr float kWorldHalfSize = 140.0f; // the playable ground spans [-140, 140] on X and Z
 inline constexpr float kPlayerHalfWidth = 0.28f; // collision box of the explorer
 inline constexpr float kPlayerHeight = 1.1f;
 inline constexpr float kWalkSpeed = 5.0f;       // m/s
 inline constexpr float kJumpSpeed = 7.0f;       // m/s, jumps ~1.2 m high
 inline constexpr float kGravity = 20.0f;        // m/s²
 inline constexpr float kMaxFallSpeed = 30.0f;
-inline constexpr uint32_t kObjectCount = 380;   // trees, rocks... outside the village and the ruins
+inline constexpr uint32_t kObjectCount = 1250;  // trees, rocks... in the open (outside the places below)
+inline constexpr uint32_t kForestTrees = 650;    // more trees in the forest
 inline constexpr float kSpawnClearRadius = 4.0f;
 inline constexpr float kObjectGap = 0.6f;       // free space kept between objects
-inline constexpr uint32_t kWildMonsters = 40;
 inline constexpr uint32_t kVillagers = 8;
-inline constexpr uint32_t kCrows = 5;
-inline constexpr uint32_t kFish = 4;
 inline constexpr float kVillagerGreetDistance = 2.5f;
 inline constexpr float kCrowFleeDistance = 4.0f;
-inline constexpr float kMonsterSpawnMinDistance = 8.0f;  // from the player's start
+inline constexpr float kMonsterSpawnMinDistance = 8.0f;  // from the player when it appears
 inline constexpr float kWanderRadius = 8.0f;             // around a monster's home
 inline constexpr float kBirdFleeDistance = 3.5f;
 inline constexpr float kCompanionFollowDistance = 1.3f;  // behind the player
@@ -45,6 +43,17 @@ inline constexpr float kCompanionTeleportDistance = 14.0f;
 inline constexpr uint32_t kTicksPerHour = 60 * kTicksPerSecond;
 inline constexpr uint32_t kTicksPerDay = 24 * kTicksPerHour;
 inline constexpr uint32_t kStartClock = 8 * kTicksPerHour;  // a new game starts at 8:00
+inline constexpr size_t kTeamSize = 6;
+// Only the surroundings of the player live: the world is cut into squares;
+// the wild monsters of a square appear when the player comes near it, and
+// disappear when it goes far away (others appear when it comes back).
+inline constexpr float kPopulationCell = 40.0f;          // side of a square
+inline constexpr int kPopulationCells = static_cast<int>(2 * kWorldHalfSize / kPopulationCell);  // per side
+inline constexpr float kSpawnRadius = 50.0f;             // a square closer than this is lived in
+inline constexpr float kDespawnRadius = 80.0f;           // farther than this: emptied
+inline constexpr uint32_t kPopulationEveryTicks = 30;    // how often squares are checked
+inline constexpr float kSimulationRadius = 80.0f;        // villagers farther away stand still
+inline constexpr uint16_t kKnockedOutTicks = 10 * kTicksPerSecond;  // a beaten monster lies there
 }  // namespace rules
 
 // Orders given from the menus (context menu on the right), see battle.hpp.
@@ -54,6 +63,8 @@ enum class Command : uint8_t {
   Flee,     // the companion runs back to the player, then the battle ends
   Capture,  // the enemy joins the team (it must be weakened first)
   Summon,   // team[Input::target] comes out of the staff's crystal (or goes back in, if it is out)
+  Release,  // team[Input::target] comes out of the crystal and goes back to the wild
+  Train,    // the companion trains against the magician, who shields itself (Flee ends it)
 };
 
 // What the player does during one tick. Integers, so that replays and saved
@@ -66,7 +77,7 @@ struct Input {
   uint8_t attack = 0;  // in a battle: 1 quick attack, 2 and 3 special attacks
   bool parry = false;  // in a battle
   Command command = Command::None;
-  uint16_t target = 0; // Engage: index of the creature; Summon: index in the team
+  uint16_t target = 0; // Engage: index of the creature; Summon, Release: index in the team
   bool operator==(const Input&) const = default;
 };
 
@@ -94,6 +105,15 @@ enum class ObjectKind : uint8_t {
   FallenPillar,  // a column lying along its yaw, 3 m long
   Rubble,        // a low pile of stones
   RuneStone,     // standing stone with glowing runes
+  // The castle (fixed sizes):
+  CastleWall,    // a 4 m stretch of crenellated wall along its yaw, 5 m high
+  CastleTower,   // round corner tower, 9 m high, a flag on top
+  CastleGate,    // the gatehouse: walk through its arch (its walls are Colliders)
+  CastleKeep,    // the square keep in the middle, 12 m high
+  // The cave:
+  CaveMouth,     // a rock arch against the cliff, dark inside (its rocks are Colliders)
+  Crystal,       // a cluster of glowing crystals. size.x = scale
+  Collider,      // invisible: the solid parts of a gate or a cave. size = half extents
   Count
 };
 
@@ -162,7 +182,8 @@ struct Genes {
 };
 
 // What a creature is doing. Battle: fighting the companion (battle.hpp).
-enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly, Battle };
+// KnockedOut: beaten in a battle, it lies on the ground for a while.
+enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly, Battle, KnockedOut };
 
 struct Creature {
   Species species = Species::Slime;
@@ -175,6 +196,8 @@ struct Creature {
   uint8_t variant = 0; // villagers: their look (clothes, hair...), visual only
   Genes genes{};       // monsters: their variants
   uint8_t level = 1;   // wild monsters: their strength (the companion's is in World::team)
+  uint32_t id = 0;     // unique in the world (World::next_id), to follow it while others come and go
+  bool released = false;  // let go by the player: beating or capturing it again gives no experience
   bool operator==(const Creature&) const = default;
 };
 
@@ -220,7 +243,7 @@ struct MonsterStats {
 const MonsterStats& monster_stats(Species species);
 
 // Named parts of the world, for maps and the interface.
-enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Count };
+enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Count };
 
 // What the player knows of each variant of each species (bestiary): every
 // variant listed by variants.hpp, in the same order.
@@ -230,8 +253,9 @@ inline constexpr size_t kSpeciesCount = static_cast<size_t>(Species::Count);
 using Dex = std::array<std::array<Discovery, kMaxVariants>, kSpeciesCount>;
 
 // A battle between the companion and one wild monster (see battle.hpp). Not
-// saved: a game loaded during a battle goes on without it.
-enum class BattlePhase : uint8_t { None, Fight, Flee };
+// saved: a game loaded during a battle goes on without it. Training: the
+// companion attacks the magician, who shields itself (no one is hurt).
+enum class BattlePhase : uint8_t { None, Fight, Flee, Training };
 enum class BattleOutcome : uint8_t { None, Victory, Defeat, Fled, Captured };
 
 // What one side of a battle is doing.
@@ -272,6 +296,15 @@ struct Projectile {
   bool operator==(const Projectile&) const = default;
 };
 
+// Experience one team member earned in the last battle (for the interface).
+struct XpGain {
+  uint8_t slot = 0;          // in the team
+  uint32_t xp = 0;
+  uint16_t level_before = 1; // its level and experience before
+  uint32_t xp_before = 0;
+  bool operator==(const XpGain&) const = default;
+};
+
 struct Battle {
   BattlePhase phase = BattlePhase::None;
   uint16_t enemy = 0;  // index of the wild creature
@@ -279,11 +312,15 @@ struct Battle {
   Fighter ally, foe;
   std::vector<Projectile> projectiles;
   uint16_t timer = 0;  // Flee: ticks spent running back
+  // Hit points dealt to the enemy by each team member: the experience is shared accordingly.
+  std::array<uint32_t, rules::kTeamSize> dealt{};
   // How the last battle ended, for the interface.
   BattleOutcome outcome = BattleOutcome::None;
   uint64_t outcome_tick = 0;
-  uint32_t outcome_xp = 0;
+  uint32_t outcome_xp = 0;  // the experience of the victory, shared by the team
   Species outcome_species = Species::Companion;
+  std::vector<XpGain> outcome_gains;  // who earned it
+  uint32_t outcome_wizard_xp = 0;
   bool operator==(const Battle&) const = default;
 };
 
@@ -298,6 +335,15 @@ struct CrystalTrace {
   bool operator==(const CrystalTrace&) const = default;
 };
 
+// Which squares of the world are lived in (see rules::kPopulationCell), and
+// how many times each was: its monsters differ every time.
+inline constexpr size_t kPopulationCellCount = static_cast<size_t>(rules::kPopulationCells * rules::kPopulationCells);
+struct Population {
+  std::array<uint8_t, kPopulationCellCount> active{};
+  std::array<uint16_t, kPopulationCellCount> visits{};
+  bool operator==(const Population&) const = default;
+};
+
 struct World {
   uint64_t seed = 0;   // the world's layout: path, objects, decoration
   uint64_t tick = 0;
@@ -305,6 +351,9 @@ struct World {
   Path path;           // derived from the seed (not saved)
   VillageLayout village;  // derived from the seed (not saved)
   RuinsLayout ruins;   // derived from the seed (not saved)
+  ForestLayout forest; // derived from the seed (not saved)
+  CaveLayout cave;     // derived from the seed (not saved)
+  CastleLayout castle; // derived from the seed (not saved)
   Heightmap ground;    // derived from the seed (not saved)
   Body player;
   std::vector<Object> objects;
@@ -315,12 +364,19 @@ struct World {
   int8_t active = 0;   // team member out of the crystal (creatures[0]), -1: none
   CrystalTrace went_in;        // not saved
   uint64_t came_out_tick = 0;  // not saved: when creatures[0] was summoned
+  uint32_t released_id = 0;    // not saved: the monster last let go back to the wild (Creature::id)
+  uint64_t released_tick = 0;  // and when it came out of the crystal (0: it was already out)
   Battle battle;       // not saved
   uint32_t clock = rules::kStartClock;  // time of day: ticks since midnight, < kTicksPerDay
+  uint32_t next_id = 1;  // Creature::id of the next creature
+  Population population;
   bool operator==(const World&) const = default;
 };
 
 World new_game(uint64_t seed);
+
+// Rebuilds what derives from the seed alone: the path, the places, the relief.
+void build_layouts(World& world);
 
 // The companion out of the crystal (creatures[0]), or nullptr.
 inline const Monster* active_monster(const World& w) {
@@ -337,11 +393,23 @@ inline float hour_of_day(const World& world) {
   return static_cast<float>(world.clock) / static_cast<float>(rules::kTicksPerHour);
 }
 
-// Places the companion next to the player and the wild monsters around the
-// world (replaces any existing creatures). Uses its own random stream from
-// the seed, so objects are not affected. Called by new_game, and when
-// loading saves from before creatures existed.
+// Places the companion next to the player, the villagers in the village and
+// the wild monsters around the player (replaces any existing creatures).
+// Uses its own random streams from the seed, so objects are not affected.
 void spawn_creatures(World& world);
+
+// Makes the squares near the player lived in (their monsters appear) and
+// empties the far ones (see rules::kPopulationCell). Called by step() every
+// kPopulationEveryTicks ticks, and by spawn_creatures. Worlds without
+// relief (made by hand, for tests) keep the creatures put in them.
+void update_population(World& world);
+
+// Adds a creature (gives it its id); returns its index.
+size_t add_creature(World& world, Creature creature);
+// Removes creatures[index] (not the companion), keeping the battle's enemy right.
+void remove_creature(World& world, size_t index);
+// Index of the creature with this id, or -1.
+int find_creature(const World& world, uint32_t id);
 
 // Builds the village (houses, well, fences, signs...) as objects, removing
 // any other object in its way or in the lake. Used by new_game, and when
@@ -351,6 +419,11 @@ void build_village(World& world);
 // Builds the ruins of the tower (tower, walls, columns, rubble, rune stones)
 // as objects, removing any other object in their way.
 void build_ruins(World& world);
+
+// Builds the castle (walls, towers, gatehouse, keep) and the cave (its
+// mouth, crystals, rocks), removing any other object in their way.
+void build_castle(World& world);
+void build_cave(World& world);
 
 // Which named part of the world (x, z) is in.
 Zone zone_at(const World& world, float x, float z);

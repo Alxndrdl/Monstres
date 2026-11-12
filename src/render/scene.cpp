@@ -107,6 +107,13 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::FallenPillar: return MeshId::FallenPillar;
     case ObjectKind::Rubble: return MeshId::Rubble;
     case ObjectKind::RuneStone: return MeshId::RuneStone;
+    case ObjectKind::CastleWall: return MeshId::CastleWall;
+    case ObjectKind::CastleTower: return MeshId::CastleTower;
+    case ObjectKind::CastleGate: return MeshId::CastleGate;
+    case ObjectKind::CastleKeep: return MeshId::CastleKeep;
+    case ObjectKind::CaveMouth: return MeshId::CaveMouth;
+    case ObjectKind::Crystal: return MeshId::Crystal;
+    case ObjectKind::Collider: return MeshId::Count;  // invisible
     default:                return MeshId::Crate;
   }
 }
@@ -129,8 +136,11 @@ float rand01(uint64_t seed, uint64_t a, uint64_t b = 0) {
 float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
 void add(DrawList& list, MeshId id, const Instance& in) {
+  if (id == MeshId::Count) return;
   list.batches[static_cast<size_t>(id)].push_back(in);
-  if (id == MeshId::Sparkle || id == MeshId::RuneCircle) list.batches[static_cast<size_t>(id)].back().material = kGlowing;  // magic glows
+  if (id == MeshId::Sparkle || id == MeshId::RuneCircle || id == MeshId::Crystal) {
+    list.batches[static_cast<size_t>(id)].back().material = kGlowing;  // magic glows
+  }
 }
 
 }  // namespace
@@ -175,6 +185,7 @@ void scale_for(const Object& o, Instance& in) {
     case ObjectKind::Bush:  in.sx = s.x; in.sy = s.y; in.sz = s.x; break;
     case ObjectKind::Crate: in.sx = s.x; in.sy = s.y; in.sz = s.z; in.y += s.y; break;  // centered cube
     case ObjectKind::Pillar: in.sx = in.sz = 1; in.sy = s.y; break;                    // unit height
+    case ObjectKind::Crystal: in.sx = in.sy = in.sz = s.x; break;
     default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
   }
 }
@@ -188,7 +199,31 @@ float wind_for(ObjectKind kind) {
   }
 }
 
-void add_object(DrawList& list, const World& w, const Object& o) {
+// How far an object is drawn: landmarks always, trees simplified far away,
+// small things only near the player.
+enum class Detail { Landmark, Tree, Small };
+Detail detail_of(const Object& o) {
+  switch (o.kind) {
+    case ObjectKind::Tree:
+    case ObjectKind::Pine: return Detail::Tree;
+    case ObjectKind::Rock: return o.size.x >= 1.0f || o.size.z >= 1.0f ? Detail::Landmark : Detail::Small;
+    case ObjectKind::Log:
+    case ObjectKind::Stump:
+    case ObjectKind::Bush:
+    case ObjectKind::Crate:
+    case ObjectKind::Fence:
+    case ObjectKind::Sign:
+    case ObjectKind::Barrel:
+    case ObjectKind::Lamp:
+    case ObjectKind::Rubble: return Detail::Small;
+    default: return Detail::Landmark;
+  }
+}
+
+// `near`: within the detailed part of the landscape (full models, shadows).
+void add_object(DrawList& list, const World& w, const Object& o, bool near = true) {
+  const Detail detail = detail_of(o);
+  if (!near && detail == Detail::Small) return;
   Instance in;
   in.x = o.pos.x;
   in.y = o.pos.y;
@@ -199,9 +234,15 @@ void add_object(DrawList& list, const World& w, const Object& o) {
   in.wind = wind_for(o.kind);
   const float k = 0.88f + 0.24f * static_cast<float>(o.variant) / 255.0f;  // slight color variation
   in.tint = {k, k, k, 1};
-  add(list, mesh_for(o), in);
+  if (detail == Detail::Small) in.material = kFadeFar;  // shrinks away before the edge of the detail
+  MeshId mesh = mesh_for(o);
+  if (!near && o.kind == ObjectKind::Tree) mesh = MeshId::TreeFar;
+  if (!near && o.kind == ObjectKind::Pine) mesh = MeshId::PineFar;
+  add(list, mesh, in);
+  if (!near) return;
 
   // Soft shadow on the ground, sized to the object.
+  const size_t shadows_before = list.batches[static_cast<size_t>(MeshId::Shadow)].size();
   const Vec3 s = o.size;
   switch (o.kind) {
     case ObjectKind::Tree:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.7f * s.x, 1.7f * s.x, 0); break;
@@ -224,8 +265,14 @@ void add_object(DrawList& list, const World& w, const Object& o) {
     case ObjectKind::FallenPillar: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.8f, 0.6f, yaw, 0.7f); break;
     case ObjectKind::Rubble: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.0f, 1.0f, 0, 0.6f); break;
     case ObjectKind::RuneStone: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.6f, 0.4f, yaw, 0.7f); break;
+    case ObjectKind::CastleWall: add_ground_shadow(list, w, o.pos.x, o.pos.z, 2.6f, 1.2f, yaw, 0.7f); break;
+    case ObjectKind::CastleTower: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.2f, 3.2f, 0, 0.75f); break;
+    case ObjectKind::CastleKeep: add_ground_shadow(list, w, o.pos.x, o.pos.z, 6.2f, 6.2f, yaw, 0.75f); break;
+    case ObjectKind::Crystal: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.5f * s.x, 0.5f * s.x, 0, 0.5f); break;
     default: break;
   }
+  auto& shadows = list.batches[static_cast<size_t>(MeshId::Shadow)];
+  for (size_t i = shadows_before; i < shadows.size(); ++i) shadows[i].material = detail == Detail::Small ? kFadeFar : kLit;
 }
 
 // Trees, pines and a few rocks beyond the edges of the playable area, so the
@@ -270,31 +317,62 @@ std::vector<Object> border_forest(const World& w) {
   return forest;
 }
 
-bool covered(const std::vector<Box>& boxes, float x, float z, float margin) {
-  return std::any_of(boxes.begin(), boxes.end(), [&](const Box& b) {
-    return x > b.min.x - margin && x < b.max.x + margin && z > b.min.z - margin && z < b.max.z + margin;
-  });
-}
+// Boxes of the objects around a place, by cells of 4 m: where grass does not grow.
+class Obstacles {
+public:
+  Obstacles(Vec2 center, float radius) : x0_(center.x - radius), z0_(center.z - radius),
+                                         n_(static_cast<int>(2 * radius / kCell) + 1),
+                                         cells_(static_cast<size_t>(n_ * n_)) {}
+  void add(const Box& b) {
+    for (int i = cell(b.min.x - x0_); i <= cell(b.max.x - x0_); ++i) {
+      for (int j = cell(b.min.z - z0_); j <= cell(b.max.z - z0_); ++j) cells_[static_cast<size_t>(i * n_ + j)].push_back(b);
+    }
+  }
+  bool covered(float x, float z, float margin) const {
+    const auto& boxes = cells_[static_cast<size_t>(cell(x - x0_) * n_ + cell(z - z0_))];
+    return std::any_of(boxes.begin(), boxes.end(), [&](const Box& b) {
+      return x > b.min.x - margin && x < b.max.x + margin && z > b.min.z - margin && z < b.max.z + margin;
+    });
+  }
 
-void add_vegetation(const World& w, const std::vector<Box>& obstacles, DrawList& list) {
+private:
+  static constexpr float kCell = 4.0f;
+  int cell(float v) const { return std::clamp(static_cast<int>(v / kCell), 0, n_ - 1); }
+  float x0_, z0_;
+  int n_;
+  std::vector<std::vector<Box>> cells_;
+};
+
+// Grass and flowers around `center` (they fade out before kGrassRadius, see build_view).
+void add_vegetation(const World& w, const Obstacles& obstacles, Vec2 center, DrawList& list) {
   static constexpr Color kFlowerColors[] = {
       {1.0f, 1.0f, 1.0f, 1}, {1.0f, 0.88f, 0.35f, 1}, {0.80f, 0.55f, 0.95f, 1},
       {1.0f, 0.62f, 0.75f, 1}, {0.55f, 0.70f, 1.0f, 1},
   };
   constexpr float kCell = 1.0f;
   const int cells = static_cast<int>(2 * kDecorationHalfSize / kCell);
-  for (int i = 0; i < cells; ++i) {
-    for (int j = 0; j < cells; ++j) {
+  const auto cell_of = [&](float v) {
+    return std::clamp(static_cast<int>((v + kDecorationHalfSize) / kCell), 0, cells - 1);
+  };
+  constexpr float r2 = landscape::kGrassRadius * landscape::kGrassRadius;
+  for (int i = cell_of(center.x - landscape::kGrassRadius); i <= cell_of(center.x + landscape::kGrassRadius); ++i) {
+    for (int j = cell_of(center.z - landscape::kGrassRadius); j <= cell_of(center.z + landscape::kGrassRadius); ++j) {
       const auto ui = static_cast<uint64_t>(i), uj = static_cast<uint64_t>(j);
       const float x = -kDecorationHalfSize + kCell * (static_cast<float>(i) + rand01(w.seed, 1000 + ui, uj));
       const float z = -kDecorationHalfSize + kCell * (static_cast<float>(j) + rand01(w.seed, 2000 + ui, uj));
+      if ((x - center.x) * (x - center.x) + (z - center.z) * (z - center.z) > r2) continue;
       const float on_path = distance_to_path(w.path, x, z, 2 * rules::kPathHalfWidth) / rules::kPathHalfWidth;
       if (on_path < 0.75f) continue;
-      if (covered(obstacles, x, z, 0.05f)) continue;
+      if (obstacles.covered(x, z, 0.05f)) continue;
+      if (w.ground.normal(x, z).y < 0.8f) continue;  // bare rock on cliffs
       if (in_lake(w.village.lake, x, z, 0.6f)) continue;
       if (w.ruins.radius > 0) {  // the paved courtyard of the ruins
         const float rx = x - w.ruins.center.x, rz = z - w.ruins.center.z;
         if (std::max(std::fabs(rx), std::fabs(rz)) < 8.5f && rand01(w.seed, 3500 + ui, uj) < 0.8f) continue;
+      }
+      if (w.castle.radius > 0) {  // the castle's courtyard, paved
+        const float kx = x - w.castle.center.x, kz = z - w.castle.center.z;
+        if (std::max(std::fabs(kx), std::fabs(kz)) < rules::kCastleHalf + 0.5f && rand01(w.seed, 3600 + ui, uj) < 0.9f) continue;
       }
       if (w.village.lake.radius_x > 0) {  // the trodden village square
         const float vx = x - w.village.center.x, vz = z - w.village.center.z;
@@ -312,6 +390,7 @@ void add_vegetation(const World& w, const std::vector<Box>& obstacles, DrawList&
       in.z = z;
       in.rotation = quat_yaw(kTau * rand01(w.seed, 4000 + ui, uj));
       in.wind = 1;
+      in.material = kFadeNear;
       const float k = 0.85f + 0.25f * rand01(w.seed, 5000 + ui, uj);
       in.tint = {k, k, k, 1};
 
@@ -347,15 +426,15 @@ void add_mountains(const World& w, DrawList& list) {
   for (int i = 0; i < kCount; ++i) {
     const auto u = static_cast<uint64_t>(i);
     const float angle = kTau * (static_cast<float>(i) + 0.6f * rand01(w.seed, 10000 + u)) / kCount;
-    const float distance = 200.0f + 70.0f * rand01(w.seed, 10100 + u);
+    const float distance = 270.0f + 80.0f * rand01(w.seed, 10100 + u);
     Instance in;
     in.x = std::cos(angle) * distance;
     in.z = std::sin(angle) * distance;
     in.rotation = quat_yaw(kTau * rand01(w.seed, 10200 + u));
-    const float width = 55.0f + 40.0f * rand01(w.seed, 10300 + u);
+    const float width = 70.0f + 50.0f * rand01(w.seed, 10300 + u);
     in.sx = width;
     in.sz = width * (0.8f + 0.4f * rand01(w.seed, 10400 + u));
-    in.sy = 24.0f + 30.0f * rand01(w.seed, 10500 + u);
+    in.sy = 30.0f + 36.0f * rand01(w.seed, 10500 + u);
     add(list, mesh_offset(MeshId::Mountain0, u % kMountainVariants), in);
   }
 }
@@ -432,7 +511,16 @@ void add_village_effects(const World& w, float time, DrawList& list) {
 
 }  // namespace
 
+Vec2 landscape_center(float x, float z) {
+  const auto snap = [](float v) { return std::round(v / landscape::kStep) * landscape::kStep; };
+  return {snap(x), snap(z)};
+}
+
 void build_landscape(const World& w, DrawList& list) {
+  build_landscape(w, list, landscape_center(w.player.pos.x, w.player.pos.z));
+}
+
+void build_landscape(const World& w, DrawList& list, Vec2 center) {
   list.batches.assign(kMeshCount, {});
   list.cached = true;
   ++list.version;
@@ -442,16 +530,17 @@ void build_landscape(const World& w, DrawList& list) {
   water.material = kWater;  // the shader adds waves and reflections
   add(list, MeshId::Water, water);
 
-  std::vector<Box> obstacles;
-  for (const Object& o : w.objects) {
-    add_object(list, w, o);
-    obstacles.push_back(object_box(o));
-  }
-  for (const Object& o : border_forest(w)) {
-    add_object(list, w, o);
-    obstacles.push_back(object_box(o));
-  }
-  add_vegetation(w, obstacles, list);
+  Obstacles obstacles(center, landscape::kGrassRadius + 4);
+  constexpr float near2 = landscape::kDetailRadius * landscape::kDetailRadius;
+  const auto place = [&](const Object& o) {
+    const float dx = o.pos.x - center.x, dz = o.pos.z - center.z;
+    const bool near = dx * dx + dz * dz < near2;
+    add_object(list, w, o, near);
+    if (near) obstacles.add(object_box(o));
+  };
+  for (const Object& o : w.objects) place(o);
+  for (const Object& o : border_forest(w)) place(o);
+  add_vegetation(w, obstacles, center, list);
   add_mountains(w, list);
 }
 
@@ -485,17 +574,82 @@ void add_spark(DrawList& list, float x, float y, float z, float size, Color c, f
 
 Element creature_element(const Creature& c) { return creature_elements(c.species, c.genes).first; }
 
+// Training: the magician's shield, a bubble of light that flashes when hit.
+void add_shield(const World& w, float time, DrawList& list) {
+  const Body& p = w.player;
+  const float mid = p.pos.y + rules::kPlayerHeight * 0.55f;
+  const uint64_t since = w.tick - w.battle.foe.parried_tick;
+  const float flash = w.battle.foe.parried_tick > 0 && since < 16 ? 1 - static_cast<float>(since) / 16.0f : 0;
+  add_spark(list, p.pos.x, mid, p.pos.z, 1.05f + 0.04f * std::sin(time * 3) + 0.15f * flash,
+            {0.7f + 1.2f * flash, 1.1f + 0.8f * flash, 2.0f, 1}, 0.18f + 0.3f * flash, time * 0.4f);
+  for (int k = 0; k < 6; ++k) {  // runes of light turning around it
+    const float a = time * 1.2f + kTau * static_cast<float>(k) / 6;
+    add_spark(list, p.pos.x + std::cos(a) * 0.95f, mid + 0.35f * std::sin(time * 2 + static_cast<float>(k)),
+              p.pos.z + std::sin(a) * 0.95f, 0.06f, {1.0f, 1.6f, 2.0f, 1}, 0.8f, a);
+  }
+  if (flash > 0) {
+    Creature ring_at;  // at the player's feet
+    ring_at.species = Species::Villager;
+    ring_at.body = p;
+    add_ring(list, w, ring_at, 0.9f + 0.7f * (1 - flash), {1.4f, 1.8f, 2.2f, flash});
+  }
+}
+
+// After a victory: golden sparks rise around the companion; a column of
+// light if it grew a level.
+void add_victory_effects(const World& w, float time, DrawList& list) {
+  const Battle& b = w.battle;
+  const bool won = b.outcome == BattleOutcome::Victory || b.outcome == BattleOutcome::Captured;
+  const uint64_t since = w.tick - b.outcome_tick;
+  if (!won || b.outcome_tick == 0 || since >= 150 || w.active < 0 || w.creatures.empty()) return;
+  const Creature& c = w.creatures[0];
+  const float t = static_cast<float>(since) / 150.0f;
+  const float fade = 1 - t * t;
+  for (int k = 0; k < 14; ++k) {
+    const float u = std::fmod(t * 2.2f + static_cast<float>(k) / 14, 1.0f);
+    const float a = kTau * static_cast<float>(k) / 14 + time * 2.0f;
+    const float r = 0.45f + 0.25f * std::sin(static_cast<float>(k) * 1.3f);
+    add_spark(list, c.body.pos.x + std::cos(a) * r, c.body.pos.y + 0.1f + 1.6f * u, c.body.pos.z + std::sin(a) * r,
+              0.07f * (1 - 0.5f * u), {2.0f, 1.7f, 0.7f, 1}, fade * (1 - u), a);
+  }
+  if (since < 30) add_ring(list, w, c, 0.4f + 1.6f * static_cast<float>(since) / 30, {2.0f, 1.7f, 0.8f, 1 - static_cast<float>(since) / 30});
+  bool level_up = false;
+  for (const XpGain& g : b.outcome_gains) {
+    level_up = level_up || (static_cast<int>(g.slot) == w.active && g.slot < w.team.size() && w.team[g.slot].level > g.level_before);
+  }
+  if (level_up) {
+    Instance column;
+    column.x = c.body.pos.x;
+    column.y = c.body.pos.y + 1.5f;
+    column.z = c.body.pos.z;
+    column.sx = column.sz = 0.35f + 0.1f * std::sin(time * 8);
+    column.sy = 1.6f;
+    column.rotation = quat_yaw(time);
+    column.tint = {2.0f, 1.9f, 1.2f, 0.45f * fade};
+    add(list, MeshId::Sparkle, column);
+    for (int k = 0; k < 3; ++k) {
+      const float a = time * 4 + kTau * static_cast<float>(k) / 3;
+      add_spark(list, c.body.pos.x + std::cos(a) * 0.6f, c.body.pos.y + 0.4f + 0.9f * std::fmod(t * 3 + 0.33f * static_cast<float>(k), 1.0f),
+                c.body.pos.z + std::sin(a) * 0.6f, 0.12f, {2.0f, 2.0f, 1.4f, 1}, fade, a);
+    }
+  }
+}
+
 // Battle: the enemy's red ring, what it is preparing, projectiles, bursts,
 // parries, hits and stuns.
 void add_battle_effects(const World& w, float time, DrawList& list) {
   const Battle& b = w.battle;
-  if (b.phase != BattlePhase::Fight || w.creatures.empty() || b.enemy >= w.creatures.size()) return;
+  add_victory_effects(w, time, list);
+  if (b.phase == BattlePhase::Training && !w.creatures.empty()) add_shield(w, time, list);
+  const bool training = b.phase == BattlePhase::Training;
+  if ((b.phase != BattlePhase::Fight && !training) || w.creatures.empty() || b.enemy >= w.creatures.size()) return;
   const Creature& ally = w.creatures[0];
   const Creature& foe = w.creatures[b.enemy];
   const float foe_radius = species_info(foe.species).shape.half_width * 2.2f + 0.15f;
 
   // The enemy's ring: red, beating fast while it prepares an attack.
-  const bool windup = b.foe.state == FighterState::Windup;
+  const bool windup = !training && b.foe.state == FighterState::Windup;
+  if (!training) {
   const float beat = windup ? 0.12f * std::sin(time * 22.0f) : 0.05f * std::sin(time * 4.0f);
   add_ring(list, w, foe, foe_radius * (1 + beat), windup ? Color{1.6f, 0.25f, 0.2f, 1} : Color{1.0f, 0.3f, 0.25f, 0.85f});
   if (windup) {
@@ -511,6 +665,7 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
                 element_glow(creature_element(foe)), 0.9f, time * 6);
     }
   }
+  }
 
   // Projectiles: a glowing ball and its trail.
   for (const Projectile& p : b.projectiles) {
@@ -523,7 +678,7 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
     }
   }
 
-  for (int side = 0; side < 2; ++side) {
+  for (int side = 0; side < (training ? 1 : 2); ++side) {
     const Fighter& f = side == 0 ? b.ally : b.foe;
     const Creature& c = side == 0 ? ally : foe;
     const Monster* mine = side == 0 ? active_monster(w) : nullptr;
@@ -748,6 +903,34 @@ int pick_creature(const World& w, const View& view, float ndc_x, float ndc_y) {
   return best;
 }
 
+int pick_sign(const World& w, const View& view, float ndc_x, float ndc_y) {
+  const Ray ray = screen_ray(view, ndc_x, ndc_y);
+  int best = -1;
+  float best_t = 2;
+  for (size_t i = 0; i < w.objects.size(); ++i) {
+    const Object& o = w.objects[i];
+    if (o.kind != ObjectKind::Sign) continue;
+    // The planks, wider than the post (easier to tap).
+    const Box b{{o.pos.x - 0.7f, o.pos.y, o.pos.z - 0.7f}, {o.pos.x + 0.7f, o.pos.y + 1.9f, o.pos.z + 0.7f}};
+    const float t = ray_box(ray, b);
+    if (t >= 0 && t < best_t) {
+      best_t = t;
+      best = static_cast<int>(i);
+    }
+  }
+  if (best < 0) return -1;
+  // Close enough to read it, and not hidden behind something.
+  const Object& sign = w.objects[static_cast<size_t>(best)];
+  const float px = sign.pos.x - w.player.pos.x, pz = sign.pos.z - w.player.pos.z;
+  if (px * px + pz * pz > kReadDistance * kReadDistance) return -1;
+  for (size_t i = 0; i < w.objects.size(); ++i) {
+    if (static_cast<int>(i) == best) continue;
+    const float t = ray_box(ray, object_box(w.objects[i]));
+    if (t >= 0 && t < best_t - 1e-4f) return -1;
+  }
+  return best;
+}
+
 Portrait build_portrait(const PortraitSubject& subject, float aspect) {
   Portrait p;
   p.list.batches.assign(kMeshCount, {});
@@ -776,9 +959,12 @@ Portrait build_portrait(const PortraitSubject& subject, float aspect) {
 }
 
 bool creature_on_screen(const World& w, const View& view, int index, float& ndc_x, float& ndc_y) {
-  if (index < 0 || static_cast<size_t>(index) >= w.creatures.size()) return false;
-  const Creature& c = w.creatures[static_cast<size_t>(index)];
-  const Vec3 p = c.body.pos + Vec3{0, species_info(c.species).shape.height * 0.5f, 0};
+  if (index < -1 || index >= static_cast<int>(w.creatures.size())) return false;
+  Vec3 p = w.player.pos + Vec3{0, rules::kPlayerHeight * 0.6f, 0};  // -1: the magician
+  if (index >= 0) {
+    const Creature& c = w.creatures[static_cast<size_t>(index)];
+    p = c.body.pos + Vec3{0, species_info(c.species).shape.height * 0.5f, 0};
+  }
   const float* m = view.view_projection.m;
   const float v[4] = {p.x, p.y, p.z, 1};
   float r[4];
@@ -853,27 +1039,82 @@ SkyDirections sky_directions(float hour) {
 
 float night_amount(const World& world) { return 1 - sky_at(hour_of_day(world)).daylight; }
 
-View build_view(const World& w, const Camera& cam, float aspect, float time) {
+namespace {
+
+// Where the camera turns around, what it looks at, and how far it stays.
+struct CameraGoal {
+  float tx, ty, tz;           // pivot
+  float look_x, look_y, look_z;
+  float zoom;                 // times Camera::distance
+};
+
+CameraGoal camera_goal(const World& w, CameraSubject subject) {
   const Player& p = w.player;
-  float tx = p.pos.x, ty = p.pos.y + 1.0f, tz = p.pos.z;
-  float wanted = cam.distance;
+  CameraGoal g{p.pos.x, p.pos.y + 1.0f, p.pos.z, p.pos.x, p.pos.y + 1.0f, p.pos.z, 1.0f};
+  if (subject != CameraSubject::Companion || w.creatures.empty()) return g;
   // In a battle the camera follows the companion; in a fight it looks
   // between the companion and its enemy (the yaw is turned towards it, see
-  // the platform code).
-  float look_x = tx, look_y = ty, look_z = tz;
-  if (w.battle.phase != BattlePhase::None && !w.creatures.empty()) {
-    const Body& a = w.creatures[0].body;
-    tx = look_x = a.pos.x;
-    ty = look_y = a.pos.y + 0.75f;
-    tz = look_z = a.pos.z;
-    wanted = cam.distance * 0.8f;
-    if (w.battle.phase == BattlePhase::Fight && w.battle.enemy < w.creatures.size()) {
-      const Body& e = w.creatures[w.battle.enemy].body;
-      look_x = lerp(tx, e.pos.x, 0.4f);
-      look_y = lerp(ty, e.pos.y + 0.5f, 0.4f);
-      look_z = lerp(tz, e.pos.z, 0.4f);
-    }
+  // the platform code), when training between it and the magician.
+  const Body& a = w.creatures[0].body;
+  g = {a.pos.x, a.pos.y + 0.75f, a.pos.z, a.pos.x, a.pos.y + 0.75f, a.pos.z, 0.8f};
+  const Body* other = nullptr;
+  float other_mid = 0.5f;
+  if (w.battle.phase == BattlePhase::Fight && w.battle.enemy < w.creatures.size()) {
+    other = &w.creatures[w.battle.enemy].body;
+  } else if (w.battle.phase == BattlePhase::Training) {
+    other = &w.player;
+    other_mid = 0.8f;
   }
+  if (other) {
+    g.look_x = lerp(g.tx, other->pos.x, 0.4f);
+    g.look_y = lerp(g.ty, other->pos.y + other_mid, 0.4f);
+    g.look_z = lerp(g.tz, other->pos.z, 0.4f);
+  }
+  return g;
+}
+
+}  // namespace
+
+CameraSubject camera_subject(const World& w) {
+  if (w.battle.phase != BattlePhase::None) return CameraSubject::Companion;
+  // Just after a battle: a moment on the companion (its victory), unless the player walks away.
+  const Battle& b = w.battle;
+  const bool after = b.outcome == BattleOutcome::Victory || b.outcome == BattleOutcome::Captured;
+  if (after && w.tick - b.outcome_tick < kCameraHoldTicks && w.active >= 0 && w.player.speed < 0.5f) {
+    return CameraSubject::Companion;
+  }
+  return CameraSubject::Magician;
+}
+
+void update_camera(Camera& cam, const World& w, float dt) {
+  const CameraSubject wanted = camera_subject(w);
+  if (!cam.smooth) {
+    cam.smooth = true;
+    cam.subject = cam.previous = wanted;
+    cam.blend = 1;
+    return;
+  }
+  if (wanted != cam.subject) {
+    // From wherever the camera is (maybe halfway), towards the new subject.
+    cam.previous = cam.blend < 0.5f ? cam.previous : cam.subject;
+    cam.subject = wanted;
+    cam.blend = cam.blend < 0.5f ? 1 - cam.blend : 0;
+  }
+  cam.blend = std::min(1.0f, cam.blend + dt / kCameraBlendSeconds);
+}
+
+View build_view(const World& w, const Camera& cam, float aspect, float time) {
+  CameraGoal g = camera_goal(w, cam.smooth ? cam.subject : camera_subject(w));
+  if (cam.smooth && cam.blend < 1) {
+    // Gliding from one subject to the other (both may move meanwhile).
+    const CameraGoal from = camera_goal(w, cam.previous);
+    const float t = cam.blend * cam.blend * (3 - 2 * cam.blend);
+    g = {lerp(from.tx, g.tx, t), lerp(from.ty, g.ty, t), lerp(from.tz, g.tz, t), lerp(from.look_x, g.look_x, t),
+         lerp(from.look_y, g.look_y, t), lerp(from.look_z, g.look_z, t), lerp(from.zoom, g.zoom, t)};
+  }
+  const float tx = g.tx, ty = g.ty, tz = g.tz;
+  const float look_x = g.look_x, look_y = g.look_y, look_z = g.look_z;
+  const float wanted = cam.distance * g.zoom;
 
   // The camera sits behind the player, opposite to where it looks, and comes
   // closer when an object (a trunk, a rock...) is in between.
@@ -914,6 +1155,13 @@ View build_view(const World& w, const Camera& cam, float aspect, float time) {
   v.night = 1 - sky.daylight;
   v.light_count = world_lights(w, tx, tz, v.night, time, v.lights);
   v.time = time;
+  // Grass and small things shrink away around the player (see build_landscape).
+  v.fade_x = w.player.pos.x;
+  v.fade_z = w.player.pos.z;
+  v.fade_near_start = landscape::kGrassFadeStart;
+  v.fade_near_end = landscape::kGrassFadeEnd;
+  v.fade_far_start = landscape::kDetailFadeStart;
+  v.fade_far_end = landscape::kDetailFadeEnd;
   return v;
 }
 

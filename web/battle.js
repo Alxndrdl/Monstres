@@ -78,6 +78,10 @@
       'stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h5M15 12h5"/><circle cx="12" cy="12" r="3"/></svg>',
     talk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12z"/></svg>',
+    train: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+    stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
   };
 
   const action = (id, label, enabled, onClick) => {
@@ -95,6 +99,7 @@
     tooFar: 'Trop loin : approche-toi à moins de 15 m.',
     inBattle: 'Un combat est déjà en cours.',
     noCompanion: 'Invoque d’abord un monstre de ton équipe (à gauche).',
+    knockedOut: 'K.O. : il se repose. Laisse-le tranquille un moment.',
   };
   // Under the capture button: why it cannot be used yet.
   const CAPTURE_NOTES = {
@@ -118,6 +123,14 @@
         contextActions.replaceChildren(action('flee', 'Fuir', true, () => game.flee()), capture);
         contextNote.textContent = '';
       };
+    } else if (b.phase === 'training') {
+      const name = speciesName(b.ally.species);
+      key = 'training';
+      build = () => {
+        contextTitle.replaceChildren(`Entraînement · ${name}`);
+        contextActions.replaceChildren(action('stop', 'Arrêter l’entraînement', true, () => game.stopTraining()));
+        contextNote.textContent = 'Ton magicien se protège avec un bouclier : attaque-le pour essayer tes attaques.';
+      };
     } else if (b.phase === 'flee') {
       key = 'flee';
       build = () => {
@@ -127,8 +140,15 @@
       };
     } else {
       const c = selected >= 0 && game.selected();
-      if (!c || c.index === 0) {
+      if (!c) {
         key = 'none';
+      } else if (c.index === 0) {  // the companion
+        key = `companion/${c.train}`;
+        build = () => {
+          contextTitle.replaceChildren(`${speciesName(c.species)} `, el('small', { textContent: `niv. ${c.level}` }));
+          contextActions.replaceChildren(action('train', 'S’entraîner', c.train, () => game.train()));
+          contextNote.textContent = 'Contrôle-le comme en combat, contre ton magicien.';
+        };
       } else if (c.species === 'villager') {
         key = `villager/${c.index}`;
         build = () => {
@@ -149,6 +169,7 @@
     contextKey = key;
     context.hidden = !build;
     context.classList.toggle('in-battle', b.phase !== 'none');
+    context.dataset.phase = b.phase;
     if (build) build();
   }
 
@@ -171,7 +192,7 @@
 
   let tagsFor = '';
   function renderHud(b) {
-    hud.hidden = b.phase === 'none';
+    hud.hidden = b.phase === 'none' || b.phase === 'training';
     if (hud.hidden) return;
     showSide(sides.enemy, speciesName(b.enemy.species), b.enemy.level, b.enemy.hp, b.enemy.maxHp);
     showSide(sides.ally, speciesName(b.ally.species), b.ally.level, b.ally.hp, b.ally.maxHp);
@@ -221,7 +242,7 @@
 
   // ---- Damage numbers and the outcome ----
   const layer = $('damage-layer');
-  const seen = { enemyHit: 0, allyHit: 0, enemyParried: 0, allyParried: 0, outcome: -1 };
+  const seen = { enemyHit: 0, allyHit: 0, enemyParried: 0, allyParried: 0, shield: 0, outcome: -1 };
 
   function floatText(index, text, className) {
     const at = game.creatureOnScreen(index);
@@ -234,6 +255,15 @@
   }
 
   function renderHits(b) {
+    if (b.phase === 'training') {
+      // What the attack would have done, on the magician's shield.
+      if (b.shield.parriedTick > seen.shield) floatText(-1, `🛡 ${b.shield.lastDamage}`, 'shield');
+      seen.shield = b.shield.parriedTick;
+      const a = b.ally.fighter;
+      if (a.parriedTick > seen.allyParried) floatText(0, 'Paré !', 'blocked');
+      seen.allyParried = a.parriedTick;
+      return;
+    }
     if (b.phase !== 'fight') return;
     const e = b.enemy.fighter;
     const a = b.ally.fighter;
@@ -249,6 +279,60 @@
 
   const banner = $('battle-banner');
   let bannerTimer = 0;
+  const portraits = new Map();
+  function portrait(species, look) {
+    const key = `${species}/${look}`;
+    if (!portraits.has(key)) {
+      const canvas = el('canvas', { width: 96, height: 96 });
+      canvas.getContext('2d').putImageData(game.portrait(LORE.speciesOrder.indexOf(species), 96, look), 0, 0);
+      portraits.set(key, canvas.toDataURL());
+    }
+    return portraits.get(key);
+  }
+
+  // One monster's experience: its bar fills up, level after level.
+  function xpCard(g) {
+    const fill = el('span');
+    const level = el('strong', { className: 'xp-level' });
+    const card = el('div', { className: 'xp-card' }, [
+      el('img', { src: portrait(g.species, g.look), alt: '' }),
+      el('div', { className: 'xp-body' }, [
+        el('div', { className: 'xp-head' }, [el('span', { textContent: speciesName(g.species) }), level]),
+        el('div', { className: 'bar xp-bar' }, [fill]),
+        el('small', { className: 'xp-gain', textContent: `+${g.xp} XP` }),
+      ]),
+    ]);
+    const steps = g.steps || [];
+    let k = 0;
+    const show = (step, ratio) => {
+      level.textContent = `Niv. ${step[0]}`;
+      fill.style.width = `${100 * ratio}%`;
+    };
+    if (steps.length) {
+      fill.style.transition = 'none';
+      show(steps[0], steps[0][1] / steps[0][3]);
+    }
+    const next = () => {
+      if (k >= steps.length) return;
+      const [lvl, , to, need] = steps[k];
+      fill.style.transition = 'width 0.6s ease-out';
+      show([lvl], to / need);
+      if (to >= need && k + 1 < steps.length) {  // full: one level up
+        setTimeout(() => {
+          ++k;
+          card.classList.remove('level-up');
+          void card.offsetWidth;  // restart the animation
+          card.classList.add('level-up');
+          fill.style.transition = 'none';
+          show(steps[k], steps[k][1] / steps[k][3]);
+          requestAnimationFrame(() => requestAnimationFrame(next));
+        }, 650);
+      }
+    };
+    setTimeout(() => requestAnimationFrame(next), 350);
+    return card;
+  }
+
   function renderOutcome(b) {
     const o = b.outcome;
     if (seen.outcome < 0) seen.outcome = o.tick;  // what happened before the page was opened
@@ -256,19 +340,29 @@
     seen.outcome = o.tick;
     const foe = speciesName(o.species);
     const companion = speciesName((game.team().find((m) => m.active) || {}).species || 'companion');
-    const xp = o.xp ? ` · +${o.xp} XP` : '';
     const texts = {
-      victory: ['Victoire !', `${foe} s’enfuit${xp}`],
-      captured: [`${foe} capturé !`, `Il rejoint ton équipe${xp}`],
+      victory: ['Victoire !', `${foe} est K.O.`],
+      captured: [`${foe} capturé !`, 'Il rejoint ton équipe'],
       defeat: [`${companion} est K.O.`, 'Il se repose près de toi.'],
       fled: ['Tu as pris la fuite', ''],
     }[o.result];
     if (!texts) return;
-    banner.replaceChildren(texts[0], ...(texts[1] ? [el('small', { textContent: texts[1] })] : []));
+    const won = o.result === 'victory' || o.result === 'captured';
+    const gains = won ? (o.gains || []).filter((g) => g.species) : [];
+    let note = '';
+    if (won && !o.xp) note = 'Il avait été relâché : pas d’expérience cette fois.';
+    else if (won && o.wizardXp) note = `Ton magicien gagne ${o.wizardXp} XP`;
+    banner.replaceChildren(el('span', { className: 'banner-title', textContent: texts[0] }),
+      ...(texts[1] ? [el('small', { textContent: texts[1] })] : []),
+      ...(gains.length ? [el('div', { className: 'xp-cards' }, gains.map(xpCard))] : []),
+      ...(note ? [el('small', { className: 'banner-note', textContent: note })] : []));
     banner.dataset.result = o.result;
+    banner.classList.remove('show');
+    void banner.offsetWidth;
+    banner.classList.add('show');
     banner.hidden = false;
     clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(() => { banner.hidden = true; }, 2800);
+    bannerTimer = setTimeout(() => { banner.hidden = true; }, gains.length ? 4200 : 2800);
   }
 
   // ---- Every frame ----
@@ -277,8 +371,9 @@
     requestAnimationFrame(frame);
     if (!game || typeof game.battle !== 'function') return;
     const b = game.battle();
-    fighting = b.phase === 'fight';
+    fighting = b.phase === 'fight' || b.phase === 'training';
     root.classList.toggle('battle', fighting);
+    root.classList.toggle('training', b.phase === 'training');
     renderButtons(b);
     renderHud(b);
     renderHits(b);

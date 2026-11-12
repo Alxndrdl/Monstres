@@ -6,6 +6,8 @@
 #include "monstres/core/variants.hpp"
 #include "test_helpers.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <string>
 
 using namespace monstres;
@@ -19,23 +21,23 @@ World arena(Species foe = Species::Slime, uint8_t level = 2) {
   Creature companion;
   companion.species = Species::Companion;
   companion.body.pos = {0, 0, 1};
-  w.creatures.push_back(companion);
+  add_creature(w, companion);
   Creature wild;
   wild.species = foe;
   wild.level = level;
   wild.body.pos = {0, 0, -3};
   wild.home = {0, -3};
   wild.timer = 1000;
-  w.creatures.push_back(wild);
+  add_creature(w, wild);
   Creature villager;
   villager.species = Species::Villager;
   villager.body.pos = {5, 0, 0};
   villager.home = {5, 0};
-  w.creatures.push_back(villager);
+  add_creature(w, villager);
   Creature crow;
   crow.species = Species::Crow;
   crow.body.pos = {-5, 0, 0};
-  w.creatures.push_back(crow);
+  add_creature(w, crow);
   w.team = {starting_companion({})};
   return w;
 }
@@ -61,19 +63,26 @@ void engage(World& w, uint16_t target = 1) {
 }  // namespace
 
 TEST_CASE("a new game starts with the companion alone in the team") {
-  const World w = new_game(42);
+  const World& w = cached_game(42);
   REQUIRE(w.team.size() == 1);
   CHECK(w.team[0].species == Species::Companion);
   CHECK(w.team[0].level == rules::kCompanionStartLevel);
   CHECK(w.team[0].hp == monster_fight_stats(Species::Companion, w.team[0].level).hp);
   CHECK(w.battle.phase == BattlePhase::None);
-  // Wild monsters have a level, a little higher in the ruins.
+  // Wild monsters have a level, higher far from the start.
   for (size_t i = 1; i < w.creatures.size(); ++i) {
     const Creature& c = w.creatures[i];
     if (!monster_stats(c.species).is_monster) continue;
-    const bool ruins = zone_at(w, c.home.x, c.home.z) == Zone::Ruins;
-    CHECK(c.level >= (ruins ? 3 : 1));
-    CHECK(c.level <= (ruins ? 5 : 3));
+    int lowest = 1;
+    switch (zone_at(w, c.home.x, c.home.z)) {
+      case Zone::Forest: lowest = 2; break;
+      case Zone::Ruins: lowest = 3; break;
+      case Zone::Cave: lowest = 4; break;
+      case Zone::Castle: lowest = 5; break;
+      default: break;
+    }
+    CHECK(c.level >= lowest);
+    CHECK(c.level <= lowest + 2);
   }
 }
 
@@ -215,6 +224,7 @@ TEST_CASE("capture needs a weakened enemy; the monster then joins the team") {
   const Genes genes = w.creatures[1].genes;
   w.battle.enemy_hp = static_cast<uint16_t>(w.battle.enemy_max_hp * rules::kCaptureHpPercent / 100);
   CHECK(can_capture(w));
+  w.battle.dealt[0] = w.battle.enemy_max_hp - w.battle.enemy_hp;  // as if the companion had done it
   const size_t creatures = w.creatures.size();
   const uint32_t xp = w.team[0].xp;
   step(w, command(Command::Capture));
@@ -260,6 +270,7 @@ TEST_CASE("victory gives experience, a defeat leaves the companion weak") {
   World w = arena();
   engage(w);
   w.battle.enemy_hp = 1;
+  w.battle.dealt[0] = w.battle.enemy_max_hp - 1;  // it did all the work
   w.creatures[0].body.pos = {0, 0, -2.2f};
   const uint32_t wizard_xp = w.wizard.xp;
   step(w, attack_input(1));
@@ -267,8 +278,17 @@ TEST_CASE("victory gives experience, a defeat leaves the companion weak") {
   CHECK(w.battle.outcome == BattleOutcome::Victory);
   CHECK(w.battle.outcome_xp == 16u);
   CHECK(w.team[0].xp == 16u);
+  REQUIRE(w.battle.outcome_gains.size() == 1);
+  CHECK(w.battle.outcome_gains[0].xp == 16u);
+  CHECK(w.battle.outcome_gains[0].xp_before == 0u);
   CHECK(w.wizard.xp == wizard_xp + 8u);
-  CHECK(w.creatures[1].mind == Mind::Flee);
+  // Beaten: it lies there for a while, then runs home.
+  CHECK(w.creatures[1].mind == Mind::KnockedOut);
+  CHECK(can_engage(w, 1) == EngageCheck::KnockedOut);
+  run(w, Input{}, rules::kKnockedOutTicks - 2);
+  CHECK(w.creatures[1].mind == Mind::KnockedOut);
+  run(w, Input{}, 3);
+  CHECK(w.creatures[1].mind != Mind::KnockedOut);  // up again (it was home already)
 
   World lost = arena();
   engage(lost);
@@ -287,6 +307,7 @@ TEST_CASE("levels go up with experience") {
   w.team[0].hp = 10;
   const uint16_t level = w.team[0].level;
   w.battle.enemy_hp = 1;
+  w.battle.dealt[0] = 10;
   w.creatures[0].body.pos = {0, 0, -2.2f};
   step(w, attack_input(1));
   CHECK(w.team[0].level == level + 1);
@@ -309,7 +330,7 @@ TEST_CASE("battles are deterministic") {
 }
 
 TEST_CASE("the team and the levels are saved, not the battle") {
-  World w = new_game(7);
+  World w = cached_game(7);
   w.team.push_back({Species::Bird, {}, 4, 12, 9});
   w.creatures[1].level = 3;
   const auto loaded = deserialize(serialize(w));
@@ -437,7 +458,7 @@ TEST_CASE("a captured monster leaves a trace for the runes; the companion out is
   CHECK(w.went_in.species == Species::Slime);
   CHECK(w.went_in.body.pos.x == doctest::Approx(where.x));
 
-  World g = new_game(5);
+  World g = cached_game(5);
   g.team.push_back({Species::Slime, {}, 2, 0, 10});
   step(g, summon_input(1));
   auto loaded = deserialize(serialize(g));
@@ -491,7 +512,7 @@ TEST_CASE("a fish can be fought from the shore: it stays in the water") {
   fish.level = 2;
   fish.body.pos = {4, 0, -4};
   fish.home = {4, -4};
-  w.creatures.push_back(fish);
+  add_creature(w, fish);
   const auto index = static_cast<uint16_t>(w.creatures.size() - 1);
   engage(w, index);
   const uint16_t hp = w.battle.enemy_hp;
@@ -519,4 +540,123 @@ TEST_CASE("a crow companion flies at the magician's side, a fish swims in the ai
   engage(w);
   run(w, move(0, 127), 30);
   CHECK(w.creatures[0].body.pos.y == doctest::Approx(companion_hover(Species::Fish)).epsilon(0.05));
+}
+
+TEST_CASE("the victory's experience is shared by the hit points each team member dealt") {
+  World w = arena(Species::Slime, 4);  // 32 XP to share
+  w.team.push_back(starting_companion({}));
+  engage(w);
+  w.battle.dealt[0] = 30;  // Pompon did most of the work
+  w.battle.dealt[1] = 10;  // the second one came in later
+  w.battle.enemy_hp = 1;
+  w.battle.dealt[0] -= 1;  // the last hit, below, brings it back to 30
+  w.creatures[0].body.pos = {0, 0, -2.2f};
+  step(w, attack_input(1));
+  REQUIRE(w.battle.outcome == BattleOutcome::Victory);
+  CHECK(w.battle.outcome_xp == 32u);
+  REQUIRE(w.battle.outcome_gains.size() == 2);
+  // 32 * 30 / 41 = 23.4 and 32 * 10 / 41 = 7.8, rounded.
+  CHECK(w.battle.outcome_gains[0].xp == 23u);
+  CHECK(w.battle.outcome_gains[1].xp == 8u);
+  CHECK(w.team[1].xp == 8u);
+  const std::string json = battle_json(w);
+  CHECK(json.find("\"gains\":[{\"slot\":0,\"xp\":23") != std::string::npos);
+  CHECK(json.find("\"steps\":[[") != std::string::npos);
+}
+
+TEST_CASE("a monster let go gives no experience when beaten or caught again") {
+  World w = arena();
+  w.creatures[1].released = true;
+  engage(w);
+  w.battle.dealt[0] = 20;
+  w.battle.enemy_hp = 1;
+  w.creatures[0].body.pos = {0, 0, -2.2f};
+  step(w, attack_input(1));
+  CHECK(w.battle.outcome == BattleOutcome::Victory);
+  CHECK(w.battle.outcome_xp == 0u);
+  CHECK(w.team[0].xp == 0u);
+  CHECK(w.battle.outcome_gains.empty());
+}
+
+TEST_CASE("letting a monster go: out of the crystal, back to the wild") {
+  World w = arena();
+  w.team.push_back({Species::Bird, {}, 5, 3, 20});
+  const size_t creatures = w.creatures.size();
+  // One alone cannot be let go; nor during a battle.
+  World alone = arena();
+  step(alone, command(Command::Release, 0));
+  CHECK(alone.team.size() == 1);
+
+  step(w, command(Command::Release, 1));  // the bird, in the crystal
+  REQUIRE(w.team.size() == 1);
+  REQUIRE(w.creatures.size() == creatures + 1);
+  const Creature& bird = w.creatures.back();
+  CHECK(bird.species == Species::Bird);
+  CHECK(bird.level == 5);
+  CHECK(bird.released);
+  CHECK(bird.id == w.released_id);
+  CHECK(w.released_tick == w.tick);
+  CHECK(w.active == 0);  // Pompon is still out
+  const float d0 = std::hypot(bird.body.pos.x - w.player.pos.x, bird.body.pos.z - w.player.pos.z);
+  CHECK(d0 < 2.0f);  // it came out next to the player
+  run(w, Input{}, 3 * rules::kTicksPerSecond);
+  const Creature& gone = w.creatures[static_cast<size_t>(find_creature(w, w.released_id))];
+  CHECK(std::hypot(gone.body.pos.x - w.player.pos.x, gone.body.pos.z - w.player.pos.z) > d0 + 4.0f);  // and runs off
+
+  // The companion out can be let go too: it simply leaves.
+  w.team.push_back({Species::Slime, {}, 3, 0, 30});
+  step(w, command(Command::Release, 0));
+  REQUIRE(w.team.size() == 1);
+  CHECK(w.team[0].species == Species::Slime);
+  CHECK(w.active == -1);
+  CHECK(w.creatures.back().species == Species::Companion);
+  CHECK(w.creatures.back().released);
+}
+
+TEST_CASE("training: the companion attacks the magician's shield, no one is hurt") {
+  World w = arena();
+  w.creatures.resize(1);  // just the companion, behind the player
+  REQUIRE(can_train(w));
+  step(w, command(Command::Train));
+  REQUIRE(w.battle.phase == BattlePhase::Training);
+  float fx, fz;
+  REQUIRE(battle_forward(w, fx, fz));
+  CHECK(fz < -0.9f);  // towards the magician
+  // The joystick moves the companion, not the player.
+  const Vec3 player = w.player.pos;
+  run(w, move(0, 127), 10);
+  CHECK(w.player.pos == player);
+  // A bite on the shield: blocked, its damage shown.
+  w.creatures[0].body.pos = {0, 0, 0.7f};
+  const uint16_t hp = w.team[0].hp;
+  step(w, attack_input(1));
+  CHECK(w.battle.foe.parried_tick == w.tick);
+  CHECK(w.battle.foe.last_damage > 0);
+  CHECK(w.team[0].hp == hp);
+  CHECK(battle_json(w).find("\"phase\":\"training\"") != std::string::npos);
+  CHECK(battle_json(w).find("\"shield\":{") != std::string::npos);
+  // Flee stops it at once.
+  step(w, command(Command::Flee));
+  CHECK(w.battle.phase == BattlePhase::None);
+  CHECK(w.battle.outcome == BattleOutcome::None);
+  run(w, forward(), 10);
+  CHECK(w.player.pos.z < player.z);  // the player walks again
+}
+
+TEST_CASE("a dodge without moving is a jump on the spot") {
+  World w = arena();
+  engage(w);
+  const Vec3 start = w.creatures[0].body.pos;
+  Input jump;
+  jump.jump = true;
+  step(w, jump);
+  CHECK(w.battle.ally.state == FighterState::Dodge);
+  CHECK_FALSE(w.creatures[0].body.on_ground);  // up in the air
+  float highest = 0;
+  for (int i = 0; i < 30; ++i) {
+    step(w, Input{});
+    highest = std::max(highest, w.creatures[0].body.pos.y);
+  }
+  CHECK(highest > 0.6f);
+  CHECK(std::hypot(w.creatures[0].body.pos.x - start.x, w.creatures[0].body.pos.z - start.z) < 0.05f);  // not back
 }
