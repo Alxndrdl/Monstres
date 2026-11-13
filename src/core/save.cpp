@@ -418,12 +418,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   } else if (!with_quests) {
     // Version 14: the teleporters are built (trees and rocks around them give
     // way), the villagers get their names, Gaspard goes to the village's teleporter.
-    const size_t before = w.objects.size();
     build_teleporters(w);
-    for (size_t i = before; i < w.objects.size(); ++i) {
-      Object& o = w.objects[i];
-      o.pos.y = w.ground.height(o.pos.x, o.pos.z) - 0.05f;
-    }
     uint8_t n = 0;
     for (Creature& c : w.creatures) {
       if (c.species != Species::Villager || n >= rules::kVillagers) continue;
@@ -435,6 +430,12 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
         c.mind = Mind::Idle;
       }
     }
+  }
+  // The teleporters stand on the ground. Versions 14 patched by an earlier
+  // build left them at height 0, under the hills (trees making way for them
+  // moved them in the list, and they were missed): put them back up.
+  for (Object& o : w.objects) {
+    if (o.kind == ObjectKind::Teleporter && !w.ground.empty()) o.pos.y = w.ground.height(o.pos.x, o.pos.z) - 0.05f;
   }
   return w;
 }

@@ -10,6 +10,7 @@
 
 #include <doctest.h>
 
+#include <cmath>
 #include <filesystem>
 #include <sstream>
 
@@ -68,5 +69,23 @@ TEST_CASE("every past save still loads to the same state") {
     const auto expected = read_text(expected_path.string());
     REQUIRE(expected.has_value());
     CHECK(actual == *expected);
+  }
+}
+
+TEST_CASE("teleporters stand on the ground in every save") {
+  // Version 14 saves patched by an earlier build had their teleporters at
+  // height 0, under the hills (v15_buried_teleporters.sav is one, played on).
+  const fs::path dir = fs::path(MONSTRES_TEST_DATA_DIR) / "saves";
+  if (!fs::exists(dir)) return;
+  for (const auto& entry : fs::directory_iterator(dir)) {
+    if (entry.path().extension() != ".sav") continue;
+    CAPTURE(entry.path().filename().string());
+    const auto world = deserialize(read_bytes(entry.path()));
+    if (!world || world->ground.empty()) continue;
+    for (const Object& o : world->objects) {
+      if (o.kind != ObjectKind::Teleporter) continue;
+      CAPTURE(int{o.variant});
+      CHECK(std::abs(o.pos.y - world->ground.height(o.pos.x, o.pos.z)) < 0.1f);
+    }
   }
 }
