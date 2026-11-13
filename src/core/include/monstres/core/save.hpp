@@ -67,7 +67,7 @@ namespace monstres {
 //      end the known teleporters (u8 bits), the number of quests (u8) and per
 //      quest its stage and progress (u8 each). Version 14 still loads: the
 //      teleporters are built where they go, the villagers get their names.
-inline constexpr uint32_t kSaveVersion = 15;
+inline constexpr uint32_t kSaveVersion = 16;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

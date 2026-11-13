@@ -97,9 +97,17 @@
     event.preventDefault();  // no focus, no text selection
     jumpButton.classList.add('pressed');
     if (game) game.input.jump();
+    held(true);
   });
   for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
-    jumpButton.addEventListener(type, () => jumpButton.classList.remove('pressed'));
+    jumpButton.addEventListener(type, () => {
+      jumpButton.classList.remove('pressed');
+      held(false);
+    });
+  }
+  // Held down: a flying monster climbs, in a battle.
+  function held(down) {
+    if (game && game.input.jumpHeld) game.input.jumpHeld(down);
   }
   jumpButton.addEventListener('click', (event) => event.preventDefault());
 
@@ -151,6 +159,7 @@
     } else if (event.code === 'Space') {
       event.preventDefault();
       if (!event.repeat && game) game.input.jump();
+      held(true);
       jumpButton.classList.add('pressed');
     }
   });
@@ -160,10 +169,12 @@
       sendMove();
     } else if (event.code === 'Space') {
       jumpButton.classList.remove('pressed');
+      held(false);
     }
   });
   window.addEventListener('blur', () => {
     keys.clear();
+    held(false);
     sendMove();
   });
 

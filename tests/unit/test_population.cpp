@@ -37,7 +37,7 @@ TEST_CASE("wild monsters live only around the player, and others come back") {
   // Far away (the other end of the world): the monsters of the start are gone.
   go_to(w, 0, 120);
   for (const Creature& c : w.creatures) {
-    if (!monster_stats(c.species).is_monster || &c == &w.creatures[0]) continue;
+    if (!monster_stats(c.species).is_monster || &c == &w.creatures[0] || c.tag == Tag::Rival) continue;  // Bastien's stays
     CHECK(std::hypot(c.home.x - w.player.pos.x, c.home.z - w.player.pos.z) < rules::kDespawnRadius + 60);
   }
   // Back: new ones (new ids), about as many.
@@ -45,7 +45,7 @@ TEST_CASE("wild monsters live only around the player, and others come back") {
   size_t again = 0, old = 0;
   for (size_t i = 1; i < w.creatures.size(); ++i) {
     const Creature& c = w.creatures[i];
-    if (!monster_stats(c.species).is_monster) continue;
+    if (!monster_stats(c.species).is_monster || c.tag == Tag::Rival) continue;  // Bastien's stays
     ++again;
     old += first_ids.count(c.id) && c.home.z < 20;  // from the squares emptied while far away
   }
@@ -86,14 +86,14 @@ TEST_CASE("the enemy of a battle stays, even far from its square") {
   in.target = static_cast<uint16_t>(foe);
   step(w, in);
   REQUIRE(w.battle.phase == BattlePhase::Fight);
-  const uint32_t id = w.creatures[w.battle.enemy].id;
+  const uint32_t id = w.creatures[w.battle.foes[0].index].id;
   // Its square empties around it (as if the player were far): it stays, the index follows.
   for (size_t k = 0; k < kPopulationCellCount; ++k) w.population.active[k] = 1;
   const Vec3 p = w.player.pos;
   w.player.pos = {-p.x, p.y, -p.z};
   update_population(w);
   w.player.pos = p;
-  CHECK(w.creatures[w.battle.enemy].id == id);
+  CHECK(w.creatures[w.battle.foes[0].index].id == id);
 }
 
 TEST_CASE("the world has its places: forest, cave, castle") {

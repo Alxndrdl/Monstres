@@ -77,11 +77,19 @@ std::string creature_json(const World& w, int index) {
     s += std::string(",\"released\":") + (c.released ? "true" : "false");
     s += std::string(",\"beaten\":") + (c.beaten ? "true" : "false");
     if (c.tag == Tag::LostPiou) s += ",\"tag\":\"lostPiou\"";
+    if (c.tag == Tag::Rival) s += ",\"tag\":\"rival\"";
+    if (const int k = foe_slot(w, static_cast<size_t>(index)); k >= 0) s += ",\"foe\":" + std::to_string(k);
     if (index == 0) s += std::string(",\"train\":") + (can_train(w) ? "true" : "false");
   }
   if (c.npc) {
     s += ",\"npc\":" + std::to_string(c.npc);
     s += std::string(",\"talk\":") + (near_npc(w, c.npc) ? "true" : "false");
+    uint8_t rivals = 0;
+    rival_team(c.npc, rivals);
+    if (rivals) {
+      s += std::string(",\"trainer\":true,\"challenge\":") + (can_challenge(w, c.npc) ? "true" : "false");
+      s += ",\"wins\":" + std::to_string(w.rival_wins);
+    }
   }
   s += ",\"x\":" + num(p.x) + ",\"y\":" + num(p.y) + ",\"z\":" + num(p.z);
   s += ",\"distance\":" + num(std::sqrt(dx * dx + dz * dz));
@@ -419,7 +427,7 @@ std::string moves_json(Species species, const Genes& genes, const FightStats& st
 }
 
 const char* outcome_name(BattleOutcome o) {
-  static const char* kNames[] = {"none", "victory", "defeat", "fled", "captured"};
+  static const char* kNames[] = {"none", "victory", "defeat", "fled", "captured", "forfeit"};
   return kNames[static_cast<size_t>(o)];
 }
 
@@ -515,8 +523,46 @@ std::string gains_json(const World& w) {
 }
 
 const char* phase_name(BattlePhase p) {
-  static const char* kNames[] = {"none", "fight", "flee", "training"};
+  static const char* kNames[] = {"none", "fight", "flee", "training", "prepare"};
   return kNames[static_cast<size_t>(p)];
+}
+
+}  // namespace
+
+namespace {
+
+const char* no_xp_name(NoXp n) {
+  static const char* kNames[] = {"none", "beaten", "released", "trainer"};
+  return kNames[static_cast<size_t>(n)];
+}
+
+std::string ally_json(const World& w, const Fighter& f) {
+  const Monster& a = *active_monster(w);
+  const FightStats st = monster_fight_stats(a.species, a.level);
+  std::string s = "{\"species\":\"" + std::string(species_name(a.species)) + "\"";
+  s += ",\"slot\":" + std::to_string(w.active);
+  s += ",\"level\":" + std::to_string(a.level) + ",\"hp\":" + std::to_string(a.hp);
+  s += ",\"maxHp\":" + std::to_string(st.hp);
+  s += ",\"look\":" + std::to_string(genes_code(a.genes));
+  s += ",\"lift\":" + num(f.lift);
+  s += ",\"moves\":" + moves_json(a.species, a.genes, st);
+  s += ",\"fighter\":" + fighter_json(w, f, species_moves(a.species), true) + "}";
+  return s;
+}
+
+std::string foe_json(const World& w, size_t k) {
+  const Foe& f = w.battle.foes[k];
+  const Creature& e = w.creatures[f.index];
+  std::string s = "{\"slot\":" + std::to_string(k) + ",\"index\":" + std::to_string(f.index);
+  s += std::string(",\"species\":\"") + species_name(e.species) + "\"";
+  s += ",\"level\":" + std::to_string(e.level) + ",\"hp\":" + std::to_string(f.hp);
+  s += ",\"maxHp\":" + std::to_string(f.max_hp) + ",\"xp\":" + std::to_string(f.xp);
+  s += ",\"elements\":" + elements_json(creature_elements(e.species, e.genes));
+  s += ",\"look\":" + std::to_string(genes_code(e.genes));
+  s += std::string(",\"targeted\":") + (w.battle.target == k ? "true" : "false");
+  s += ",\"y\":" + num(e.body.pos.y - w.ground.height(e.body.pos.x, e.body.pos.z));
+  s += ",\"fighter\":" + fighter_json(w, f.fighter, species_moves(e.species), false) + "}";
+  return s;
 }
 
 }  // namespace
@@ -527,35 +573,55 @@ std::string battle_json(const World& w) {
   s += ",\"tick\":" + std::to_string(w.tick);
   s += std::string(",\"outcome\":{\"result\":\"") + outcome_name(b.outcome) + "\",\"tick\":" +
        std::to_string(b.outcome_tick) + ",\"xp\":" + std::to_string(b.outcome_xp) + ",\"species\":\"" +
-       species_name(b.outcome_species) + "\",\"gains\":" + gains_json(w) +
+       species_name(b.outcome_species) + "\",\"count\":" + std::to_string(b.outcome_count) + ",\"noXp\":\"" +
+       no_xp_name(b.outcome_no_xp) + "\",\"rival\":" + std::to_string(b.outcome_rival) + ",\"gains\":" + gains_json(w) +
        ",\"wizardXp\":" + std::to_string(b.outcome_wizard_xp) + "}";
-  if (b.phase == BattlePhase::Training && active_monster(w)) {
-    const Monster& a = *active_monster(w);
-    s += ",\"ally\":{\"species\":\"" + std::string(species_name(a.species)) + "\"";
-    s += ",\"level\":" + std::to_string(a.level) + ",\"hp\":" + std::to_string(a.hp);
-    s += ",\"maxHp\":" + std::to_string(monster_fight_stats(a.species, a.level).hp);
-    s += ",\"moves\":" + moves_json(a.species, a.genes, monster_fight_stats(a.species, a.level));
-    s += ",\"fighter\":" + fighter_json(w, b.ally, species_moves(a.species), true) + "}";
-    s += ",\"shield\":{\"parriedTick\":" + std::to_string(b.foe.parried_tick) +
-         ",\"lastDamage\":" + std::to_string(b.foe.last_damage) + "}";
-  } else if (b.phase != BattlePhase::None && active_monster(w)) {
-    const Creature& e = w.creatures[b.enemy];
-    const Monster& a = *active_monster(w);
-    s += ",\"enemy\":{\"index\":" + std::to_string(b.enemy) + ",\"species\":\"" + species_name(e.species) + "\"";
-    s += ",\"level\":" + std::to_string(e.level) + ",\"hp\":" + std::to_string(b.enemy_hp);
-    s += ",\"maxHp\":" + std::to_string(b.enemy_max_hp);
-    s += ",\"elements\":" + elements_json(creature_elements(e.species, e.genes));
-    s += ",\"look\":" + std::to_string(genes_code(e.genes));
-    s += ",\"fighter\":" + fighter_json(w, b.foe, species_moves(e.species), false) + "}";
-    s += ",\"ally\":{\"species\":\"" + std::string(species_name(a.species)) + "\"";
-    s += ",\"level\":" + std::to_string(a.level) + ",\"hp\":" + std::to_string(a.hp);
-    s += ",\"maxHp\":" + std::to_string(monster_fight_stats(a.species, a.level).hp);
-    s += ",\"moves\":" + moves_json(a.species, a.genes, monster_fight_stats(a.species, a.level));
-    s += ",\"fighter\":" + fighter_json(w, b.ally, species_moves(a.species), true) + "}";
-    const bool weak = uint32_t{b.enemy_hp} * 100u <= uint32_t{b.enemy_max_hp} * rules::kCaptureHpPercent;
+  if (b.phase == BattlePhase::None) return s + "}";
+  s += ",\"target\":" + (b.target == kNoTarget ? std::string("-1") : std::to_string(b.target));
+  if (active_monster(w)) s += ",\"ally\":" + ally_json(w, b.ally);
+  if (b.phase == BattlePhase::Training) {
+    s += ",\"shield\":{\"parriedTick\":" + std::to_string(b.shield.parried_tick) +
+         ",\"lastDamage\":" + std::to_string(b.shield.last_damage) + "}";
+    return s + "}";
+  }
+  s += ",\"foes\":[";
+  for (size_t k = 0; k < b.foes.size(); ++k) {
+    if (k) s += ',';
+    s += foe_json(w, k);
+  }
+  s += "]";
+  // The foe aimed at (else the first one): its bars at the top of the screen.
+  if (!b.foes.empty()) s += ",\"enemy\":" + foe_json(w, b.target < b.foes.size() ? b.target : 0);
+  if (const Foe* t = battle_target(w)) {
+    const bool weak = uint32_t{t->hp} * 100u <= uint32_t{t->max_hp} * rules::kCaptureHpPercent;
     s += std::string(",\"capture\":\"") +
-         (can_capture(w) ? "ok" : w.team.size() >= rules::kTeamSize ? "teamFull" : !weak ? "notWeak" : "no") + "\"";
-    s += ",\"captureHpPercent\":" + std::to_string(rules::kCaptureHpPercent);
+         (can_capture(w) ? "ok" : b.rival.npc ? "trainer" : w.team.size() >= rules::kTeamSize ? "teamFull" : !weak ? "notWeak" : "no") + "\"";
+  } else {
+    s += std::string(",\"capture\":\"") + (b.rival.npc ? "trainer" : "noTarget") + "\"";
+  }
+  s += ",\"captureHpPercent\":" + std::to_string(rules::kCaptureHpPercent);
+  if (b.rival.npc) {
+    const Rival& r = b.rival;
+    s += ",\"rival\":{\"npc\":" + std::to_string(r.npc) + ",\"out\":" + std::to_string(r.out);
+    s += ",\"nextIn\":" + seconds(r.next_in) + ",\"wins\":" + std::to_string(w.rival_wins) + ",\"team\":[";
+    for (uint8_t k = 0; k < r.count; ++k) {
+      const RivalMonster& m = r.team[k];
+      if (k) s += ',';
+      s += "{\"slot\":" + std::to_string(k) + std::string(",\"seen\":") + (m.seen ? "true" : "false");
+      if (m.seen) {
+        s += std::string(",\"species\":\"") + species_name(m.species) + "\",\"look\":" + std::to_string(genes_code(m.genes));
+        s += ",\"level\":" + std::to_string(m.level);
+      }
+      s += std::string(",\"ko\":") + (m.hp == 0 ? "true" : "false");
+      s += std::string(",\"out\":") + (k == r.out && !b.foes.empty() ? "true" : "false") + "}";
+    }
+    s += "],\"teamLeft\":" + std::to_string(std::count_if(w.team.begin(), w.team.end(), [](const Monster& m) { return m.hp > 0; }));
+    s += ",\"mine\":[";
+    for (size_t k = 0; k < w.team.size(); ++k) {
+      if (k) s += ',';
+      s += std::string("{\"slot\":") + std::to_string(k) + ",\"ko\":" + (w.team[k].hp == 0 ? "true" : "false") + "}";
+    }
+    s += "]}";
   }
   return s + "}";
 }

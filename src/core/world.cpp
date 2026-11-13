@@ -401,6 +401,29 @@ void move_flyer(const Surroundings& s, Body& b, const BodyShape& shape, float di
   b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
 }
 
+// A crow in a battle: it flies over everything, `lift` meters above the
+// ground, rising and sinking smoothly.
+void fly_free(const Surroundings& s, Body& b, const Steer& st) {
+  const float len2 = st.dir_x * st.dir_x + st.dir_z * st.dir_z;
+  if (len2 > 0.0f) {
+    const float len = std::sqrt(len2);
+    b.facing_x = st.dir_x / len;
+    b.facing_z = st.dir_z / len;
+  }
+  const float x0 = b.pos.x, z0 = b.pos.z;
+  const float limit = rules::kWorldHalfSize - 1.0f;
+  b.pos.x = std::clamp(b.pos.x + st.dir_x * st.speed * rules::kDt, -limit, limit);
+  b.pos.z = std::clamp(b.pos.z + st.dir_z * st.speed * rules::kDt, -limit, limit);
+  const float floor = s.ground.height(b.pos.x, b.pos.z);
+  const float climb = 4.0f * rules::kDt;
+  b.pos.y += std::clamp(floor + st.lift - b.pos.y, -climb, climb);
+  b.pos.y = std::max(b.pos.y, floor);
+  b.velocity_y = 0;
+  b.on_ground = false;
+  const float dx = b.pos.x - x0, dz = b.pos.z - z0;
+  b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
+}
+
 Vec2 clamp_to_world(Vec2 p, float margin) {
   const float limit = rules::kWorldHalfSize - margin;
   return {std::clamp(p.x, -limit, limit), std::clamp(p.z, -limit, limit)};
@@ -543,7 +566,8 @@ void step_villager(World& w, const Surroundings& s, Creature& c) {
     } else {
       c.mind = Mind::Wander;
       c.timer = 10 * rules::kTicksPerSecond;
-      const float r = c.npc == npc::kGaspard ? 2.5f : rules::kVillageRadius - 4.0f;  // he stays by the teleporter
+      // Gaspard stays by the teleporter, Bastien at the edge of the village.
+      const float r = c.npc == npc::kGaspard || c.npc == npc::kBastien ? 2.5f : rules::kVillageRadius - 4.0f;
       c.target = {c.home.x + random_range(w.rng, -r, r), c.home.z + random_range(w.rng, -r, r)};
     }
   } else {
@@ -861,6 +885,44 @@ void keep_lost_piou(World& w) {
   add_creature(w, c);
 }
 
+// Bastien's monster stands beside him (the first of his team); between
+// battles it is the first one again (a game saved during a battle).
+void keep_rival(World& w) {
+  const int owner = npc_index(w, npc::kBastien);
+  if (owner < 0) return;
+  int index = -1;
+  for (size_t i = 1; i < w.creatures.size(); ++i) {
+    if (w.creatures[i].tag == Tag::Rival) index = static_cast<int>(i);
+  }
+  uint8_t count = 0;
+  const RivalMonster& first = rival_team(npc::kBastien, count)[0];
+  if (index > 0) {
+    Creature& c = w.creatures[static_cast<size_t>(index)];
+    if (w.battle.rival.npc == 0 && (c.species != first.species || c.level != first.level)) {
+      c.species = first.species;
+      c.genes = first.genes;
+      c.level = first.level;
+      c.mind = Mind::Idle;
+    }
+    return;
+  }
+  const Body& o = w.creatures[static_cast<size_t>(owner)].body;
+  Creature c;
+  c.species = first.species;
+  c.genes = first.genes;
+  c.level = first.level;
+  c.tag = Tag::Rival;
+  for (int k = 0; k < 8; ++k) {  // beside him, where there is room
+    const SinCos sc = sincos16(static_cast<Angle16>(k * 8192));
+    const float x = o.pos.x + sc.cos * 0.9f, z = o.pos.z + sc.sin * 0.9f;
+    c.body.pos = {x, w.ground.height(x, z), z};
+    if (!inside_any_object(w, c.body, species_info(c.species).shape) && !in_lake(w.village.lake, x, z, 1.0f)) break;
+    c.body.pos = o.pos;
+  }
+  c.home = {o.pos.x, o.pos.z};
+  add_creature(w, c);
+}
+
 }  // namespace
 
 size_t add_creature(World& w, Creature c) {
@@ -872,7 +934,9 @@ size_t add_creature(World& w, Creature c) {
 void remove_creature(World& w, size_t index) {
   if (index == 0 || index >= w.creatures.size()) return;
   w.creatures.erase(w.creatures.begin() + static_cast<std::ptrdiff_t>(index));
-  if (w.battle.phase != BattlePhase::None && w.battle.enemy > index) --w.battle.enemy;
+  for (Foe& f : w.battle.foes) {
+    if (f.index > index) --f.index;
+  }
 }
 
 int find_creature(const World& w, uint32_t id) {
@@ -898,15 +962,41 @@ void update_population(World& w) {
       w.population.active[k] = 0;
       for (size_t i = w.creatures.size(); i-- > 1;) {
         const Creature& c = w.creatures[i];
-        const bool fighting = w.battle.phase != BattlePhase::None && w.battle.enemy == i;
-        const bool owned = c.tag == Tag::LostPiou && w.quests[static_cast<size_t>(QuestId::LostPiou)].stage == QuestStage::Done;
-        if (monster_stats(c.species).is_monster && !fighting && !owned && cell_index(c.home.x, c.home.z) == index) {
+        const bool fighting = foe_slot(w, i) >= 0;
+        if (monster_stats(c.species).is_monster && !fighting && !owned(w, c) && cell_index(c.home.x, c.home.z) == index) {
           remove_creature(w, i);
         }
       }
     }
   }
   keep_lost_piou(w);
+  keep_rival(w);
+}
+
+bool place_trainer(const World& w, Creature& c) {
+  // Bastien waits at the edge of the village, on the side of the place where he fights.
+  Vec2 center, axis;
+  if (!rival_arena(w, center, axis)) return false;
+  const Vec2 vc = w.village.center;
+  const float dx = center.x - vc.x, dz = center.z - vc.z;
+  const float d = std::sqrt(dx * dx + dz * dz);
+  // A spot wide enough for him and his monster (a fence, a house may be in the way).
+  const BodyShape room{0.75f, 1.2f};
+  for (int attempt = 0; attempt < 120; ++attempt) {
+    const float r = rules::kVillageRadius - 3.0f - static_cast<float>(attempt / 12);
+    const int k = attempt % 12;
+    const float t = 1.5f * static_cast<float>(k % 2 == 0 ? k / 2 : -(k + 1) / 2);
+    const float x = vc.x + dx / d * r + axis.x * t;
+    const float z = vc.z + dz / d * r + axis.z * t;
+    Body b = c.body;
+    b.pos = {x, w.ground.height(x, z), z};
+    if (!inside_any_object(w, b, room) && !in_lake(w.village.lake, x, z, 1.5f)) {
+      c.body.pos = b.pos;
+      c.home = {x, z};
+      return true;
+    }
+  }
+  return false;  // nowhere free: anywhere in the village
 }
 
 void spawn_creatures(World& w) {
@@ -941,6 +1031,11 @@ void spawn_creatures(World& w) {
         const float x = teleporter.x + sc.cos * 2.4f, z = teleporter.z + sc.sin * 2.4f;
         c.home = {teleporter.x, teleporter.z};
         c.body.pos = {x, w.ground.height(x, z), z};
+      }
+      if (c.npc == npc::kBastien && place_trainer(w, c)) {
+        add_creature(w, c);
+        ++n;
+        continue;
       }
       if (inside_any_object(w, c.body, species_info(c.species).shape)) continue;
       if (in_lake(w.village.lake, c.body.pos.x, c.body.pos.z, 1.0f)) continue;
@@ -1559,12 +1654,13 @@ void step_knocked_out(World& w, const Surroundings& s, Creature& c) {
 
 namespace {
 
-// Mirabelle's Piou, back with her: it stays at her side.
-void step_pet(World& w, const Surroundings& s, Creature& c) {
-  const int owner = npc_index(w, npc::kMirabelle);
+// Mirabelle's Piou, back with her: it stays at her side; Bastien's monster too.
+void step_pet(World& w, const Surroundings& s, Creature& c, uint8_t owner_npc) {
+  const int owner = npc_index(w, owner_npc);
   if (owner < 0) return;
   const Body& o = w.creatures[static_cast<size_t>(owner)].body;
-  const Vec2 spot{o.pos.x - o.facing_z * 0.9f, o.pos.z + o.facing_x * 0.9f};  // on her left
+  const float side = owner_npc == npc::kMirabelle ? 1.0f : -1.0f;  // on her left, on his right
+  const Vec2 spot{o.pos.x - o.facing_z * 0.9f * side, o.pos.z + o.facing_x * 0.9f * side};
   float dx, dz;
   const float d = direction_to(c.body.pos.x, c.body.pos.z, spot, dx, dz);
   const SpeciesInfo& info = species_info(c.species);
@@ -1622,11 +1718,13 @@ void step(World& w, const Input& in) {
   Surroundings s{boxes, w.village.lake, w.ground, {}, {}};
   s.build();
 
-  // During a battle the magician waits: the joystick moves the companion.
+  // During a battle the magician waits: the joystick moves the companion
+  // (before a trainer's battle, the magician walks to its place).
   if (phase == BattlePhase::None) {
     move_body(s, w.player, kPlayerShape, dir_x, dir_z, rules::kWalkSpeed, in.jump, rules::kJumpSpeed);
   } else {
-    move_body(s, w.player, kPlayerShape, 0, 0, 0, false, 0);
+    const Steer st = battle_prepare(w, Stand::Magician);
+    move_body(s, w.player, kPlayerShape, st.dir_x, st.dir_z, st.speed, false, 0);
   }
   std::vector<Vec3> perches;
   for (size_t i = 0; i < w.creatures.size(); ++i) {
@@ -1635,13 +1733,18 @@ void step(World& w, const Input& in) {
       c.body.pos = w.player.pos;
       continue;
     }
-    const bool foe = phase == BattlePhase::Fight && i == w.battle.enemy;
-    if ((steered && i == 0) || foe) {
-      const Steer st = i == 0 ? battle_ally(w, in, dir_x, dir_z) : battle_foe(w);
+    const int foe = i > 0 ? foe_slot(w, i) : -1;
+    const bool preparing = phase == BattlePhase::Prepare && (i == 0 || foe >= 0);
+    if ((steered && i == 0) || foe >= 0 || preparing) {
+      const Steer st = preparing ? battle_prepare(w, i == 0 ? Stand::Ally : Stand::Foe)
+                       : i == 0  ? battle_ally(w, in, dir_x, dir_z)
+                                 : battle_foe(w, static_cast<size_t>(foe));
       const SpeciesInfo& info = species_info(c.species);
-      if (i != 0 && holds_its_place(c.species)) continue;  // on its perch, in the air or in the lake
-      if (const float hover = i == 0 ? companion_hover(c.species) : 0.0f; hover > 0) {
-        move_flyer(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, hover);
+      if (i != 0 && holds_its_place(c.species)) continue;  // in the lake
+      if (i != 0 && st.fly) {
+        fly_free(s, c.body, st);
+      } else if (const float hover = i == 0 ? companion_hover(c.species) : 0.0f; hover > 0) {
+        move_flyer(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, hover + (steered ? w.battle.ally.lift : 0.0f));
       } else {
         move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
       }
@@ -1656,7 +1759,17 @@ void step(World& w, const Input& in) {
       continue;
     }
     if (c.tag == Tag::LostPiou && w.quests[static_cast<size_t>(QuestId::LostPiou)].stage == QuestStage::Done) {
-      step_pet(w, s, c);
+      step_pet(w, s, c, npc::kMirabelle);
+      continue;
+    }
+    if (c.tag == Tag::Rival) {
+      step_pet(w, s, c, npc::kBastien);
+      continue;
+    }
+    if (c.species == Species::Villager && w.battle.rival.npc && c.npc == w.battle.rival.npc) {
+      // The trainer goes to its place, and watches.
+      const Steer st = battle_prepare(w, Stand::Trainer);
+      move_body(s, c.body, species_info(c.species).shape, st.dir_x, st.dir_z, st.speed, false, 0);
       continue;
     }
     switch (c.species) {

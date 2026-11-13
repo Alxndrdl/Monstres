@@ -266,19 +266,36 @@ personnages gardent leur éclat la nuit (`kGlowing`).
 
 Règles dans `src/core/battle.hpp` / `battle.cpp`, interface dans
 `web/battle.js`. Depuis le menu contextuel, « Combattre » lance un combat entre
-le compagnon et le monstre visé (à moins de 15 m du joueur). Les Croa
-(perchés ou en vol) et les Bloup du lac restent à leur place pendant le combat :
-on les atteint avec les attaques à distance (projectiles visés en hauteur,
-qui traversent le toit où se tient le corbeau) ou l'onde si on est assez près,
-pas avec une morsure ; eux mordent ce qui s'approche et lancent leurs
-projectiles. La caméra se place alors derrière
-le compagnon, tournée vers l'ennemi : le joystick déplace le compagnon (en
-avant : vers l'ennemi, sur les côtés : on tourne autour), le magicien attend.
+le compagnon et le monstre visé (à moins de 15 m du joueur). Les monstres de la
+même espèce à moins de 7 m de lui se joignent au combat (3 adversaires au
+plus). Les Croa s'envolent et tournent autour du compagnon, à 2 m du sol, et
+piquent pour mordre : en l'air, on les atteint avec les attaques à distance
+(projectiles visés en hauteur) ou l'onde, pas avec une morsure. Les Bloup du
+lac restent dans l'eau. La caméra se place derrière le compagnon, tournée
+vers sa cible : le joystick déplace le compagnon (en avant : vers la cible,
+sur les côtés : on tourne autour), le magicien attend.
+
+Viser : les icônes des adversaires s'affichent en haut de l'écran, la cible
+entourée de rouge. Toucher une autre icône (ou le monstre lui-même) le vise ;
+toucher la cible actuelle ne vise plus personne : mode libre, le compagnon se
+déplace par rapport à la caméra (qu'on tourne à nouveau librement), ses
+projectiles partent droit devant (vers un adversaire s'il est juste en face),
+sa morsure touche ce qui est devant lui, son onde tout ce qui est autour. Au
+clavier, T passe à l'adversaire suivant, puis au mode libre. Quand la cible
+est battue, le compagnon vise le plus proche des autres.
+
+Les adversaires ont les mêmes délais d'attaque que le compagnon (le temps de
+recharge compte depuis le début de leur élan). Ils tournent autour du
+compagnon, s'approchent quand leur morsure est prête et reculent sinon,
+s'écartent les uns des autres, et esquivent parfois les projectiles qui
+arrivent sur eux. Un Croa de l'équipe vole : tant que le bouton de saut (ou
+Espace) est enfoncé sans bouger, il monte (jusqu'à 5 m de plus), puis
+redescend doucement quand on le relâche.
 
 Boutons en bas à droite pendant un combat :
 - esquive (le bouton de saut, Espace) : un bond rapide dans la direction du
-  déplacement (à l'arrêt : un saut sur place), pendant lequel on ne peut pas
-  être touché ;
+  déplacement (à l'arrêt : un saut sur place ; un Croa, lui, s'élève), pendant
+  lequel on ne peut pas être touché ;
 - au-dessus, trois attaques (touches 1, 2, 3) : une attaque rapide au corps à
   corps, qu'on peut enchaîner, et deux attaques spéciales avec un temps de
   recharge (un projectile de son élément, une onde tout autour de lui) ;
@@ -290,10 +307,13 @@ l'onde, boule qui grossit) : c'est le moment d'esquiver ou de parer. Dans le
 menu contextuel : « Fuir » (le compagnon revient vers le joueur, puis le
 combat s'arrête et le joueur reprend la main) et « Capturer », possible quand
 l'ennemi n'a plus que 25 % de ses points de vie (trait doré sur sa barre) : il
-rejoint l'équipe. Une victoire ou une capture rapporte 8 points
-d'expérience par niveau de l'ennemi, partagés entre les monstres de l'équipe
+rejoint l'équipe (il faut viser celui qu'on veut capturer). Chaque monstre
+battu ou capturé rapporte 8 points d'expérience par niveau, partagés entre les monstres de l'équipe
 qui ont combattu selon les dégâts infligés par chacun : XP × dégâts du monstre
 / (1 + dégâts de toute l'équipe), arrondi ; le magicien en gagne la moitié.
+Un monstre déjà battu une fois, ou relâché par le joueur, ne rapporte plus
+rien : l'écran de victoire en donne la raison (« Déjà battu », « Il avait été
+relâché »).
 L'écran de victoire montre la barre d'expérience de chacun qui se remplit,
 niveau après niveau, puis la caméra quitte doucement le compagnon pour revenir
 au magicien (elle glisse aussi au début et à la fin des combats). Le monstre
@@ -309,6 +329,32 @@ l'attaque aurait infligé à un monstre de même niveau), personne n'est blessé
 « Arrêter l'entraînement » (ou rappeler le compagnon) y met fin. Pas de forces ni de
 faiblesses entre éléments pour l'instant. Les combats ne sont pas sauvegardés :
 une partie rechargée pendant un combat reprend sans lui.
+
+### Combats de dresseurs
+
+Bastien, au bord du village, a un Champi (niveau 4) à côté de lui et un Gloubi
+(niveau 5) en réserve. En lui parlant, « Combattre ! » lance un combat de
+dresseurs (`Command::Challenge`). Les deux monstres vont se placer face à
+face, à 10 m l'un de l'autre, juste à l'extérieur du village (un endroit plat
+et dégagé, cherché autour du village à partir du côté opposé au lac) ; le
+magicien et Bastien se mettent en retrait, sur le côté. Pendant ce temps, les
+règles s'affichent, et « Prêt ! » (`Command::Ready`) commence le combat :
+- un seul monstre de chaque côté se bat à la fois ; un monstre K.O. est
+  éliminé, son dresseur envoie le suivant (le joueur choisit le sien dans sa
+  barre d'équipe : les monstres K.O. y sont grisés et barrés) ;
+- le dresseur qui n'a plus de monstre en état de se battre perd ;
+- « Déclarer forfait » (ou « Renoncer » avant le début) termine le combat
+  tout de suite : l'adversaire gagne ;
+- on voit combien de monstres a l'adversaire, mais leur portrait ne
+  s'affiche qu'une fois entrés en jeu (sinon « ? ») ; les K.O. sont grisés et
+  barrés ; on vise ou on passe en mode libre comme dans la nature ;
+- pas de capture ; seule la première victoire contre Bastien rapporte de
+  l'expérience (8 par niveau de ses monstres), le nombre de victoires est
+  sauvegardé (sauvegarde v16).
+
+Après le combat, les monstres K.O. du joueur se relèvent avec 1 point de vie,
+et le Champi de Bastien revient à ses côtés. Une partie sauvegardée en plein
+combat reprend sans lui, le Champi à sa place.
 
 ## Performances
 

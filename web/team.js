@@ -61,7 +61,8 @@
   function refresh() {
     if (!game || typeof game.team !== 'function') return;
     const team = game.team();
-    const fighting = game.battle().phase === 'fight';
+    const phase = game.battle().phase;
+    const fighting = phase === 'fight' || phase === 'prepare';
     const key = team.map((m) => `${m.species}/${m.look}/${m.active}`).join() + fighting;
     if (key !== shape) {
       shape = key;
@@ -76,6 +77,10 @@
       fill.style.width = `${100 * ratio}%`;
       fill.style.background = ratio > 0.5 ? '#8fd16a' : ratio > 0.25 ? '#f2c94c' : '#ff7a6b';
       icon.querySelector('.team-level').textContent = m.level;
+      // Knocked out in a trainer's battle: it cannot come out again.
+      const ko = fighting && m.hp === 0;
+      icon.classList.toggle('ko', ko);
+      if (!m.active) icon.disabled = ko;
     });
   }
 

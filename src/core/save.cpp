@@ -206,6 +206,7 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u8(static_cast<uint8_t>(q.stage));
     out.u8(q.progress);
   }
+  out.u8(w.rival_wins);
   return out.take();
 }
 
@@ -230,6 +231,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   const bool with_active = version >= 13;  // which team member is out of the crystal
   const bool grown = version >= 14;        // the bigger world: creatures have ids, squares are lived in
   const bool with_quests = version >= 15;  // teleporters, quests, named villagers
+  const bool with_rival = version >= 16;   // Bastien, the trainer: battles won against him
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -291,7 +293,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       }
       if (with_quests) {
         uint8_t tag = 0;
-        if (!in.u8(c.npc) || !in.u8(tag) || tag > static_cast<uint8_t>(Tag::LostPiou)) {
+        if (!in.u8(c.npc) || !in.u8(tag) || tag > static_cast<uint8_t>(Tag::Rival)) {
           return fail(error, LoadError::Corrupt);
         }
         c.tag = static_cast<Tag>(tag);
@@ -332,7 +334,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       for (uint8_t& a : m.genes.allele) ok = ok && in.u8(a);
       ok = ok && in.u8(forms) && in.u16(m.level) && in.u32(m.xp) && in.u16(m.hp);
       uint8_t tag = 0, beaten = 0;
-      if (with_quests) ok = ok && in.u8(tag) && in.u8(beaten) && tag <= static_cast<uint8_t>(Tag::LostPiou) && beaten <= 1;
+      if (with_quests) ok = ok && in.u8(tag) && in.u8(beaten) && tag <= static_cast<uint8_t>(Tag::LostPiou) && beaten <= 1;  // never a trainer's
       m.tag = static_cast<Tag>(tag);
       m.beaten = beaten == 1;
       if (!ok || species >= static_cast<uint8_t>(Species::Count) || forms > 2 || m.level == 0) {
@@ -384,6 +386,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       q.stage = static_cast<QuestStage>(stage);
     }
   }
+  if (with_rival && !in.u8(w.rival_wins)) return fail(error, LoadError::Corrupt);
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
 
   if (!grown) {
@@ -427,6 +430,16 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       if (c.npc == npc::kGaspard && teleporter_position(w, TeleporterId::Village, t)) {
         c.home = {t.x, t.z};
         c.body.pos = {t.x + 2.4f, w.ground.height(t.x + 2.4f, t.z), t.z};
+        c.mind = Mind::Idle;
+      }
+    }
+  }
+  if (grown && !with_rival) {
+    // Before version 16: Bastien goes to the edge of the village, where he
+    // offers battles (his monster comes to his side, see update_population).
+    for (Creature& c : w.creatures) {
+      if (c.species == Species::Villager && c.npc == npc::kBastien) {
+        place_trainer(w, c);
         c.mind = Mind::Idle;
       }
     }

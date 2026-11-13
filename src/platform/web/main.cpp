@@ -64,6 +64,7 @@ struct App {
   int attack_buffer = 0;         // same for an attack (battle)
   uint8_t attack_slot = 0;       // 1..3
   int parry_buffer = 0;
+  bool jump_held = false;        // the jump button or key is down (a flying companion climbs)
   bool hold_clock = false;       // debug: the time of day stands still
   uint32_t held_clock = 0;
   Command command = Command::None;  // sent with the next tick
@@ -108,6 +109,7 @@ Input current_input(App& app) {
   in.jump = app.jump_buffer > 0;
   in.attack = app.attack_buffer > 0 ? app.attack_slot : 0;
   in.parry = app.parry_buffer > 0;
+  in.jump_held = app.jump_held;
   in.command = app.command;
   in.target = app.command_target;
   return in;
@@ -131,7 +133,9 @@ void tick(App& app, const Input& in) {
   app.command = Command::None;
   // Creatures come and go: follow the selected one by its id.
   if (w.creatures.size() != creatures && app.selected >= 0) app.selected = find_creature(w, app.selected_id);
-  if (w.battle.phase == BattlePhase::Fight) app.selected = -1;  // the enemy has its own ring
+  if (w.battle.phase == BattlePhase::Fight || w.battle.phase == BattlePhase::Prepare) {
+    app.selected = -1;  // the foes have their own rings
+  }
 }
 
 void select(App& app, int index) {
@@ -145,7 +149,10 @@ void select(App& app, int index) {
 void follow_battle(App& app, double dt_ms) {
   float fx, fz;
   const BattlePhase phase = app.world.battle.phase;
-  if ((phase != BattlePhase::Fight && phase != BattlePhase::Training) || !battle_forward(app.world, fx, fz)) return;
+  if ((phase != BattlePhase::Fight && phase != BattlePhase::Training && phase != BattlePhase::Prepare) ||
+      !battle_forward(app.world, fx, fz)) {
+    return;  // moving freely: the player turns the camera
+  }
   const float target = std::atan2(-fx, -fz);  // forward = (-sin yaw, -cos yaw)
   const float k = std::min(1.0f, static_cast<float>(dt_ms) * 0.012f);
   Camera& c = app.camera;
@@ -352,7 +359,8 @@ EMSCRIPTEN_KEEPALIVE void monstres_look(float delta_yaw, float delta_pitch) {
   Camera& c = g_app->camera;
   g_app->redraw = true;
   const BattlePhase phase = g_app->world.battle.phase;
-  if (phase == BattlePhase::Fight || phase == BattlePhase::Training) delta_yaw = 0;  // locked on the enemy
+  float fx, fz;
+  if (phase == BattlePhase::Prepare || battle_forward(g_app->world, fx, fz)) delta_yaw = 0;  // locked on the target
   c.yaw = std::remainder(c.yaw + delta_yaw, static_cast<float>(2 * kPi));
   c.pitch = std::clamp(c.pitch + delta_pitch, kMinPitch, kMaxPitch);
 }
@@ -364,6 +372,7 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_camera(float yaw, float pitch) {
 }
 
 EMSCRIPTEN_KEEPALIVE void monstres_jump() { g_app->jump_buffer = kJumpBufferTicks; }
+EMSCRIPTEN_KEEPALIVE void monstres_jump_held(int held) { g_app->jump_held = held != 0; }
 
 // Battle buttons: attack 1 (quick), 2 and 3 (special); parry. The dodge is
 // the jump.
@@ -379,10 +388,11 @@ EMSCRIPTEN_KEEPALIVE void monstres_parry() { g_app->parry_buffer = kJumpBufferTi
 // 3 capture, 6 train; team bar: 4 summon (or recall) team[target]; team
 // sheet: 5 release team[target]; map: 7 teleport to teleporter target;
 // dialogues: 8 accept quest target, 9 give team[target], 10 report quest
-// target (Command).
+// target, 12 challenge the trainer target (Npc); battle: 11 aim at
+// foes[target] (65535: at no one), 13 ready (Command).
 // Applied with the next tick (right away when frozen, for tests).
 EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
-  if (command < 1 || command > 10 || target < 0 || target > 65535) return;
+  if (command < 1 || command > 13 || target < 0 || target > 65535) return;
   g_app->command = static_cast<Command>(command);
   g_app->command_target = static_cast<uint16_t>(target);
   if (g_app->frozen) {

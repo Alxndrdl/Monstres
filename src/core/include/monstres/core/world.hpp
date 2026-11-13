@@ -72,7 +72,11 @@ enum class Command : uint8_t {
   QuestAccept,    // the quest Input::target (QuestId), from the villager who gives it
   QuestGive,      // team[Input::target] is handed to the villager who asked for it
   QuestComplete,  // the quest Input::target is reported done to its villager
+  Target,     // in a battle: aim at foes[Input::target] (kNoTarget: aim at no one, move freely)
+  Challenge,  // a battle against the trainer Input::target (Npc), who offered it
+  Ready,      // a trainer's battle: the player has read the rules, the fight starts
 };
+inline constexpr uint16_t kNoTarget = 0xFFFF;
 
 // What the player does during one tick. Integers, so that replays and saved
 // inputs reproduce exactly.
@@ -83,6 +87,7 @@ struct Input {
   bool jump = false;   // jump this tick (if on the ground); in a battle: dodge
   uint8_t attack = 0;  // in a battle: 1 quick attack, 2 and 3 special attacks
   bool parry = false;  // in a battle
+  bool jump_held = false;  // the jump is held down: a flying monster climbs (in a battle)
   Command command = Command::None;
   uint16_t target = 0; // Engage: index of the creature; Summon, Release: index in the team
   bool operator==(const Input&) const = default;
@@ -191,7 +196,7 @@ struct Genes {
 
 // What a creature is doing. Battle: fighting the companion (battle.hpp).
 // What ties a creature or a team member to a quest.
-enum class Tag : uint8_t { None, LostPiou };
+enum class Tag : uint8_t { None, LostPiou, Rival };  // Rival: the monster out of a trainer's team
 
 // KnockedOut: beaten in a battle, it lies on the ground for a while.
 enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly, Battle, KnockedOut };
@@ -268,11 +273,13 @@ inline constexpr size_t kMaxVariants = 16;  // per species
 inline constexpr size_t kSpeciesCount = static_cast<size_t>(Species::Count);
 using Dex = std::array<std::array<Discovery, kMaxVariants>, kSpeciesCount>;
 
-// A battle between the companion and one wild monster (see battle.hpp). Not
-// saved: a game loaded during a battle goes on without it. Training: the
-// companion attacks the magician, who shields itself (no one is hurt).
-enum class BattlePhase : uint8_t { None, Fight, Flee, Training };
-enum class BattleOutcome : uint8_t { None, Victory, Defeat, Fled, Captured };
+// A battle between the companion and wild monsters, or a trainer's (see
+// battle.hpp). Not saved: a game loaded during a battle goes on without it.
+// Training: the companion attacks the magician, who shields itself (no one
+// is hurt). Prepare: before a trainer's battle, both sides take their places
+// while the player reads the rules.
+enum class BattlePhase : uint8_t { None, Fight, Flee, Training, Prepare };
+enum class BattleOutcome : uint8_t { None, Victory, Defeat, Fled, Captured, Forfeit };
 
 // What one side of a battle is doing.
 enum class FighterState : uint8_t {
@@ -298,6 +305,10 @@ struct Fighter {
   uint64_t hit_tick = 0;     // last time it was hurt (last_damage: how much)
   uint16_t last_damage = 0;
   uint64_t parried_tick = 0; // last hit it blocked
+  // Foes: how they move around (they circle the companion, one way or the other).
+  int8_t strafe = 1;         // +1 / -1: which way it circles, 0: holds still
+  uint16_t think = 0;        // ticks before it changes its mind
+  float lift = 0;            // flying: height above the ground it wants (the ally: climbed with the jump)
   bool operator==(const Fighter&) const = default;
 };
 
@@ -321,20 +332,65 @@ struct XpGain {
   bool operator==(const XpGain&) const = default;
 };
 
+// One monster fighting the companion: a wild one (several of the same kind
+// may fight together), or the one out of a trainer's team.
+struct Foe {
+  uint16_t index = 0;  // in World::creatures
+  uint16_t hp = 0, max_hp = 0;
+  uint32_t xp = 0;     // what beating it is worth (0: beaten before, or let go by the player)
+  Fighter fighter;
+  bool operator==(const Foe&) const = default;
+};
+
+// A monster of a trainer's team (the one out is a creature, Tag::Rival).
+struct RivalMonster {
+  Species species = Species::Slime;
+  Genes genes{};
+  uint8_t level = 1;
+  uint16_t hp = 0;
+  bool seen = false;  // it came out once: the player knows it
+  bool operator==(const RivalMonster&) const = default;
+};
+inline constexpr size_t kRivalTeamSize = 3;
+
+// A trainer's battle: who, its team, and where both sides stand.
+struct Rival {
+  uint8_t npc = 0;  // 0: a wild battle
+  std::array<RivalMonster, kRivalTeamSize> team{};
+  uint8_t count = 0;   // monsters in team
+  uint8_t out = 0;     // the one fighting (the creature tagged Rival)
+  uint16_t next_in = 0;  // ticks before the next one comes out (its last one was beaten)
+  Vec2 ally_spot, foe_spot;  // where the monsters stand at the start, facing each other
+  Vec2 player_spot, trainer_spot;
+  bool operator==(const Rival&) const = default;
+};
+
+// Why a victory gave no experience.
+enum class NoXp : uint8_t { None, Beaten, Released, Trainer };
+
 struct Battle {
   BattlePhase phase = BattlePhase::None;
-  uint16_t enemy = 0;  // index of the wild creature
-  uint16_t enemy_hp = 0, enemy_max_hp = 0;
-  Fighter ally, foe;
+  std::vector<Foe> foes;  // still fighting: hp > 0 (the beaten ones lie there)
+  uint16_t target = 0;    // foes[target] is aimed at; kNoTarget: no one, the companion moves freely
+  Fighter ally;
+  Fighter shield;         // training: the magician's shield
   std::vector<Projectile> projectiles;
-  uint16_t timer = 0;  // Flee: ticks spent running back
-  // Hit points dealt to the enemy by each team member: the experience is shared accordingly.
+  uint16_t timer = 0;  // Flee: ticks spent running back; Prepare: ticks spent taking places
+  // Hit points dealt to the foes by each team member: the experience is shared accordingly.
   std::array<uint32_t, rules::kTeamSize> dealt{};
+  uint32_t won_xp = 0;    // the experience of the foes beaten so far
+  uint8_t beaten = 0;     // how many foes were beaten or caught
+  NoXp no_xp = NoXp::None;
+  Species last_species = Species::Companion;  // the last one beaten
+  Rival rival;
   // How the last battle ended, for the interface.
   BattleOutcome outcome = BattleOutcome::None;
   uint64_t outcome_tick = 0;
   uint32_t outcome_xp = 0;  // the experience of the victory, shared by the team
   Species outcome_species = Species::Companion;
+  uint8_t outcome_count = 0;  // foes beaten or caught
+  NoXp outcome_no_xp = NoXp::None;
+  uint8_t outcome_rival = 0;  // the trainer (Npc), 0: wild monsters
   std::vector<XpGain> outcome_gains;  // who earned it
   uint32_t outcome_wizard_xp = 0;
   bool operator==(const Battle&) const = default;
@@ -364,6 +420,7 @@ struct Population {
 namespace npc {
 inline constexpr uint8_t kMirabelle = 1;  // lost her Piou (Tag::LostPiou)
 inline constexpr uint8_t kGaspard = 2;    // stands by the village's teleporter, curious about it
+inline constexpr uint8_t kBastien = 4;    // a trainer: he offers battles against his monsters
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
@@ -410,6 +467,7 @@ struct World {
   Population population;
   uint8_t teleporters = 0;  // known teleporters, as bits (1 << TeleporterId)
   std::array<QuestState, kQuestCount> quests{};
+  uint8_t rival_wins = 0;      // battles won against Bastien (only the first one gives experience)
   uint64_t teleport_tick = 0;  // not saved: the last teleport, for the drawing
   Vec3 teleport_from;          // not saved: where it left
   bool operator==(const World&) const = default;
@@ -452,6 +510,11 @@ size_t add_creature(World& world, Creature creature);
 void remove_creature(World& world, size_t index);
 // Index of the creature with this id, or -1.
 int find_creature(const World& world, uint32_t id);
+
+// Where Bastien, the trainer, waits: at the edge of the village, on the side
+// where he fights (sets the villager's home and position). False if there
+// is no room there (the villager is left as it was).
+bool place_trainer(const World& world, Creature& villager);
 
 // Builds the village (houses, well, fences, signs...) as objects, removing
 // any other object in its way or in the lake. Used by new_game, and when

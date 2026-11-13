@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 using namespace monstres;
 using doctest::Approx;
@@ -111,7 +112,10 @@ TEST_CASE("the magician's name, level and experience are saved") {
   }
   SUBCASE("a level 0 or a broken name length is refused") {
     auto bytes = serialize(w);
-    bytes[bytes.size() - 6 - 1 - w.wizard.name.size()] = 200;  // the name length
+    const std::vector<uint8_t> name(w.wizard.name.begin(), w.wizard.name.end());
+    const auto at = std::search(bytes.begin(), bytes.end(), name.begin(), name.end());
+    REQUIRE(at != bytes.end());
+    *(at - 1) = 200;  // the name length
     LoadError error = LoadError::None;
     CHECK_FALSE(deserialize(bytes, &error));
     CHECK(error == LoadError::Corrupt);

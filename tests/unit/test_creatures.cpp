@@ -45,7 +45,7 @@ TEST_CASE("a new game has the companion next to the player and wild monsters aro
       CHECK(c.species != Species::Companion);
       CHECK(c.id > 0);
       if (c.species != Species::Villager) CHECK(distance_xz(c.body, w.player) >= rules::kMonsterSpawnMinDistance);
-      if (c.species <= Species::Bird) {
+      if (c.species <= Species::Bird && c.tag != Tag::Rival) {  // Bastien's stands beside him
         ++wild;
         CHECK(c.home.x == c.body.pos.x);
         // Only around the player: in the squares near it.

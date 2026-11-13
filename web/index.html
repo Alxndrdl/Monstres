@@ -35,6 +35,8 @@
       border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 6px; padding: 6px 12px; cursor: pointer;
     }
     .button:hover { background: rgba(255, 255, 255, 0.22); }
+    .button.primary { background: rgba(242, 201, 76, 0.35); border-color: rgba(242, 201, 76, 0.9); font-weight: 700; }
+    .button.primary:hover { background: rgba(242, 201, 76, 0.5); }
     .icon-button {
       width: 42px; height: 42px; padding: 0; border-radius: 50%; cursor: pointer; color: #fff;
       background: rgba(20, 24, 40, 0.45); border: 1px solid rgba(255, 255, 255, 0.4);
@@ -417,9 +419,50 @@
     .hp-bar.mid > span { background: #f2c94c; }
     .hp-bar.low > span { background: #ff7a6b; }
     .hp-bar .capture-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(242, 201, 76, 0.95); }
+    .hp-bar .capture-mark[hidden] { display: none; }
     .hp-text { display: block; margin-top: 2px; font-size: 11px; color: rgba(255, 255, 255, 0.8); }
     .fighter.windup { animation: warn 0.25s ease-in-out infinite alternate; }
     @keyframes warn { to { border-color: #ff5a4a; box-shadow: 0 0 14px rgba(255, 90, 74, 0.7); } }
+    /* The foes' icons, under the target's bars. */
+    #foe-icons {
+      position: fixed; left: 50%; transform: translateX(-50%); top: calc(max(12px, env(safe-area-inset-top)) + 64px);
+      z-index: 2; display: flex; align-items: center; gap: 6px;
+    }
+    #foe-icons[hidden] { display: none; }
+    .foe-icons-title { font-size: 12px; font-weight: 700; color: #f2c94c; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); margin-right: 2px; }
+    .foe-icon {
+      position: relative; width: 42px; height: 42px; padding: 0; border-radius: 50%; cursor: pointer;
+      border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(20, 24, 40, 0.7); color: #fff;
+    }
+    .foe-icon:disabled { cursor: default; }
+    .foe-icon img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+    .foe-icon.targeted { border-color: #ff7a6b; box-shadow: 0 0 10px rgba(255, 122, 107, 0.9); }
+    .foe-icon.windup { animation: warn 0.25s ease-in-out infinite alternate; }
+    .foe-icon.ko img { filter: grayscale(1); opacity: 0.45; }
+    .foe-unknown { font-size: 20px; font-weight: 700; color: rgba(255, 255, 255, 0.75); }
+    .foe-ko {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 26px; font-weight: 700; color: #ff5a4a; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+    .foe-hp { position: absolute; left: 4px; right: 4px; bottom: -6px; height: 4px; border-radius: 2px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
+    .foe-hp > span { display: block; height: 100%; background: #8fd16a; }
+    .fighter.enemy.free { border-color: rgba(255, 255, 255, 0.35); }
+    .fighter.enemy.free .hp-bar { display: none; }
+    .team-icon.ko img { filter: grayscale(1); opacity: 0.35; }
+    .team-icon.ko::after {
+      content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 700; color: #ff5a4a; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+    /* The rules before a trainer's battle. */
+    #rules {
+      position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 4;
+      width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 14px 18px;
+    }
+    #rules[hidden] { display: none; }
+    .rules-title { margin: 0 0 6px; font-weight: 700; font-size: 17px; color: #f2c94c; }
+    .rules-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+    .rules-list li { margin-bottom: 3px; }
+    .rules-actions { display: flex; justify-content: flex-end; gap: 8px; }
     #battle-banner {
       position: fixed; left: 50%; top: 28%; transform: translate(-50%, -50%); z-index: 3; padding: 10px 22px;
       border-radius: 12px; background: rgba(20, 24, 40, 0.85); border: 1px solid rgba(242, 201, 76, 0.6);
@@ -708,6 +751,17 @@
       <div class="fighter-name"><strong></strong><span class="level"></span></div>
       <div class="hp-bar"><span></span></div>
       <span class="hp-text"></span>
+    </div>
+  </div>
+  <!-- The foes: tap one to aim at it (battle.js). -->
+  <div id="foe-icons" aria-label="Adversaires" hidden></div>
+  <!-- Before a trainer's battle: the rules (battle.js). -->
+  <div id="rules" class="panel" role="dialog" aria-label="Règles du combat" hidden>
+    <p class="rules-title"></p>
+    <ul class="rules-list"></ul>
+    <div class="rules-actions">
+      <button type="button" class="button" id="rules-forfeit">Renoncer</button>
+      <button type="button" class="button primary" id="rules-ready">Prêt !</button>
     </div>
   </div>
   <div id="battle-banner" role="status" aria-live="polite" hidden></div>

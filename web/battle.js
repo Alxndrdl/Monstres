@@ -1,6 +1,8 @@
-// Battles, on the page: the context menu on the right (fight, flee, capture),
-// the hit points of both sides, the battle buttons around the dodge (the jump
-// button), damage numbers and the outcome. The rules are in the game
+// Battles, on the page: the context menu on the right (fight, flee, capture,
+// forfeit), the hit points of both sides, the foes' icons at the top (tap one
+// to aim at it; tap the one aimed at to move freely), the rules before a
+// trainer's battle, the battle buttons around the dodge (the jump button),
+// damage numbers and the outcome. The rules are in the game
 // (src/core/battle.cpp); this only shows them and sends the presses.
 (() => {
   'use strict';
@@ -13,6 +15,7 @@
     return node;
   };
   const speciesName = (id) => (LORE.species[id] || { name: id }).name;
+  const npcName = (n) => (LORE.npcs[n] || { name: 'Dresseur' }).name;
 
   let game = null;
   let selected = -1;  // creature touched (ui.js)
@@ -59,6 +62,11 @@
       event.preventDefault();
       game.input.parry();
       flash(parryButton);
+    } else if (event.code === 'KeyT') {  // the next foe, then no one (moving freely)
+      event.preventDefault();
+      const b = game.battle();
+      const n = (b.foes || []).length;
+      if (b.phase === 'fight' && n) game.target(b.target < 0 ? 0 : b.target + 1 < n ? b.target + 1 : -1);
     }
   });
   function flash(button) {
@@ -87,6 +95,8 @@
       'stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
     stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+    forfeit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>',
     teleport: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round"><ellipse cx="12" cy="18" rx="8" ry="3"/><path d="M12 15V3M8 7l4-4 4 4"/></svg>',
   };
@@ -107,29 +117,42 @@
     inBattle: 'Un combat est déjà en cours.',
     noCompanion: 'Invoque d’abord un monstre de ton équipe (à gauche).',
     knockedOut: 'K.O. : il se repose. Laisse-le tranquille un moment.',
-    owned: 'C’est le Piou de Mirabelle : il reste avec elle.',
+    owned: 'Il appartient à quelqu’un.',
   };
   // Under the capture button: why it cannot be used yet.
   const CAPTURE_NOTES = {
     notWeak: (b) => `PV < ${b.captureHpPercent} %`,
     teamFull: () => 'Équipe complète',
+    noTarget: () => 'Vise un monstre',
     ok: () => 'Il est affaibli !',
   };
 
   function renderContext(b) {
     let key;
     let build;
-    if (b.phase === 'fight') {
-      const name = speciesName(b.enemy.species);
-      key = `fight/${b.enemy.index}/${b.capture}`;
+    if (b.phase === 'prepare') {
+      key = 'prepare';  // the rules panel says it all
+    } else if (b.phase === 'fight' && b.rival) {
+      const out = !!b.ally;
+      key = `rival/${out}`;
       build = () => {
-        contextTitle.replaceChildren(`Combat · ${name} `, el('small', { textContent: `niv. ${b.enemy.level}` }));
+        contextTitle.replaceChildren(`Combat contre ${npcName(b.rival.npc)}`);
+        contextActions.replaceChildren(action('forfeit', 'Déclarer forfait', true, () => game.forfeit()));
+        contextNote.textContent = out ? ''
+          : 'Ton monstre est K.O. : choisis-en un autre dans ton équipe (à gauche).';
+      };
+    } else if (b.phase === 'fight') {
+      const target = b.target >= 0 ? b.enemy : null;
+      const name = target ? speciesName(target.species) : 'mode libre';
+      key = `fight/${target ? target.index : -1}/${b.capture}/${b.foes.length}`;
+      build = () => {
+        contextTitle.replaceChildren(`Combat · ${name} `, el('small', { textContent: target ? `niv. ${target.level}` : '' }));
         const capture = action('capture', 'Capturer', b.capture === 'ok', () => game.capture());
         capture.append(el('small', { textContent: (CAPTURE_NOTES[b.capture] || (() => ''))(b) }));
         capture.title = b.capture === 'notWeak'
           ? `Affaiblis-le d’abord : moins de ${b.captureHpPercent} % de ses PV (le trait doré sur sa barre).` : '';
         contextActions.replaceChildren(action('flee', 'Fuir', true, () => game.flee()), capture);
-        contextNote.textContent = '';
+        contextNote.textContent = target ? '' : 'Touche un adversaire (ou son icône) pour le viser.';
       };
     } else if (b.phase === 'training') {
       const name = speciesName(b.ally.species);
@@ -168,6 +191,13 @@
           contextTitle.replaceChildren(`${speciesName(c.species)} `, el('small', { textContent: `niv. ${c.level}` }));
           contextActions.replaceChildren(action('train', 'S’entraîner', c.train, () => game.train()));
           contextNote.textContent = 'Contrôle-le comme en combat, contre ton magicien.';
+        };
+      } else if (c.tag === 'rival') {
+        key = `rival-monster/${c.index}`;
+        build = () => {
+          contextTitle.replaceChildren(`${speciesName(c.species)} `, el('small', { textContent: `niv. ${c.level}` }));
+          contextActions.replaceChildren(action('fight', 'Combattre', false, () => {}));
+          contextNote.textContent = 'C’est le monstre de Bastien : parle-lui pour le défier.';
         };
       } else if (c.species === 'villager') {
         key = `villager/${c.index}/${c.talk}`;
@@ -212,20 +242,133 @@
 
   let tagsFor = '';
   function renderHud(b) {
-    hud.hidden = b.phase === 'none' || b.phase === 'training';
+    hud.hidden = b.phase === 'none' || b.phase === 'training' || b.phase === 'prepare';
+    renderFoeIcons(b);
     if (hud.hidden) return;
-    showSide(sides.enemy, speciesName(b.enemy.species), b.enemy.level, b.enemy.hp, b.enemy.maxHp);
-    showSide(sides.ally, speciesName(b.ally.species), b.ally.level, b.ally.hp, b.ally.maxHp);
+    const aimed = b.target >= 0 && b.enemy;
+    sides.enemy.classList.toggle('free', !aimed);
+    if (aimed) {
+      showSide(sides.enemy, speciesName(b.enemy.species), b.enemy.level, b.enemy.hp, b.enemy.maxHp);
+    } else {
+      sides.enemy.querySelector('strong').textContent = b.rival && !(b.foes || []).length
+        ? `${npcName(b.rival.npc)} envoie son prochain monstre…` : 'Mode libre';
+      sides.enemy.querySelector('.level').textContent = '';
+      sides.enemy.querySelector('.hp-text').textContent = (b.foes || []).length
+        ? 'Touche un adversaire, ou son icône, pour le viser.' : '';
+      sides.enemy.querySelector('.hp-bar').firstElementChild.style.width = '0';
+    }
+    sides.ally.hidden = !b.ally;
+    if (b.ally) showSide(sides.ally, speciesName(b.ally.species), b.ally.level, b.ally.hp, b.ally.maxHp);
     captureMark.style.left = `${b.captureHpPercent}%`;
-    sides.enemy.classList.toggle('windup', b.enemy.fighter.state === 'windup');
-    if (tagsFor !== `${b.enemy.index}`) {
-      tagsFor = `${b.enemy.index}`;
-      sides.enemy.querySelector('.tags').replaceChildren(...b.enemy.elements.map((id) => {
+    captureMark.hidden = !!b.rival || !aimed;
+    sides.enemy.classList.toggle('windup', (b.foes || []).some((f) => f.fighter.state === 'windup'));
+    const tags = aimed ? `${b.enemy.index}` : '';
+    if (tagsFor !== tags) {
+      tagsFor = tags;
+      sides.enemy.querySelector('.tags').replaceChildren(...(aimed ? b.enemy.elements : []).map((id) => {
         const e = LORE.elements[id] || { name: id, color: '#ccc' };
         return el('span', { className: 'badge', textContent: e.name, style: `background:${e.color}` });
       }));
     }
   }
+
+  // ---- The foes' icons: tap one to aim at it, tap the one aimed at to move freely ----
+  const icons = $('foe-icons');
+  let iconsFor = '';
+  function toggleTarget(b, slot) {
+    game.target(b.target === slot ? -1 : slot);
+  }
+  function renderFoeIcons(b) {
+    const show = b.phase === 'fight' || b.phase === 'prepare';
+    icons.hidden = !show;
+    if (!show) {
+      iconsFor = '';
+      return;
+    }
+    const foes = b.foes || [];
+    // A trainer's team: the ones not seen yet are a "?", the beaten ones crossed out.
+    const list = b.rival
+      ? b.rival.team.map((m) => {
+        const foe = m.out ? foes[0] : null;
+        return { key: `${m.slot}/${m.seen}/${m.ko}/${m.out}`, species: m.seen ? m.species : null, look: m.look,
+          level: m.level, ko: m.ko, slot: foe ? foe.slot : -1, foe };
+      })
+      : foes.map((f) => ({ key: `${f.index}`, species: f.species, look: f.look, level: f.level, ko: false, slot: f.slot, foe: f }));
+    const key = `${b.phase}/${b.target}/` + list.map((x) => x.key).join();
+    if (key !== iconsFor) {
+      iconsFor = key;
+      icons.classList.toggle('rival', !!b.rival);
+      icons.replaceChildren(...(b.rival ? [el('span', { className: 'foe-icons-title', textContent: npcName(b.rival.npc) })] : []),
+        ...list.map((x) => {
+          const button = el('button', { type: 'button', className: 'foe-icon' });
+          button.dataset.slot = x.slot;
+          if (x.species) button.append(el('img', { src: portrait(x.species, x.look), alt: '' }));
+          else button.append(el('span', { className: 'foe-unknown', textContent: '?' }));
+          button.append(el('span', { className: 'foe-hp' }, [el('span')]));
+          if (x.ko) button.append(el('span', { className: 'foe-ko', textContent: '✕' }));
+          button.classList.toggle('ko', x.ko);
+          button.classList.toggle('targeted', x.slot >= 0 && b.target === x.slot && b.phase === 'fight');
+          const name = x.species ? `${speciesName(x.species)} · niv. ${x.level}` : 'Monstre inconnu';
+          const clickable = x.slot >= 0 && b.phase === 'fight';
+          button.disabled = !clickable;
+          button.title = !clickable ? name : b.target === x.slot ? `${name} — viser personne (mode libre)` : `${name} — le viser`;
+          button.setAttribute('aria-label', button.title);
+          button.addEventListener('pointerdown', (event) => event.preventDefault());
+          button.addEventListener('click', () => {
+            if (game && !button.disabled) toggleTarget(game.battle(), x.slot);
+          });
+          return button;
+        }));
+    }
+    // Their hit points.
+    list.forEach((x, i) => {
+      const button = icons.querySelectorAll('.foe-icon')[i];
+      if (!button) return;
+      const ratio = x.foe ? x.foe.hp / x.foe.maxHp : x.ko ? 0 : 1;
+      const fill = button.querySelector('.foe-hp > span');
+      fill.style.width = `${100 * ratio}%`;
+      fill.style.background = ratio > 0.5 ? '#8fd16a' : ratio > 0.25 ? '#f2c94c' : '#ff7a6b';
+      button.classList.toggle('windup', !!x.foe && x.foe.fighter.state === 'windup');
+    });
+  }
+  // A tap on a foe in the view (ui.js): aim at it, or at no one if it was aimed at.
+  window.addEventListener('monstres-foe-tap', (event) => {
+    if (!game) return;
+    const b = game.battle();
+    if (b.phase !== 'fight') return;
+    const foe = (b.foes || []).find((f) => f.index === event.detail.index);
+    if (foe) toggleTarget(b, foe.slot);
+  });
+
+  // ---- Before a trainer's battle: the rules, and "ready" ----
+  const rules = $('rules');
+  let rulesFor = '';
+  function renderRules(b) {
+    const show = b.phase === 'prepare';
+    rules.hidden = !show;
+    if (!show) {
+      rulesFor = '';
+      return;
+    }
+    const key = `${b.rival.npc}/${b.rival.team.length}/${b.rival.wins}`;
+    if (key === rulesFor) return;
+    rulesFor = key;
+    const name = npcName(b.rival.npc);
+    const n = b.rival.team.length;
+    const lines = [
+      `${name} a ${n} monstres, toi ${b.rival.mine.length}. Un seul monstre de chaque côté se bat à la fois.`,
+      'Un monstre K.O. est éliminé : son dresseur envoie le suivant (tu choisis le tien dans ton équipe, à gauche).',
+      'Le dresseur qui n’a plus de monstre en état de se battre perd.',
+      'Tu vois combien de monstres a ton adversaire, mais pas lesquels avant qu’ils entrent en jeu.',
+      'Touche le monstre adverse, ou son icône, pour le viser ou te déplacer librement.',
+      'Pas de capture : ce sont ses monstres. Tu peux déclarer forfait à tout moment, il gagne alors.',
+      b.rival.wins ? 'Tu l’as déjà battu : cette fois, pas d’expérience.' : 'Le premier combat gagné rapporte de l’expérience.',
+    ];
+    rules.querySelector('.rules-title').textContent = `Combat contre ${name}`;
+    rules.querySelector('.rules-list').replaceChildren(...lines.map((t) => el('li', { textContent: t })));
+  }
+  $('rules-ready').addEventListener('click', () => { if (game) game.readyToFight(); });
+  $('rules-forfeit').addEventListener('click', () => { if (game) game.forfeit(); });
 
   // ---- Battle buttons: element colors, cooldowns ----
   let buttonsFor = '';
@@ -238,7 +381,7 @@
       jumpHint.replaceChildren(el('kbd', { textContent: 'Espace' }), fighting ? ' esquiver · ' : ' pour sauter');
       if (fighting) jumpHint.append(el('kbd', { textContent: 'F' }), ' parer');
     }
-    if (!fighting) return;
+    if (!fighting || !b.ally) return;
     const moves = b.ally.moves;
     const key = moves.map((m) => m.id + m.element).join();
     if (key !== buttonsFor) {
@@ -262,7 +405,8 @@
 
   // ---- Damage numbers and the outcome ----
   const layer = $('damage-layer');
-  const seen = { enemyHit: 0, allyHit: 0, enemyParried: 0, allyParried: 0, shield: 0, outcome: -1 };
+  const seen = { allyHit: 0, allyParried: 0, shield: 0, outcome: -1 };
+  const seenFoes = new Map();  // creature index -> { hit, parried }
 
   function floatText(index, text, className) {
     const at = game.creatureOnScreen(index);
@@ -285,16 +429,19 @@
       return;
     }
     if (b.phase !== 'fight') return;
-    const e = b.enemy.fighter;
+    for (const f of b.foes || []) {
+      const e = f.fighter;
+      const was = seenFoes.get(f.index) || { hit: e.hitTick, parried: e.parriedTick };
+      if (e.hitTick > was.hit) floatText(f.index, `${e.lastDamage}`, 'enemy');
+      if (e.parriedTick > was.parried) floatText(f.index, 'Paré !', 'blocked');
+      seenFoes.set(f.index, { hit: e.hitTick, parried: e.parriedTick });
+    }
+    if (!b.ally) return;
     const a = b.ally.fighter;
-    if (e.hitTick > seen.enemyHit) floatText(b.enemy.index, `${e.lastDamage}`, 'enemy');
     if (a.hitTick > seen.allyHit) floatText(0, `${a.lastDamage}`, 'ally');
     if (a.parriedTick > seen.allyParried) floatText(0, 'Paré !', 'blocked');
-    if (e.parriedTick > seen.enemyParried) floatText(b.enemy.index, 'Paré !', 'blocked');
-    seen.enemyHit = e.hitTick;
     seen.allyHit = a.hitTick;
     seen.allyParried = a.parriedTick;
-    seen.enemyParried = e.parriedTick;
   }
 
   const banner = $('battle-banner');
@@ -360,18 +507,28 @@
     seen.outcome = o.tick;
     const foe = speciesName(o.species);
     const companion = speciesName((game.team().find((m) => m.active) || {}).species || 'companion');
-    const texts = {
-      victory: ['Victoire !', `${foe} est K.O.`],
+    const trainer = o.rival ? npcName(o.rival) : '';
+    const texts = o.rival ? {
+      victory: ['Victoire !', `Tu as battu ${trainer} !`],
+      defeat: [`${trainer} a gagné`, 'Tes monstres sont épuisés.'],
+      forfeit: ['Tu as déclaré forfait', `${trainer} remporte le combat.`],
+    }[o.result] : {
+      victory: ['Victoire !', o.count > 1 ? `${o.count} monstres sont K.O.` : `${foe} est K.O.`],
       captured: [`${foe} capturé !`, 'Il rejoint ton équipe'],
       defeat: [`${companion} est K.O.`, 'Il se repose près de toi.'],
       fled: ['Tu as pris la fuite', ''],
     }[o.result];
     if (!texts) return;
     const won = o.result === 'victory' || o.result === 'captured';
-    const gains = won ? (o.gains || []).filter((g) => g.species) : [];
+    const gains = (o.gains || []).filter((g) => g.species);  // also those beaten before a defeat
+    const NO_XP = {
+      beaten: o.count > 1 ? 'Déjà battus : pas d’expérience cette fois.' : 'Déjà battu : pas d’expérience cette fois.',
+      released: 'Il avait été relâché : pas d’expérience cette fois.',
+      trainer: `${trainer} ne donne de l’expérience qu’au premier combat gagné.`,
+    };
     let note = '';
-    if (won && !o.xp) note = 'Il avait été relâché : pas d’expérience cette fois.';
-    else if (won && o.wizardXp) note = `Ton magicien gagne ${o.wizardXp} XP`;
+    if (won && !o.xp) note = NO_XP[o.noXp] || '';
+    else if (o.wizardXp) note = `Ton magicien gagne ${o.wizardXp} XP`;
     banner.replaceChildren(el('span', { className: 'banner-title', textContent: texts[0] }),
       ...(texts[1] ? [el('small', { textContent: texts[1] })] : []),
       ...(gains.length ? [el('div', { className: 'xp-cards' }, gains.map(xpCard))] : []),
@@ -398,6 +555,7 @@
     renderHud(b);
     renderHits(b);
     renderOutcome(b);
+    renderRules(b);
     renderContext(b);
   }
 

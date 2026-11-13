@@ -16,6 +16,7 @@
   const QUEST_INDEX = { lostPiou: 0, teleporters: 1 };  // QuestId
   const MIRABELLE = 1;
   const GASPARD = 2;
+  const BASTIEN = 4;
 
   let game = null;
   const box = $('dialogue');
@@ -136,6 +137,26 @@
     }
   }
 
+  // ---- Bastien: battles against his monsters ----
+  function bastien(c) {
+    const wins = c.wins || 0;
+    const challenge = () => {
+      game.challenge(BASTIEN);
+      close();
+    };
+    const offer = c.challenge ? [['Combattre !', challenge, 'challenge']] : [];
+    const why = !c.challenge ? ' Mais d’abord, fais sortir un monstre en forme de ton cristal.' : '';
+    if (!wins) {
+      show('Tu as un monstre, toi aussi ? Moi, c’est Champi, et j’en garde un autre en réserve. ' +
+        'Un combat de dresseurs, ça te dit ? Gagne, et tu apprendras beaucoup !' + why,
+        [...offer, ['Une autre fois', close]]);
+    } else {
+      show(`Tu m’as déjà battu ${wins === 1 ? 'une fois' : `${wins} fois`} ! On remet ça ? ` +
+        'Pour l’honneur, cette fois : je n’ai plus rien à t’apprendre.' + why,
+        [...offer, ['Une autre fois', close]]);
+    }
+  }
+
   // ---- The other villagers: rumors about the quests, and chatter ----
   function villager(n) {
     const quests = game.quests();
@@ -149,6 +170,7 @@
     else if (n % 2 === 1) add(LORE.rumors.lostPiouDone, 0);  // some of them thank the player
     if (stones.stage !== 'done') { if (n % 2 === 0) add(LORE.rumors.teleporters, 1); }
     else if (n % 3 === 0) add(LORE.rumors.teleportersDone, 0);
+    if (n !== BASTIEN && n % 3 === 1) add(LORE.rumors.bastien, 0);  // some of them send the player to him
     for (const line of (LORE.npcs[n] || {}).chatter || []) pool.push(line);
     const k = said[n] = (said[n] || 0) + 1;
     show(pool[(k - 1) % pool.length] || 'Bonjour !', [['Encore un mot ?', () => villager(n)], ['Au revoir', close]]);
@@ -161,6 +183,7 @@
     box.hidden = false;
     if (c.npc === MIRABELLE) mirabelle();
     else if (c.npc === GASPARD) gaspard();
+    else if (c.npc === BASTIEN) bastien(c);
     else villager(c.npc);
     // Walking away ends the talk.
     clearInterval(watch);

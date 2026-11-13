@@ -2,6 +2,7 @@
 
 #include "monstres/render/scene.hpp"
 
+#include "monstres/core/battle.hpp"
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
@@ -674,8 +675,9 @@ void vanish(CreatureLook& look, Element element, float t) {
 // In a battle: a fighter lunges when it bites, and flashes when it is hurt.
 void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body) {
   const Battle& b = w.battle;
-  if (b.phase != BattlePhase::Fight || (index != 0 && index != b.enemy)) return;
-  const Fighter& f = index == 0 ? b.ally : b.foe;
+  const int slot = index == 0 ? -1 : foe_slot(w, index);
+  if (b.phase != BattlePhase::Fight || (index != 0 && slot < 0)) return;
+  const Fighter& f = index == 0 ? b.ally : b.foes[static_cast<size_t>(slot)].fighter;
   const uint64_t since_attack = w.tick - f.attack_tick;
   if (f.attack_tick > 0 && f.attack_move == 0 && since_attack < 12) {
     const float k = 0.35f * std::sin((kTau / 2) * static_cast<float>(since_attack) / 12.0f);

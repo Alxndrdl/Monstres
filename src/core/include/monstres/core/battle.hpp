@@ -6,19 +6,32 @@
 
 namespace monstres {
 
-// Battles: the companion fights one wild monster, controlled by the player
-// (the player's magician waits). The victory's experience is shared by the
-// team members who fought, by the hit points each dealt; the beaten
-// monster lies knocked out for a while. Training (Command::Train) works the
-// same way against the magician, who shields itself: no one is hurt. Started from the context menu (Command::
-// Engage), ended by a victory, a defeat, a capture, or by fleeing (the
+// Battles: the companion fights wild monsters, controlled by the player
+// (the player's magician waits). Wild monsters of the same kind close to the
+// one engaged join in (at most kMaxFoes). The companion aims at one of them
+// (Command::Target), or at no one: it then moves freely, relative to the
+// camera, and its attacks go straight ahead. The victory's experience is
+// shared by the team members who fought, by the hit points each dealt; a
+// beaten monster lies knocked out for a while. Training (Command::Train)
+// works the same way against the magician, who shields itself: no one is
+// hurt. Ended by a victory, a defeat, a capture, or by fleeing (the
 // companion runs back to the player first).
 //
+// Trainers (Bastien, in the village) offer battles (Command::Challenge):
+// both sides first take their places, facing each other outside the
+// village, while the player reads the rules (BattlePhase::Prepare), then the
+// fight starts (Command::Ready). One monster of each side fights at a time;
+// a beaten one is replaced by the next of its team. The side with no
+// monster left standing loses; fleeing is forfeiting. Only the first
+// victory against a trainer gives experience.
+//
 // During a fight the joystick moves the companion relative to the line
-// between it and the enemy (forward: towards the enemy); the jump becomes a
-// dodge, and the companion has three attacks: a quick one, and two special
-// ones with a cooldown. Parrying blocks the next hit and stuns an enemy
-// whose bite was parried. No elemental strengths or weaknesses yet.
+// between it and its target (forward: towards it); the jump becomes a
+// dodge (a flying companion climbs while it is held), and the companion has
+// three attacks: a quick one, and two special ones with a cooldown. Parrying
+// blocks the next hit and stuns a foe whose bite was parried. Foes have the
+// same attacks and delays, but show theirs before (Windup); they circle,
+// dodge, and fly if they can. No elemental strengths or weaknesses yet.
 
 namespace rules {
 inline constexpr uint16_t kCompanionStartLevel = 3;
@@ -36,6 +49,13 @@ inline constexpr uint16_t kStunTicks = 70;          // an enemy whose attack was
 inline constexpr float kProjectileSpeed = 13.0f;
 inline constexpr uint16_t kRegenEveryTicks = rules::kTicksPerSecond;  // +1 hit point (out of battle)
 inline constexpr float kCompanionMinRunSpeed = 6.0f;  // slow species keep up with the player
+inline constexpr size_t kMaxFoes = 3;               // a wild monster and those of its kind around
+inline constexpr float kGroupRadius = 7.0f;         // they join from this far (from the one engaged)
+inline constexpr float kFlyLiftMax = 5.0f;          // a flying companion climbs this high above its usual height
+inline constexpr float kRivalSpacing = 10.0f;       // a trainer's battle: the monsters start this far apart
+inline constexpr uint16_t kPrepareMaxTicks = 6 * rules::kTicksPerSecond;  // then everyone is at its place
+inline constexpr uint16_t kRivalNextTicks = 90;     // a trainer sends its next monster after this
+inline constexpr uint32_t kRivalXpPerLevel = 8;     // the first victory against a trainer
 }  // namespace rules
 
 enum class MoveShape : uint8_t {
@@ -50,7 +70,7 @@ struct Move {
   MoveShape shape;
   bool elemental;     // of the monster's element (else Normal)
   uint8_t power;
-  uint16_t cooldown;  // ticks, for the companion (wild monsters wait longer)
+  uint16_t cooldown;  // ticks, from the attack (a foe's: from the start of its windup)
   float range;        // Melee: reach beyond both bodies; Projectile: distance; Burst: radius
 };
 using Moves = std::array<Move, 3>;  // quick attack, then two special ones
@@ -81,18 +101,37 @@ enum class EngageCheck : uint8_t {
   InBattle,
   NoCompanion,  // no monster out of the crystal
   KnockedOut,   // already beaten, it lies there
-  Owned,        // someone's (Mirabelle's Piou, back with her)
+  Owned,        // someone's (Mirabelle's Piou, back with her; a trainer's)
 };
 EngageCheck can_engage(const World& world, size_t index);
 const char* engage_check_name(EngageCheck check);
 
 bool can_capture(const World& world);
 
+// Can the player challenge the trainer `npc` now (close to it, a monster out, no battle)?
+bool can_challenge(const World& world, uint8_t npc);
+
+// The trainer's team (Bastien's): the first one stands beside him.
+const std::array<RivalMonster, kRivalTeamSize>& rival_team(uint8_t npc, uint8_t& count);
+
+// Where a trainer's battle takes place: its middle, and the line between the
+// two sides (unit vector), outside the village. False if this world has no village.
+bool rival_arena(const World& world, Vec2& center, Vec2& axis);
+
+// The foe aimed at, or nullptr (free move, or no battle).
+const Foe* battle_target(const World& world);
+// foes[k] for creatures[index], or -1.
+int foe_slot(const World& world, size_t index);
+
+// Whether a creature belongs to someone (Mirabelle's Piou once back, a trainer's monster).
+bool owned(const World& world, const Creature& creature);
+
 // Can the companion start training against the magician now?
 bool can_train(const World& world);
 
-// Direction the companion faces the enemy (unit vector on the ground):
+// Direction the companion faces its target (unit vector on the ground):
 // the battle camera looks along it, forward on the joystick goes along it.
+// False out of a fight, or moving freely (no target): the camera decides.
 bool battle_forward(const World& world, float& fx, float& fz);
 
 // How a body should move during this tick (world.cpp moves it).
@@ -100,10 +139,12 @@ struct Steer {
   float dir_x = 0, dir_z = 0;
   float speed = 0;
   bool jump = false;
+  bool fly = false;  // a crow: flies freely, `lift` meters above the ground
+  float lift = 0;
 };
 
-// Wild crows and fish do not move during a battle (up on their perch or in
-// the air, in the lake): they bite only what comes close, and throw.
+// Fish do not move during a battle (in the lake): they bite only what comes
+// close, and throw.
 bool holds_its_place(Species species);
 
 // Summon team[slot] out of the staff's crystal, where the companion was (it
@@ -111,10 +152,14 @@ bool holds_its_place(Species species);
 // (not during a fight). During a fight, swapping is allowed.
 void summon(World& world, size_t slot);
 
+// Before a trainer's battle: who walks to its place.
+enum class Stand : uint8_t { Magician, Ally, Foe, Trainer };
+
 // Steps of a tick, called by step() in this order:
-void battle_command(World& world, const Input& input);  // Engage, Flee, Capture, Summon, Release, Train
+void battle_command(World& world, const Input& input);  // Engage, Flee, Capture, Summon, Release, Train, Target, Challenge, Ready
 Steer battle_ally(World& world, const Input& input, float dir_x, float dir_z);  // Fight phase
-Steer battle_foe(World& world);                         // Fight phase
+Steer battle_foe(World& world, size_t slot);             // Fight phase, foes[slot]
+Steer battle_prepare(World& world, Stand who);           // Prepare phase (and the trainer, waiting)
 void battle_resolve(World& world);  // projectiles, timers, victory or defeat (after moving)
 void team_regen(World& world);      // hit points come back out of battles
 

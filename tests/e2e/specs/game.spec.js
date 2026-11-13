@@ -495,12 +495,20 @@ test.describe('battles', () => {
     expect(battle.phase).toBe('fight');
     expect(battle.enemy.index).toBe(BIRD);
 
-    // A special attack: a projectile, and the button waits for its cooldown.
+    // A special attack: a projectile (the Piou may dodge it), and the button waits for its cooldown.
     await page.locator('#attack-2').dispatchEvent('pointerdown');
     await page.evaluate(() => window.monstres.step(40));
     const after = await page.evaluate(() => window.monstres.battle());
-    expect(after.enemy.hp).toBeLessThan(battle.enemy.hp);
+    expect(after.ally.fighter.attackTick).toBeGreaterThan(battle.tick);
     expect(after.ally.fighter.cooldowns[1]).toBeGreaterThan(0);
+    // The foe's icon, aimed at; tapped again: no one is aimed at, Pompon moves freely.
+    await expect(page.locator('.foe-icon')).toHaveCount(1);
+    await expect(page.locator('.foe-icon')).toHaveClass(/targeted/);
+    await page.locator('.foe-icon').click();
+    await expect(page.locator('.fighter.enemy strong')).toHaveText('Mode libre');
+    expect((await page.evaluate(() => window.monstres.battle())).target).toBe(-1);
+    await page.locator('.foe-icon').click();
+    await expect(page.locator('.fighter.enemy strong')).toHaveText('Piou');
     await expect(page.locator('#attack-2')).toHaveClass(/waiting/);
 
     // Fleeing: Pompon comes back to the player, the battle ends.
@@ -541,10 +549,9 @@ test.describe('battles', () => {
         const b = m.battle();
         if (b.phase !== 'fight') return b.outcome.result;
         if (b.capture === 'ok') return 'weak';
-        m.input.move(0, b.enemy.hp * 4 > b.enemy.maxHp ? 1 : 0);
-        if (b.enemy.fighter.state === 'windup') m.input.parry();  // its attacks are shown first
-        else if (b.enemy.hp * 2 > b.enemy.maxHp && b.ally.fighter.cooldowns[1] === 0) m.input.attack(2);
-        else if (b.enemy.hp * 3 > b.enemy.maxHp) m.input.attack(1);
+        // Its attacks are shown first: parried. One ember weakens it enough (it may dodge: again).
+        if (b.enemy.fighter.state === 'windup') m.input.parry();
+        else if (b.enemy.hp === b.enemy.maxHp && b.ally.fighter.cooldowns[1] === 0) m.input.attack(2);
         m.step(4);
       }
       return 'timeout';
@@ -660,6 +667,68 @@ test.describe('battles', () => {
 });
 
 test.describe('the bigger world', () => {
+  test('Bastien offers a battle: rules, ready, his unknown second monster, forfeit', async ({ page }) => {
+    await openGame(page, '?seed=3&new&frozen');
+    const i = await page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 1; i < m.state().creatures.length; i++) {
+        m.select(i);
+        const c = m.selected();
+        if (c && c.npc === 4) { m.teleport(c.x + 1.5, c.z); m.step(1); return i; }
+      }
+      return -1;
+    });
+    expect(i).toBeGreaterThan(0);
+    await page.evaluate((i) => { window.monstres.select(i); window.monstresDialogue.open(window.monstres.selected()); }, i);
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Bastien');
+    await page.locator('#challenge').click();
+    await page.evaluate(() => window.monstres.step(1));
+    // The rules, while both sides take their places; his team: Champi, and a "?".
+    await expect(page.locator('#rules')).toBeVisible();
+    await expect(page.locator('#rules .rules-title')).toHaveText('Combat contre Bastien');
+    await expect(page.locator('#context')).toBeHidden();
+    await expect(page.locator('.foe-icon')).toHaveCount(2);
+    await expect(page.locator('.foe-icon .foe-unknown')).toHaveCount(1);
+    await page.locator('#rules-ready').click();
+    await page.evaluate(() => window.monstres.step(1));
+    await expect(page.locator('#rules')).toBeHidden();
+    expect((await page.evaluate(() => window.monstres.battle())).phase).toBe('fight');
+    await expect(page.locator('.fighter.enemy strong')).toHaveText('Champi');
+    await expect(page.locator('#action-capture')).toHaveCount(0);  // his monsters cannot be caught
+    // Forfeit: over at once, he wins.
+    await page.locator('#action-forfeit').click();
+    await page.evaluate(() => window.monstres.step(1));
+    await expect(page.locator('#battle-banner')).toContainText('forfait');
+    expect((await page.evaluate(() => window.monstres.battle())).outcome.result).toBe('forfeit');
+  });
+
+  test('monsters of the same kind join in; their icons, the one aimed at', async ({ page }) => {
+    await openGame(page, '?seed=2&new&frozen');  // slimes close together, not far from the start
+    // Three slimes close together, in front of the player.
+    const foes = await page.evaluate(() => {
+      const m = window.monstres;
+      const s = m.state();
+      const slimes = s.creatures.map((c, i) => [c, i]).filter(([c]) => c.species === 'slime');
+      for (const [c, i] of slimes) {
+        const near = slimes.filter(([d]) => Math.hypot(d.x - c.x, d.z - c.z) < 7);
+        if (near.length >= 2) {
+          m.teleport(c.x + 5, c.z);
+          m.step(1);
+          m.engage(i);
+          m.step(1);
+          return m.battle().foes.length;
+        }
+      }
+      return 0;
+    });
+    test.skip(foes < 2, 'no group of slimes in this world');
+    await expect(page.locator('.foe-icon')).toHaveCount(foes);
+    await expect(page.locator('.foe-icon.targeted')).toHaveCount(1);
+    await page.locator('.foe-icon').nth(1).click();
+    expect((await page.evaluate(() => window.monstres.battle())).target).toBe(1);
+    await expect(page.locator('.foe-icon').nth(1)).toHaveClass(/targeted/);
+  });
+
   test('talking to Mirabelle gives a quest, found in the journal', async ({ page }) => {
     await openGame(page, '?seed=3&new&frozen');
     // Next to her, then her menu (the context menu is driven by a tap: select through the page).

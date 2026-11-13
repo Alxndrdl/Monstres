@@ -627,8 +627,8 @@ Element creature_element(const Creature& c) { return creature_elements(c.species
 void add_shield(const World& w, float time, DrawList& list) {
   const Body& p = w.player;
   const float mid = p.pos.y + rules::kPlayerHeight * 0.55f;
-  const uint64_t since = w.tick - w.battle.foe.parried_tick;
-  const float flash = w.battle.foe.parried_tick > 0 && since < 16 ? 1 - static_cast<float>(since) / 16.0f : 0;
+  const uint64_t since = w.tick - w.battle.shield.parried_tick;
+  const float flash = w.battle.shield.parried_tick > 0 && since < 16 ? 1 - static_cast<float>(since) / 16.0f : 0;
   add_spark(list, p.pos.x, mid, p.pos.z, 1.05f + 0.04f * std::sin(time * 3) + 0.15f * flash,
             {0.7f + 1.2f * flash, 1.1f + 0.8f * flash, 2.0f, 1}, 0.18f + 0.3f * flash, time * 0.4f);
   for (int k = 0; k < 6; ++k) {  // runes of light turning around it
@@ -691,20 +691,26 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
   add_victory_effects(w, time, list);
   if (b.phase == BattlePhase::Training && !w.creatures.empty()) add_shield(w, time, list);
   const bool training = b.phase == BattlePhase::Training;
-  if ((b.phase != BattlePhase::Fight && !training) || w.creatures.empty() || b.enemy >= w.creatures.size()) return;
+  if ((b.phase != BattlePhase::Fight && b.phase != BattlePhase::Prepare && !training) || w.creatures.empty()) return;
   const Creature& ally = w.creatures[0];
-  const Creature& foe = w.creatures[b.enemy];
-  const float foe_radius = species_info(foe.species).shape.half_width * 2.2f + 0.15f;
 
-  // The enemy's ring: red, beating fast while it prepares an attack.
-  const bool windup = !training && b.foe.state == FighterState::Windup;
-  if (!training) {
-  const float beat = windup ? 0.12f * std::sin(time * 22.0f) : 0.05f * std::sin(time * 4.0f);
-  add_ring(list, w, foe, foe_radius * (1 + beat), windup ? Color{1.6f, 0.25f, 0.2f, 1} : Color{1.0f, 0.3f, 0.25f, 0.85f});
-  if (windup) {
-    const Move& m = species_moves(foe.species)[b.foe.move];
-    const float total = b.foe.move == 0 ? 28.0f : b.foe.move == 1 ? 36.0f : 45.0f;
-    const float progress = 1 - static_cast<float>(b.foe.state_ticks) / total;
+  // The foes' rings: the one aimed at red and beating, the others fainter;
+  // fast while one prepares an attack.
+  for (size_t k = 0; k < b.foes.size() && !training; ++k) {
+    const Foe& f = b.foes[k];
+    const Creature& foe = w.creatures[f.index];
+    const float foe_radius = species_info(foe.species).shape.half_width * 2.2f + 0.15f;
+    const bool aimed = b.target == k;
+    const bool windup = f.fighter.state == FighterState::Windup;
+    const float beat = windup ? 0.12f * std::sin(time * 22.0f) : aimed ? 0.05f * std::sin(time * 4.0f) : 0;
+    const Color color = windup ? Color{1.6f, 0.25f, 0.2f, aimed ? 1.0f : 0.8f}
+                        : aimed ? Color{1.0f, 0.3f, 0.25f, 0.85f}
+                                : Color{0.9f, 0.55f, 0.3f, 0.4f};
+    add_ring(list, w, foe, foe_radius * (1 + beat), color);
+    if (!windup) continue;
+    const Move& m = species_moves(foe.species)[f.fighter.move];
+    const float total = f.fighter.move == 0 ? 12.0f : f.fighter.move == 1 ? 24.0f : 30.0f;
+    const float progress = 1 - static_cast<float>(f.fighter.state_ticks) / total;
     if (m.shape == MoveShape::Burst) {  // where the burst will reach
       add_ring(list, w, foe, m.range * (0.25f + 0.75f * progress), {1.5f, 0.3f, 0.2f, 0.5f + 0.4f * progress});
     } else if (m.shape == MoveShape::Projectile) {  // a ball of its element grows in front of it
@@ -713,7 +719,6 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
                 foe.body.pos.z + foe.body.facing_z * sh.half_width, 0.08f + 0.18f * progress,
                 element_glow(creature_element(foe)), 0.9f, time * 6);
     }
-  }
   }
 
   // Projectiles: a glowing ball and its trail.
@@ -727,9 +732,11 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
     }
   }
 
-  for (int side = 0; side < (training ? 1 : 2); ++side) {
-    const Fighter& f = side == 0 ? b.ally : b.foe;
-    const Creature& c = side == 0 ? ally : foe;
+  const size_t sides = 1 + (training ? 0 : b.foes.size());
+  for (size_t side = 0; side < sides; ++side) {
+    if (side == 0 && w.active < 0) continue;  // in the crystal
+    const Fighter& f = side == 0 ? b.ally : b.foes[side - 1].fighter;
+    const Creature& c = side == 0 ? ally : w.creatures[b.foes[side - 1].index];
     const Monster* mine = side == 0 ? active_monster(w) : nullptr;
     const Species species = mine ? mine->species : c.species;
     const BodyShape& sh = species_info(c.species).shape;
@@ -1111,8 +1118,10 @@ CameraGoal camera_goal(const World& w, CameraSubject subject) {
   g = {a.pos.x, a.pos.y + 0.75f, a.pos.z, a.pos.x, a.pos.y + 0.75f, a.pos.z, 0.8f};
   const Body* other = nullptr;
   float other_mid = 0.5f;
-  if (w.battle.phase == BattlePhase::Fight && w.battle.enemy < w.creatures.size()) {
-    other = &w.creatures[w.battle.enemy].body;
+  if (const Foe* t = battle_target(w)) {
+    other = &w.creatures[t->index].body;
+  } else if (w.battle.phase == BattlePhase::Prepare && !w.battle.foes.empty()) {
+    other = &w.creatures[w.battle.foes[0].index].body;
   } else if (w.battle.phase == BattlePhase::Training) {
     other = &w.player;
     other_mid = 0.8f;

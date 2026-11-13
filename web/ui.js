@@ -352,6 +352,14 @@
   // signpost or a teleporter (its menu: battle.js), or nothing.
   window.addEventListener('monstres-tap', (event) => {
     if (!game || typeof game.pick !== 'function') return;
+    const phase = game.battle().phase;
+    if (phase === 'fight' || phase === 'prepare') {
+      // In a battle: a tap on a foe aims at it (battle.js), nothing else.
+      const foe = game.pick(event.detail.x, event.detail.y);
+      game.select(-1);
+      if (foe >= 0) window.dispatchEvent(new CustomEvent('monstres-foe-tap', { detail: { index: foe } }));
+      return;
+    }
     const index = game.pick(event.detail.x, event.detail.y);
     select(index);
     const object = index < 0 && typeof game.pickObject === 'function' ? game.pickObject(event.detail.x, event.detail.y) : -1;

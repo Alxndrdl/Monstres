@@ -96,6 +96,7 @@ window.monstres = {
     move: (x, y) => _monstres_set_move(x, y),
     look: (deltaYaw, deltaPitch) => _monstres_look(deltaYaw, deltaPitch),
     jump: () => _monstres_jump(),  // in a battle: dodge
+    jumpHeld: (held) => _monstres_jump_held(held ? 1 : 0),  // a flying companion climbs while it is held
     attack: (slot) => _monstres_attack(slot),  // battle: 1 quick, 2 and 3 special
     parry: () => _monstres_parry(),
   },
@@ -112,6 +113,12 @@ window.monstres = {
   // Context menu on the companion: train against the magician (stopTraining ends it).
   train: () => _monstres_command(6, 0),
   stopTraining: () => _monstres_command(2, 0),
+  // Battle: aim at foes[slot] (-1: at no one, the companion moves freely).
+  target: (slot) => _monstres_command(11, slot < 0 ? 65535 : slot),
+  // Trainers: challenge (npc), readyToFight once the rules are read, forfeit.
+  challenge: (npc) => _monstres_command(12, npc),
+  readyToFight: () => _monstres_command(13, 0),
+  forfeit: () => _monstres_command(2, 0),
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),
   holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),

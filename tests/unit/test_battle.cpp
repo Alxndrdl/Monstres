@@ -72,7 +72,7 @@ TEST_CASE("a new game starts with the companion alone in the team") {
   // Wild monsters have a level, higher far from the start.
   for (size_t i = 1; i < w.creatures.size(); ++i) {
     const Creature& c = w.creatures[i];
-    if (!monster_stats(c.species).is_monster) continue;
+    if (!monster_stats(c.species).is_monster || c.tag == Tag::Rival) continue;  // Bastien's has its own
     int lowest = 1;
     switch (zone_at(w, c.home.x, c.home.z)) {
       case Zone::Forest: lowest = 2; break;
@@ -120,8 +120,8 @@ TEST_CASE("a battle starts only against a wild monster on the ground, not too fa
   CHECK(w.battle.phase == BattlePhase::None);
   engage(w);
   CHECK(w.creatures[1].mind == Mind::Battle);
-  CHECK(w.battle.enemy == 1);
-  CHECK(w.battle.enemy_hp == monster_fight_stats(Species::Slime, 2).hp);
+  CHECK(w.battle.foes[0].index == 1);
+  CHECK(w.battle.foes[0].hp == monster_fight_stats(Species::Slime, 2).hp);
   CHECK(can_engage(w, 1) == EngageCheck::InBattle);
 }
 
@@ -145,37 +145,37 @@ TEST_CASE("the quick attack hits in reach and has a short cooldown") {
   World w = arena();
   engage(w);
   w.creatures[0].body.pos = {0, 0, -2.2f};  // next to the slime
-  const uint16_t hp = w.battle.enemy_hp;
+  const uint16_t hp = w.battle.foes[0].hp;
   step(w, attack_input(1));
-  CHECK(w.battle.enemy_hp < hp);
-  CHECK(w.battle.foe.hit_tick == w.tick);
-  const uint16_t after_one = w.battle.enemy_hp;
+  CHECK(w.battle.foes[0].hp < hp);
+  CHECK(w.battle.foes[0].fighter.hit_tick == w.tick);
+  const uint16_t after_one = w.battle.foes[0].hp;
   step(w, attack_input(1));  // too soon
-  CHECK(w.battle.enemy_hp == after_one);
+  CHECK(w.battle.foes[0].hp == after_one);
   CHECK(w.battle.ally.cooldown[0] > 0);
   run(w, Input{}, species_moves(Species::Companion)[0].cooldown);
   step(w, attack_input(1));
-  CHECK(w.battle.enemy_hp < after_one);
+  CHECK(w.battle.foes[0].hp < after_one);
 
   // Out of reach, the quick attack misses.
   World far = arena();
   engage(far);
-  const uint16_t full = far.battle.enemy_hp;
+  const uint16_t full = far.battle.foes[0].hp;
   step(far, attack_input(1));
-  CHECK(far.battle.enemy_hp == full);
+  CHECK(far.battle.foes[0].hp == full);
 }
 
 TEST_CASE("a special attack throws a projectile that flies to the enemy") {
   World w = arena();
   engage(w);
-  const uint16_t hp = w.battle.enemy_hp;
+  const uint16_t hp = w.battle.foes[0].hp;
   step(w, attack_input(2));
   REQUIRE(w.battle.projectiles.size() == 1);
   CHECK(w.battle.projectiles[0].element == Element::Fire);
   CHECK(w.battle.projectiles[0].from_ally);
   for (int i = 0; i < 40 && !w.battle.projectiles.empty(); ++i) step(w, Input{});
   CHECK(w.battle.projectiles.empty());
-  CHECK(w.battle.enemy_hp < hp);
+  CHECK(w.battle.foes[0].hp < hp);
   CHECK(w.battle.ally.cooldown[1] > 0);
 }
 
@@ -184,33 +184,33 @@ TEST_CASE("the enemy shows its attack first: a dodge or a parry avoids it") {
   World w = arena();
   engage(w);
   w.creatures[0].body.pos = {0, 0, -2.2f};
-  w.battle.foe.cooldown = {};
+  w.battle.foes[0].fighter.cooldown = {};
   int ticks = 0;
-  while (w.battle.foe.state != FighterState::Windup && ticks++ < 200) step(w, Input{});
-  REQUIRE(w.battle.foe.state == FighterState::Windup);
+  while (w.battle.foes[0].fighter.state != FighterState::Windup && ticks++ < 200) step(w, Input{});
+  REQUIRE(w.battle.foes[0].fighter.state == FighterState::Windup);
   World dodging = w, parrying = w, standing = w;
 
   const uint16_t full = standing.team[0].hp;
-  while (standing.battle.foe.state == FighterState::Windup) step(standing, Input{});
+  while (standing.battle.foes[0].fighter.state == FighterState::Windup) step(standing, Input{});
   CHECK(standing.team[0].hp < full);
   CHECK(standing.battle.ally.hit_tick == standing.tick);
 
   // Dodge just before the hit: back, out of reach and untouchable.
-  while (dodging.battle.foe.state_ticks > 3) step(dodging, Input{});
+  while (dodging.battle.foes[0].fighter.state_ticks > 3) step(dodging, Input{});
   step(dodging, jump_input());
   CHECK(dodging.battle.ally.state == FighterState::Dodge);
-  while (dodging.battle.foe.state == FighterState::Windup) step(dodging, Input{});
+  while (dodging.battle.foes[0].fighter.state == FighterState::Windup) step(dodging, Input{});
   CHECK(dodging.team[0].hp == full);
 
   // Parry: no damage, and the enemy is stunned.
-  while (parrying.battle.foe.state_ticks > 3) step(parrying, Input{});
+  while (parrying.battle.foes[0].fighter.state_ticks > 3) step(parrying, Input{});
   Input parry;
   parry.parry = true;
   step(parrying, parry);
-  while (parrying.battle.foe.state == FighterState::Windup) step(parrying, Input{});
+  while (parrying.battle.foes[0].fighter.state == FighterState::Windup) step(parrying, Input{});
   CHECK(parrying.team[0].hp == full);
   CHECK(parrying.battle.ally.parried_tick > 0);
-  if (parrying.battle.foe.move == 0) CHECK(parrying.battle.foe.state == FighterState::Stunned);
+  if (parrying.battle.foes[0].fighter.move == 0) CHECK(parrying.battle.foes[0].fighter.state == FighterState::Stunned);
 }
 
 TEST_CASE("capture needs a weakened enemy; the monster then joins the team") {
@@ -222,9 +222,9 @@ TEST_CASE("capture needs a weakened enemy; the monster then joins the team") {
   CHECK(w.team.size() == 1);
 
   const Genes genes = w.creatures[1].genes;
-  w.battle.enemy_hp = static_cast<uint16_t>(w.battle.enemy_max_hp * rules::kCaptureHpPercent / 100);
+  w.battle.foes[0].hp = static_cast<uint16_t>(w.battle.foes[0].max_hp * rules::kCaptureHpPercent / 100);
   CHECK(can_capture(w));
-  w.battle.dealt[0] = w.battle.enemy_max_hp - w.battle.enemy_hp;  // as if the companion had done it
+  w.battle.dealt[0] = w.battle.foes[0].max_hp - w.battle.foes[0].hp;  // as if the companion had done it
   const size_t creatures = w.creatures.size();
   const uint32_t xp = w.team[0].xp;
   step(w, command(Command::Capture));
@@ -243,7 +243,7 @@ TEST_CASE("capture needs a weakened enemy; the monster then joins the team") {
   World full = arena();
   full.team.resize(rules::kTeamSize, starting_companion({}));
   engage(full);
-  full.battle.enemy_hp = 1;
+  full.battle.foes[0].hp = 1;
   CHECK_FALSE(can_capture(full));
 }
 
@@ -269,8 +269,8 @@ TEST_CASE("fleeing: the companion runs back to the player, then the battle ends"
 TEST_CASE("victory gives experience, a defeat leaves the companion weak") {
   World w = arena();
   engage(w);
-  w.battle.enemy_hp = 1;
-  w.battle.dealt[0] = w.battle.enemy_max_hp - 1;  // it did all the work
+  w.battle.foes[0].hp = 1;
+  w.battle.dealt[0] = w.battle.foes[0].max_hp - 1;  // it did all the work
   w.creatures[0].body.pos = {0, 0, -2.2f};
   const uint32_t wizard_xp = w.wizard.xp;
   step(w, attack_input(1));
@@ -306,7 +306,7 @@ TEST_CASE("levels go up with experience") {
   w.team[0].xp = monster_xp_to_next(w.team[0].level) - 1;
   w.team[0].hp = 10;
   const uint16_t level = w.team[0].level;
-  w.battle.enemy_hp = 1;
+  w.battle.foes[0].hp = 1;
   w.battle.dealt[0] = 10;
   w.creatures[0].body.pos = {0, 0, -2.2f};
   step(w, attack_input(1));
@@ -361,7 +361,8 @@ TEST_CASE("team and battle JSON for the interface") {
   const std::string b = battle_json(w);
   CHECK(b.find("\"phase\":\"fight\"") != std::string::npos);
   CHECK(b.find("\"capture\":\"notWeak\"") != std::string::npos);
-  CHECK(b.find("\"enemy\":{\"index\":1,\"species\":\"slime\"") != std::string::npos);
+  CHECK(b.find("\"enemy\":{\"slot\":0,\"index\":1,\"species\":\"slime\"") != std::string::npos);
+  CHECK(b.find("\"target\":0") != std::string::npos);
 }
 
 TEST_CASE("the companion does not walk through its enemy") {
@@ -421,7 +422,7 @@ TEST_CASE("another team member takes the companion's place") {
   World fight = w;
   engage(fight);
   const uint16_t hp = fight.team[1].hp;
-  fight.battle.foe.cooldown = {};
+  fight.battle.foes[0].fighter.cooldown = {};
   fight.creatures[0].body.pos = {fight.creatures[1].body.pos.x, 0, fight.creatures[1].body.pos.z + 1.2f};
   for (int i = 0; i < 300 && fight.team[1].hp == hp; ++i) step(fight, Input{});
   CHECK(fight.team[1].hp < hp);
@@ -451,7 +452,7 @@ TEST_CASE("during a fight, a companion can be swapped but not recalled") {
 TEST_CASE("a captured monster leaves a trace for the runes; the companion out is saved") {
   World w = arena();
   engage(w);
-  w.battle.enemy_hp = 1;
+  w.battle.foes[0].hp = 1;
   const Vec3 where = w.creatures[1].body.pos;
   step(w, command(Command::Capture));
   CHECK(w.went_in.captured);
@@ -471,7 +472,7 @@ TEST_CASE("a captured monster leaves a trace for the runes; the companion out is
   CHECK(loaded->active == -1);
 }
 
-TEST_CASE("a crow on a roof: out of reach of a bite, not of a throw; it stays there and throws back") {
+TEST_CASE("a crow takes off from its roof: out of reach of a bite up there, not of a throw") {
   World w = arena();
   add_box(w, {-6, 0, 0}, {1, 2, 1});  // a "roof" 4 m high
   Creature& crow = w.creatures[3];
@@ -480,29 +481,40 @@ TEST_CASE("a crow on a roof: out of reach of a bite, not of a throw; it stays th
   w.creatures[0].body.pos = {-5.2f, 0, 0};  // right below it
   REQUIRE(can_engage(w, 3) == EngageCheck::Ok);
   engage(w, 3);
-  const uint16_t hp = w.battle.enemy_hp;
+  const uint16_t hp = w.battle.foes[0].hp;
   step(w, attack_input(1));
-  CHECK(w.battle.enemy_hp == hp);  // a bite does not reach that high
+  CHECK(w.battle.foes[0].hp == hp);  // a bite does not reach that high
   w.creatures[0].body.pos = {-1, 0, 0};
   step(w, attack_input(2));
   REQUIRE(w.battle.projectiles.size() == 1);
-  CHECK(w.battle.projectiles[0].dir_y > 0.3f);  // aimed up at it
+  CHECK(w.battle.projectiles[0].dir_y > 0.2f);  // aimed up at it
   for (int i = 0; i < 60 && !w.battle.projectiles.empty(); ++i) step(w, Input{});
-  CHECK(w.battle.enemy_hp < hp);  // the roof did not stop it
-  // It does not come down, and it throws at the companion.
-  w.battle.foe.cooldown = {};
+  // It moves (and may dodge): throw again until one lands.
+  for (int k = 0; k < 10 && w.battle.foes[0].hp == hp; ++k) {
+    w.battle.ally.cooldown = {};
+    step(w, attack_input(2));
+    for (int i = 0; i < 60 && !w.battle.projectiles.empty(); ++i) step(w, Input{});
+  }
+  CHECK(w.battle.foes[0].hp < hp);  // the roof did not stop it
+  // It flies about (not stuck on its roof), swoops down, and hurts the companion.
+  const Vec3 start = w.creatures[3].body.pos;
   const uint16_t mine = w.team[0].hp;
-  for (int i = 0; i < 300 && w.team[0].hp == mine; ++i) step(w, Input{});
+  float lowest = 99;
+  for (int i = 0; i < 600 && w.team[0].hp == mine; ++i) {
+    step(w, Input{});
+    lowest = std::min(lowest, w.creatures[3].body.pos.y);
+  }
   CHECK(w.team[0].hp < mine);
-  CHECK(w.creatures[3].body.pos == Vec3{-6, 4, 0});
-  // Beaten, it flies away.
-  w.battle.enemy_hp = 1;
+  CHECK(std::hypot(w.creatures[3].body.pos.x - start.x, w.creatures[3].body.pos.z - start.z) > 1.0f);
+  CHECK(lowest < 3.0f);
+  // Beaten, it falls and lies there.
+  w.battle.foes[0].hp = 1;
   w.battle.ally.cooldown = {};
+  w.battle.target = 0;
   step(w, attack_input(2));
-  for (int i = 0; i < 60 && w.battle.phase == BattlePhase::Fight; ++i) step(w, Input{});
+  for (int i = 0; i < 90 && w.battle.phase == BattlePhase::Fight; ++i) step(w, Input{});
   CHECK(w.battle.outcome == BattleOutcome::Victory);
-  step(w, Input{});
-  CHECK(w.creatures[3].mind != Mind::Battle);
+  CHECK(w.creatures[3].mind == Mind::KnockedOut);
 }
 
 TEST_CASE("a fish can be fought from the shore: it stays in the water") {
@@ -515,10 +527,10 @@ TEST_CASE("a fish can be fought from the shore: it stays in the water") {
   add_creature(w, fish);
   const auto index = static_cast<uint16_t>(w.creatures.size() - 1);
   engage(w, index);
-  const uint16_t hp = w.battle.enemy_hp;
+  const uint16_t hp = w.battle.foes[0].hp;
   step(w, attack_input(2));
   for (int i = 0; i < 60 && !w.battle.projectiles.empty(); ++i) step(w, Input{});
-  CHECK(w.battle.enemy_hp < hp);
+  CHECK(w.battle.foes[0].hp < hp);
   run(w, Input{}, 120);
   CHECK(w.creatures[index].body.pos == Vec3{4, 0, -4});
 }
@@ -548,7 +560,7 @@ TEST_CASE("the victory's experience is shared by the hit points each team member
   engage(w);
   w.battle.dealt[0] = 30;  // Pompon did most of the work
   w.battle.dealt[1] = 10;  // the second one came in later
-  w.battle.enemy_hp = 1;
+  w.battle.foes[0].hp = 1;
   w.battle.dealt[0] -= 1;  // the last hit, below, brings it back to 30
   w.creatures[0].body.pos = {0, 0, -2.2f};
   step(w, attack_input(1));
@@ -569,7 +581,7 @@ TEST_CASE("a monster let go gives no experience when beaten or caught again") {
   w.creatures[1].released = true;
   engage(w);
   w.battle.dealt[0] = 20;
-  w.battle.enemy_hp = 1;
+  w.battle.foes[0].hp = 1;
   w.creatures[0].body.pos = {0, 0, -2.2f};
   step(w, attack_input(1));
   CHECK(w.battle.outcome == BattleOutcome::Victory);
@@ -630,8 +642,8 @@ TEST_CASE("training: the companion attacks the magician's shield, no one is hurt
   w.creatures[0].body.pos = {0, 0, 0.7f};
   const uint16_t hp = w.team[0].hp;
   step(w, attack_input(1));
-  CHECK(w.battle.foe.parried_tick == w.tick);
-  CHECK(w.battle.foe.last_damage > 0);
+  CHECK(w.battle.shield.parried_tick == w.tick);
+  CHECK(w.battle.shield.last_damage > 0);
   CHECK(w.team[0].hp == hp);
   CHECK(battle_json(w).find("\"phase\":\"training\"") != std::string::npos);
   CHECK(battle_json(w).find("\"shield\":{") != std::string::npos);
@@ -665,7 +677,7 @@ TEST_CASE("a monster beaten once gives no more experience, captured or beaten ag
   World w = arena();
   engage(w);
   w.battle.dealt[0] = 20;
-  w.battle.enemy_hp = 1;
+  w.battle.foes[0].hp = 1;
   w.creatures[0].body.pos = {0, 0, -2.2f};
   step(w, attack_input(1));
   REQUIRE(w.battle.outcome == BattleOutcome::Victory);
@@ -676,7 +688,7 @@ TEST_CASE("a monster beaten once gives no more experience, captured or beaten ag
   w.creatures[1].body.pos = {0, 0, -3};
   engage(w);
   w.battle.dealt[0] = 20;
-  w.battle.enemy_hp = 1;
+  w.battle.foes[0].hp = 1;
   w.creatures[0].body.pos = {0, 0, -2.2f};
   step(w, attack_input(1));
   REQUIRE(w.battle.outcome == BattleOutcome::Victory);
@@ -686,7 +698,7 @@ TEST_CASE("a monster beaten once gives no more experience, captured or beaten ag
   w.creatures[1].body.pos = {0, 0, -3};
   engage(w);
   w.battle.dealt[0] = 20;
-  w.battle.enemy_hp = 1;
+  w.battle.foes[0].hp = 1;
   step(w, command(Command::Capture));
   REQUIRE(w.battle.outcome == BattleOutcome::Captured);
   CHECK(w.battle.outcome_xp == 0u);
