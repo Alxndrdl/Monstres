@@ -79,7 +79,7 @@
   }
 
   function show(tab) {
-    if (!['character', 'team', 'quests', 'bestiary', 'map'].includes(tab)) tab = 'character';
+    if (!['character', 'team', 'spells', 'quests', 'bestiary', 'map'].includes(tab)) tab = 'character';
     if (tab !== 'map') teleportMode = false;
     current = tab;
     prefs.set('menuTab', tab);
@@ -91,6 +91,7 @@
     }
     if (tab === 'character') renderCharacter();
     else if (tab === 'team') renderTeam();
+    else if (tab === 'spells') window.MonstresSpells.renderTab();
     else if (tab === 'quests') renderQuests();
     else if (tab === 'bestiary') renderBestiary();
     else renderMap();
@@ -106,10 +107,15 @@
 
   // Keyboard: Escape closes; C, E, B and M open a tab (not while typing a name).
   // By letter, not by key position: M is not at the same place on AZERTY.
-  const SHORTCUTS = { c: 'character', e: 'team', j: 'quests', b: 'bestiary', m: 'map' };
+  const SHORTCUTS = { c: 'character', e: 'team', p: 'spells', j: 'quests', b: 'bestiary', m: 'map' };
   window.addEventListener('keydown', (event) => {
     const typing = event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(event.target.tagName);
-    if (event.key === 'Escape' && isOpen()) {
+    if (event.key === 'Escape' && releaseOpen()) {
+      event.stopImmediatePropagation();
+      keepIt();  // Escape keeps it
+    } else if (releaseOpen()) {
+      // The window asks first: no shortcuts behind it.
+    } else if (event.key === 'Escape' && isOpen()) {
       event.stopImmediatePropagation();  // not also the settings menu
       close();
     } else if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat &&
@@ -211,8 +217,35 @@
     renderMember(team[chosenMember], team.length);
   }
 
-  // Letting a monster go back to the wild: asked twice, done once the grimoire is closed.
-  let releasing = -1;  // slot waiting for the confirmation
+  // Letting a monster go back to the wild: a window in the middle of the
+  // screen asks to confirm (the grimoire then closes, to see it go).
+  const releaseDialog = $('release-dialog');
+  const releaseOpen = () => !releaseDialog.hidden;
+  function askRelease(m) {
+    const name = LORE.species[m.species].name;
+    releaseDialog.querySelector('.release-portrait').src = portraitUrl(speciesIndex(m.species), 128, m.look);
+    releaseDialog.querySelector('.release-title').textContent = `Relâcher ${name} ?`;
+    releaseDialog.querySelector('.release-level').textContent = `Niveau ${m.level}`;
+    $('release-confirm').textContent = `Relâcher ${name}`;
+    $('release-cancel').textContent = `Garder ${name}`;
+    $('release-confirm').onclick = () => {
+      releaseDialog.hidden = true;
+      game.release(m.slot);
+      chosenMember = 0;
+      prefs.set('teamSlot', 0);
+      close();  // to see it go
+    };
+    releaseDialog.hidden = false;
+    $('release-cancel').focus();
+  }
+  function keepIt() {
+    releaseDialog.hidden = true;
+    renderTeam();
+  }
+  $('release-cancel').addEventListener('click', keepIt);
+  releaseDialog.addEventListener('pointerdown', (event) => {
+    if (event.target === releaseDialog) keepIt();  // the dark backdrop
+  });
   function releaseBox(m, teamSize) {
     const name = LORE.species[m.species].name;
     const phase = game.battle().phase;
@@ -225,30 +258,9 @@
       box.append(el('p', { className: 'facts', textContent: 'Pas pendant un combat ou un entraînement.' }));
       return box;
     }
-    if (releasing !== m.slot) {
-      const button = el('button', { type: 'button', className: 'button danger', id: 'release', textContent: 'Relâcher' });
-      button.addEventListener('click', () => {
-        releasing = m.slot;
-        renderTeam();
-      });
-      box.append(button, el('p', { className: 'facts', textContent: 'Il sort du cristal et retourne vivre dans la nature.' }));
-      return box;
-    }
-    const yes = el('button', { type: 'button', className: 'button danger', id: 'release-confirm', textContent: `Oui, relâcher ${name}` });
-    const no = el('button', { type: 'button', className: 'button', id: 'release-cancel', textContent: 'Non' });
-    yes.addEventListener('click', () => {
-      releasing = -1;
-      game.release(m.slot);
-      chosenMember = 0;
-      prefs.set('teamSlot', 0);
-      close();  // to see it go
-    });
-    no.addEventListener('click', () => {
-      releasing = -1;
-      renderTeam();
-    });
-    box.append(el('p', { textContent: `Relâcher ${name} ? Il ne reviendra pas, et le recapturer ne rapportera pas d’expérience.` }),
-      el('div', { className: 'row' }, [yes, no]));
+    const button = el('button', { type: 'button', className: 'button danger', id: 'release', textContent: `Relâcher ${name}…` });
+    button.addEventListener('click', () => askRelease(m));
+    box.append(button, el('p', { className: 'facts', textContent: 'Il sort du cristal et retourne vivre dans la nature.' }));
     return box;
   }
 

@@ -353,6 +353,15 @@
   window.addEventListener('monstres-tap', (event) => {
     if (!game || typeof game.pick !== 'function') return;
     const phase = game.battle().phase;
+    if (phase === 'training') {  // a tap on the magician aims at it, or not
+      const index = game.pick(event.detail.x, event.detail.y);
+      game.select(-1);
+      const p = game.creatureOnScreen(-1);
+      if (index < 0 && p && Math.hypot(p.x - event.detail.x, p.y - event.detail.y) < 60) {
+        window.dispatchEvent(new CustomEvent('monstres-wizard-tap'));
+      }
+      return;
+    }
     if (phase === 'fight' || phase === 'prepare') {
       // In a battle: a tap on a foe aims at it (battle.js), nothing else.
       const foe = game.pick(event.detail.x, event.detail.y);

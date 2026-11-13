@@ -141,6 +141,24 @@
     .release-box p { margin: 4px 0; font-size: 13px; }
     .release-box .row { display: flex; gap: 8px; flex-wrap: wrap; }
     .button.danger { background: rgba(255, 110, 90, 0.25); border-color: rgba(255, 130, 110, 0.6); }
+    #release-dialog {
+      position: fixed; inset: 0; z-index: 7; display: flex; align-items: center; justify-content: center;
+      background: rgba(10, 12, 26, 0.6); padding: 16px;
+    }
+    #release-dialog[hidden] { display: none; }
+    .release-window {
+      width: min(380px, 100%); max-height: 100%; overflow: auto; padding: 16px 18px; text-align: center;
+      border-color: rgba(255, 130, 110, 0.7); background: #1c2033;
+    }
+    .release-portrait { width: 96px; height: 96px; }
+    .release-title { margin: 4px 0 0; font-size: 19px; font-weight: 700; }
+    .release-level { margin: 0 0 8px; }
+    .release-warning {
+      margin: 0 0 12px; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.4;
+      background: rgba(255, 110, 90, 0.16); border: 1px solid rgba(255, 130, 110, 0.5);
+    }
+    .release-actions { display: flex; gap: 10px; justify-content: center; }
+    .release-actions .button { flex: 1; padding: 9px 12px; font-size: 14px; }
     .button.danger:hover { background: rgba(255, 110, 90, 0.4); }
 
     /* Info about the creature that was clicked, top left (the creature is
@@ -423,6 +441,60 @@
     .hp-text { display: block; margin-top: 2px; font-size: 11px; color: rgba(255, 255, 255, 0.8); }
     .fighter.windup { animation: warn 0.25s ease-in-out infinite alternate; }
     @keyframes warn { to { border-color: #ff5a4a; box-shadow: 0 0 14px rgba(255, 90, 74, 0.7); } }
+    /* Spells: on the right, beside the attacks (left of the parry). */
+    .action.spell-button {
+      position: absolute; width: 50px; height: 50px; overflow: hidden; border-color: rgba(140, 230, 160, 0.85);
+    }
+    #spell-0 { left: -160px; top: -32px; }
+    #spell-1 { left: -150px; top: -94px; }
+    .action.spell-button[hidden] { display: none; }
+    .spell-button[data-spell="shield"] { border-color: rgba(242, 201, 76, 0.9); }
+    .spell-button .spell-icon { position: relative; z-index: 1; display: grid; place-items: center; }
+    .spell-button .spell-icon svg { width: 24px; height: 24px; }
+    .spell-button .cooldown {
+      position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+      background: conic-gradient(rgba(10, 12, 26, 0.72) calc(var(--cd, 0) * 360deg), transparent 0);
+    }
+    .spell-button:disabled { opacity: 0.6; }
+    .spell-button kbd {
+      display: none; position: absolute; bottom: 2px; right: 50%; transform: translateX(50%); z-index: 2;
+      font: 600 9px/1.3 system-ui, sans-serif; padding: 0 3px; border-radius: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.6); background: rgba(0, 0, 0, 0.3);
+    }
+    .has-keyboard .spell-button kbd { display: block; }
+    /* The spells tab: slots on the left, the chosen one on the right. */
+    .spell-badge {
+      width: 36px; height: 36px; flex: none; border-radius: 50%; display: grid; place-items: center;
+      border: 2px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.06);
+    }
+    .spell-badge svg { width: 20px; height: 20px; }
+    .spell-badge.heal { border-color: rgba(140, 230, 160, 0.85); color: #b8f5c6; }
+    .spell-badge.shield { border-color: rgba(242, 201, 76, 0.9); color: #f8dc85; }
+    .spell-detail { display: flex; flex-direction: column; gap: 8px; }
+    .spell-detail > p { margin: 0; font-size: 14px; }
+    .spell-head { display: flex; align-items: center; gap: 12px; }
+    .spell-head .spell-badge { width: 54px; height: 54px; }
+    .spell-head .spell-badge svg { width: 28px; height: 28px; }
+    .spell-head h2 { margin: 0; font-size: 22px; }
+    .spell-head .facts { margin: 0; }
+    .spell-edit { margin-left: auto; }
+    .spell-edit:disabled { opacity: 0.4; cursor: default; }
+    .spell-choices { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+    .spell-choices button {
+      display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; cursor: pointer; color: #fff; font: inherit;
+      border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.05);
+    }
+    .spell-choices button.taken { opacity: 0.45; }
+    .spell-choices button.current { border-style: dashed; }
+    .spell-choices button[aria-current="true"] { opacity: 1; border-color: rgba(242, 201, 76, 0.8); background: rgba(242, 201, 76, 0.14); }
+    .spell-detail .row { display: flex; gap: 8px; }
+    /* Too far from the foes. */
+    #away-warning {
+      position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 3; padding: 8px 16px;
+      border-radius: 10px; background: rgba(120, 20, 20, 0.82); border: 1px solid #ff7a6b; font-weight: 700;
+      text-align: center; animation: warn 0.4s ease-in-out infinite alternate;
+    }
+    #away-warning[hidden] { display: none; }
     /* The foes' icons, under the target's bars. */
     #foe-icons {
       position: fixed; left: 50%; transform: translateX(-50%); top: calc(max(12px, env(safe-area-inset-top)) + 64px);
@@ -651,6 +723,7 @@
       <div class="tabs" role="tablist">
         <button id="tab-button-character" role="tab" type="button" aria-controls="tab-character" data-tab="character">Personnage</button>
         <button id="tab-button-team" role="tab" type="button" aria-controls="tab-team" data-tab="team">Équipe</button>
+        <button id="tab-button-spells" role="tab" type="button" aria-controls="tab-spells" data-tab="spells">Sorts</button>
         <button id="tab-button-quests" role="tab" type="button" aria-controls="tab-quests" data-tab="quests">Quêtes</button>
         <button id="tab-button-bestiary" role="tab" type="button" aria-controls="tab-bestiary" data-tab="bestiary">Bestiaire</button>
         <button id="tab-button-map" role="tab" type="button" aria-controls="tab-map" data-tab="map">Carte</button>
@@ -683,6 +756,13 @@
             <ul id="team-list" class="bestiary-list"></ul>
           </div>
           <article id="team-detail" class="bestiary-detail" aria-live="polite"></article>
+        </div>
+      </section>
+
+      <section id="tab-spells" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-spells" hidden>
+        <div class="bestiary">
+          <ul id="spell-list" class="bestiary-list"></ul>
+          <article id="spell-detail" aria-live="polite"></article>
         </div>
       </section>
 
@@ -753,6 +833,21 @@
       <span class="hp-text"></span>
     </div>
   </div>
+  <!-- Letting a monster go: asked in the middle of the screen (menu.js). -->
+  <div id="release-dialog" role="alertdialog" aria-modal="true" aria-labelledby="release-title" hidden>
+    <div class="panel release-window">
+      <img class="release-portrait" alt="">
+      <p class="release-title" id="release-title"></p>
+      <p class="release-level facts"></p>
+      <p class="release-warning">⚠ Il retournera vivre dans la nature et ne reviendra pas. Le recapturer ne rapportera pas d’expérience.</p>
+      <div class="release-actions">
+        <button type="button" class="button" id="release-cancel">Garder</button>
+        <button type="button" class="button danger" id="release-confirm">Relâcher</button>
+      </div>
+    </div>
+  </div>
+  <!-- Too far from the foes: come back (battle.js). -->
+  <div id="away-warning" role="alert" hidden></div>
   <!-- The foes: tap one to aim at it (battle.js). -->
   <div id="foe-icons" aria-label="Adversaires" hidden></div>
   <!-- Before a trainer's battle: the rules (battle.js). -->
@@ -811,6 +906,9 @@
              stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></svg>
         <span class="cooldown"></span><kbd>F</kbd>
       </button>
+      <!-- The magician's spells, beside the attacks (spells.js). -->
+      <button id="spell-0" class="action spell-button" type="button" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>R</kbd></button>
+      <button id="spell-1" class="action spell-button" type="button" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>G</kbd></button>
     </div>
     <div class="hint" id="jump-hint"><kbd>Espace</kbd> pour sauter</div>
   </div>
@@ -828,6 +926,7 @@
   <script src="menu.js"></script>
   <script src="battle.js"></script>
   <script src="team.js"></script>
+  <script src="spells.js"></script>
   <script src="dialogue.js"></script>
   {{{ SCRIPT }}}
 </body>

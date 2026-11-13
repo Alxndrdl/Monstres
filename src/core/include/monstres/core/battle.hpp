@@ -47,7 +47,6 @@ inline constexpr uint16_t kParryTicks = 18;         // 0.3 s guard
 inline constexpr uint16_t kParryCooldown = 42;
 inline constexpr uint16_t kStunTicks = 70;          // an enemy whose attack was parried
 inline constexpr float kProjectileSpeed = 13.0f;
-inline constexpr uint16_t kRegenEveryTicks = rules::kTicksPerSecond;  // +1 hit point (out of battle)
 inline constexpr float kCompanionMinRunSpeed = 6.0f;  // slow species keep up with the player
 inline constexpr size_t kMaxFoes = 3;               // a wild monster and those of its kind around
 inline constexpr float kGroupRadius = 7.0f;         // they join from this far (from the one engaged)
@@ -56,7 +55,33 @@ inline constexpr float kRivalSpacing = 10.0f;       // a trainer's battle: the m
 inline constexpr uint16_t kPrepareMaxTicks = 6 * rules::kTicksPerSecond;  // then everyone is at its place
 inline constexpr uint16_t kRivalNextTicks = 90;     // a trainer sends its next monster after this
 inline constexpr uint32_t kRivalXpPerLevel = 8;     // the first victory against a trainer
+inline constexpr uint16_t kAwayTicks = 5 * rules::kTicksPerSecond;  // out of reach this long: the battle ends
+inline constexpr float kKnockedOutRecall = 15.0f;   // a knocked out companion goes back into the crystal from this far
+inline constexpr uint16_t kHealPoints = 10;
+inline constexpr uint16_t kHealCooldown = 5 * rules::kTicksPerSecond;
+inline constexpr uint16_t kShieldTicks = rules::kTicksPerSecond;
+inline constexpr uint16_t kShieldCooldown = 5 * rules::kTicksPerSecond;
 }  // namespace rules
+
+// Spells: the magician casts them on its monster out of the crystal.
+// Heal (combat and adventure): +10 hit points; a knocked out monster lying
+// there wakes up with them (in a battle, a knocked out one is in the crystal).
+// Shield (combat): for a second, no hit lands on the monster. Two combat
+// spells and two adventure spells are chosen out of battles (Command::EquipSpell);
+// training uses the combat ones.
+struct SpellInfo {
+  const char* id;  // names and texts in web/lore.js (spells)
+  bool combat, adventure;
+  uint16_t cooldown;
+};
+const SpellInfo& spell_info(SpellId spell);
+// The spells that can be cast now (a battle or training: the combat ones).
+const std::array<SpellId, kSpellSlots>& current_spells(const World& world);
+// Why spell slot `slot` cannot be cast now (nullptr: it can).
+const char* cannot_cast(const World& world, size_t slot);
+
+// Can the healer `npc` heal the team now (close to her, no battle)?
+bool can_heal_team(const World& world, uint8_t npc);
 
 enum class MoveShape : uint8_t {
   Melee,       // hits the enemy in reach, in front
@@ -102,6 +127,7 @@ enum class EngageCheck : uint8_t {
   NoCompanion,  // no monster out of the crystal
   KnockedOut,   // already beaten, it lies there
   Owned,        // someone's (Mirabelle's Piou, back with her; a trainer's)
+  CompanionDown,  // the monster out is knocked out
 };
 EngageCheck can_engage(const World& world, size_t index);
 const char* engage_check_name(EngageCheck check);
@@ -161,6 +187,6 @@ Steer battle_ally(World& world, const Input& input, float dir_x, float dir_z);  
 Steer battle_foe(World& world, size_t slot);             // Fight phase, foes[slot]
 Steer battle_prepare(World& world, Stand who);           // Prepare phase (and the trainer, waiting)
 void battle_resolve(World& world);  // projectiles, timers, victory or defeat (after moving)
-void team_regen(World& world);      // hit points come back out of battles
+void spells_step(World& world);    // spells' cooldowns (no hit points come back by themselves)
 
 }  // namespace monstres

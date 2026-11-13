@@ -344,11 +344,14 @@ TEST_CASE("a trainer's battle: a knocked out companion is replaced; none left, o
   step(w, Input{});
   CHECK(w.battle.phase == BattlePhase::None);
   CHECK(w.battle.outcome == BattleOutcome::Defeat);
-  CHECK(w.team[0].hp >= 1);  // they get up
-  CHECK(w.team[1].hp >= 1);
+  CHECK(w.team[0].hp == 0);  // they stay knocked out: the healer, or a spell
+  CHECK(w.team[1].hp == 0);
+  CHECK(w.creatures[0].mind == Mind::KnockedOut);
   CHECK(w.rival_wins == 0);
+  CHECK_FALSE(can_challenge(w, npc::kBastien));
 
   // Forfeit: over at once, the trainer wins.
+  for (Monster& m : w.team) m.hp = 20;
   step(w, command(Command::Summon, 0));
   go_to_bastien(w);
   run(w, Input{}, 2);

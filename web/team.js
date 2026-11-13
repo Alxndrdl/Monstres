@@ -77,10 +77,10 @@
       fill.style.width = `${100 * ratio}%`;
       fill.style.background = ratio > 0.5 ? '#8fd16a' : ratio > 0.25 ? '#f2c94c' : '#ff7a6b';
       icon.querySelector('.team-level').textContent = m.level;
-      // Knocked out in a trainer's battle: it cannot come out again.
-      const ko = fighting && m.hp === 0;
+      // Knocked out: it cannot come out in a battle (out of one, it lies there until healed).
+      const ko = m.hp === 0;
       icon.classList.toggle('ko', ko);
-      if (!m.active) icon.disabled = ko;
+      if (!m.active) icon.disabled = ko && (fighting || phase === 'training');
     });
   }
 

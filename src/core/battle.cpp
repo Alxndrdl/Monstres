@@ -208,7 +208,6 @@ void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
     restore_rival(w);
     const int trainer = npc_index(w, b.rival.npc);
     if (trainer > 0) w.creatures[static_cast<size_t>(trainer)].mind = Mind::Idle;
-    for (Monster& m : w.team) m.hp = std::max<uint16_t>(m.hp, 1);  // the knocked out ones get up
   }
   b.outcome_count = b.beaten;
   b.outcome_no_xp = xp == 0 ? b.no_xp : NoXp::None;
@@ -219,6 +218,7 @@ void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
   b.ally = {};
   b.shield = {};
   b.timer = 0;
+  b.away_ticks = 0;
   b.dealt = {};
   b.won_xp = 0;
   b.beaten = 0;
@@ -235,6 +235,7 @@ uint32_t reward(const Creature& c) { return c.released || c.beaten ? 0u : 8u * c
 void end_training(World& w) {
   Battle& b = w.battle;
   b.phase = BattlePhase::None;
+  b.away_ticks = 0;
   b.target = 0;
   b.projectiles.clear();
   b.ally = {};
@@ -373,6 +374,10 @@ bool hit(World& w, bool on_ally, size_t k, uint16_t damage, bool melee) {
   Battle& b = w.battle;
   Fighter& target = on_ally ? b.ally : foe_fighter(w, k);
   if (target.state == FighterState::Dodge) return false;
+  if (on_ally && target.shield_ticks > 0) {  // the magician's shield takes it
+    target.parried_tick = w.tick;
+    return false;
+  }
   if (!on_ally && training(w)) {  // the magician's shield takes it (shows what it would have done)
     target.parried_tick = w.tick;
     target.last_damage = damage;
@@ -527,6 +532,7 @@ void count_down(Fighter& f) {
   for (uint16_t& c : f.cooldown) c = c > 0 ? static_cast<uint16_t>(c - 1) : 0;
   if (f.dodge_cooldown > 0) --f.dodge_cooldown;
   if (f.parry_cooldown > 0) --f.parry_cooldown;
+  if (f.shield_ticks > 0) --f.shield_ticks;
 }
 
 bool free_to_act(const Fighter& f) { return f.state == FighterState::Ready || f.state == FighterState::Recover; }
@@ -607,7 +613,7 @@ void summon(World& w, size_t slot) {
   Creature& c = w.creatures[0];
   const bool fighting = w.battle.phase == BattlePhase::Fight || w.battle.phase == BattlePhase::Prepare;
   const bool trains = training(w);
-  if (fighting && w.team[slot].hp == 0) return;  // knocked out in a trainer's battle
+  if ((fighting || trains) && w.team[slot].hp == 0) return;  // knocked out: not in a battle
   if (w.active >= 0) {  // the one out goes back into the crystal
     const Monster& out = w.team[static_cast<size_t>(w.active)];
     if (static_cast<int>(slot) == w.active) {  // just recalled (not in the middle of a fight)
@@ -628,7 +634,7 @@ void summon(World& w, size_t slot) {
   c.species = m.species;
   c.genes = m.genes;
   c.level = static_cast<uint8_t>(std::min<uint16_t>(m.level, 255));
-  c.mind = Mind::Idle;
+  c.mind = m.hp == 0 ? Mind::KnockedOut : Mind::Idle;  // knocked out: it lies there, waiting for a heal
   c.timer = 0;
   c.body.velocity_y = 0;
   w.came_out_tick = w.tick;
@@ -677,6 +683,7 @@ EngageCheck can_engage(const World& w, size_t index) {
   if (!monster_stats(c.species).is_monster) return EngageCheck::NotMonster;
   if (w.battle.phase != BattlePhase::None) return EngageCheck::InBattle;
   if (!active_monster(w)) return EngageCheck::NoCompanion;
+  if (active_monster(w)->hp == 0) return EngageCheck::CompanionDown;
   if (c.mind == Mind::KnockedOut) return EngageCheck::KnockedOut;
   if (owned(w, c)) return EngageCheck::Owned;
   const float dx = c.body.pos.x - w.player.pos.x, dz = c.body.pos.z - w.player.pos.z;
@@ -685,7 +692,8 @@ EngageCheck can_engage(const World& w, size_t index) {
 }
 
 const char* engage_check_name(EngageCheck check) {
-  static const char* kNames[] = {"ok", "notMonster", "tooFar", "inBattle", "noCompanion", "knockedOut", "owned"};
+  static const char* kNames[] = {"ok",         "notMonster", "tooFar", "inBattle", "noCompanion",
+                                 "knockedOut", "owned",      "companionDown"};
   const auto i = static_cast<size_t>(check);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
@@ -798,7 +806,47 @@ bool battle_forward(const World& w, float& fx, float& fz) {
   }
 }
 
-bool can_train(const World& w) { return w.battle.phase == BattlePhase::None && active_monster(w) != nullptr; }
+bool can_train(const World& w) {
+  return w.battle.phase == BattlePhase::None && active_monster(w) != nullptr && active_monster(w)->hp > 0;
+}
+
+const SpellInfo& spell_info(SpellId spell) {
+  static const SpellInfo kSpells[] = {
+      {"none", false, false, 0},
+      {"heal", true, true, rules::kHealCooldown},
+      {"shield", true, false, rules::kShieldCooldown},
+  };
+  static_assert(std::size(kSpells) == kSpellCount);
+  const auto i = static_cast<size_t>(spell);
+  return kSpells[i < kSpellCount ? i : 0];
+}
+
+namespace {
+bool in_combat(const World& w) {
+  const BattlePhase p = w.battle.phase;
+  return p == BattlePhase::Fight || p == BattlePhase::Training || p == BattlePhase::Prepare;
+}
+}  // namespace
+
+const std::array<SpellId, kSpellSlots>& current_spells(const World& w) {
+  return in_combat(w) ? w.combat_spells : w.adventure_spells;
+}
+
+const char* cannot_cast(const World& w, size_t slot) {
+  if (slot >= kSpellSlots) return "none";
+  const SpellId s = current_spells(w)[slot];
+  if (s == SpellId::None) return "none";
+  if (w.battle.phase == BattlePhase::Flee) return "fleeing";
+  if (w.spell_cooldowns[static_cast<size_t>(s)] > 0) return "cooldown";
+  const Monster* a = active_monster(w);
+  if (!a) return "noCompanion";
+  if (s == SpellId::Heal && a->hp >= monster_fight_stats(a->species, a->level).hp) return "full";
+  return nullptr;
+}
+
+bool can_heal_team(const World& w, uint8_t n) {
+  return n == npc::kOdette && w.battle.phase == BattlePhase::None && near_npc(w, n);
+}
 
 namespace {
 
@@ -896,6 +944,43 @@ void battle_command(World& w, const Input& in) {
     case Command::QuestGive:
     case Command::QuestComplete:
       break;  // quests.cpp
+    case Command::Cast: {
+      if (in.target >= kSpellSlots || cannot_cast(w, in.target)) break;
+      const SpellId s = current_spells(w)[in.target];
+      Monster& a = ally(w);
+      if (s == SpellId::Heal) {
+        a.hp = std::min<uint16_t>(static_cast<uint16_t>(a.hp + rules::kHealPoints), monster_fight_stats(a.species, a.level).hp);
+        if (companion(w).mind == Mind::KnockedOut) companion(w).mind = Mind::Idle;  // it wakes up
+      } else if (s == SpellId::Shield) {
+        b.ally.shield_ticks = rules::kShieldTicks;
+      }
+      w.spell_cooldowns[static_cast<size_t>(s)] = spell_info(s).cooldown;
+      w.spell_tick = w.tick;
+      w.spell_cast = s;
+      break;
+    }
+    case Command::EquipSpell: {
+      const size_t slot = in.target / 16;
+      const auto spell = static_cast<SpellId>(in.target % 16);
+      if (b.phase != BattlePhase::None || slot >= 2 * kSpellSlots || spell >= SpellId::Count) break;
+      const bool combat = slot < kSpellSlots;
+      const SpellInfo& info = spell_info(spell);
+      if (spell != SpellId::None && !(combat ? info.combat : info.adventure)) break;
+      auto& slots = combat ? w.combat_spells : w.adventure_spells;
+      const size_t k = slot % kSpellSlots;
+      // Already in the other slot: they swap.
+      for (SpellId& other : slots) {
+        if (spell != SpellId::None && other == spell) other = slots[k];
+      }
+      slots[k] = spell;
+      break;
+    }
+    case Command::HealTeam:
+      if (in.target >= 256 || !can_heal_team(w, static_cast<uint8_t>(in.target))) break;
+      for (Monster& m : w.team) m.hp = monster_fight_stats(m.species, m.level).hp;
+      if (w.active >= 0 && companion(w).mind == Mind::KnockedOut) companion(w).mind = Mind::Idle;
+      w.healed_tick = w.tick;
+      break;
     case Command::Target:
       if ((b.phase == BattlePhase::Fight || training(w)) && (in.target == kNoTarget || in.target < foe_count(w))) {
         b.target = in.target;
@@ -922,6 +1007,10 @@ void battle_command(World& w, const Input& in) {
         break;
       }
       if (b.phase != BattlePhase::Fight) break;
+      if (!active_monster(w)) {  // no one out to run back
+        end_battle(w, BattleOutcome::Fled, b.won_xp);
+        break;
+      }
       b.phase = BattlePhase::Flee;
       b.timer = 0;
       b.projectiles.clear();
@@ -1261,7 +1350,9 @@ void battle_resolve(World& w) {
 
   if (training(w)) {  // the magician keeps its shield up: no one wins
     float dx, dz;
-    if (flat_distance(ally_c.body, w.player, dx, dz) > rules::kBattleLeash) end_training(w);
+    const bool away = flat_distance(ally_c.body, w.player, dx, dz) > rules::kBattleLeash;
+    b.away_ticks = away ? static_cast<uint16_t>(b.away_ticks + 1) : 0;
+    if (b.away_ticks >= rules::kAwayTicks) end_training(w);
     return;
   }
 
@@ -1288,39 +1379,36 @@ void battle_resolve(World& w) {
     return;
   }
   if (Monster* a = active_monster(w); a && a->hp == 0) {
-    if (r.npc) {
-      // Knocked out: back into the crystal; the player sends another one, if it has one left.
+    if (std::any_of(w.team.begin(), w.team.end(), [](const Monster& m) { return m.hp > 0; })) {
+      // Knocked out: back into the crystal; the player sends another one.
       w.went_in = {w.tick, false, a->species, a->genes, ally_c.body};
       w.active = -1;
       ally_c.mind = Mind::Idle;
       b.ally = {};
-      if (std::none_of(w.team.begin(), w.team.end(), [](const Monster& m) { return m.hp > 0; })) {
-        end_battle(w, BattleOutcome::Defeat, 0);
-      }
+      b.away_ticks = 0;
       return;
     }
-    a->hp = 1;  // knocked out: it comes back to the player and rests
-    end_battle(w, BattleOutcome::Defeat, b.won_xp);
+    // None left: the battle is lost; the last one lies there, waiting for a heal.
+    ally_c.mind = Mind::KnockedOut;
+    ally_c.timer = 0;
+    ally_c.body.speed = 0;
+    end_battle(w, BattleOutcome::Defeat, r.npc ? 0 : b.won_xp);
     return;
   }
   if (!r.npc && has_ally && !b.foes.empty()) {
+    // Too far from all of them: the battle ends, after a while to come back.
     float nearest = 1e9f;
     for (size_t k = 0; k < b.foes.size(); ++k) {
       float dx, dz;
       nearest = std::min(nearest, flat_distance(ally_c.body, foe_creature(w, k).body, dx, dz));
     }
-    if (nearest > rules::kBattleLeash) end_battle(w, BattleOutcome::Fled, b.won_xp);
+    b.away_ticks = nearest > rules::kBattleLeash ? static_cast<uint16_t>(b.away_ticks + 1) : 0;
+    if (b.away_ticks >= rules::kAwayTicks) end_battle(w, BattleOutcome::Fled, b.won_xp);
   }
 }
 
-void team_regen(World& w) {
-  if (w.tick % rules::kRegenEveryTicks != 0) return;
-  if (w.battle.rival.npc) return;  // a trainer's battle: the knocked out stay so
-  for (size_t i = 0; i < w.team.size(); ++i) {
-    if (static_cast<int>(i) == w.active && w.battle.phase != BattlePhase::None) continue;
-    Monster& m = w.team[i];
-    if (m.hp < monster_fight_stats(m.species, m.level).hp) ++m.hp;
-  }
+void spells_step(World& w) {
+  for (uint16_t& c : w.spell_cooldowns) c = c > 0 ? static_cast<uint16_t>(c - 1) : 0;
 }
 
 }  // namespace monstres

@@ -684,11 +684,39 @@ void add_victory_effects(const World& w, float time, DrawList& list) {
   }
 }
 
+// Spells: a heal makes green sparks rise around the monster out (the healer:
+// around the magician too); the shield is a golden bubble around it.
+void add_spell_effects(const World& w, float time, DrawList& list) {
+  if (w.creatures.empty()) return;
+  const auto rise = [&](const Body& at, uint64_t tick, Color color, float height) {
+    const uint64_t since = w.tick - tick;
+    if (tick == 0 || since >= 60) return;
+    const float t = static_cast<float>(since) / 60.0f;
+    for (int k = 0; k < 10; ++k) {
+      const float u = std::fmod(t * 1.6f + static_cast<float>(k) / 10, 1.0f);
+      const float a = kTau * static_cast<float>(k) / 10 + time * 3.0f;
+      add_spark(list, at.pos.x + std::cos(a) * 0.45f, at.pos.y + 0.1f + height * u, at.pos.z + std::sin(a) * 0.45f,
+                0.07f, color, (1 - t) * (1 - u), a);
+    }
+  };
+  const Body& c = w.creatures[0].body;
+  if (w.active >= 0 && w.spell_cast == SpellId::Heal) rise(c, w.spell_tick, {0.6f, 2.0f, 0.8f, 1}, 1.2f);
+  if (w.active >= 0) rise(c, w.healed_tick, {0.9f, 2.0f, 1.2f, 1}, 1.4f);
+  rise(w.player, w.healed_tick, {0.9f, 2.0f, 1.2f, 1}, 1.8f);
+  if (w.active >= 0 && w.battle.ally.shield_ticks > 0) {
+    const BodyShape& sh = species_info(w.creatures[0].species).shape;
+    const float k = static_cast<float>(w.battle.ally.shield_ticks) / rules::kShieldTicks;
+    add_spark(list, c.pos.x, c.pos.y + sh.height * 0.5f, c.pos.z, sh.height * 0.9f + 0.3f + 0.03f * std::sin(time * 9),
+              {2.0f, 1.7f, 0.6f, 1}, 0.2f + 0.2f * k, time);
+  }
+}
+
 // Battle: the enemy's red ring, what it is preparing, projectiles, bursts,
 // parries, hits and stuns.
 void add_battle_effects(const World& w, float time, DrawList& list) {
   const Battle& b = w.battle;
   add_victory_effects(w, time, list);
+  add_spell_effects(w, time, list);
   if (b.phase == BattlePhase::Training && !w.creatures.empty()) add_shield(w, time, list);
   const bool training = b.phase == BattlePhase::Training;
   if ((b.phase != BattlePhase::Fight && b.phase != BattlePhase::Prepare && !training) || w.creatures.empty()) return;
@@ -1115,17 +1143,20 @@ CameraGoal camera_goal(const World& w, CameraSubject subject) {
   // between the companion and its enemy (the yaw is turned towards it, see
   // the platform code), when training between it and the magician.
   const Body& a = w.creatures[0].body;
-  g = {a.pos.x, a.pos.y + 0.75f, a.pos.z, a.pos.x, a.pos.y + 0.75f, a.pos.z, 0.8f};
   const Body* other = nullptr;
   float other_mid = 0.5f;
   if (const Foe* t = battle_target(w)) {
     other = &w.creatures[t->index].body;
   } else if (w.battle.phase == BattlePhase::Prepare && !w.battle.foes.empty()) {
     other = &w.creatures[w.battle.foes[0].index].body;
-  } else if (w.battle.phase == BattlePhase::Training) {
+  } else if (w.battle.phase == BattlePhase::Training && w.battle.target != kNoTarget) {
     other = &w.player;
     other_mid = 0.8f;
   }
+  // Aiming: closer, between the companion and its target. Moving freely (or
+  // after a battle): the same camera as for the magician, on the companion.
+  const float up = other ? 0.75f : 1.0f;
+  g = {a.pos.x, a.pos.y + up, a.pos.z, a.pos.x, a.pos.y + up, a.pos.z, other ? 0.8f : 1.0f};
   if (other) {
     g.look_x = lerp(g.tx, other->pos.x, 0.4f);
     g.look_y = lerp(g.ty, other->pos.y + other_mid, 0.4f);

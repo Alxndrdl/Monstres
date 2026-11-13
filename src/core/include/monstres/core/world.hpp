@@ -57,6 +57,7 @@ inline constexpr uint16_t kKnockedOutTicks = 10 * kTicksPerSecond;  // a beaten 
 inline constexpr float kTeleporterDiscoverDistance = 6.0f;  // a teleporter this close is known from then on
 inline constexpr float kTeleporterUseDistance = 3.0f;       // standing this close to one: it can be used
 inline constexpr float kTalkDistance = 5.0f;                // to talk to a villager
+inline constexpr float kStepHeight = 0.75f;  // walkers step up onto anything this low (a rock, a log; not a fence)
 }  // namespace rules
 
 // Orders given from the menus (context menu on the right), see battle.hpp.
@@ -75,7 +76,15 @@ enum class Command : uint8_t {
   Target,     // in a battle: aim at foes[Input::target] (kNoTarget: aim at no one, move freely)
   Challenge,  // a battle against the trainer Input::target (Npc), who offered it
   Ready,      // a trainer's battle: the player has read the rules, the fight starts
+  Cast,       // the magician casts its spell Input::target (0 or 1: combat spells in a battle, else adventure ones)
+  EquipSpell, // out of battles: spell slot Input::target / 16 (0, 1: combat; 2, 3: adventure) gets SpellId target % 16
+  HealTeam,   // the healer (Npc Input::target) heals the whole team, and wakes the knocked out
 };
+
+// The magician's spells (see battle.hpp: what each does, where it can be cast).
+enum class SpellId : uint8_t { None, Heal, Shield, Count };
+inline constexpr size_t kSpellCount = static_cast<size_t>(SpellId::Count);
+inline constexpr size_t kSpellSlots = 2;  // combat spells, and adventure spells
 inline constexpr uint16_t kNoTarget = 0xFFFF;
 
 // What the player does during one tick. Integers, so that replays and saved
@@ -309,6 +318,7 @@ struct Fighter {
   int8_t strafe = 1;         // +1 / -1: which way it circles, 0: holds still
   uint16_t think = 0;        // ticks before it changes its mind
   float lift = 0;            // flying: height above the ground it wants (the ally: climbed with the jump)
+  uint16_t shield_ticks = 0; // the companion: the magician's shield protects it (no hit lands)
   bool operator==(const Fighter&) const = default;
 };
 
@@ -376,6 +386,7 @@ struct Battle {
   Fighter shield;         // training: the magician's shield
   std::vector<Projectile> projectiles;
   uint16_t timer = 0;  // Flee: ticks spent running back; Prepare: ticks spent taking places
+  uint16_t away_ticks = 0;  // the companion too far from its foes (or the magician): it gives up after a while
   // Hit points dealt to the foes by each team member: the experience is shared accordingly.
   std::array<uint32_t, rules::kTeamSize> dealt{};
   uint32_t won_xp = 0;    // the experience of the foes beaten so far
@@ -421,6 +432,7 @@ namespace npc {
 inline constexpr uint8_t kMirabelle = 1;  // lost her Piou (Tag::LostPiou)
 inline constexpr uint8_t kGaspard = 2;    // stands by the village's teleporter, curious about it
 inline constexpr uint8_t kBastien = 4;    // a trainer: he offers battles against his monsters
+inline constexpr uint8_t kOdette = 5;     // the healer: she heals the team, for free
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
@@ -468,6 +480,12 @@ struct World {
   uint8_t teleporters = 0;  // known teleporters, as bits (1 << TeleporterId)
   std::array<QuestState, kQuestCount> quests{};
   uint8_t rival_wins = 0;      // battles won against Bastien (only the first one gives experience)
+  std::array<SpellId, kSpellSlots> combat_spells{SpellId::Heal, SpellId::Shield};  // chosen out of battles
+  std::array<SpellId, kSpellSlots> adventure_spells{SpellId::Heal, SpellId::None};
+  std::array<uint16_t, kSpellCount> spell_cooldowns{};  // not saved: ticks before each spell can be cast again
+  uint64_t spell_tick = 0;     // not saved: the last spell cast, for the drawing
+  SpellId spell_cast = SpellId::None;
+  uint64_t healed_tick = 0;    // not saved: the healer healed the team
   uint64_t teleport_tick = 0;  // not saved: the last teleport, for the drawing
   Vec3 teleport_from;          // not saved: where it left
   bool operator==(const World&) const = default;

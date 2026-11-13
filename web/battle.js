@@ -118,6 +118,7 @@
     noCompanion: 'Invoque d’abord un monstre de ton équipe (à gauche).',
     knockedOut: 'K.O. : il se repose. Laisse-le tranquille un moment.',
     owned: 'Il appartient à quelqu’un.',
+    companionDown: 'Ton monstre est K.O. : soigne-le (sort de soin) ou va voir Odette au village.',
   };
   // Under the capture button: why it cannot be used yet.
   const CAPTURE_NOTES = {
@@ -144,7 +145,7 @@
     } else if (b.phase === 'fight') {
       const target = b.target >= 0 ? b.enemy : null;
       const name = target ? speciesName(target.species) : 'mode libre';
-      key = `fight/${target ? target.index : -1}/${b.capture}/${b.foes.length}`;
+      key = `fight/${target ? target.index : -1}/${b.capture}/${b.foes.length}/${!!b.ally}`;
       build = () => {
         contextTitle.replaceChildren(`Combat · ${name} `, el('small', { textContent: target ? `niv. ${target.level}` : '' }));
         const capture = action('capture', 'Capturer', b.capture === 'ok', () => game.capture());
@@ -152,7 +153,8 @@
         capture.title = b.capture === 'notWeak'
           ? `Affaiblis-le d’abord : moins de ${b.captureHpPercent} % de ses PV (le trait doré sur sa barre).` : '';
         contextActions.replaceChildren(action('flee', 'Fuir', true, () => game.flee()), capture);
-        contextNote.textContent = target ? '' : 'Touche un adversaire (ou son icône) pour le viser.';
+        contextNote.textContent = !b.ally ? 'Ton monstre est K.O. : choisis-en un autre dans ton équipe (à gauche).'
+          : target ? '' : 'Touche un adversaire (ou son icône) pour le viser.';
       };
     } else if (b.phase === 'training') {
       const name = speciesName(b.ally.species);
@@ -186,11 +188,13 @@
       } else if (!c) {
         key = 'none';
       } else if (c.index === 0) {  // the companion
-        key = `companion/${c.train}`;
+        const down = c.mind === 'knockedOut';
+        key = `companion/${c.train}/${down}`;
         build = () => {
           contextTitle.replaceChildren(`${speciesName(c.species)} `, el('small', { textContent: `niv. ${c.level}` }));
           contextActions.replaceChildren(action('train', 'S’entraîner', c.train, () => game.train()));
-          contextNote.textContent = 'Contrôle-le comme en combat, contre ton magicien.';
+          contextNote.textContent = down ? 'Il est K.O. : soigne-le (sort de soin) ou va voir Odette au village.'
+            : 'Contrôle-le comme en combat, contre ton magicien.';
         };
       } else if (c.tag === 'rival') {
         key = `rival-monster/${c.index}`;
@@ -279,7 +283,7 @@
     game.target(b.target === slot ? -1 : slot);
   }
   function renderFoeIcons(b) {
-    const show = b.phase === 'fight' || b.phase === 'prepare';
+    const show = b.phase === 'fight' || b.phase === 'prepare' || b.phase === 'training';
     icons.hidden = !show;
     if (!show) {
       iconsFor = '';
@@ -287,7 +291,9 @@
     }
     const foes = b.foes || [];
     // A trainer's team: the ones not seen yet are a "?", the beaten ones crossed out.
-    const list = b.rival
+    const list = b.phase === 'training'
+      ? [{ key: 'wizard', species: 'wizard', look: 0, level: 0, ko: false, slot: 0, foe: null, wizard: true }]
+      : b.rival
       ? b.rival.team.map((m) => {
         const foe = m.out ? foes[0] : null;
         return { key: `${m.slot}/${m.seen}/${m.ko}/${m.out}`, species: m.seen ? m.species : null, look: m.look,
@@ -304,12 +310,13 @@
           button.dataset.slot = x.slot;
           if (x.species) button.append(el('img', { src: portrait(x.species, x.look), alt: '' }));
           else button.append(el('span', { className: 'foe-unknown', textContent: '?' }));
-          button.append(el('span', { className: 'foe-hp' }, [el('span')]));
+          if (!x.wizard) button.append(el('span', { className: 'foe-hp' }, [el('span')]));
           if (x.ko) button.append(el('span', { className: 'foe-ko', textContent: '✕' }));
           button.classList.toggle('ko', x.ko);
-          button.classList.toggle('targeted', x.slot >= 0 && b.target === x.slot && b.phase === 'fight');
-          const name = x.species ? `${speciesName(x.species)} · niv. ${x.level}` : 'Monstre inconnu';
-          const clickable = x.slot >= 0 && b.phase === 'fight';
+          const live = b.phase === 'fight' || b.phase === 'training';
+          button.classList.toggle('targeted', x.slot >= 0 && b.target === x.slot && live);
+          const name = x.wizard ? 'Ton magicien' : x.species ? `${speciesName(x.species)} · niv. ${x.level}` : 'Monstre inconnu';
+          const clickable = x.slot >= 0 && live;
           button.disabled = !clickable;
           button.title = !clickable ? name : b.target === x.slot ? `${name} — viser personne (mode libre)` : `${name} — le viser`;
           button.setAttribute('aria-label', button.title);
@@ -326,6 +333,7 @@
       if (!button) return;
       const ratio = x.foe ? x.foe.hp / x.foe.maxHp : x.ko ? 0 : 1;
       const fill = button.querySelector('.foe-hp > span');
+      if (!fill) return;
       fill.style.width = `${100 * ratio}%`;
       fill.style.background = ratio > 0.5 ? '#8fd16a' : ratio > 0.25 ? '#f2c94c' : '#ff7a6b';
       button.classList.toggle('windup', !!x.foe && x.foe.fighter.state === 'windup');
@@ -339,6 +347,24 @@
     const foe = (b.foes || []).find((f) => f.index === event.detail.index);
     if (foe) toggleTarget(b, foe.slot);
   });
+  // Training: a tap on the magician aims at it, or at no one.
+  window.addEventListener('monstres-wizard-tap', () => {
+    if (!game) return;
+    const b = game.battle();
+    if (b.phase === 'training') toggleTarget(b, 0);
+  });
+
+  // ---- Too far from the foes (or the magician): come back ----
+  const away = $('away-warning');
+  function renderAway(b) {
+    const show = (b.phase === 'fight' || b.phase === 'training') && b.away !== undefined;
+    away.hidden = !show;
+    if (!show) return;
+    const left = Math.ceil(b.away);
+    away.textContent = b.phase === 'training'
+      ? `Trop loin ! Reviens vers ton magicien : fin de l’entraînement dans ${left} s`
+      : `Trop loin ! Reviens à portée : fin du combat dans ${left} s`;
+  }
 
   // ---- Before a trainer's battle: the rules, and "ready" ----
   const rules = $('rules');
@@ -515,7 +541,7 @@
     }[o.result] : {
       victory: ['Victoire !', o.count > 1 ? `${o.count} monstres sont K.O.` : `${foe} est K.O.`],
       captured: [`${foe} capturé !`, 'Il rejoint ton équipe'],
-      defeat: [`${companion} est K.O.`, 'Il se repose près de toi.'],
+      defeat: [`${companion} est K.O.`, 'Soigne-le d’un sort, ou va voir Odette au village.'],
       fled: ['Tu as pris la fuite', ''],
     }[o.result];
     if (!texts) return;
@@ -556,6 +582,7 @@
     renderHits(b);
     renderOutcome(b);
     renderRules(b);
+    renderAway(b);
     renderContext(b);
   }
 

@@ -37,7 +37,9 @@ nuages, ciel et soleil.
 Contrôles :
 - joystick en bas à gauche, ou ZQSD / flèches : se déplacer (par rapport à la caméra) ;
 - glisser sur l'écran (doigt ou souris) : regarder autour de soi ;
-- bouton en bas à droite, ou Espace : sauter.
+- bouton en bas à droite, ou Espace : sauter. Les petits obstacles (un rocher bas, une
+  bûche, une souche, un buisson : jusqu'à 75 cm) ne bloquent pas : on monte dessus en marchant ;
+- boutons à droite du joystick, ou R et G : lancer ses sorts (voir Sorts) ;
 - toucher ou cliquer sur un monstre (ou un villageois) : sa fiche s'affiche en
   haut à gauche (nom, famille, éléments, description, ses variantes, niveau,
   ce qu'il fait, distance) et un anneau doré le marque au sol ; toucher
@@ -318,17 +320,45 @@ L'écran de victoire montre la barre d'expérience de chacun qui se remplit,
 niveau après niveau, puis la caméra quitte doucement le compagnon pour revenir
 au magicien (elle glisse aussi au début et à la fin des combats). Le monstre
 battu reste allongé K.O. (étoiles au-dessus de la tête) une dizaine de
-secondes, puis se relève et rentre chez lui. Un compagnon K.O. revient avec 1
-point de vie ; hors combat, l'équipe regagne 1 point de vie par seconde. Les
-monstres sauvages ont un niveau selon leur lieu (voir plus haut).
+secondes, puis se relève et rentre chez lui. Les monstres sauvages ont un
+niveau selon leur lieu (voir plus haut).
+
+K.O. et soins : un compagnon K.O. en combat retourne dans le cristal, et on en
+fait sortir un autre de l'équipe (barre à gauche) ; le combat n'est perdu que
+quand plus aucun monstre n'est debout (le dernier reste alors allongé). Les
+points de vie ne reviennent plus tout seuls : il faut un sort de soin, ou
+Odette, au village, qui soigne et réveille toute l'équipe gratuitement (en lui
+parlant). Un monstre K.O. ne peut pas sortir du cristal en combat ; hors
+combat, il en sort mais reste à terre jusqu'à ce qu'on le soigne, et retourne
+dans le cristal si le magicien s'éloigne à plus de 15 m.
+
+Trop loin : si le compagnon s'éloigne à plus de 25 m de ses adversaires (ou de
+son magicien à l'entraînement), un avertissement laisse 5 secondes pour
+revenir à portée avant la fin du combat.
 
 Entraînement : toucher son compagnon puis « S'entraîner ». On le contrôle comme
 en combat, mais face au magicien, qui lève son bâton et se protège d'un
 bouclier de lumière : chaque coup s'y brise (le nombre affiché est ce que
 l'attaque aurait infligé à un monstre de même niveau), personne n'est blessé.
-« Arrêter l'entraînement » (ou rappeler le compagnon) y met fin. Pas de forces ni de
+L'icône du magicien en haut de l'écran (ou le magicien lui-même) se vise ou se
+« dévise » comme un adversaire. « Arrêter l'entraînement » (ou rappeler le
+compagnon) y met fin. Pas de forces ni de
 faiblesses entre éléments pour l'instant. Les combats ne sont pas sauvegardés :
 une partie rechargée pendant un combat reprend sans lui.
+
+### Sorts
+
+Le magicien lance des sorts sur son monstre sorti du cristal. Onglet « Sorts »
+du grimoire (touche P) : deux sorts de combat (utilisés en combat et à
+l'entraînement) et deux sorts d'aventure (le reste du temps), qu'on change hors
+combat. Ils se lancent avec les deux boutons au-dessus du joystick (touches R
+et G), qui montrent leur recharge.
+- Soin (combat et aventure) : +10 points de vie, ou réveille un monstre K.O.
+  avec 10 points de vie ; recharge 5 s.
+- Bouclier (combat) : aucun coup ne touche le monstre pendant 1 s ; recharge
+  5 s.
+
+Les sorts choisis sont sauvegardés (sauvegarde v17).
 
 ### Combats de dresseurs
 
@@ -352,8 +382,8 @@ règles s'affichent, et « Prêt ! » (`Command::Ready`) commence le combat :
   l'expérience (8 par niveau de ses monstres), le nombre de victoires est
   sauvegardé (sauvegarde v16).
 
-Après le combat, les monstres K.O. du joueur se relèvent avec 1 point de vie,
-et le Champi de Bastien revient à ses côtés. Une partie sauvegardée en plein
+Après le combat, les monstres K.O. du joueur le restent (sort de soin ou
+Odette), et le Champi de Bastien revient à ses côtés. Une partie sauvegardée en plein
 combat reprend sans lui, le Champi à sa place.
 
 ## Performances

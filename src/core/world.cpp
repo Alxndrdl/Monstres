@@ -297,7 +297,29 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
   area.max.x = std::max(area.max.x, area.max.x - (axis == 0 ? delta : 0));
   area.min.z = std::min(area.min.z, area.min.z - (axis == 2 ? delta : 0));
   area.max.z = std::max(area.max.z, area.max.z - (axis == 2 ? delta : 0));
-  s.near(area, [&](const Box& ob) {
+  // Walking into something low (a rock, a log, a bush): step up onto it,
+  // if there is room on top.
+  const float y0 = b.pos.y;
+  bool stepped = false;
+  if (medium == Medium::Land && b.on_ground) {
+    float top = b.pos.y;
+    bool low = false, high = false;
+    s.near(area, [&](const Box& ob) {
+      if (!overlaps(body_box(b, shape), ob)) return;
+      if (ob.max.y - b.pos.y <= rules::kStepHeight) {
+        low = true;
+        top = std::max(top, ob.max.y);
+      } else {
+        high = true;
+      }
+    });
+    if (low && !high) {
+      b.pos.y = top;
+      stepped = !s.any_overlap(body_box(b, shape));  // up on it (move_vertical keeps it there)
+      if (!stepped) b.pos.y = y0;
+    }
+  }
+  if (!stepped) s.near(area, [&](const Box& ob) {
     if (!overlaps(body_box(b, shape), ob)) return;
     const float lo = axis == 0 ? ob.min.x : ob.min.z;
     const float hi = axis == 0 ? ob.max.x : ob.max.z;
@@ -312,7 +334,10 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
                              std::fabs(*coord - start) * rules::kMaxWalkSlope + kStepUp;
   // Pushed out of one object into another (a gap narrower than the body):
   // do not move along this axis at all.
-  if (too_steep || s.any_overlap(body_box(b, shape)) || wrong_medium(s, b, shape, medium)) *coord = start;
+  if (too_steep || s.any_overlap(body_box(b, shape)) || wrong_medium(s, b, shape, medium)) {
+    *coord = start;
+    b.pos.y = y0;
+  }
 }
 
 void move_vertical(const Surroundings& s, Body& b, const BodyShape& shape) {  // walkers only
@@ -1750,6 +1775,19 @@ void step(World& w, const Input& in) {
       }
       continue;
     }
+    if (i == 0 && c.mind == Mind::KnockedOut) {
+      // Knocked out: it lies there until healed; too far behind, it goes back into the crystal.
+      move_body(s, c.body, species_info(c.species).shape, 0, 0, 0, false, 0);
+      c.body.speed = 0;
+      const float dx = c.body.pos.x - w.player.pos.x, dz = c.body.pos.z - w.player.pos.z;
+      if (dx * dx + dz * dz > rules::kKnockedOutRecall * rules::kKnockedOutRecall && w.active >= 0) {
+        const Monster& m = w.team[static_cast<size_t>(w.active)];
+        w.went_in = {w.tick, false, m.species, m.genes, c.body};
+        w.active = -1;
+        c.mind = Mind::Idle;
+      }
+      continue;
+    }
     if (i == 0) {
       step_companion(w, s, c);
       continue;
@@ -1789,7 +1827,7 @@ void step(World& w, const Input& in) {
     }
   }
   battle_resolve(w);
-  team_regen(w);
+  spells_step(w);
   discover(w);
   quests_step(w);
   if (w.tick % rules::kPopulationEveryTicks == 0) update_population(w);

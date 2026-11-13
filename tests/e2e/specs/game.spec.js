@@ -321,7 +321,7 @@ test.describe('grimoire', () => {
     await expect(menu).toBeHidden();
     await page.locator('#menu-button').click();
     await expect(menu).toBeVisible();
-    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Quêtes', 'Bestiaire', 'Carte']);
+    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Sorts', 'Quêtes', 'Bestiaire', 'Carte']);
     const tick = (await state(page)).tick;
     await page.waitForTimeout(500);
     expect((await state(page)).tick).toBe(tick);  // paused
@@ -593,8 +593,14 @@ test.describe('battles', () => {
     await expect(page.locator('#team-detail')).toContainText('Boule de braise');
     await expect(page.locator('#team-detail')).toContainText('Niveau 3');
 
-    // Letting the bird go: asked twice; it comes out of the crystal and leaves.
+    // Letting the bird go: a window in the middle asks; "keep" first, then "release".
     await page.locator('#team-list li').nth(1).locator('button').click();
+    await page.locator('#release').click();
+    await expect(page.locator('#release-dialog')).toBeVisible();
+    await expect(page.locator('#release-dialog .release-warning')).toContainText('ne reviendra pas');
+    await page.locator('#release-cancel').click();
+    await expect(page.locator('#release-dialog')).toBeHidden();
+    await expect(page.locator('#game-menu')).toBeVisible();
     await page.locator('#release').click();
     await expect(page.locator('#release-confirm')).toContainText('Piou');
     const before = (await state(page)).creatures.length;
@@ -700,6 +706,49 @@ test.describe('the bigger world', () => {
     await page.evaluate(() => window.monstres.step(1));
     await expect(page.locator('#battle-banner')).toContainText('forfait');
     expect((await page.evaluate(() => window.monstres.battle())).outcome.result).toBe('forfeit');
+  });
+
+  test('spells: chosen in the grimoire, cast with a button; Odette heals the team', async ({ page }) => {
+    await openGame(page, '?seed=3&new&frozen');
+    // The grimoire's tab: the adventure and combat slots; the first adventure one is shown.
+    await page.keyboard.press('p');
+    await expect(page.locator('#tab-spells')).toBeVisible();
+    await expect(page.locator('.spell-entry')).toHaveCount(4);
+    await expect(page.locator('#spell-slot-2')).toHaveAttribute('aria-current', 'true');
+    await expect(page.locator('#spell-detail h2')).toHaveText('Soin');
+    // Emptied (the menu stops time: it happens at once).
+    await page.locator('#spell-edit').click();
+    await expect(page.locator('.spell-choice')).toHaveCount(2);  // none, heal (the shield is for battles)
+    await page.locator('#spell-choice-none').click();
+    await page.locator('#spell-confirm').click();
+    await expect(page.locator('#spell-slot-2')).toHaveAttribute('data-spell', 'none');
+    expect((await page.evaluate(() => window.monstres.spells())).adventure).toEqual(['none', 'none']);
+    // The combat ones: heal in the second slot swaps with the shield (greyed: already chosen).
+    await page.locator('#spell-slot-1').click();
+    await page.locator('#spell-edit').click();
+    await expect(page.locator('#spell-choice-heal')).toHaveClass(/taken/);
+    await page.locator('#spell-choice-heal').click();
+    await expect(page.locator('#spell-detail')).toContainText('échangés');
+    await page.locator('#spell-confirm').click();
+    expect((await page.evaluate(() => window.monstres.spells())).combat).toEqual(['shield', 'heal']);
+    await page.keyboard.press('Escape');
+    // No adventure spell: no button.
+    await expect(page.locator('#spell-0')).toBeHidden();
+    await expect(page.locator('#spell-1')).toBeHidden();
+    // Odette heals the team (here: nothing to heal, she says so).
+    const i = await page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 1; i < m.state().creatures.length; i++) {
+        m.select(i);
+        const c = m.selected();
+        if (c && c.npc === 5) { m.teleport(c.x + 1.5, c.z); m.step(1); return i; }
+      }
+      return -1;
+    });
+    expect(i).toBeGreaterThan(0);
+    await page.evaluate((i) => { window.monstres.select(i); window.monstresDialogue.open(window.monstres.selected()); }, i);
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Odette');
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('pleine forme');
   });
 
   test('monsters of the same kind join in; their icons, the one aimed at', async ({ page }) => {

@@ -207,6 +207,8 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u8(q.progress);
   }
   out.u8(w.rival_wins);
+  for (SpellId sp : w.combat_spells) out.u8(static_cast<uint8_t>(sp));
+  for (SpellId sp : w.adventure_spells) out.u8(static_cast<uint8_t>(sp));
   return out.take();
 }
 
@@ -232,6 +234,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   const bool grown = version >= 14;        // the bigger world: creatures have ids, squares are lived in
   const bool with_quests = version >= 15;  // teleporters, quests, named villagers
   const bool with_rival = version >= 16;   // Bastien, the trainer: battles won against him
+  const bool with_spells = version >= 17;  // the magician's spells
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -387,6 +390,21 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     }
   }
   if (with_rival && !in.u8(w.rival_wins)) return fail(error, LoadError::Corrupt);
+  if (with_spells) {
+    const auto read_spells = [&](std::array<SpellId, kSpellSlots>& slots, bool combat) {
+      for (SpellId& sp : slots) {
+        uint8_t v = 0;
+        if (!in.u8(v) || v >= kSpellCount) return false;
+        sp = static_cast<SpellId>(v);
+        const SpellInfo& info = spell_info(sp);
+        if (sp != SpellId::None && !(combat ? info.combat : info.adventure)) return false;
+      }
+      return true;
+    };
+    if (!read_spells(w.combat_spells, true) || !read_spells(w.adventure_spells, false)) {
+      return fail(error, LoadError::Corrupt);
+    }
+  }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
 
   if (!grown) {

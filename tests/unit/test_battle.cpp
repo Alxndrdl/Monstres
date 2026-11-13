@@ -295,9 +295,14 @@ TEST_CASE("victory gives experience, a defeat leaves the companion weak") {
   lost.team[0].hp = 0;
   step(lost, Input{});
   CHECK(lost.battle.outcome == BattleOutcome::Defeat);
-  CHECK(lost.team[0].hp == 1);
-  run(lost, Input{}, 3 * rules::kTicksPerSecond);  // it rests
-  CHECK(lost.team[0].hp > 1);
+  // Its only monster knocked out: it lies there, and does not get better by itself.
+  CHECK(lost.team[0].hp == 0);
+  CHECK(lost.creatures[0].mind == Mind::KnockedOut);
+  run(lost, Input{}, 3 * rules::kTicksPerSecond);
+  CHECK(lost.team[0].hp == 0);
+  CHECK(lost.creatures[0].mind == Mind::KnockedOut);
+  CHECK(can_engage(lost, 1) == EngageCheck::CompanionDown);
+  CHECK_FALSE(can_train(lost));
 }
 
 TEST_CASE("levels go up with experience") {

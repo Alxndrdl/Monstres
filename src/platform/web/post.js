@@ -119,6 +119,14 @@ window.monstres = {
   challenge: (npc) => _monstres_command(12, npc),
   readyToFight: () => _monstres_command(13, 0),
   forfeit: () => _monstres_command(2, 0),
+  // Spells (web/spells.js): cast slot 0 or 1 (combat spells in a battle, else
+  // adventure ones); equip a spell (its value, 0: none) in slot 0..3 (0, 1:
+  // combat; 2, 3: adventure), out of battles; what they are.
+  cast: (slot) => _monstres_command(14, slot),
+  equipSpell: (slot, spell) => _monstres_command(15, slot * 16 + spell),
+  spells: () => JSON.parse(UTF8ToString(_monstres_spells_json())),
+  // The healer (Odette): heals the team.
+  healTeam: (npc) => _monstres_command(16, npc),
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),
   holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),

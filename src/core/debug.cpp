@@ -86,6 +86,9 @@ std::string creature_json(const World& w, int index) {
     s += std::string(",\"talk\":") + (near_npc(w, c.npc) ? "true" : "false");
     uint8_t rivals = 0;
     rival_team(c.npc, rivals);
+    if (c.npc == npc::kOdette) {
+      s += std::string(",\"healer\":true,\"heal\":") + (can_heal_team(w, c.npc) ? "true" : "false");
+    }
     if (rivals) {
       s += std::string(",\"trainer\":true,\"challenge\":") + (can_challenge(w, c.npc) ? "true" : "false");
       s += ",\"wins\":" + std::to_string(w.rival_wins);
@@ -189,6 +192,46 @@ std::string wizard_json(const World& w) {
   s += ",\"hp\":" + std::to_string(st.hp) + ",\"mana\":" + std::to_string(st.mana);
   s += ",\"power\":" + std::to_string(st.power) + ",\"wisdom\":" + std::to_string(st.wisdom);
   s += ",\"agility\":" + std::to_string(st.agility) + ",\"endurance\":" + std::to_string(st.endurance) + "}";
+  return s;
+}
+
+std::string spells_json(const World& w) {
+  const auto seconds = [](uint32_t ticks) { return num(static_cast<float>(ticks) / rules::kTicksPerSecond); };
+  const auto list = [](const std::array<SpellId, kSpellSlots>& slots) {
+    std::string s = "[";
+    for (size_t k = 0; k < slots.size(); ++k) {
+      if (k) s += ',';
+      s += std::string("\"") + spell_info(slots[k]).id + "\"";
+    }
+    return s + "]";
+  };
+  const BattlePhase p = w.battle.phase;
+  const bool combat = p == BattlePhase::Fight || p == BattlePhase::Training || p == BattlePhase::Prepare;
+  std::string s = std::string("{\"inCombat\":") + (combat ? "true" : "false");
+  s += std::string(",\"editable\":") + (p == BattlePhase::None ? "true" : "false");
+  s += ",\"combat\":" + list(w.combat_spells) + ",\"adventure\":" + list(w.adventure_spells);
+  s += ",\"known\":[";
+  for (size_t i = 1; i < kSpellCount; ++i) {
+    const SpellInfo& info = spell_info(static_cast<SpellId>(i));
+    if (i > 1) s += ',';
+    s += std::string("{\"id\":\"") + info.id + "\",\"value\":" + std::to_string(i);
+    s += std::string(",\"combat\":") + (info.combat ? "true" : "false");
+    s += std::string(",\"adventure\":") + (info.adventure ? "true" : "false");
+    s += ",\"cooldown\":" + seconds(info.cooldown) + "}";
+  }
+  s += "],\"now\":[";
+  const auto& now = current_spells(w);
+  for (size_t k = 0; k < now.size(); ++k) {
+    const SpellInfo& info = spell_info(now[k]);
+    const char* why = cannot_cast(w, k);
+    if (k) s += ',';
+    s += std::string("{\"slot\":") + std::to_string(k) + ",\"id\":\"" + info.id + "\"";
+    s += ",\"cooldown\":" + seconds(w.spell_cooldowns[static_cast<size_t>(now[k])]);
+    s += ",\"cooldownTotal\":" + seconds(info.cooldown);
+    s += std::string(",\"why\":") + (why ? std::string("\"") + why + "\"" : "null") + "}";
+  }
+  s += "],\"castTick\":" + std::to_string(w.spell_tick) + ",\"cast\":\"" + spell_info(w.spell_cast).id + "\"";
+  s += ",\"healedTick\":" + std::to_string(w.healed_tick) + "}";
   return s;
 }
 
@@ -544,7 +587,7 @@ std::string ally_json(const World& w, const Fighter& f) {
   s += ",\"level\":" + std::to_string(a.level) + ",\"hp\":" + std::to_string(a.hp);
   s += ",\"maxHp\":" + std::to_string(st.hp);
   s += ",\"look\":" + std::to_string(genes_code(a.genes));
-  s += ",\"lift\":" + num(f.lift);
+  s += ",\"lift\":" + num(f.lift) + ",\"shield\":" + seconds(f.shield_ticks);
   s += ",\"moves\":" + moves_json(a.species, a.genes, st);
   s += ",\"fighter\":" + fighter_json(w, f, species_moves(a.species), true) + "}";
   return s;
@@ -578,6 +621,8 @@ std::string battle_json(const World& w) {
        ",\"wizardXp\":" + std::to_string(b.outcome_wizard_xp) + "}";
   if (b.phase == BattlePhase::None) return s + "}";
   s += ",\"target\":" + (b.target == kNoTarget ? std::string("-1") : std::to_string(b.target));
+  // Too far from the foes: seconds left to come back.
+  if (b.away_ticks > 0) s += ",\"away\":" + seconds(rules::kAwayTicks - b.away_ticks);
   if (active_monster(w)) s += ",\"ally\":" + ally_json(w, b.ally);
   if (b.phase == BattlePhase::Training) {
     s += ",\"shield\":{\"parriedTick\":" + std::to_string(b.shield.parried_tick) +

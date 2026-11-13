@@ -26,6 +26,9 @@ const char* rarity_name(Rarity rarity);
 
 // The character sheet: name, level, experience and characteristics.
 std::string wizard_json(const World& world);
+// The magician's spells: those chosen (combat, adventure), those it knows,
+// and the ones that can be cast now (with their cooldowns).
+std::string spells_json(const World& world);
 
 // Every monster species with its base characteristics, elements, family,
 // size, speeds and how many live in this world (villagers are not listed),

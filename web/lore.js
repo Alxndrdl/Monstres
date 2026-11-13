@@ -149,6 +149,11 @@ window.MonstresLore = {
 
   // Attacks of the monsters (species_moves in src/core/battle.cpp). byElement:
   // the name when the attack is of another element (elemental forms).
+  // The magician's spells (src/core/battle.hpp).
+  spells: {
+    heal: { name: 'Soin', text: 'Soigne ton monstre de 10 PV, ou le réveille s’il est K.O.' },
+    shield: { name: 'Bouclier', text: 'Protège ton monstre : aucun coup ne le touche pendant 1 seconde.' },
+  },
   moves: {
     bite: { name: 'Morsure', description: 'Un petit coup de dents rapide. On peut l’enchaîner.' },
     ember: {
@@ -199,7 +204,7 @@ window.MonstresLore = {
       'Ma grand-mère disait que le magicien de la Tour parlait aux étoiles.'] },
     4: { name: 'Bastien', trainer: true, chatter: ['Ne t’approche pas trop des corbeaux du château : ils sont bien plus forts que ceux d’ici.',
       'Le soir, les Champi de la forêt brillent comme des lanternes.'] },
-    5: { name: 'Odette', chatter: ['Le puits n’a jamais tari, même pendant la grande sécheresse.',
+    5: { name: 'Odette', healer: true, chatter: ['Le puits n’a jamais tari, même pendant la grande sécheresse.',
       'Un Bloup a sauté dans mon seau ce matin ! Je l’ai remis au lac, bien sûr.'] },
     6: { name: 'Félix', chatter: ['Personne n’est entré dans la grotte aux Cristaux depuis des années. On dit qu’elle chante la nuit.',
       'Un vieux Piou peut voler jusqu’au château sans s’arrêter.'] },
@@ -219,6 +224,8 @@ window.MonstresLore = {
     teleporters: ['Gaspard ne quitte plus le cercle de pierres, sur la place. Il se demande à quoi il sert.',
       'Gaspard dit qu’il a vu le même cercle de pierres près du château.',
       'Ces vieilles pierres à runes, sur la place… Gaspard est persuadé qu’elles sont magiques.'],
+    odette: ['Si tes monstres sont épuisés, va voir Odette : elle les soigne pour rien.',
+      'Odette a toujours une tisane pour les monstres fatigués.'],
     bastien: ['Bastien s’entraîne tous les jours avec son Champi, au bord du village. Il cherche un adversaire !',
       'Si tu veux te mesurer à un vrai dresseur, va voir Bastien, à l’entrée du village.'],
     teleportersDone: ['Gaspard raconte à tout le monde que tu as disparu dans un éclair de lumière !',

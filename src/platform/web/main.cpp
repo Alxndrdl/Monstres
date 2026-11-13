@@ -389,13 +389,16 @@ EMSCRIPTEN_KEEPALIVE void monstres_parry() { g_app->parry_buffer = kJumpBufferTi
 // sheet: 5 release team[target]; map: 7 teleport to teleporter target;
 // dialogues: 8 accept quest target, 9 give team[target], 10 report quest
 // target, 12 challenge the trainer target (Npc); battle: 11 aim at
-// foes[target] (65535: at no one), 13 ready (Command).
-// Applied with the next tick (right away when frozen, for tests).
+// foes[target] (65535: at no one), 13 ready; spells: 14 cast spell slot
+// target, 15 equip (slot * 16 + spell); the healer: 16 heal the team (Command).
+// Applied with the next tick (right away when frozen or paused).
 EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
-  if (command < 1 || command > 13 || target < 0 || target > 65535) return;
+  if (command < 1 || command > 16 || target < 0 || target > 65535) return;
   g_app->command = static_cast<Command>(command);
   g_app->command_target = static_cast<uint16_t>(target);
-  if (g_app->frozen) {
+  // Frozen (tests), or a menu open (time stands still: choosing spells,
+  // letting a monster go): one tick, so that it happens now.
+  if (g_app->frozen || g_app->paused) {
     tick(*g_app, current_input(*g_app));
     g_app->redraw = true;
   }
@@ -482,6 +485,11 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_object_json(int index) {
 
 EMSCRIPTEN_KEEPALIVE const char* monstres_teleporters_json() {
   g_app->json = teleporters_json(g_app->world);
+  return g_app->json.c_str();
+}
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_spells_json() {
+  g_app->json = spells_json(g_app->world);
   return g_app->json.c_str();
 }
 

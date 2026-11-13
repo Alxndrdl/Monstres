@@ -17,6 +17,7 @@
   const MIRABELLE = 1;
   const GASPARD = 2;
   const BASTIEN = 4;
+  const ODETTE = 5;
 
   let game = null;
   const box = $('dialogue');
@@ -157,6 +158,25 @@
     }
   }
 
+  // ---- Odette: she heals the team ----
+  function odette() {
+    const tired = game.team().filter((m) => m.hp < m.maxHp);
+    if (!tired.length) {
+      show('Tes monstres sont en pleine forme ! Reviens me voir s’ils sont fatigués.',
+        [['Encore un mot ?', () => villager(ODETTE)], ['Au revoir', close]]);
+      return;
+    }
+    const ko = tired.filter((m) => m.hp === 0).length;
+    show(ko ? 'Oh, tes pauvres monstres ! Laisse-moi les soigner, ça ne coûte rien.'
+      : 'Tes monstres ont l’air fatigués. Je les soigne ? C’est gratuit, bien sûr.', [
+      ['Oui, merci !', () => {
+        game.healTeam(ODETTE);
+        afterTick(() => show('Et voilà, ils sont comme neufs ! Prends soin d’eux.'));
+      }, 'heal-team'],
+      ['Non merci', close],
+    ]);
+  }
+
   // ---- The other villagers: rumors about the quests, and chatter ----
   function villager(n) {
     const quests = game.quests();
@@ -171,6 +191,7 @@
     if (stones.stage !== 'done') { if (n % 2 === 0) add(LORE.rumors.teleporters, 1); }
     else if (n % 3 === 0) add(LORE.rumors.teleportersDone, 0);
     if (n !== BASTIEN && n % 3 === 1) add(LORE.rumors.bastien, 0);  // some of them send the player to him
+    if (n !== ODETTE && n % 3 === 2) add(LORE.rumors.odette, 0);  // and to her
     for (const line of (LORE.npcs[n] || {}).chatter || []) pool.push(line);
     const k = said[n] = (said[n] || 0) + 1;
     show(pool[(k - 1) % pool.length] || 'Bonjour !', [['Encore un mot ?', () => villager(n)], ['Au revoir', close]]);
@@ -184,6 +205,7 @@
     if (c.npc === MIRABELLE) mirabelle();
     else if (c.npc === GASPARD) gaspard();
     else if (c.npc === BASTIEN) bastien(c);
+    else if (c.npc === ODETTE) odette();
     else villager(c.npc);
     // Walking away ends the talk.
     clearInterval(watch);
