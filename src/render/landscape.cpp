@@ -190,7 +190,9 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
   if (obstacles.covered(x, z, 0.05f)) return;
   if (w.ground.normal(x, z).y < 0.8f) return;  // bare rock on cliffs
   if (in_lake(w.village.lake, x, z, 0.6f)) return;
-  if (w.ground.height(x, z) < rules::kSeaLevel + 0.6f) return;  // the sea and the wet sand
+  // The sea and the wet sand, on the shore only: the valley's hollows below
+  // the sea's level are dry land (Heightmap::land_height, as Zone::Coast).
+  if (w.ground.height(x, z) < rules::kSeaLevel + 0.6f && w.ground.land_height(x, z) < rules::kSeaLevel + 1.0f) return;
   if (w.ruins.radius > 0) {  // the paved courtyard of the ruins
     const float rx = x - w.ruins.center.x, rz = z - w.ruins.center.z;
     if (std::max(std::fabs(rx), std::fabs(rz)) < 8.5f && rand01(w.seed, 3500 + ui, uj) < 0.8f) return;
@@ -242,6 +244,16 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
     in.sx = in.sz = 0.8f + 0.5f * rand01(w.seed, 9000 + ui, uj);
     in.sy = s;
     out.push_back({MeshId::GrassShort, in, keep});
+  }
+}
+
+// The simpler model of a tuft or a flower, a little farther away.
+MeshId simpler_grass(MeshId id) {
+  switch (id) {
+    case MeshId::GrassShort: return MeshId::GrassShortFar;
+    case MeshId::GrassTall: return MeshId::GrassTallFar;
+    case MeshId::Flower: return MeshId::FlowerFar;
+    default: return id;
   }
 }
 
@@ -317,6 +329,11 @@ Aabb instance_bounds(MeshId id, const Instance& in) {
 Vec2 landscape_center(float x, float z) {
   const auto snap = [](float v) { return std::round(v / landscape::kStep) * landscape::kStep; };
   return {snap(x), snap(z)};
+}
+
+bool landscape_can_wait(Vec2 player, Vec2 built) {
+  const float dx = player.x - built.x, dz = player.z - built.z;
+  return dx * dx + dz * dz < kWaitReach * kWaitReach;
 }
 
 void LandscapeCache::clear() {
@@ -494,15 +511,16 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
                                 : 1.0f - (1.0f - landscape::kGrassThinLeast) * (d - landscape::kGrassThinStart) /
                                              (landscape::kGrassRadius - landscape::kGrassThinStart);
         if (g.keep >= share) continue;
+        const MeshId mesh = d <= landscape::kGrassFullRadius ? g.mesh : simpler_grass(g.mesh);
         if (share >= 1.0f) {
-          emit(g.mesh, g.instance);
+          emit(mesh, g.instance);
           continue;
         }
         Instance in = g.instance;
         const float widen = std::sqrt(1.0f / share);
         in.sx *= widen;
         in.sz *= widen;
-        emit(g.mesh, in);
+        emit(mesh, in);
       }
     }
   }
@@ -517,6 +535,25 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
       batch.insert(batch.end(), bins[k].begin(), bins[k].end());
     }
   }
+}
+
+bool follow_player(const World& w, DrawList& list, LandscapeCache& cache, Vec2& built, double budget_ms, bool all_now,
+                   int* prepared) {
+  const Vec2 player{w.player.pos.x, w.player.pos.z};
+  const Vec2 center = landscape_center(player.x, player.z);
+  int n = 0;
+  bool rebuilt = false;
+  if (center == built) {
+    n = cache.prepare(w, player, budget_ms);  // what the next steps will need
+  } else if (!all_now && !cache.ready(w, center) && landscape_can_wait(player, built)) {
+    n = cache.prepare(w, center, budget_ms);  // a little longer: its chunks first
+  } else {
+    built = center;
+    build_landscape(w, list, center, cache);  // what is still missing is computed now
+    rebuilt = true;
+  }
+  if (prepared) *prepared += n;
+  return rebuilt;
 }
 
 void build_landscape(const World& w, DrawList& list, Vec2 center) {

@@ -66,9 +66,8 @@ struct App {
   Continent continent;  // the land beyond the playable area (built once per seed)
   GroundColors ground_colors;    // the ground's colors, kept as the tiles are built
   GroundTiles ground_tiles;      // the detailed tiles drawn, built ahead of time
-  std::vector<Part> coarse_parts, path_parts;  // for culling the terrain list
+  std::vector<Part> path_parts, water_parts;  // for culling the terrain list
   LandscapeCache landscape_cache;  // the landscape by chunks, computed ahead of time
-  int landscape_wait = 0;        // frames the landscape has waited for its chunks
   // Resolution: device pixels per CSS pixel, at most kPixelBudget pixels,
   // lowered (down to kMinScale) when frames come too slowly.
   double render_scale = 1;       // share of the best resolution, adapted
@@ -181,11 +180,6 @@ void follow_battle(App& app, double dt_ms) {
   app.redraw = true;
 }
 
-// Sends a detailed ground tile to the GPU (GroundTiles::Upload).
-void upload_tile(void* user, size_t slot, const MeshData& mesh) {
-  static_cast<App*>(user)->renderer->set_mesh(kMeshCount + slot, mesh);
-}
-
 constexpr double kBackgroundMs = 2.0;  // each frame, at most this long building ahead (tiles, chunks)
 
 // The detailed ground and landscape follow the player: built ahead of time,
@@ -193,36 +187,20 @@ constexpr double kBackgroundMs = 2.0;  // each frame, at most this long building
 // needed right away (a new world). True when the landscape was rebuilt.
 bool update_landscape(App& app, bool all_now = false) {
   const World& w = app.world;
-  const Vec2 player{w.player.pos.x, w.player.pos.z};
   const double start = emscripten_get_now();
   const double budget = all_now ? 1e9 : kBackgroundMs;
-  if (app.ground_tiles.update(w, app.ground_colors, player, budget, upload_tile, &app)) {
-    app.ground_tiles.fill_list(app.terrain, app.coarse_parts, app.path_parts);
+  int prepared = 0;
+  const bool rebuilt = follow_player(w, app.landscape, app.landscape_cache, app.landscape_center, budget, all_now, &prepared);
+  if (rebuilt) app.redraw = true;
+  if (app.profile.on) app.profile.chunks_prepared += prepared;
+  const double left = std::max(0.2, budget - (emscripten_get_now() - start));
+  if (app.ground_tiles.update(w, app.ground_colors, {w.player.pos.x, w.player.pos.z}, left)) {
+    // The drawn tiles in one mesh, the coarse ground's other tiles in order (GroundTiles).
+    app.renderer->set_mesh(terrain::kDetailMesh, app.ground_tiles.detail());
+    app.renderer->set_mesh_indices(static_cast<size_t>(MeshId::Ground), app.ground_tiles.coarse_indices());
+    app.ground_tiles.fill_list(app.terrain, app.path_parts, app.water_parts);
     app.redraw = true;
     if (app.profile.on) ++app.profile.tile_swaps;
-  }
-  const double left = std::max(0.2, budget - (emscripten_get_now() - start));
-  const Vec2 center = landscape_center(player.x, player.z);
-  bool rebuilt = false;
-  if (center != app.landscape_center) {
-    // A step away: wait (a few frames at most) until its chunks are ready.
-    // Farther (a teleporter, a new world): right away.
-    const bool jump = std::max(std::fabs(center.x - app.landscape_center.x), std::fabs(center.z - app.landscape_center.z)) >
-                      2 * landscape::kStep;
-    if (!jump && !all_now && !app.landscape_cache.ready(w, center) && app.landscape_wait < 30) {
-      ++app.landscape_wait;
-      const int n = app.landscape_cache.prepare(w, center, left);
-      if (app.profile.on) app.profile.chunks_prepared += n;
-      return false;
-    }
-    app.landscape_center = center;
-    app.landscape_wait = 0;
-    build_landscape(w, app.landscape, center, app.landscape_cache);
-    app.redraw = true;
-    rebuilt = true;
-  } else {
-    const int n = app.landscape_cache.prepare(w, player, left);
-    if (app.profile.on) app.profile.chunks_prepared += n;
   }
   return rebuilt;
 }
@@ -235,29 +213,30 @@ void world_changed(App& app) {
   app.camera_tick = app.world.tick;
   app.landscape_center = {1e9f, 1e9f};
   app.ground_colors = {};  // another world: other colors
-  app.ground_tiles.reset();
   app.landscape_cache.clear();
-  MeshData coarse = build_coarse_ground(app.world, app.ground_colors);
-  app.coarse_parts = coarse.parts;
+  const MeshData coarse = build_coarse_ground(app.world, app.ground_colors);
+  app.ground_tiles.reset(coarse);
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), coarse);
   MeshData path = build_path_mesh(app.world);
   app.path_parts = path.parts;
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), path);
-  app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), build_water_mesh(app.world));
+  MeshData water = build_water_mesh(app.world);
+  app.water_parts = water.parts;
+  app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), water);
   update_landscape(app, true);
   // The continent depends on the seed only: built again for another world.
   if (app.continent.empty() || app.continent.seed != app.world.seed) {
     const double start = emscripten_get_now();
     app.continent = make_continent(app.world.seed);
-    const MeshData ground = build_far_ground_mesh(app.continent);
-    const MeshData water = build_far_water_mesh(app.continent);
-    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarGround), ground);
-    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarWater), water);
+    const MeshData far_ground = build_far_ground_mesh(app.continent);
+    const MeshData far_water = build_far_water_mesh(app.continent);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarGround), far_ground);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarWater), far_water);
     app.renderer->set_mesh(static_cast<size_t>(MeshId::Lava), build_lava_mesh(app.continent));
     build_far_landscape(app.far_landscape);
     app.far_landscape.mesh_parts.assign(kMeshCount, {});
-    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarGround)] = ground.parts;
-    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarWater)] = water.parts;
+    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarGround)] = far_ground.parts;
+    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarWater)] = far_water.parts;
     app.continent_ms = emscripten_get_now() - start;
   }
 }

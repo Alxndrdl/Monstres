@@ -37,6 +37,6 @@ void visible_ranges(const std::vector<Part>& parts, const Frustum& frustum, uint
 void split_into_parts(MeshData& mesh, float cx, float cz, int sectors, std::span<const float> bands, float big);
 
 inline constexpr uint32_t kMergeInstances = 24;  // instances drawn for nothing rather than one more draw call
-inline constexpr uint32_t kMergeVertices = 768;
+inline constexpr uint32_t kMergeVertices = 1600;  // (or indices) about 530 triangles
 
 }  // namespace monstres

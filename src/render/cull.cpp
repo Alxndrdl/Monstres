@@ -93,28 +93,32 @@ void cull_list(DrawList& list, const Frustum& f) {
 
 void split_into_parts(MeshData& m, float cx, float cz, int sectors, std::span<const float> bands, float big) {
   constexpr size_t kv = MeshData::kFloatsPerVertex;
-  const size_t triangles = m.vertex_count() / 3;
+  const bool indexed = !m.indices.empty();
+  const size_t triangles = m.triangle_count();
+  // Vertex k of triangle t.
+  const auto vertex = [&](size_t t, size_t k) -> const float* {
+    const size_t i = indexed ? m.indices[t * 3 + k] : t * 3 + k;
+    return &m.vertices[i * kv];
+  };
   const size_t groups = static_cast<size_t>(sectors) * (bands.size() + 1) + 1;  // the last one: the big triangles
   std::vector<uint32_t> group_of(triangles);
   std::vector<size_t> count(groups, 0);
   for (size_t t = 0; t < triangles; ++t) {
-    const float* v = &m.vertices[t * 3 * kv];
-    float lo_x = v[0], hi_x = v[0], lo_z = v[2], hi_z = v[2];
+    float lo_x = 1e30f, hi_x = -1e30f, lo_z = 1e30f, hi_z = -1e30f;
     float mx = 0, mz = 0;
-    for (int k = 0; k < 3; ++k) {
-      const float x = v[k * kv], z = v[k * kv + 2];
-      lo_x = std::min(lo_x, x);
-      hi_x = std::max(hi_x, x);
-      lo_z = std::min(lo_z, z);
-      hi_z = std::max(hi_z, z);
-      mx += x / 3;
-      mz += z / 3;
+    for (size_t k = 0; k < 3; ++k) {
+      const float* v = vertex(t, k);
+      lo_x = std::min(lo_x, v[0]);
+      hi_x = std::max(hi_x, v[0]);
+      lo_z = std::min(lo_z, v[2]);
+      hi_z = std::max(hi_z, v[2]);
+      mx += v[0] / 3;
+      mz += v[2] / 3;
     }
     size_t g = groups - 1;
     if (hi_x - lo_x <= big && hi_z - lo_z <= big) {
       const float dx = mx - cx, dz = mz - cz;
-      const float angle = std::atan2(dz, dx);
-      int sector = static_cast<int>((angle + 3.14159265f) / 6.2831853f * static_cast<float>(sectors));
+      int sector = static_cast<int>((std::atan2(dz, dx) + 3.14159265f) / 6.2831853f * static_cast<float>(sectors));
       sector = std::clamp(sector, 0, sectors - 1);
       const float d = std::sqrt(dx * dx + dz * dz);
       size_t band = 0;
@@ -124,25 +128,37 @@ void split_into_parts(MeshData& m, float cx, float cz, int sectors, std::span<co
     group_of[t] = static_cast<uint32_t>(g);
     ++count[g];
   }
-  // Counting sort of the triangles by group.
+  // Counting sort of the triangles by group (their indices, or their vertices).
   std::vector<size_t> start(groups + 1, 0);
   for (size_t g = 0; g < groups; ++g) start[g + 1] = start[g] + count[g];
-  std::vector<float> sorted(m.vertices.size());
   std::vector<size_t> fill(start.begin(), start.end() - 1);
-  for (size_t t = 0; t < triangles; ++t) {
-    const size_t to = fill[group_of[t]]++;
-    std::copy_n(m.vertices.begin() + static_cast<std::ptrdiff_t>(t * 3 * kv), 3 * kv,
-                sorted.begin() + static_cast<std::ptrdiff_t>(to * 3 * kv));
+  if (indexed) {
+    std::vector<uint32_t> sorted(m.indices.size());
+    for (size_t t = 0; t < triangles; ++t) {
+      const size_t to = fill[group_of[t]]++;
+      std::copy_n(m.indices.begin() + static_cast<std::ptrdiff_t>(t * 3), 3, sorted.begin() + static_cast<std::ptrdiff_t>(to * 3));
+    }
+    m.indices = std::move(sorted);
+  } else {
+    std::vector<float> sorted(m.vertices.size());
+    for (size_t t = 0; t < triangles; ++t) {
+      const size_t to = fill[group_of[t]]++;
+      std::copy_n(m.vertices.begin() + static_cast<std::ptrdiff_t>(t * 3 * kv), 3 * kv,
+                  sorted.begin() + static_cast<std::ptrdiff_t>(to * 3 * kv));
+    }
+    m.vertices = std::move(sorted);
   }
-  m.vertices = std::move(sorted);
   m.parts.clear();
   for (size_t g = 0; g < groups; ++g) {
     if (count[g] == 0) continue;
     Part part;
     part.range = {static_cast<uint32_t>(start[g] * 3), static_cast<uint32_t>(count[g] * 3)};
     part.bounds = empty_aabb();
-    for (size_t k = start[g] * 3; k < (start[g] + count[g]) * 3; ++k) {
-      part.bounds.add(m.vertices[k * kv], m.vertices[k * kv + 1], m.vertices[k * kv + 2]);
+    for (size_t t = start[g]; t < start[g] + count[g]; ++t) {
+      for (size_t k = 0; k < 3; ++k) {
+        const float* v = vertex(t, k);
+        part.bounds.add(v[0], v[1], v[2]);
+      }
     }
     m.parts.push_back(part);
   }

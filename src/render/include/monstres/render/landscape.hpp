@@ -33,7 +33,9 @@ inline constexpr float kObjectsRadius = 215.0f;
 inline constexpr float kTreeFadeStart = 160.0f, kTreeFadeEnd = 198.0f;
 // Grass thins out (from the center): all of it within kGrassThinStart, then
 // fewer and wider tufts, down to a share of kGrassThinLeast at kGrassRadius.
-inline constexpr float kGrassThinStart = 20.0f, kGrassThinLeast = 0.45f;
+inline constexpr float kGrassThinStart = 24.0f, kGrassThinLeast = 0.6f;
+// Beyond this (from the center), simpler tufts and flowers (one triangle a blade).
+inline constexpr float kGrassFullRadius = 22.0f;
 
 // The world by chunks of kChunk meters (lined up with the objects' index):
 // what the landscape is made of is computed chunk by chunk, when first
@@ -52,6 +54,15 @@ inline constexpr int kBins = 2 * kSectors;
 
 // Center of the detailed landscape for a player at (x, z).
 Vec2 landscape_center(float x, float z);
+
+// When the player has come to a new center but its chunks are not all
+// computed yet: whether the landscape around `built` may stay a little
+// longer. Only while the player is still well within it (its grass and
+// small things reach farther than they show: kGrassRadius against
+// kGrassFadeEnd); beyond, the landscape must be built right away, or grass
+// would be missing ahead.
+inline constexpr float kWaitReach = landscape::kGrassRadius - landscape::kGrassFadeEnd - 1.5f;
+bool landscape_can_wait(Vec2 player, Vec2 built);
 
 // The models' bounds, for culling: set once the models are loaded (until
 // then, and for meshes built at runtime, generous bounds).
@@ -121,5 +132,13 @@ private:
 void build_landscape(const World& world, DrawList& list, Vec2 center, LandscapeCache& cache);
 void build_landscape(const World& world, DrawList& list, Vec2 center);
 void build_landscape(const World& world, DrawList& list);
+
+// One frame of the landscape following the player: rebuilt around its new
+// center when the chunks are ready (or right away, see landscape_can_wait),
+// chunks computed ahead meanwhile, for about budget_ms. `built`: the center
+// of the landscape in `list` ({1e9, 1e9} at first). `all_now`: no waiting
+// (a new world, pictures). True when rebuilt; `prepared` counts the chunks computed.
+bool follow_player(const World& world, DrawList& list, LandscapeCache& cache, Vec2& built, double budget_ms,
+                   bool all_now = false, int* prepared = nullptr);
 
 }  // namespace monstres

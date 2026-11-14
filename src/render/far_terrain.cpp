@@ -142,12 +142,14 @@ MeshData build_far_ground_mesh(const Continent& k) {
     Vec3 n;
   };
   std::vector<Point> grid;
+  std::vector<int64_t> ids;  // vertex of each grid point, -1 until used (indexed: each point once)
   for (int level = 0; level < kLevels; ++level) {
     const float cell = kCells[level], outer = kOuter[level];
     const float inner = level == 0 ? rules::kReliefHalfSize : kOuter[level - 1];
     const int n = static_cast<int>(std::lround(2 * outer / cell));
     const int points = n + 1;
     grid.assign(static_cast<size_t>(points) * points, Point{});
+    ids.assign(grid.size(), -1);
     const auto coord = [&](int i) { return -outer + cell * static_cast<float>(i); };
     for (int i = 0; i < points; ++i) {
       for (int j = 0; j < points; ++j) {
@@ -171,8 +173,16 @@ MeshData build_far_ground_mesh(const Continent& k) {
         // The deep ocean: no ground (the water there is opaque).
         const float deep = rules::kSeaLevel - 20.0f;
         if (p00.y < deep && p10.y < deep && p01.y < deep && p11.y < deep) continue;
-        vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x0, p01.y, z1, p01.c, p01.n); vertex(m, x1, p11.y, z1, p11.c, p11.n);
-        vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x1, p11.y, z1, p11.c, p11.n); vertex(m, x1, p10.y, z0, p10.c, p10.n);
+        const auto id = [&](int a, int b) {
+          const size_t g = static_cast<size_t>((i + a) * points + j + b);
+          if (ids[g] < 0) {
+            ids[g] = static_cast<int64_t>(m.vertex_count());
+            const Point& p = grid[g];
+            vertex(m, coord(i + a), p.y, coord(j + b), p.c, p.n);
+          }
+          return static_cast<uint32_t>(ids[g]);
+        };
+        m.indices.insert(m.indices.end(), {id(0, 0), id(0, 1), id(1, 1), id(0, 0), id(1, 1), id(1, 0)});
       }
     }
   }
@@ -198,6 +208,7 @@ MeshData build_far_ground_mesh(const Continent& k) {
         if (nx * inward.x + nz * inward.z < 0) std::swap(t[1], t[2]);
         for (const auto& v : t) {
           const bool first = v[0] == ax && v[2] == az;
+          m.indices.push_back(static_cast<uint32_t>(m.vertex_count()));
           vertex(m, v[0], v[1], v[2], first ? ca : cb, inward);
         }
       }

@@ -189,11 +189,21 @@ Ce qui tient le passage à l'échelle :
     tuile du joueur et les huit autour, en 4 m deux ou trois tuiles plus loin ;
   - quand le joueur change de tuile, celles qui manquent sont construites en
     avance, quelques-unes par image (2 ms au plus), puis toutes dessinées
-    d'un coup ; d'ici là, les précédentes restent. Elles sont gardées sur la
-    carte graphique (96 places, les plus anciennes remplacées) ;
+    d'un coup ; d'ici là, les précédentes restent (après un téléporteur,
+    tout est construit tout de suite). Les tuiles construites sont gardées
+    (120 au plus, les plus anciennes oubliées) ;
+  - peu d'appels de dessin : les tuiles dessinées forment un seul maillage,
+    et les tuiles grossières restantes sont remises en ordre (leurs indices
+    seulement), les deux rangés par secteurs autour du joueur. Celles qui
+    sont dans le champ se suivent : deux à cinq appels pour tout le sol ;
   - le bord d'une tuile voisine d'une plus grossière suit le bord de
     celle-ci : pas de fente. Une bande descend le long du bord du terrain
     lointain ;
+  - les tuiles et le sol grossier sont indexés : chaque point est un seul
+    sommet, partagé par jusqu'à six triangles (cinq fois moins de mémoire,
+    et la carte graphique ne calcule chaque sommet qu'une fois) ;
+  - l'eau de la mer dans le relief est en mailles de 16 m, découpée en
+    parties comme le reste ;
 - **paysage par morceaux** de 32 m (`LandscapeCache`,
   `src/render/landscape.hpp`) : les objets de chaque morceau (leurs modèles
   de près, à mi-distance et de loin, leur ombre) et son herbe sont calculés
@@ -213,9 +223,10 @@ Ce qui tient le passage à l'échelle :
   mètre et le continent à 1 pixel pour 10 m.
 
 Rendu lointain (`src/render/far_terrain.hpp`) :
-- le sol du continent est un seul maillage en anneaux carrés autour du
-  relief jouable (mailles de 10, 20, 40 puis 80 m) ; le bord fin suit le bord
-  grossier. L'océan profond n'a pas de sol, son eau est opaque ;
+- le sol du continent est un seul maillage indexé (chaque point une seule
+  fois) en anneaux carrés autour du relief jouable : mailles de 10 m jusqu'à
+  840 m du centre, puis 20, 40 et 80 m ; le bord fin suit le bord grossier.
+  L'océan profond n'a pas de sol, son eau est opaque ;
 - il est dessiné dans une passe lointaine (`DrawList::far`), avec sa propre
   plage de profondeur (8 m à 9,5 km). La profondeur est ensuite effacée, et la
   scène proche (0,1 m à 2 km : tout le relief jouable, même depuis un coin)
@@ -229,10 +240,12 @@ Mesures :
   0,01 ms par pas de simulation dans les terres sauvages, sauvegarde de
   62 Ko écrite et relue en environ 120 ms ;
 - continent : grille en environ 50 ms, maillages en environ 20 ms ;
-  64 000 triangles ;
+  53 000 triangles, 2,4 Mo ;
 - dans le navigateur (Chromium sans carte graphique) :
-  - de 190 000 à 260 000 triangles par image selon les lieux, contre 460 000
-    à 520 000 avant le tri selon la vue et les tuiles ;
+  - de 127 000 à 166 000 triangles par image selon les lieux, contre
+    460 000 à 520 000 avant le tri selon la vue et les tuiles ; l'herbe et
+    les fleurs en font de 5 000 à 25 000 ;
+  - de 59 à 93 appels de dessin par image ;
   - simulation environ 0,25 ms par image ;
   - la mise à jour du paysage et du sol ne dépasse plus environ 3,5 ms (le
     travail en avance est limité à 2 ms par image).
@@ -247,7 +260,7 @@ Des tests vérifient le budget :
 Il reste à faire, quand le monde grandira encore ou s'ouvrira au continent :
 - un relief et des objets de la simulation par tronçons (le monde est encore
   construit en entier au chargement, environ 120 ms) ;
-- des maillages indexés, pour alléger la mémoire graphique et les sommets.
+- d'autres maillages indexés (les modèles, l'eau, le chemin).
 
 ## Un monde vivant autour du joueur
 
@@ -266,7 +279,9 @@ suivre pendant que d'autres vont et viennent.
 L'affichage suit le même principe (`build_landscape`,
 `src/render/landscape.cpp`) : autour du joueur (64 m), tout est dessiné avec
 les ombres, et l'herbe et les fleurs poussent (56 m), de plus en plus
-clairsemées au-delà de 20 m (des touffes un peu plus larges compensent). Les
+clairsemées au-delà de 20 m (des touffes un peu plus larges compensent) et,
+au-delà de 22 m, en modèles plus simples (un triangle par brin : 4 et 6
+triangles au lieu de 21 et 33, des fleurs de 6 triangles au lieu de 14). Les
 arbres et les buissons sont entiers à moins de 26 m, puis simplifiés
 (`tree_mid`, 92 triangles au lieu de 332 ; `bush_far`, 40 au lieu de 320).
 Au-delà de 64 m, seuls les points marquants restent (maisons, tours,

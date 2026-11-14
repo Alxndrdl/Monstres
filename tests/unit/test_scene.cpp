@@ -67,11 +67,14 @@ TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mount
   DrawList list;
   build_landscape(w, list);
 
-  const auto& short_grass = batch(list, MeshId::GrassShort);
-  const auto& tall_grass = batch(list, MeshId::GrassTall);
-  CHECK(short_grass.size() > 1500);  // thinning out with the distance
+  // Near the center in full, simpler farther (and thinning out).
+  std::vector<Instance> short_grass = batch(list, MeshId::GrassShort), tall_grass = batch(list, MeshId::GrassTall);
+  short_grass.insert(short_grass.end(), batch(list, MeshId::GrassShortFar).begin(), batch(list, MeshId::GrassShortFar).end());
+  tall_grass.insert(tall_grass.end(), batch(list, MeshId::GrassTallFar).begin(), batch(list, MeshId::GrassTallFar).end());
+  CHECK(short_grass.size() > 1500);
   CHECK(tall_grass.size() > 300);
-  CHECK(batch(list, MeshId::Flower).size() > 100);
+  CHECK(batch(list, MeshId::Flower).size() + batch(list, MeshId::FlowerFar).size() > 100);
+  CHECK(batch(list, MeshId::GrassShortFar).size() > batch(list, MeshId::GrassShort).size());
 
   // No grass in the middle of the path or inside an object.
   for (const auto* grass : {&short_grass, &tall_grass}) {
@@ -141,6 +144,34 @@ TEST_CASE("the continent is drawn in the far pass: its ground, waters, lava, and
   CHECK(view_range::kNearFar > rules::kReliefHalfSize * 2.9f);  // the whole relief, from one of its corners
   CHECK(v.fog_end <= view_range::kFarFar);
   CHECK(v.fog_half < 3000.0f);
+}
+
+TEST_CASE("grass grows in the valley's hollows below the sea's level (dry land), not on the shore") {
+  // Seed 42 starts in a hollow below the sea's level.
+  const World& w = cached_game(42);
+  REQUIRE(w.ground.height(0, 0) < rules::kSeaLevel);
+  DrawList list;
+  build_landscape(w, list);
+  size_t low = 0, shore = 0;
+  for (MeshId id : {MeshId::GrassShort, MeshId::GrassShortFar, MeshId::GrassTall, MeshId::GrassTallFar}) {
+    for (const Instance& g : list.batches[static_cast<size_t>(id)]) {
+      low += g.y < rules::kSeaLevel;
+      shore += g.y < rules::kSeaLevel + 0.5f && w.ground.land_height(g.x, g.z) < rules::kSeaLevel + 1.0f;
+    }
+  }
+  CHECK(low > 500);
+  CHECK(shore == 0);
+  // On the west coast: no grass on the wet sand nor in the sea.
+  World coast = cached_game(3);
+  float x = -150;
+  while (x > -rules::kWorldHalfSize && !(coast.ground.sea(x, 0) && coast.ground.height(x, 0) < rules::kSeaLevel)) x -= 2;
+  REQUIRE(x > -rules::kWorldHalfSize);
+  coast.player.pos = {x + 10, coast.ground.height(x + 10, 0), 0};
+  DrawList beach;
+  build_landscape(coast, beach);
+  for (const Instance& g : beach.batches[static_cast<size_t>(MeshId::GrassShort)]) {
+    CHECK_FALSE((coast.ground.sea(g.x, g.z) && coast.ground.height(g.x, g.z) < rules::kSeaLevel + 0.5f));
+  }
 }
 
 TEST_CASE("the landscape depends on the world only") {

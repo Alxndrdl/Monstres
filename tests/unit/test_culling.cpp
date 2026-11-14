@@ -24,6 +24,9 @@ View view_at(const World& w, float yaw, float pitch = 0.28f) {
   return build_view(w, cam, 844.0f / 390.0f, 0);
 }
 
+// Where the tiles test walks last.
+Vec2 p_last(Vec2 at) { return {at.x + terrain::kTile * 1, at.z + terrain::kTile * 3}; }
+
 bool covered(const std::vector<DrawRange>& ranges, uint32_t i) {
   return std::any_of(ranges.begin(), ranges.end(), [&](const DrawRange& r) { return i >= r.first && i < r.first + r.count; });
 }
@@ -136,9 +139,15 @@ TEST_CASE("the landscape built from the cache is the one built from scratch, chu
   DrawList moved;
   build_landscape(w, moved, {center.x + landscape::kStep, center.z}, cache);
   CHECK(moved.version == 1);
-  CHECK(moved.batches[static_cast<size_t>(MeshId::GrassShort)].size() > 1000);
-  // Grass thins out with the distance.
-  const auto& grass = scratch.batches[static_cast<size_t>(MeshId::GrassShort)];
+  CHECK(moved.batches[static_cast<size_t>(MeshId::GrassShort)].size() +
+            moved.batches[static_cast<size_t>(MeshId::GrassShortFar)].size() > 1000);
+  // Grass thins out with the distance, simpler beyond kGrassFullRadius.
+  for (const Instance& g : scratch.batches[static_cast<size_t>(MeshId::GrassShort)]) {
+    CHECK(std::hypot(g.x - center.x, g.z - center.z) <= landscape::kGrassFullRadius + 1e-3f);
+  }
+  std::vector<Instance> grass = scratch.batches[static_cast<size_t>(MeshId::GrassShort)];
+  const auto& simpler = scratch.batches[static_cast<size_t>(MeshId::GrassShortFar)];
+  grass.insert(grass.end(), simpler.begin(), simpler.end());
   size_t near = 0, far = 0;
   for (const Instance& g : grass) {
     const float d = std::hypot(g.x - center.x, g.z - center.z);
@@ -215,55 +224,56 @@ TEST_CASE("no gap between a detailed tile and a coarser neighbor") {
   }
 }
 
-namespace {
-struct Uploads {
-  int count = 0;
-  size_t max_slot = 0;
-};
-void count_upload(void* user, size_t slot, const MeshData& mesh) {
-  auto* u = static_cast<Uploads*>(user);
-  ++u->count;
-  u->max_slot = std::max(u->max_slot, slot);
-  CHECK(mesh.vertex_count() > 0);
-}
-}  // namespace
-
-TEST_CASE("the detailed tiles are built ahead, a few at a time, and swapped in all at once") {
+TEST_CASE("the detailed tiles are built ahead, a few at a time, and swapped in all at once, in few draw calls") {
   const World& w = cached_game(8);
   GroundColors colors;
+  const MeshData coarse = build_coarse_ground(w, colors);
   GroundTiles tiles;
-  Uploads uploads;
+  tiles.reset(coarse);
   const Vec2 at{w.player.pos.x, w.player.pos.z};
-  CHECK(tiles.update(w, colors, at, 0.0, count_upload, &uploads));  // nothing drawn yet: all now
-  CHECK(tiles.drawn().size() == detailed_tiles(at.x, at.z).size());
-  CHECK(uploads.count == static_cast<int>(tiles.drawn().size()));
-  CHECK_FALSE(tiles.update(w, colors, at, 0.0, count_upload, &uploads));  // the same: nothing to do
+  CHECK(tiles.update(w, colors, at, 0.0));  // nothing drawn yet: all now
+  CHECK(tiles.drawn() == detailed_tiles(at.x, at.z));
+  CHECK_FALSE(tiles.update(w, colors, at, 0.0));  // the same: nothing to do
+  // The drawn tiles in one mesh, a part each; the coarse ground's others, all of its triangles but theirs.
+  const MeshData& detail = tiles.detail();
+  CHECK(detail.parts.size() == tiles.drawn().size());
+  size_t expected = 0;
+  for (const TileKey& k : tiles.drawn()) expected += build_ground_tile(w, colors, k).indices.size();
+  CHECK(detail.indices.size() == expected);
+  for (uint32_t i : detail.indices) REQUIRE(i < detail.vertex_count());
+  const size_t per_coarse_tile = coarse.indices.size() / coarse.parts.size();
+  CHECK(tiles.coarse_indices().size() == coarse.indices.size() - tiles.drawn().size() * per_coarse_tile);
   // One tile farther: built one by one (no time given), drawn when all are ready.
   const Vec2 next{at.x + terrain::kTile, at.z};
-  const std::vector<int> before = tiles.drawn();
+  const std::vector<TileKey> before = tiles.drawn();
   int frames = 0;
-  while (!tiles.update(w, colors, next, 0.0, count_upload, &uploads)) {
+  while (!tiles.update(w, colors, next, 0.0)) {
     CHECK(tiles.drawn() == before);  // meanwhile, the tiles before
     REQUIRE(++frames < 100);
   }
   CHECK(frames > 3);
-  CHECK(tiles.drawn().size() == detailed_tiles(next.x, next.z).size());
-  // Walking around for long: the slots are reused.
+  CHECK(tiles.drawn() == detailed_tiles(next.x, next.z));
+  // Far away at once (a teleporter): all of them right away.
+  CHECK(tiles.update(w, colors, {at.x - 400, at.z + 300}, 0.0));
+  CHECK(tiles.drawn() == detailed_tiles(at.x - 400, at.z + 300));
+  // Walking around for long: the built tiles kept stay within bounds.
   for (int k = 0; k < 12; ++k) {
     const Vec2 p{at.x + terrain::kTile * static_cast<float>(k % 5), at.z + terrain::kTile * static_cast<float>(k / 3)};
-    while (!tiles.update(w, colors, p, 1e9, count_upload, &uploads)) {}
+    while (!tiles.update(w, colors, p, 1e9)) {}
   }
-  CHECK(uploads.max_slot < terrain::kTileSlots);
-  // The terrain list: the coarse ground but under the detailed tiles, the tiles.
+  CHECK(tiles.cached() <= terrain::kTileCache);
+  // Few draw calls: sorted around the player, the parts in view are mostly next to one another.
   DrawList list;
-  MeshData coarse = build_coarse_ground(w, colors);
-  tiles.fill_list(list, coarse.parts, {});
-  size_t hidden = 0;
-  for (const Part& p : list.mesh_parts[static_cast<size_t>(MeshId::Ground)]) hidden += p.hidden;
-  CHECK(hidden == tiles.drawn().size());
-  size_t tile_batches = 0;
-  for (size_t i = kMeshCount; i < list.batches.size(); ++i) tile_batches += list.batches[i].size();
-  CHECK(tile_batches == tiles.drawn().size());
+  tiles.fill_list(list, {}, {});
+  for (float yaw : {0.0f, 1.6f, -2.4f}) {
+    World look = w;
+    look.player.pos = {p_last(at).x, w.ground.height(p_last(at).x, p_last(at).z), p_last(at).z};
+    const Frustum f = frustum_of(view_at(look, yaw).view_projection);
+    cull_list(list, f);
+    CHECK(list.visible[terrain::kDetailMesh].vertices.size() <= 4);
+    CHECK(list.visible[static_cast<size_t>(MeshId::Ground)].vertices.size() <= 6);
+    CHECK_FALSE(list.visible[static_cast<size_t>(MeshId::Ground)].vertices.empty());
+  }
 }
 
 TEST_CASE("the continent is cut into parts by where it is, all of it kept") {
@@ -276,7 +286,7 @@ TEST_CASE("the continent is cut into parts by where it is, all of it kept") {
     next += p.range.count;
     CHECK(p.range.count % 3 == 0);
   }
-  CHECK(next == ground.vertex_count());
+  CHECK(next == ground.draw_count());
   // Looking from the playable area: much of it is out of view.
   const World& w = cached_game(3);
   const View v = view_at(w, 0.7f);
@@ -284,7 +294,7 @@ TEST_CASE("the continent is cut into parts by where it is, all of it kept") {
   visible_ranges(ground.parts, frustum_of(v.far_view_projection), kMergeVertices, ranges);
   uint32_t drawn = 0;
   for (const DrawRange& r : ranges) drawn += r.count;
-  CHECK(drawn < ground.vertex_count() * 6 / 10);
+  CHECK(drawn < ground.draw_count() * 6 / 10);
   CHECK(drawn > 0);
 }
 
@@ -308,4 +318,34 @@ TEST_CASE("creatures out of view are not drawn; the player always is") {
   CHECK(bodies(all) == 2);
   CHECK(bodies(seen) == 1);
   CHECK(seen.batches[static_cast<size_t>(MeshId::PlayerHead)].size() == 1);
+}
+
+TEST_CASE("walking on, the landscape keeps up: never so far behind that grass would be missing ahead") {
+  // A run, and much faster than any run (the chunks then cannot keep up):
+  // on the slowest device, one chunk computed per frame at most.
+  for (const float speed : {6.5f, 40.0f}) {
+    CAPTURE(speed);
+    World w = cached_game(6);
+    LandscapeCache cache;
+    DrawList list;
+    Vec2 built{1e9f, 1e9f};
+    CHECK(follow_player(w, list, cache, built, 0.0, true));
+    int rebuilds = 0, waits = 0;
+    float worst = 0;
+    for (int frame = 0; frame < 8 * 60; ++frame) {
+      w.player.pos.x += speed / 60;
+      w.player.pos.z += 0.3f * speed / 60;
+      const Vec2 before = built;
+      rebuilds += follow_player(w, list, cache, built, 0.0);
+      waits += built == before && landscape_center(w.player.pos.x, w.player.pos.z) != built;
+      worst = std::max(worst, std::hypot(w.player.pos.x - built.x, w.player.pos.z - built.z));
+    }
+    CHECK(rebuilds > 2);
+    CHECK(waits >= 0);  // it may wait for its chunks...
+    CHECK(worst < landscape::kGrassRadius - landscape::kGrassFadeEnd);  // ...but never too long
+    // And what it built is what building from scratch gives.
+    DrawList scratch;
+    build_landscape(w, scratch, built);
+    for (size_t m = 0; m < kMeshCount; ++m) CHECK(list.batches[m].size() == scratch.batches[m].size());
+  }
 }

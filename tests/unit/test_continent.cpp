@@ -89,7 +89,9 @@ TEST_CASE("the far ground: rings without gaps between them, meeting the playable
       CHECK(far_vertex_height(c, level, t + fine, -e) == Approx(0.5f * (d + f)));
     }
   }
-  const MeshData ground = build_far_ground_mesh(c);
+  const MeshData indexed = build_far_ground_mesh(c);
+  CHECK(indexed.vertex_count() * 3 < indexed.draw_count());  // each point shared by several triangles
+  const MeshData ground = expanded(indexed);
   CHECK_FALSE(ground.transparent);
   const World& world = cached_game(3);
   bool up = true, seam = true;
@@ -121,10 +123,11 @@ TEST_CASE("the continent stays within its budget: triangles, memory, time") {
   const auto meshes = std::chrono::steady_clock::now();
   const MeshData ground = build_far_ground_mesh(c), water = build_far_water_mesh(c), lava = build_lava_mesh(c);
   const double mesh_ms = ms_since(meshes);
-  const size_t triangles = (ground.vertex_count() + water.vertex_count() + lava.vertex_count()) / 3;
-  const double megabytes = static_cast<double>((ground.vertices.size() + water.vertices.size()) * sizeof(float)) / 1e6;
+  const size_t triangles = ground.triangle_count() + water.triangle_count() + lava.triangle_count();
+  const double megabytes = static_cast<double>((ground.vertices.size() + water.vertices.size()) * sizeof(float) +
+                                               (ground.indices.size() + water.indices.size()) * sizeof(uint32_t)) / 1e6;
   std::printf("continent: grid %.0f ms, meshes %.0f ms, %zu triangles (ground %zu, water %zu), %.1f MB of vertices\n",
-              grid_ms, mesh_ms, triangles, ground.vertex_count() / 3, water.vertex_count() / 3, megabytes);
+              grid_ms, mesh_ms, triangles, ground.triangle_count(), water.triangle_count(), megabytes);
   CHECK(triangles < 140000);  // drawn every frame, on phones too
   CHECK(megabytes < 18);
   if (!kSanitized) CHECK(grid_ms + mesh_ms < 1500);  // once per world (natively; WebAssembly is a bit slower)

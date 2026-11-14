@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monstres/core/world.hpp"
+#include "monstres/render/models.hpp"
 #include "monstres/render/renderer.hpp"
 
 #include <cstdint>
@@ -22,7 +23,8 @@ inline constexpr int kTiles = static_cast<int>(2 * kDetailHalfSize / kTile);
 inline constexpr int kLods = 3;
 inline constexpr float kLodCells[kLods] = {2.0f, 4.0f, 8.0f};
 inline constexpr int kLodReach[kLods - 1] = {1, 3};  // tiles away from the player's (at most) for each detailed level
-inline constexpr size_t kTileSlots = 96;  // detailed tiles kept on the GPU (renderer meshes after the models)
+inline constexpr size_t kTileCache = 120;  // detailed tiles kept once built
+inline constexpr size_t kDetailMesh = kMeshCount;  // the drawn tiles: the renderer's mesh after the models
 }  // namespace terrain
 
 // Which tile a coordinate is on (clamped to the relief), and where it starts.
@@ -63,37 +65,49 @@ MeshData build_ground_mesh(const World& world);
 // Which detailed tiles are drawn, built ahead of time as the player walks:
 // when the player comes onto another tile, the tiles it needs are built, a
 // few each frame, and drawn all at once when they are all ready (meanwhile,
-// the ones before stay). Kept on the GPU in kTileSlots slots, the least
-// recently drawn ones replaced first.
+// the ones before stay). Built tiles are kept (kTileCache, the least
+// recently drawn ones forgotten first).
+//
+// Few draw calls: the drawn tiles make one mesh (kDetailMesh), and the
+// coarse ground's tiles not drawn in detail are put in order again (its
+// indices only): both sorted by sectors around the player, so that those in
+// view are mostly next to one another.
 class GroundTiles {
 public:
-  // Sends a mesh to the GPU, in a slot (renderer mesh kMeshCount + slot).
-  using Upload = void (*)(void* user, size_t slot, const MeshData& mesh);
-
-  void reset();
+  // Starts again with this coarse ground (its parts: one per tile, by tile_part_index).
+  void reset(const MeshData& coarse);
   // Builds tiles the player at (x, z) needs, for about budget_ms (at least
-  // one if any is missing; all of them when nothing is drawn yet). True
-  // when the drawn tiles changed (see fill_list).
-  bool update(const World& world, GroundColors& colors, Vec2 player, double budget_ms, Upload upload, void* user);
+  // one if any is missing; all of them when nothing is drawn yet, or
+  // nothing near: after a teleporter). True
+  // when the drawn tiles changed: then send detail() to the GPU as mesh
+  // kDetailMesh, coarse_indices() as the coarse ground's indices, and fill
+  // the terrain list again.
+  bool update(const World& world, GroundColors& colors, Vec2 player, double budget_ms);
+  const MeshData& detail() const { return detail_; }
+  const std::vector<uint32_t>& coarse_indices() const { return coarse_sorted_; }
   // The terrain list: the coarse ground but under the drawn tiles, the
   // tiles, the path and the water (with the parts of their meshes, for culling).
-  void fill_list(DrawList& list, const std::vector<Part>& coarse_parts, const std::vector<Part>& path_parts) const;
+  void fill_list(DrawList& list, const std::vector<Part>& path_parts, const std::vector<Part>& water_parts = {}) const;
 
   int built() const { return built_; }  // tiles built since the start (profile)
-  bool ready() const { return !drawn_.empty(); }
-  struct Slot {
-    TileKey key;
-    bool used = false;
-    uint64_t last_drawn = 0;
-    Aabb bounds;
-  };
-  const std::vector<Slot>& slots() const { return slots_; }
-  const std::vector<int>& drawn() const { return drawn_; }  // slots drawn
+  bool ready() const { return !drawn_keys_.empty(); }
+  const std::vector<TileKey>& drawn() const { return drawn_keys_; }
+  size_t cached() const { return cache_.size(); }
 
 private:
-  int find(TileKey key) const;
-  std::vector<Slot> slots_;
-  std::vector<int> drawn_;
+  struct Cached {
+    TileKey key;
+    MeshData mesh;
+    uint64_t last_drawn = 0;
+  };
+  const Cached* find(TileKey key) const;
+  void assemble(Vec2 player);
+  std::vector<Cached> cache_;
+  std::vector<uint32_t> coarse_indices_;  // as built, tile after tile
+  std::vector<Part> coarse_tiles_;
+  std::vector<uint32_t> coarse_sorted_;
+  std::vector<Part> coarse_sorted_parts_;
+  MeshData detail_;
   std::vector<TileKey> drawn_keys_;
   uint64_t frame_ = 0;
   int built_ = 0;

@@ -338,6 +338,40 @@ def grass(blades, min_height, max_height, spread, seed):
     return m
 
 
+def grass_far(blades, min_height, max_height, spread, seed):
+    """The tuft from a little farther: as many blades, a little wider, one triangle each."""
+    m = Mesh(double_sided=True)
+    up = (0.0, 1.0, 0.0)
+    for b in range(blades):
+        angle = TAU * hash01(seed, b * 5)
+        dist = spread * math.sqrt(hash01(seed, b * 5 + 1))
+        height = min_height + (max_height - min_height) * hash01(seed, b * 5 + 2)
+        facing = TAU * hash01(seed, b * 5 + 3)
+        lean = 0.35 * height * hash01(seed, b * 5 + 4)
+        base = (dist * math.cos(angle), 0.0, dist * math.sin(angle))
+        side = (math.cos(facing), 0.0, math.sin(facing))
+        out = (-side[2], 0.0, side[0])
+        width = 1.25 * (0.035 + 0.02 * hash01(seed, b * 5 + 2))
+        tip = add(add(base, (0, height, 0)), mul(out, lean))
+        b0, b1 = add(base, mul(side, -width)), add(base, mul(side, width))
+        m.tri(b0, b1, tip, None, colors=[GRASS_BASE, GRASS_BASE, GRASS_TIP], normal=up)
+    return m
+
+
+def flower_far():
+    """The flower from a little farther: a stem and a flat corolla."""
+    m = Mesh(double_sided=True)
+    up = (0.0, 1.0, 0.0)
+    h, w = 0.32, 0.02
+    m.tri((-w, 0, 0), (w, 0, 0), (0, h, 0), STEM)
+    for i in range(5):
+        a0, a1 = TAU * i / 5, TAU * (i + 1) / 5
+        p0 = (0.07 * math.cos(a0), h + 0.02, 0.07 * math.sin(a0))
+        p1 = (0.07 * math.cos(a1), h + 0.02, 0.07 * math.sin(a1))
+        m.tri((0, h + 0.015, 0), p1, p0, WHITE, normal=up)
+    return m
+
+
 def flower():
     m = Mesh(double_sided=True)
     up = (0.0, 1.0, 0.0)
@@ -1605,6 +1639,9 @@ def all_models():
         "grass_short": grass(7, 0.18, 0.38, 0.12, 700),
         "grass_tall": grass(11, 0.5, 0.95, 0.2, 701),
         "flower": flower(),
+        "grass_short_far": grass_far(7, 0.18, 0.38, 0.12, 700),
+        "grass_tall_far": grass_far(11, 0.5, 0.95, 0.2, 701),
+        "flower_far": flower_far(),
         "shadow": shadow(),
         "eye": eye(),
         "player_leg": player_leg(),

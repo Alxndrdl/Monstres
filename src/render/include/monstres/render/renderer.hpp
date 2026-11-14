@@ -59,12 +59,34 @@ struct MeshData {
   std::vector<float> vertices;
   bool transparent = false;   // alpha-blended, drawn after the opaque meshes
   bool double_sided = false;  // no back-face culling (grass blades, flowers)
+  // Indexed meshes (the ground, the continent: each point shared by up to
+  // six triangles): the triangles are these vertices, three by three.
+  // Empty: the vertices themselves, three by three.
+  std::vector<uint32_t> indices;
   // Big meshes drawn once (the ground, the continent): their parts, by
-  // where they are, so that only those in view are drawn (vertex ranges).
+  // where they are, so that only those in view are drawn (ranges of what is
+  // drawn: indices, or vertices when there are none).
   std::vector<Part> parts;
   static constexpr size_t kFloatsPerVertex = 10;
   size_t vertex_count() const { return vertices.size() / kFloatsPerVertex; }
+  size_t draw_count() const { return indices.empty() ? vertex_count() : indices.size(); }
+  size_t triangle_count() const { return draw_count() / 3; }
 };
+
+// The same triangles without indices (each vertex repeated): for tests and tools.
+inline MeshData expanded(const MeshData& m) {
+  if (m.indices.empty()) return m;
+  MeshData out;
+  out.transparent = m.transparent;
+  out.double_sided = m.double_sided;
+  out.vertices.reserve(m.indices.size() * MeshData::kFloatsPerVertex);
+  for (uint32_t i : m.indices) {
+    const auto from = m.vertices.begin() + static_cast<std::ptrdiff_t>(i * MeshData::kFloatsPerVertex);
+    out.vertices.insert(out.vertices.end(), from, from + MeshData::kFloatsPerVertex);
+  }
+  out.parts = m.parts;  // the same ranges: one vertex per index
+  return out;
+}
 
 // Rotation as a unit quaternion.
 struct Quat {
@@ -229,6 +251,9 @@ public:
   virtual ~Renderer() = default;
   // Replaces mesh `index` (used for meshes built at runtime, like the ground).
   virtual void set_mesh(size_t index, const MeshData& mesh) = 0;
+  // Replaces only the indices of indexed mesh `index` (the same vertices,
+  // other triangles or in another order: the coarse ground sorted again).
+  virtual void set_mesh_indices(size_t index, const std::vector<uint32_t>& indices) = 0;
   virtual void begin_frame(const Frame& frame) = 0;
   // Draws the sky, then every list (all opaque batches, then all transparent ones).
   virtual void draw(const View& view, std::span<const DrawList* const> lists) = 0;

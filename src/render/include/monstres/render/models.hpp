@@ -48,6 +48,7 @@ enum class MeshId : size_t {
   CastleWall, CastleTower, CastleGate, CastleKeep, CaveMouth, Crystal, Teleporter,
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar,
+  GrassShortFar, GrassTallFar, FlowerFar,
   Ground,  // built at runtime
   FarGround, Lava,  // the continent (far pass), built at runtime
   // Transparent, drawn last, in this order:
@@ -73,7 +74,9 @@ inline MeshGroup mesh_group(MeshId id) {
     case MeshId::Ground: case MeshId::Path: case MeshId::Water: case MeshId::FarGround: case MeshId::FarWater:
     case MeshId::Lava:
       return MeshGroup::Terrain;
-    case MeshId::GrassShort: case MeshId::GrassTall: case MeshId::Flower: return MeshGroup::Vegetation;
+    case MeshId::GrassShort: case MeshId::GrassTall: case MeshId::Flower:
+    case MeshId::GrassShortFar: case MeshId::GrassTallFar: case MeshId::FlowerFar:
+      return MeshGroup::Vegetation;
     case MeshId::Cloud0: case MeshId::Cloud1: case MeshId::Cloud2: case MeshId::Mountain0: case MeshId::Mountain1:
       return MeshGroup::Sky;
     case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::RuneCircle:

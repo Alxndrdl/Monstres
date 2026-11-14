@@ -212,7 +212,8 @@ void* offset(size_t bytes) { return reinterpret_cast<void*>(bytes); }
 struct GpuMesh {
   GLuint vao = 0;
   GLuint vbo = 0;
-  GLsizei vertex_count = 0;
+  GLuint ebo = 0;            // indices, if any
+  GLsizei vertex_count = 0;  // what is drawn: indices, or vertices when there are none
   bool transparent = false;
   bool double_sided = false;
 };
@@ -274,11 +275,11 @@ public:
     if (index >= meshes_.size()) meshes_.resize(index + 1);
     GpuMesh& m = meshes_[index];
     release(m);
-    m.vertex_count = static_cast<GLsizei>(data.vertex_count());
+    m.vertex_count = data.vertices.empty() ? 0 : static_cast<GLsizei>(data.draw_count());
     m.transparent = data.transparent;
     m.double_sided = data.double_sided;
     if (m.vertex_count == 0) return;
-    stats_.uploaded_bytes += data.vertices.size() * sizeof(float);
+    stats_.uploaded_bytes += data.vertices.size() * sizeof(float) + data.indices.size() * sizeof(uint32_t);
 
     glGenVertexArrays(1, &m.vao);
     glBindVertexArray(m.vao);
@@ -293,12 +294,31 @@ public:
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, vertex_stride, offset(3 * sizeof(float)));
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, vertex_stride, offset(6 * sizeof(float)));
+    if (!data.indices.empty()) {  // kept in the vertex array
+      glGenBuffers(1, &m.ebo);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(data.indices.size() * sizeof(uint32_t)),
+                   data.indices.data(), GL_STATIC_DRAW);
+    }
     // Per-instance attributes: pointed at an instance buffer just before each draw.
     for (GLuint i = 0; i < 4; ++i) {
       glEnableVertexAttribArray(3 + i);
       glVertexAttribDivisor(3 + i, 1);
     }
     glBindVertexArray(0);
+  }
+
+  void set_mesh_indices(size_t index, const std::vector<uint32_t>& indices) override {
+    if (index >= meshes_.size()) return;
+    GpuMesh& m = meshes_[index];
+    if (!m.vao || !m.ebo) return;
+    glBindVertexArray(m.vao);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices.size() * sizeof(uint32_t)), indices.data(),
+                 GL_STATIC_DRAW);
+    glBindVertexArray(0);
+    m.vertex_count = static_cast<GLsizei>(indices.size());
+    stats_.uploaded_bytes += indices.size() * sizeof(uint32_t);
   }
 
   void begin_frame(const Frame& frame) override {
@@ -392,7 +412,13 @@ public:
           const auto draw = [&](uint32_t first_instance, uint32_t instance_count, GLint first_vertex, GLsizei vertex_count) {
             if (instance_count == 0 || vertex_count <= 0) return;
             point_instance_attributes(first_instance);
-            glDrawArraysInstanced(GL_TRIANGLES, first_vertex, vertex_count, static_cast<GLsizei>(instance_count));
+            if (m.ebo) {
+              glDrawElementsInstanced(GL_TRIANGLES, vertex_count, GL_UNSIGNED_INT,
+                                      offset(static_cast<size_t>(first_vertex) * sizeof(uint32_t)),
+                                      static_cast<GLsizei>(instance_count));
+            } else {
+              glDrawArraysInstanced(GL_TRIANGLES, first_vertex, vertex_count, static_cast<GLsizei>(instance_count));
+            }
             if (profiling_) {
               const uint64_t triangles = static_cast<uint64_t>(vertex_count / 3) * instance_count;
               ++stats_.draw_calls;
@@ -572,8 +598,9 @@ private:
 
   static void release(GpuMesh& m) {
     if (m.vbo) glDeleteBuffers(1, &m.vbo);
+    if (m.ebo) glDeleteBuffers(1, &m.ebo);
     if (m.vao) glDeleteVertexArrays(1, &m.vao);
-    m.vbo = m.vao = 0;
+    m.vbo = m.vao = m.ebo = 0;
   }
 
   GLuint mesh_program_ = 0, sky_program_ = 0;
