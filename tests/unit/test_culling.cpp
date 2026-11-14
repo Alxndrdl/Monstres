@@ -287,3 +287,25 @@ TEST_CASE("the continent is cut into parts by where it is, all of it kept") {
   CHECK(drawn < ground.vertex_count() * 6 / 10);
   CHECK(drawn > 0);
 }
+
+TEST_CASE("creatures out of view are not drawn; the player always is") {
+  World w = cached_game(3);
+  const View v = view_at(w, 0);  // looking towards -Z
+  const Frustum f = frustum_of(v.view_projection);
+  // Two slimes: one in front, one far behind the camera.
+  w.creatures.resize(1);
+  w.active = -1;
+  for (float dz : {-12.0f, 60.0f}) {
+    Creature c;
+    c.species = Species::Slime;
+    c.body.pos = {w.player.pos.x, w.ground.height(w.player.pos.x, w.player.pos.z + dz), w.player.pos.z + dz};
+    w.creatures.push_back(c);
+  }
+  DrawList all, seen;
+  build_dynamic(w, 0, all);
+  build_dynamic(w, 0, seen, -1, &f);
+  const auto bodies = [](const DrawList& l) { return l.batches[static_cast<size_t>(MeshId::SlimeBody)].size(); };
+  CHECK(bodies(all) == 2);
+  CHECK(bodies(seen) == 1);
+  CHECK(seen.batches[static_cast<size_t>(MeshId::PlayerHead)].size() == 1);
+}

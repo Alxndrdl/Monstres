@@ -115,7 +115,9 @@ inline constexpr float kLightReach = 60.0f;
 size_t world_lights(const World& world, float x, float z, float night, float time, PointLight* out);
 
 // The player, the companion and the wild monsters, with their shadows.
-void add_characters(const World& world, float time, DrawList& list);
+// With a view: only the creatures that may be in it (the player always).
+struct Frustum;
+void add_characters(const World& world, float time, DrawList& list, const Frustum* view = nullptr);
 
 // Who a portrait shows: the magician, or a species.
 struct PortraitSubject {

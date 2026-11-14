@@ -575,11 +575,11 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
 
 }  // namespace
 
-void build_dynamic(const World& w, float time, DrawList& list, int selected) {
+void build_dynamic(const World& w, float time, DrawList& list, int selected, const Frustum* view) {
   list.batches.resize(kMeshCount);
   for (auto& batch : list.batches) batch.clear();
 
-  add_characters(w, time, list);
+  add_characters(w, time, list, view);
   add_village_effects(w, time, list);
   add_teleporter_effects(w, time, list);
 

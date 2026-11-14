@@ -162,6 +162,8 @@ window.monstres = {
   // Frame profiler (settings menu): where the time of the frames goes, every half second.
   setProfiling: (on) => _monstres_set_profiling(on ? 1 : 0),
   profile: () => JSON.parse(UTF8ToString(_monstres_profile_json())),
+  // Settings menu: lower the resolution when frames are slow (on by default).
+  setAdaptiveResolution: (on) => _monstres_set_adaptive_resolution(on ? 1 : 0),
 
   // Game menus (web/menu.js).
   setPaused: (paused) => _monstres_set_paused(paused ? 1 : 0),

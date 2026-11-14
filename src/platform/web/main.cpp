@@ -72,6 +72,7 @@ struct App {
   // Resolution: device pixels per CSS pixel, at most kPixelBudget pixels,
   // lowered (down to kMinScale) when frames come too slowly.
   double render_scale = 1;       // share of the best resolution, adapted
+  bool adaptive = true;          // settings menu: lower it when frames are slow
   double slow_since = 0, fast_since = 0;  // when frames started being too slow / fast enough
   double interval_avg = 16.7;    // smoothed time between frames (ms)
   DrawList far_landscape;  // its ground and waters (far pass)
@@ -361,6 +362,10 @@ double pixel_scale(const App& app, double css_w, double css_h) {
 // (tests, pictures) nor paused.
 void adapt_resolution(App& app, double dt, double now) {
   static double ceiling = 2, ceiling_time = 0;
+  if (!app.adaptive) {
+    app.render_scale = 1;
+    return;
+  }
   if (app.frozen || app.paused || dt <= 0 || dt > 250) return;  // a hidden tab, a pause
   app.interval_avg += (dt - app.interval_avg) * 0.05;
   if (app.interval_avg > 21.0) {
@@ -451,9 +456,6 @@ void frame(void* user) {
   // Time follows the simulation, so ?frozen screenshots are reproducible.
   const float time = static_cast<float>(app.world.tick) / rules::kTicksPerSecond;
   mark = emscripten_get_now();
-  build_dynamic(app.world, time, app.dynamic, app.selected);
-  build_far_dynamic(app.world, time, app.far_dynamic);
-  measure(kScene);
   const View view = current_view(app, time);
   // Only what the camera can see (cull.hpp).
   const Frustum in_front = frustum_of(view.view_projection);
@@ -461,6 +463,9 @@ void frame(void* user) {
   cull_list(app.landscape, in_front);
   cull_list(app.far_landscape, frustum_of(view.far_view_projection));
   measure(kView);
+  build_dynamic(app.world, time, app.dynamic, app.selected, &in_front);
+  build_far_dynamic(app.world, time, app.far_dynamic);
+  measure(kScene);
   const DrawList* lists[] = {&app.far_landscape, &app.far_dynamic, &app.terrain, &app.landscape, &app.dynamic};
   app.renderer->begin_frame({pw, ph});
   app.renderer->draw(view, lists);
@@ -640,6 +645,13 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_profiling(int on) {
   p.on = on != 0;
   p.since = emscripten_get_now();
   g_app->renderer->set_profiling(p.on);
+}
+
+// Settings menu: whether the resolution goes down when frames are slow.
+EMSCRIPTEN_KEEPALIVE void monstres_set_adaptive_resolution(int on) {
+  g_app->adaptive = on != 0;
+  g_app->slow_since = g_app->fast_since = 0;
+  g_app->redraw = true;
 }
 
 EMSCRIPTEN_KEEPALIVE const char* monstres_profile_json() { return g_app->profile.json.c_str(); }

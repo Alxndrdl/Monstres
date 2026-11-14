@@ -186,9 +186,13 @@
     const [w, h] = p.pixels;
     rows.push(section('Écran'));
     rows.push(row('Pixels', `${w}×${h}`, 0, 'taille du dessin (écran × densité)', `×${(+p.dpr).toFixed(2)} · ${thousands(w * h)}`));
+    const scale = p.renderScale ?? 1;
+    rows.push(row('Résolution', `${Math.round(scale * 100)} %`, scale, 'baissée automatiquement quand le jeu ralentit (paramètres)'));
+    rows.push(row('Sol détaillé', `${p.tilesBuilt} tuiles`, 0, 'tuiles du sol construites en avance depuis le début',
+      `${p.grassChunks} morceaux d’herbe`));
     rows.push(row('Lumières', `${p.lights}`, p.lights / 12, 'lanternes, cristaux… (12 au plus)'));
     rows.push(row('Créatures', `${p.creatures}`, 0, 'simulées autour de toi', `${p.objects} objets`));
-    rows.push(row('Envoyé au GPU', `${p.uploadedKiB} Kio`, 0, 'données des instances (personnages, effets ; paysage quand il change)'));
+    rows.push(row('Envoyé au GPU', `${p.uploadedKiB} Kio`, 0, 'données des instances (personnages, effets ; paysage et tuiles du sol quand ils changent)'));
     // What limits the frame rate, in a few words.
     let hint;
     if (p.avg.interval < 18) hint = 'Fluide : rien ne freine.';
@@ -228,6 +232,18 @@
     prefs.set('showProfile', detailCheck.checked);
   });
   detailCheck.checked = prefs.get('showProfile', false) === true;
+
+  // ---- Resolution lowered when frames are slow (on by default) ----
+  const adaptiveCheck = document.getElementById('adaptive-resolution');
+  const setAdaptive = (on) => whenReady(() => {
+    if (typeof window.monstres.setAdaptiveResolution === 'function') window.monstres.setAdaptiveResolution(on);
+  });
+  adaptiveCheck.checked = prefs.get('adaptiveResolution', true) !== false;
+  setAdaptive(adaptiveCheck.checked);
+  adaptiveCheck.addEventListener('change', () => {
+    setAdaptive(adaptiveCheck.checked);
+    prefs.set('adaptiveResolution', adaptiveCheck.checked);
+  });
   showFps(prefs.get('showFps', false) === true);
 
   // ---- Creature info ----

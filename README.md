@@ -182,15 +182,33 @@ Ce qui tient le passage à l'échelle :
   les projectiles, les perchoirs, l'apparition des monstres, la caméra et le
   toucher ne regardent que les objets proches ; plus rien ne parcourt tous les
   objets à chaque pas ;
-- **sol en anneaux** autour du joueur : mailles de 2 m jusqu'à 96 m (les
-  triangles mêmes sur lesquels on marche), puis 4 m jusqu'à 224 m, puis 8 m
-  jusqu'au bord. Le sol est reconstruit tous les 64 m de marche, les couleurs
-  étant gardées au fur et à mesure. Les bords des anneaux se suivent sans
-  fente, et une bande descend le long du bord du terrain lointain ;
+- **sol en tuiles** de 64 m (`GroundTiles`, `src/render/terrain_mesh.hpp`) :
+  - un sol grossier en mailles de 8 m pour tout le relief, construit au
+    chargement ;
+  - en mailles de 2 m (les triangles mêmes sur lesquels on marche) sur la
+    tuile du joueur et les huit autour, en 4 m deux ou trois tuiles plus loin ;
+  - quand le joueur change de tuile, celles qui manquent sont construites en
+    avance, quelques-unes par image (2 ms au plus), puis toutes dessinées
+    d'un coup ; d'ici là, les précédentes restent. Elles sont gardées sur la
+    carte graphique (96 places, les plus anciennes remplacées) ;
+  - le bord d'une tuile voisine d'une plus grossière suit le bord de
+    celle-ci : pas de fente. Une bande descend le long du bord du terrain
+    lointain ;
+- **paysage par morceaux** de 32 m (`LandscapeCache`,
+  `src/render/landscape.hpp`) : les objets de chaque morceau (leurs modèles
+  de près, à mi-distance et de loin, leur ombre) et son herbe sont calculés
+  une fois, en avance quand le joueur s'approche, et gardés. Reconstruire le
+  paysage tous les 16 m ne fait plus que recopier ;
 - **seuls les objets proches sont dessinés** : les arbres et les rochers à
   moins de 215 m, rapetissant entre 160 et 198 m (pas d'apparition brusque).
   Les bâtiments sont dessinés partout. Les effets (fumées, lanternes,
   étincelles) ne parcourent que les objets de la vallée ;
+- **seul ce que la caméra voit est dessiné** (`src/render/cull.hpp`) : le
+  paysage est rangé par secteurs autour du joueur, le sol, le chemin et le
+  continent sont découpés en parties, chacune avec sa boîte. À chaque image,
+  les parties hors du champ de la caméra sont laissées de côté (les voisines
+  visibles sont dessinées d'un seul appel). Les créatures hors champ ne sont
+  pas dessinées non plus ;
 - **la carte** met ses données en cache, dessine le monde à 1 pixel par
   mètre et le continent à 1 pixel pour 10 m.
 
@@ -213,11 +231,11 @@ Mesures :
 - continent : grille en environ 50 ms, maillages en environ 20 ms ;
   64 000 triangles ;
 - dans le navigateur (Chromium sans carte graphique) :
-  - de 477 000 à 510 000 triangles par image, partout, contre 457 000 avant
-    l'agrandissement au départ ;
+  - de 190 000 à 260 000 triangles par image selon les lieux, contre 460 000
+    à 520 000 avant le tri selon la vue et les tuiles ;
   - simulation environ 0,25 ms par image ;
-  - environ 3 à 7 ms pour mettre à jour le paysage tous les 16 m ;
-  - environ 9 ms pour reconstruire le sol tous les 64 m.
+  - la mise à jour du paysage et du sol ne dépasse plus environ 3,5 ms (le
+    travail en avance est limité à 2 ms par image).
 
   À revérifier sur téléphone (détail du temps de calcul).
 
@@ -227,10 +245,9 @@ Des tests vérifient le budget :
 - `test_continent.cpp` : triangles et temps.
 
 Il reste à faire, quand le monde grandira encore ou s'ouvrira au continent :
-- un relief et des objets par tronçons, chargés autour du joueur (tout est
-  encore construit au chargement, environ 120 ms) ;
-- étaler la reconstruction du sol sur plusieurs images ;
-- des maillages indexés, pour alléger la mémoire graphique.
+- un relief et des objets de la simulation par tronçons (le monde est encore
+  construit en entier au chargement, environ 120 ms) ;
+- des maillages indexés, pour alléger la mémoire graphique et les sommets.
 
 ## Un monde vivant autour du joueur
 
@@ -247,14 +264,17 @@ disparaît jamais. Chaque créature a un identifiant (`Creature::id`) pour la
 suivre pendant que d'autres vont et viennent.
 
 L'affichage suit le même principe (`build_landscape`,
-`src/render/scene.cpp`) : autour du joueur (64 m), tout est dessiné avec les
-ombres, et l'herbe et les fleurs poussent (56 m) ; au-delà, seuls les points
-marquants restent (maisons, tours, remparts, grands rochers, ruines) et les
-arbres et sapins sont remplacés par des modèles très simplifiés (`tree_far`,
-28 triangles au lieu de 332). Le paysage détaillé est reconstruit quand le
-joueur a avancé de 16 m ; l'herbe et les petits objets rétrécissent jusqu'à
-disparaître avant le bord (dans le shader), si bien que rien n'apparaît d'un
-coup.
+`src/render/landscape.cpp`) : autour du joueur (64 m), tout est dessiné avec
+les ombres, et l'herbe et les fleurs poussent (56 m), de plus en plus
+clairsemées au-delà de 20 m (des touffes un peu plus larges compensent). Les
+arbres et les buissons sont entiers à moins de 26 m, puis simplifiés
+(`tree_mid`, 92 triangles au lieu de 332 ; `bush_far`, 40 au lieu de 320).
+Au-delà de 64 m, seuls les points marquants restent (maisons, tours,
+remparts, grands rochers, ruines) et les arbres et sapins sont remplacés par
+des modèles très simplifiés (`tree_far`, 28 triangles). Le paysage détaillé
+est reconstruit quand le joueur a avancé de 16 m ; l'herbe et les petits
+objets rétrécissent jusqu'à disparaître avant le bord (dans le shader), si
+bien que rien n'apparaît d'un coup.
 
 ## Quêtes, villageois et téléporteurs
 
@@ -570,6 +590,14 @@ image, et où il passe :
 
 Mesures faites dans `src/platform/web/main.cpp` (`Profile`) et le rendu
 (`RenderStats`).
+
+Résolution : l'image a au plus 1,6 million de pixels (les écrans de téléphone
+sont très denses). Quand le jeu passe sous 48 images par seconde pendant une
+seconde, la résolution baisse par paliers (jusqu'à 60 %), et remonte quand il
+redevient fluide ; elle ne remonte pas, pendant une demi-minute, à un palier
+trouvé trop lent. Paramètres → « Baisser la résolution quand le jeu
+ralentit » (activé par défaut) : décoché, l'image garde toujours sa
+résolution. Le panneau de détail montre la résolution du moment.
 
 ## Personnages et animations
 

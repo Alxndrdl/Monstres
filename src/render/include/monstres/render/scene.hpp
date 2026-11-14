@@ -79,7 +79,8 @@ inline constexpr float kFogStart = 30.0f, kFogHalf = 1800.0f, kFogEnd = 9000.0f;
 
 // What moves: the player, its shadow, the clouds. `time` in seconds.
 // `selected`: index of a creature to mark with a ring at its feet (-1: none).
-void build_dynamic(const World& world, float time, DrawList& list, int selected = -1);
+// With a view: the creatures out of it are left out (cull.hpp).
+void build_dynamic(const World& world, float time, DrawList& list, int selected = -1, const Frustum* view = nullptr);
 
 // How far the camera can be from the target (tx, ty, tz) along the unit
 // direction (dx, dy, dz) without an object in between, at most `wanted`.

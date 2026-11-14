@@ -1,4 +1,5 @@
 #include "monstres/render/characters.hpp"
+#include "monstres/render/cull.hpp"
 
 #include "monstres/render/scene.hpp"
 
@@ -733,7 +734,7 @@ void lie_knocked_out(DrawList& list, const std::array<size_t, kMeshCount>& befor
   }
 }
 
-void add_characters(const World& w, float time, DrawList& list) {
+void add_characters(const World& w, float time, DrawList& list, const Frustum* view) {
   std::vector<PartPose> poses;
   pose_player(w.player, time, poses);
   if (w.battle.phase == BattlePhase::Training) {
@@ -749,6 +750,10 @@ void add_characters(const World& w, float time, DrawList& list) {
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     if (i == 0 && w.active < 0) continue;  // in the crystal
     const Creature& c = w.creatures[i];
+    if (view) {  // out of view: not drawn (room for the biggest ones, their shadows, what they hold)
+      const Vec3 p = c.body.pos;
+      if (!in_view(*view, Aabb{p.x - 3, p.y - 1.5f, p.z - 3, p.x + 3, p.y + 5, p.z + 3})) continue;
+    }
     pose_creature(c, time, static_cast<float>(i) * 0.731f, poses);
     float shadow_size = 1;
     if (c.species == Species::Villager) {
