@@ -11,6 +11,7 @@
 #include "monstres/core/save.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/world.hpp"
+#include "monstres/render/cull.hpp"
 #include "monstres/render/models.hpp"
 #include "monstres/render/terrain_mesh.hpp"
 #include "monstres/render/far_terrain.hpp"
@@ -49,6 +50,8 @@ struct Profile {
   int frames = 0;
   int ticks = 0;
   int landscape_builds = 0;
+  int chunks_prepared = 0;
+  int tile_swaps = 0;
   double sum[kProfileParts] = {};
   double worst[kProfileParts] = {};
   std::string json = "null";  // the last half second
@@ -57,11 +60,20 @@ struct Profile {
 struct App {
   World world;
   std::unique_ptr<Renderer> renderer;
-  DrawList landscape;   // what never moves, rebuilt when the world changes
+  DrawList terrain;     // the ground (coarse, and detailed tiles around the player), the path, the water
+  DrawList landscape;   // objects, grass: rebuilt around the player as it walks
   DrawList dynamic;     // player, clouds: rebuilt every frame
   Continent continent;  // the land beyond the playable area (built once per seed)
-  GroundColors ground_colors;    // the ground's colors, kept as the ground is built again
-  Vec2 ground_center{1e9f, 1e9f};  // where the ground's rings are centered
+  GroundColors ground_colors;    // the ground's colors, kept as the tiles are built
+  GroundTiles ground_tiles;      // the detailed tiles drawn, built ahead of time
+  std::vector<Part> coarse_parts, path_parts;  // for culling the terrain list
+  LandscapeCache landscape_cache;  // the landscape by chunks, computed ahead of time
+  int landscape_wait = 0;        // frames the landscape has waited for its chunks
+  // Resolution: device pixels per CSS pixel, at most kPixelBudget pixels,
+  // lowered (down to kMinScale) when frames come too slowly.
+  double render_scale = 1;       // share of the best resolution, adapted
+  double slow_since = 0, fast_since = 0;  // when frames started being too slow / fast enough
+  double interval_avg = 16.7;    // smoothed time between frames (ms)
   DrawList far_landscape;  // its ground and waters (far pass)
   DrawList far_dynamic;    // the volcano's smoke (far pass)
   double continent_ms = 0; // how long building it took (profile)
@@ -168,21 +180,50 @@ void follow_battle(App& app, double dt_ms) {
   app.redraw = true;
 }
 
-// The detailed landscape follows the player (see build_landscape).
-bool update_landscape(App& app) {
-  // The ground's rings follow the player too, by bigger steps.
-  const Vec2 ground = ground_center(app.world.player.pos.x, app.world.player.pos.z);
-  if (ground != app.ground_center) {
-    app.ground_center = ground;
-    app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), build_ground_mesh(app.world, app.ground_colors, ground));
+// Sends a detailed ground tile to the GPU (GroundTiles::Upload).
+void upload_tile(void* user, size_t slot, const MeshData& mesh) {
+  static_cast<App*>(user)->renderer->set_mesh(kMeshCount + slot, mesh);
+}
+
+constexpr double kBackgroundMs = 2.0;  // each frame, at most this long building ahead (tiles, chunks)
+
+// The detailed ground and landscape follow the player: built ahead of time,
+// a little each frame, and swapped in once ready. `all_now`: build what is
+// needed right away (a new world). True when the landscape was rebuilt.
+bool update_landscape(App& app, bool all_now = false) {
+  const World& w = app.world;
+  const Vec2 player{w.player.pos.x, w.player.pos.z};
+  const double start = emscripten_get_now();
+  const double budget = all_now ? 1e9 : kBackgroundMs;
+  if (app.ground_tiles.update(w, app.ground_colors, player, budget, upload_tile, &app)) {
+    app.ground_tiles.fill_list(app.terrain, app.coarse_parts, app.path_parts);
     app.redraw = true;
+    if (app.profile.on) ++app.profile.tile_swaps;
   }
-  const Vec2 center = landscape_center(app.world.player.pos.x, app.world.player.pos.z);
-  if (center == app.landscape_center) return false;
-  app.landscape_center = center;
-  build_landscape(app.world, app.landscape, center);
-  app.redraw = true;
-  return true;
+  const double left = std::max(0.2, budget - (emscripten_get_now() - start));
+  const Vec2 center = landscape_center(player.x, player.z);
+  bool rebuilt = false;
+  if (center != app.landscape_center) {
+    // A step away: wait (a few frames at most) until its chunks are ready.
+    // Farther (a teleporter, a new world): right away.
+    const bool jump = std::max(std::fabs(center.x - app.landscape_center.x), std::fabs(center.z - app.landscape_center.z)) >
+                      2 * landscape::kStep;
+    if (!jump && !all_now && !app.landscape_cache.ready(w, center) && app.landscape_wait < 30) {
+      ++app.landscape_wait;
+      const int n = app.landscape_cache.prepare(w, center, left);
+      if (app.profile.on) app.profile.chunks_prepared += n;
+      return false;
+    }
+    app.landscape_center = center;
+    app.landscape_wait = 0;
+    build_landscape(w, app.landscape, center, app.landscape_cache);
+    app.redraw = true;
+    rebuilt = true;
+  } else {
+    const int n = app.landscape_cache.prepare(w, player, left);
+    if (app.profile.on) app.profile.chunks_prepared += n;
+  }
+  return rebuilt;
 }
 
 // Call whenever app.world is replaced (new game, loaded or imported save).
@@ -192,19 +233,30 @@ void world_changed(App& app) {
   app.camera.smooth = false;  // straight to its subject
   app.camera_tick = app.world.tick;
   app.landscape_center = {1e9f, 1e9f};
-  app.ground_center = {1e9f, 1e9f};
   app.ground_colors = {};  // another world: other colors
-  update_landscape(app);
-  app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), build_path_mesh(app.world));
+  app.ground_tiles.reset();
+  app.landscape_cache.clear();
+  MeshData coarse = build_coarse_ground(app.world, app.ground_colors);
+  app.coarse_parts = coarse.parts;
+  app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), coarse);
+  MeshData path = build_path_mesh(app.world);
+  app.path_parts = path.parts;
+  app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), path);
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), build_water_mesh(app.world));
+  update_landscape(app, true);
   // The continent depends on the seed only: built again for another world.
   if (app.continent.empty() || app.continent.seed != app.world.seed) {
     const double start = emscripten_get_now();
     app.continent = make_continent(app.world.seed);
-    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarGround), build_far_ground_mesh(app.continent));
-    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarWater), build_far_water_mesh(app.continent));
+    const MeshData ground = build_far_ground_mesh(app.continent);
+    const MeshData water = build_far_water_mesh(app.continent);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarGround), ground);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarWater), water);
     app.renderer->set_mesh(static_cast<size_t>(MeshId::Lava), build_lava_mesh(app.continent));
     build_far_landscape(app.far_landscape);
+    app.far_landscape.mesh_parts.assign(kMeshCount, {});
+    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarGround)] = ground.parts;
+    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarWater)] = water.parts;
     app.continent_ms = emscripten_get_now() - start;
   }
 }
@@ -253,6 +305,10 @@ void profile_report(App& app, double now, int pw, int ph) {
   std::string s = "{\"frames\":" + std::to_string(p.frames) + ",\"seconds\":" + std::to_string(span / 1000);
   s += ",\"ticks\":" + std::to_string(p.ticks) + ",\"landscapeBuilds\":" + std::to_string(p.landscape_builds);
   s += ",\"continentMs\":" + std::to_string(app.continent_ms);
+  s += ",\"chunksPrepared\":" + std::to_string(p.chunks_prepared) + ",\"tileSwaps\":" + std::to_string(p.tile_swaps);
+  s += ",\"tilesBuilt\":" + std::to_string(app.ground_tiles.built());
+  s += ",\"grassChunks\":" + std::to_string(app.landscape_cache.chunks_with_grass());
+  s += ",\"renderScale\":" + std::to_string(app.render_scale);
   s += ",\"avg\":{";
   for (int i = 0; i < kProfileParts; ++i) {
     s += std::string(i ? "," : "") + "\"" + kNames[i] + "\":" + std::to_string(p.sum[i] / p.frames);
@@ -284,6 +340,52 @@ void profile_report(App& app, double now, int pw, int ph) {
   p.on = on;
   p.since = now;
   p.json = s;
+}
+
+constexpr double kPixelBudget = 1.6e6;  // at most this many pixels drawn (phones have very dense screens)
+constexpr double kMinScale = 0.6;       // the resolution goes down to this share of the best one when frames are slow
+constexpr double kScaleStep = 0.85;
+
+// Device pixels per CSS pixel: the screen's density, within the budget,
+// times the adapted share.
+double pixel_scale(const App& app, double css_w, double css_h) {
+  const double dpr = emscripten_get_device_pixel_ratio();
+  const double area = css_w * css_h;
+  const double best = area > 0 ? std::min(dpr, std::sqrt(kPixelBudget / area)) : dpr;
+  return best * app.render_scale;
+}
+
+// Lowers the resolution when frames come too slowly for a while (under 48
+// per second), raises it again when they come fast enough; not above a
+// resolution found too slow less than half a minute ago. Not when frozen
+// (tests, pictures) nor paused.
+void adapt_resolution(App& app, double dt, double now) {
+  static double ceiling = 2, ceiling_time = 0;
+  if (app.frozen || app.paused || dt <= 0 || dt > 250) return;  // a hidden tab, a pause
+  app.interval_avg += (dt - app.interval_avg) * 0.05;
+  if (app.interval_avg > 21.0) {
+    app.fast_since = 0;
+    if (app.slow_since == 0) app.slow_since = now;
+  } else if (app.interval_avg < 17.8) {
+    app.slow_since = 0;
+    if (app.fast_since == 0) app.fast_since = now;
+  } else {
+    app.slow_since = app.fast_since = 0;
+  }
+  if (app.slow_since > 0 && now - app.slow_since > 1000 && app.render_scale > kMinScale) {
+    ceiling = app.render_scale;
+    ceiling_time = now;
+    app.render_scale = std::max(kMinScale, app.render_scale * kScaleStep);
+    app.slow_since = now;
+    app.interval_avg = 19;  // measure again at the new resolution
+  } else if (app.fast_since > 0 && now - app.fast_since > 4000 && app.render_scale < 1) {
+    const double up = std::min(1.0, app.render_scale / kScaleStep);
+    if (up < ceiling - 1e-6 || now - ceiling_time > 30000) {
+      app.render_scale = up;
+      app.interval_avg = 17;
+    }
+    app.fast_since = now;
+  }
 }
 
 void frame(void* user) {
@@ -327,14 +429,15 @@ void frame(void* user) {
     }
   }
   mark = emscripten_get_now();
-  if (update_landscape(app) && profiling) ++prof.landscape_builds;
+  if (update_landscape(app, app.frozen) && profiling) ++prof.landscape_builds;  // frozen: pictures right away
   measure(kLandscape);
 
+  adapt_resolution(app, dt, now);
   double css_w = 0, css_h = 0;
   emscripten_get_element_css_size("#canvas", &css_w, &css_h);
-  const double dpr = emscripten_get_device_pixel_ratio();
-  const int pw = std::max(1, static_cast<int>(css_w * dpr));
-  const int ph = std::max(1, static_cast<int>(css_h * dpr));
+  const double scale = pixel_scale(app, css_w, css_h);
+  const int pw = std::max(1, static_cast<int>(css_w * scale));
+  const int ph = std::max(1, static_cast<int>(css_h * scale));
   if (pw != app.canvas_w || ph != app.canvas_h) {
     // Setting the canvas size clears it, even to the same value: only on change.
     emscripten_set_canvas_element_size("#canvas", pw, ph);
@@ -352,8 +455,13 @@ void frame(void* user) {
   build_far_dynamic(app.world, time, app.far_dynamic);
   measure(kScene);
   const View view = current_view(app, time);
+  // Only what the camera can see (cull.hpp).
+  const Frustum in_front = frustum_of(view.view_projection);
+  cull_list(app.terrain, in_front);
+  cull_list(app.landscape, in_front);
+  cull_list(app.far_landscape, frustum_of(view.far_view_projection));
   measure(kView);
-  const DrawList* lists[] = {&app.far_landscape, &app.far_dynamic, &app.landscape, &app.dynamic};
+  const DrawList* lists[] = {&app.far_landscape, &app.far_dynamic, &app.terrain, &app.landscape, &app.dynamic};
   app.renderer->begin_frame({pw, ph});
   app.renderer->draw(view, lists);
   app.renderer->end_frame();
@@ -677,6 +785,7 @@ int main(int argc, char** argv) {
     js_fatal(("Impossible de charger les modèles : " + error).c_str());
     return 1;
   }
+  set_mesh_bounds(meshes);  // for culling
   app.renderer = make_gles3_renderer(meshes);
   if (!app.renderer) {
     js_fatal("Impossible d'initialiser le rendu (shaders).");

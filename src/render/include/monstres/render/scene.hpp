@@ -2,6 +2,7 @@
 
 #include "monstres/core/world.hpp"
 #include "monstres/render/characters.hpp"
+#include "monstres/render/landscape.hpp"
 #include "monstres/render/models.hpp"
 #include "monstres/render/renderer.hpp"
 
@@ -62,37 +63,6 @@ Quat ground_tilt(const World& world, float x, float z);
 
 // Which mesh draws an object.
 MeshId mesh_for(const Object& object);
-
-// The landscape is detailed around the player only: within kDetailRadius
-// of its center every object is drawn with its shadow, grass and flowers
-// grow within kGrassRadius; farther away only the landmarks are drawn
-// (houses, towers, walls, big rocks) and the trees are simplified. Small
-// things and grass shrink away before the edge (View::fade_*), so the
-// landscape can be rebuilt around a new center (every kStep meters walked)
-// without anything popping up.
-namespace landscape {
-inline constexpr float kStep = 16.0f;
-inline constexpr float kDetailRadius = 64.0f;
-inline constexpr float kGrassRadius = 56.0f;
-// From the player: the center is at most kStep * 0.71 away.
-inline constexpr float kGrassFadeStart = 33.0f, kGrassFadeEnd = 43.0f;
-inline constexpr float kDetailFadeStart = 42.0f, kDetailFadeEnd = 52.0f;
-// Trees and rocks (the world has tens of thousands): only within this far
-// of the center, shrinking away before (from the player).
-inline constexpr float kObjectsRadius = 215.0f;
-inline constexpr float kTreeFadeStart = 160.0f, kTreeFadeEnd = 198.0f;
-}  // namespace landscape
-
-// Center of the detailed landscape for a player at (x, z).
-Vec2 landscape_center(float x, float z);
-
-// Everything that never moves in a world: the ground, the path, the objects
-// and their shadows, grass and flowers, detailed around `center` (the
-// player's landscape_center by default): the trees and rocks within
-// landscape::kObjectsRadius only, the buildings everywhere.
-// Rebuild it when the world changes or the center moves.
-void build_landscape(const World& world, DrawList& list);
-void build_landscape(const World& world, DrawList& list, Vec2 center);
 
 // The continent beyond the playable area (a far list, see DrawList::far):
 // its ground, waters and lava (meshes from far_terrain.hpp, set once per

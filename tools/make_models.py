@@ -1302,6 +1302,26 @@ def tree_far():
     return m
 
 
+def tree_mid():
+    """The tree at a middle distance: its four crowns, each a 20-faced ball."""
+    m = Mesh()
+    frustum(m, identity, 0.2, 0.13, 2.3, 6, BARK)
+    crowns = [((0, 2.75, 0), (1.3, 1.05, 1.3)), ((0.6, 2.45, 0.35), (0.85, 0.75, 0.85)),
+              ((-0.55, 2.5, -0.3), (0.9, 0.8, 0.9)), ((0.1, 3.55, -0.1), (0.8, 0.7, 0.8))]
+    for k, (center, radii) in enumerate(crowns):
+        lowpoly_blob(m, center, mul(radii, 1.06), 11 + k, LEAVES)
+    return m
+
+
+def bush_far():
+    """The bush at a middle distance: two 20-faced balls."""
+    m = Mesh()
+    lowpoly_blob(m, (0, 0.45, 0), (0.8, 0.52, 0.8), 50, BUSH_LEAVES)
+    lowpoly_blob(m, (0.35, 0.42, 0.2), (0.6, 0.45, 0.6), 51, BUSH_LEAVES)
+    m.fit((-1, 0, -1), (1, 1, 1))
+    return m
+
+
 def pine_far():
     """The pine seen from afar: one cone."""
     m = Mesh()
@@ -1651,6 +1671,8 @@ def all_models():
         "teleporter": teleporter(),
         "tree_far": tree_far(),
         "pine_far": pine_far(),
+        "tree_mid": tree_mid(),
+        "bush_far": bush_far(),
         "sparkle": sparkle(),
         "rune_circle": rune_circle(),
     }

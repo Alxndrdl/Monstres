@@ -6,6 +6,7 @@
 #include "monstres/render/characters.hpp"
 #include "monstres/render/terrain_mesh.hpp"
 #include "monstres/core/continent.hpp"
+#include "scene_util.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -120,31 +121,10 @@ MeshId mesh_for(const Object& o) {
   }
 }
 
-namespace {
-
-constexpr float kTau = 6.28318530718f;
-constexpr float kDecorationHalfSize = rules::kWorldHalfSize + 13; // grass and flowers up to here
-
-// Deterministic pseudo-random number in [0, 1) for decoration.
-float rand01(uint64_t seed, uint64_t a, uint64_t b = 0) {
-  uint64_t z = seed * 0x9E3779B97F4A7C15ULL + a * 0xC2B2AE3D27D4EB4FULL + b * 0x165667B19E3779F9ULL + 0x632BE59BD9B4E019ULL;
-  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
-  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
-  z ^= z >> 31;
-  return static_cast<float>(z >> 40) / static_cast<float>(1ULL << 24);
-}
-
-float lerp(float a, float b, float t) { return a + (b - a) * t; }
-
-void add(DrawList& list, MeshId id, const Instance& in) {
-  if (id == MeshId::Count) return;
-  list.batches[static_cast<size_t>(id)].push_back(in);
-  if (id == MeshId::Sparkle || id == MeshId::RuneCircle || id == MeshId::Crystal) {
-    list.batches[static_cast<size_t>(id)].back().material = kGlowing;  // magic glows
-  }
-}
-
-}  // namespace
+using scene_util::add;
+using scene_util::kTau;
+using scene_util::lerp;
+using scene_util::rand01;
 
 void add_shadow(DrawList& list, float x, float z, float rx, float rz, float yaw, float alpha, float y, Quat tilt) {
   Instance s;
@@ -172,221 +152,6 @@ void add_ground_shadow(DrawList& list, const World& w, float x, float z, float r
 }
 
 namespace {
-
-// Mesh scale, matching the sizes of tools/make_models.py and the collision
-// boxes of world.cpp.
-void scale_for(const Object& o, Instance& in) {
-  const Vec3 s = o.size;
-  switch (o.kind) {
-    case ObjectKind::Tree:
-    case ObjectKind::Pine:  in.sx = in.sy = in.sz = s.x; break;
-    case ObjectKind::Rock:  in.sx = s.x; in.sy = s.y; in.sz = s.z; break;
-    case ObjectKind::Log:   in.sx = s.x; in.sy = s.y; in.sz = s.y; break;
-    case ObjectKind::Stump:
-    case ObjectKind::Bush:  in.sx = s.x; in.sy = s.y; in.sz = s.x; break;
-    case ObjectKind::Crate: in.sx = s.x; in.sy = s.y; in.sz = s.z; in.y += s.y; break;  // centered cube
-    case ObjectKind::Pillar: in.sx = in.sz = 1; in.sy = s.y; break;                    // unit height
-    case ObjectKind::Crystal: in.sx = in.sy = in.sz = s.x; break;
-    default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
-  }
-}
-
-float wind_for(ObjectKind kind) {
-  switch (kind) {
-    case ObjectKind::Tree: return 0.25f;
-    case ObjectKind::Pine: return 0.15f;
-    case ObjectKind::Bush: return 0.35f;
-    default:               return 0;
-  }
-}
-
-// Trees, rocks, logs, stumps, bushes: what the wilds are made of.
-bool nature(ObjectKind kind) { return kind <= ObjectKind::Bush; }
-
-// How far an object is drawn: landmarks always, trees simplified far away,
-// small things only near the player.
-enum class Detail { Landmark, Tree, Small };
-Detail detail_of(const Object& o) {
-  switch (o.kind) {
-    case ObjectKind::Tree:
-    case ObjectKind::Pine: return Detail::Tree;
-    case ObjectKind::Rock: return o.size.x >= 1.0f || o.size.z >= 1.0f ? Detail::Landmark : Detail::Small;
-    case ObjectKind::Log:
-    case ObjectKind::Stump:
-    case ObjectKind::Bush:
-    case ObjectKind::Crate:
-    case ObjectKind::Fence:
-    case ObjectKind::Sign:
-    case ObjectKind::Barrel:
-    case ObjectKind::Lamp:
-    case ObjectKind::Rubble: return Detail::Small;
-    default: return Detail::Landmark;
-  }
-}
-
-// `near`: within the detailed part of the landscape (full models, shadows).
-void add_object(DrawList& list, const World& w, const Object& o, bool near = true) {
-  const Detail detail = detail_of(o);
-  if (!near && detail == Detail::Small) return;
-  Instance in;
-  in.x = o.pos.x;
-  in.y = o.pos.y;
-  in.z = o.pos.z;
-  const float yaw = static_cast<float>(radians_from_angle16(o.yaw));
-  in.rotation = quat_yaw(yaw);
-  scale_for(o, in);
-  in.wind = wind_for(o.kind);
-  const float k = 0.88f + 0.24f * static_cast<float>(o.variant) / 255.0f;  // slight color variation
-  in.tint = {k, k, k, 1};
-  if (detail == Detail::Small) in.material = kFadeFar;  // shrinks away before the edge of the detail
-  else if (nature(o.kind)) in.material = kFadeTree;     // shrinks away before landscape::kObjectsRadius
-  MeshId mesh = mesh_for(o);
-  if (!near && o.kind == ObjectKind::Tree) mesh = MeshId::TreeFar;
-  if (!near && o.kind == ObjectKind::Pine) mesh = MeshId::PineFar;
-  add(list, mesh, in);
-  if (!near) return;
-
-  // Soft shadow on the ground, sized to the object.
-  const size_t shadows_before = list.batches[static_cast<size_t>(MeshId::Shadow)].size();
-  const Vec3 s = o.size;
-  switch (o.kind) {
-    case ObjectKind::Tree:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.7f * s.x, 1.7f * s.x, 0); break;
-    case ObjectKind::Pine:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.4f * s.x, 1.4f * s.x, 0); break;
-    case ObjectKind::Rock:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.25f * s.x, 1.25f * s.z, yaw); break;
-    case ObjectKind::Log:   add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.15f * s.x, 1.8f * s.y, yaw); break;
-    case ObjectKind::Stump: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.5f * s.x, 1.5f * s.x, 0); break;
-    case ObjectKind::Bush:  add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.3f * s.x, 1.3f * s.x, 0); break;
-    case ObjectKind::Crate: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.5f * s.x, 1.5f * s.z, yaw, 0.9f); break;
-    case ObjectKind::HouseCottage: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.6f, 3.0f, yaw, 0.7f); break;
-    case ObjectKind::HouseChimney: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.3f, 3.3f, yaw, 0.7f); break;
-    case ObjectKind::HouseHut: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.2f, 3.2f, 0, 0.7f); break;
-    case ObjectKind::Well: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.4f, 1.4f, 0); break;
-    case ObjectKind::Barrel: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.6f, 0.6f, 0); break;
-    case ObjectKind::Lamp:
-    case ObjectKind::Sign: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.35f, 0.35f, 0, 0.8f); break;
-    case ObjectKind::Tower: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.6f, 3.6f, 0, 0.75f); break;
-    case ObjectKind::RuinWall: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.9f, 0.6f, yaw, 0.7f); break;
-    case ObjectKind::Pillar: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.6f, 0.6f, 0, 0.8f); break;
-    case ObjectKind::FallenPillar: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.8f, 0.6f, yaw, 0.7f); break;
-    case ObjectKind::Rubble: add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.0f, 1.0f, 0, 0.6f); break;
-    case ObjectKind::RuneStone: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.6f, 0.4f, yaw, 0.7f); break;
-    case ObjectKind::CastleWall: add_ground_shadow(list, w, o.pos.x, o.pos.z, 2.6f, 1.2f, yaw, 0.7f); break;
-    case ObjectKind::CastleTower: add_ground_shadow(list, w, o.pos.x, o.pos.z, 3.2f, 3.2f, 0, 0.75f); break;
-    case ObjectKind::CastleKeep: add_ground_shadow(list, w, o.pos.x, o.pos.z, 6.2f, 6.2f, yaw, 0.75f); break;
-    case ObjectKind::Crystal: add_ground_shadow(list, w, o.pos.x, o.pos.z, 0.5f * s.x, 0.5f * s.x, 0, 0.5f); break;
-    case ObjectKind::Teleporter: add_ground_shadow(list, w, o.pos.x, o.pos.z, 2.3f, 2.3f, 0, 0.6f); break;
-    default: break;
-  }
-  auto& shadows = list.batches[static_cast<size_t>(MeshId::Shadow)];
-  for (size_t i = shadows_before; i < shadows.size(); ++i) shadows[i].material = detail == Detail::Small ? kFadeFar : kLit;
-}
-
-// Trees, pines and a few rocks beyond the edges of the playable area, so the
-// world ends in a forest instead of a wall.
-// Boxes of the objects around a place, by cells of 4 m: where grass does not grow.
-class Obstacles {
-public:
-  Obstacles(Vec2 center, float radius) : x0_(center.x - radius), z0_(center.z - radius),
-                                         n_(static_cast<int>(2 * radius / kCell) + 1),
-                                         cells_(static_cast<size_t>(n_ * n_)) {}
-  void add(const Box& b) {
-    for (int i = cell(b.min.x - x0_); i <= cell(b.max.x - x0_); ++i) {
-      for (int j = cell(b.min.z - z0_); j <= cell(b.max.z - z0_); ++j) cells_[static_cast<size_t>(i * n_ + j)].push_back(b);
-    }
-  }
-  bool covered(float x, float z, float margin) const {
-    const auto& boxes = cells_[static_cast<size_t>(cell(x - x0_) * n_ + cell(z - z0_))];
-    return std::any_of(boxes.begin(), boxes.end(), [&](const Box& b) {
-      return x > b.min.x - margin && x < b.max.x + margin && z > b.min.z - margin && z < b.max.z + margin;
-    });
-  }
-
-private:
-  static constexpr float kCell = 4.0f;
-  int cell(float v) const { return std::clamp(static_cast<int>(v / kCell), 0, n_ - 1); }
-  float x0_, z0_;
-  int n_;
-  std::vector<std::vector<Box>> cells_;
-};
-
-// Grass and flowers around `center` (they fade out before kGrassRadius, see build_view).
-void add_vegetation(const World& w, const Obstacles& obstacles, Vec2 center, DrawList& list) {
-  static constexpr Color kFlowerColors[] = {
-      {1.0f, 1.0f, 1.0f, 1}, {1.0f, 0.88f, 0.35f, 1}, {0.80f, 0.55f, 0.95f, 1},
-      {1.0f, 0.62f, 0.75f, 1}, {0.55f, 0.70f, 1.0f, 1},
-  };
-  constexpr float kCell = 1.0f;
-  const int cells = static_cast<int>(2 * kDecorationHalfSize / kCell);
-  const auto cell_of = [&](float v) {
-    return std::clamp(static_cast<int>((v + kDecorationHalfSize) / kCell), 0, cells - 1);
-  };
-  constexpr float r2 = landscape::kGrassRadius * landscape::kGrassRadius;
-  for (int i = cell_of(center.x - landscape::kGrassRadius); i <= cell_of(center.x + landscape::kGrassRadius); ++i) {
-    for (int j = cell_of(center.z - landscape::kGrassRadius); j <= cell_of(center.z + landscape::kGrassRadius); ++j) {
-      const auto ui = static_cast<uint64_t>(i), uj = static_cast<uint64_t>(j);
-      const float x = -kDecorationHalfSize + kCell * (static_cast<float>(i) + rand01(w.seed, 1000 + ui, uj));
-      const float z = -kDecorationHalfSize + kCell * (static_cast<float>(j) + rand01(w.seed, 2000 + ui, uj));
-      if ((x - center.x) * (x - center.x) + (z - center.z) * (z - center.z) > r2) continue;
-      const float on_path = distance_to_path(w.path, x, z, 2 * rules::kPathHalfWidth) / rules::kPathHalfWidth;
-      if (on_path < 0.75f) continue;
-      if (obstacles.covered(x, z, 0.05f)) continue;
-      if (w.ground.normal(x, z).y < 0.8f) continue;  // bare rock on cliffs
-      if (in_lake(w.village.lake, x, z, 0.6f)) continue;
-      if (w.ground.height(x, z) < rules::kSeaLevel + 0.6f) continue;  // the sea and the wet sand
-      if (w.ruins.radius > 0) {  // the paved courtyard of the ruins
-        const float rx = x - w.ruins.center.x, rz = z - w.ruins.center.z;
-        if (std::max(std::fabs(rx), std::fabs(rz)) < 8.5f && rand01(w.seed, 3500 + ui, uj) < 0.8f) continue;
-      }
-      if (w.castle.radius > 0) {  // the castle's courtyard, paved
-        const float kx = x - w.castle.center.x, kz = z - w.castle.center.z;
-        if (std::max(std::fabs(kx), std::fabs(kz)) < rules::kCastleHalf + 0.5f && rand01(w.seed, 3600 + ui, uj) < 0.9f) continue;
-      }
-      if (w.village.lake.radius_x > 0) {  // the trodden village square
-        const float vx = x - w.village.center.x, vz = z - w.village.center.z;
-        if (vx * vx + vz * vz < 6.0f * 6.0f) continue;
-      }
-      const float roll = rand01(w.seed, 3000 + ui, uj);
-      // Sparse along the path edges, and thinner outside the playable area
-      // (seen from afar only: saves a lot of triangles on small devices).
-      float edge_factor = on_path < 1.15f ? 0.35f : 1.0f;
-      if (std::max(std::fabs(x), std::fabs(z)) > rules::kWorldHalfSize) edge_factor *= 0.45f;
-
-      Instance in;
-      in.x = x;
-      in.y = w.ground.height(x, z) - 0.02f;
-      in.z = z;
-      in.rotation = quat_yaw(kTau * rand01(w.seed, 4000 + ui, uj));
-      in.wind = 1;
-      in.material = kFadeNear;
-      const float k = 0.85f + 0.25f * rand01(w.seed, 5000 + ui, uj);
-      in.tint = {k, k, k, 1};
-
-      // Flowers grow in clusters.
-      const float meadow = value_noise(w.seed + 21, x, z, 9.0f);
-      const float flower_chance = (meadow > 0.6f ? 0.16f : 0.02f) * edge_factor;
-      if (roll < flower_chance) {
-        const float s = 0.8f + 0.5f * rand01(w.seed, 6000 + ui, uj);
-        in.sx = in.sy = in.sz = s;
-        in.tint = kFlowerColors[static_cast<size_t>(rand01(w.seed, 7000 + ui, uj) * 5) % 5];
-        add(list, MeshId::Flower, in);
-        continue;
-      }
-      // Tall grass in patches, short grass almost everywhere.
-      const float tall = value_noise(w.seed + 20, x, z, 7.0f);
-      if (tall > 0.62f && roll < 0.85f * edge_factor) {
-        const float s = 0.55f + 0.35f * rand01(w.seed, 8000 + ui, uj);  // up to ~0.85 m
-        in.sx = in.sz = 0.9f + 0.4f * rand01(w.seed, 9000 + ui, uj);
-        in.sy = s;
-        add(list, MeshId::GrassTall, in);
-      } else if (roll < 0.6f * edge_factor) {
-        const float s = 0.7f + 0.7f * rand01(w.seed, 8000 + ui, uj);
-        in.sx = in.sz = 0.8f + 0.5f * rand01(w.seed, 9000 + ui, uj);
-        in.sy = s;
-        add(list, MeshId::GrassShort, in);
-      }
-    }
-  }
-}
 
 // Teleporters: a circle of runes on the stones, bright and turning once the
 // teleporter is known, sparks rising from it; a column of light where the
@@ -506,56 +271,6 @@ void add_village_effects(const World& w, float time, DrawList& list) {
 }
 
 }  // namespace
-
-Vec2 landscape_center(float x, float z) {
-  const auto snap = [](float v) { return std::round(v / landscape::kStep) * landscape::kStep; };
-  return {snap(x), snap(z)};
-}
-
-void build_landscape(const World& w, DrawList& list) {
-  build_landscape(w, list, landscape_center(w.player.pos.x, w.player.pos.z));
-}
-
-void build_landscape(const World& w, DrawList& list, Vec2 center) {
-  list.batches.assign(kMeshCount, {});
-  list.cached = true;
-  ++list.version;
-  add(list, MeshId::Ground, Instance{});
-  add(list, MeshId::Path, Instance{});
-  Instance water;
-  water.material = kWater;  // the shader adds waves and reflections
-  add(list, MeshId::Water, water);
-
-  Obstacles obstacles(center, landscape::kGrassRadius + 4);
-  constexpr float near2 = landscape::kDetailRadius * landscape::kDetailRadius;
-  constexpr float reach2 = landscape::kObjectsRadius * landscape::kObjectsRadius;
-  const auto place = [&](const Object& o) {
-    const float dx = o.pos.x - center.x, dz = o.pos.z - center.z;
-    const float d2 = dx * dx + dz * dz;
-    if (nature(o.kind) && d2 > reach2) return;  // too far: not drawn (the buildings are, everywhere)
-    const bool near = d2 < near2;
-    add_object(list, w, o, near);
-    if (near) obstacles.add(object_box(o));
-  };
-  // The valley's objects (a few thousand), then the wilds' around the center
-  // only: through the objects' index, each once (in the cell of its position).
-  const std::span<const Object> valley = valley_objects(w);
-  for (const Object& o : valley) place(o);
-  const ObjectIndex& ix = objects_index(w);
-  const float r = landscape::kObjectsRadius;
-  for (int cx = ObjectIndex::cell_of(center.x - r); cx <= ObjectIndex::cell_of(center.x + r); ++cx) {
-    for (int cz = ObjectIndex::cell_of(center.z - r); cz <= ObjectIndex::cell_of(center.z + r); ++cz) {
-      const auto c = static_cast<size_t>(cx * ObjectIndex::kCells + cz);
-      for (uint32_t k = ix.cell_start[c]; k < ix.cell_start[c + 1]; ++k) {
-        const uint32_t i = ix.items[k];
-        const Object& o = w.objects[i];
-        if (i < valley.size() || ObjectIndex::cell_of(o.pos.x) != cx || ObjectIndex::cell_of(o.pos.z) != cz) continue;
-        place(o);
-      }
-    }
-  }
-  add_vegetation(w, obstacles, center, list);
-}
 
 void build_far_landscape(DrawList& list) {
   list.batches.assign(kMeshCount, {});

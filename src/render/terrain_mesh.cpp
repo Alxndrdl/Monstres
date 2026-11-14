@@ -2,7 +2,10 @@
 
 #include "monstres/core/continent.hpp"
 
+#include "monstres/render/models.hpp"
+
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace monstres {
@@ -127,10 +130,38 @@ Color ground_color(const World& w, float x, float z) {
 
 float ground_height(const World& w, float x, float z) { return w.ground.height(x, z); }
 
-Vec2 ground_center(float x, float z) {
-  const auto snap = [](float v) { return std::round(v / terrain::kRecenter) * terrain::kRecenter; };
-  const float limit = terrain::kDetailHalfSize - terrain::kRecenter;
-  return {std::clamp(snap(x), -limit, limit), std::clamp(snap(z), -limit, limit)};
+int tile_of(float v) {
+  return std::clamp(static_cast<int>(std::floor((v + terrain::kDetailHalfSize) / terrain::kTile)), 0, terrain::kTiles - 1);
+}
+
+float tile_start(int t) { return -terrain::kDetailHalfSize + terrain::kTile * static_cast<float>(t); }
+
+std::vector<TileKey> detailed_tiles(float x, float z) {
+  const int pi = tile_of(x), pj = tile_of(z);
+  const auto lod_at = [&](int i, int j) {
+    const int d = std::max(std::abs(i - pi), std::abs(j - pj));
+    for (int l = 0; l < terrain::kLods - 1; ++l) {
+      if (d <= terrain::kLodReach[l]) return l;
+    }
+    return terrain::kLods - 1;
+  };
+  const auto inside = [](int i, int j) { return i >= 0 && j >= 0 && i < terrain::kTiles && j < terrain::kTiles; };
+  std::vector<TileKey> keys;
+  const int r = terrain::kLodReach[terrain::kLods - 2];
+  for (int i = pi - r; i <= pi + r; ++i) {
+    for (int j = pj - r; j <= pj + r; ++j) {
+      if (!inside(i, j)) continue;
+      const int lod = lod_at(i, j);
+      if (lod >= terrain::kLods - 1) continue;
+      uint8_t stitch = 0;
+      const int sides[4][2] = {{i - 1, j}, {i + 1, j}, {i, j - 1}, {i, j + 1}};
+      for (int s = 0; s < 4; ++s) {
+        if (inside(sides[s][0], sides[s][1]) && lod_at(sides[s][0], sides[s][1]) > lod) stitch |= static_cast<uint8_t>(1 << s);
+      }
+      keys.push_back({static_cast<int8_t>(i), static_cast<int8_t>(j), static_cast<uint8_t>(lod), stitch});
+    }
+  }
+  return keys;
 }
 
 namespace {
@@ -144,78 +175,193 @@ Color unpack(uint32_t p) {
           static_cast<float>((p >> 16) & 255u) / 255.0f, 1};
 }
 
-}  // namespace
-
-MeshData build_ground_mesh(const World& world, GroundColors& colors, Vec2 center) {
-  MeshData m;
-  const float d = terrain::kDetailHalfSize;
+// Appends a square of n x n cells of `cell` meters from (x0, z0), on the
+// relief's grid points. A side in `stitch` follows the coarser neighbor's
+// edge (cells twice as big): its points in between are on the straight
+// line between theirs. Returns where it is.
+Aabb add_cells(MeshData& m, const World& w, GroundColors& colors, float x0, float z0, float cell, int n, uint8_t stitch) {
+  constexpr float d = terrain::kDetailHalfSize;
   constexpr float kGrid = Heightmap::kCellSize;
   constexpr int kPoints = Heightmap::kPoints;
   if (colors.packed.size() != static_cast<size_t>(kPoints) * kPoints) colors.packed.assign(static_cast<size_t>(kPoints) * kPoints, 0);
   const auto index = [&](float v) { return std::clamp(static_cast<int>(std::lround((v + d) / kGrid)), 0, kPoints - 1); };
-  const auto height = [&](float x, float z) { return world.ground.empty() ? 0.0f : world.ground.at(index(x), index(z)); };
-  const auto on = [](float v, float cell) {  // a multiple of `cell` from the relief's edge
-    const float q = (v + terrain::kDetailHalfSize) / cell;
-    return std::fabs(q - std::round(q)) < 1e-3f;
-  };
+  const auto height = [&](float x, float z) { return w.ground.empty() ? 0.0f : w.ground.at(index(x), index(z)); };
   struct Point {
     float y;
     Color c;
     Vec3 n;
   };
-  const auto point = [&](int ring, float x, float z) {
-    float y = height(x, z);
-    // On a ring's outer edge, between two points of the coarser ring: on the
-    // straight line between them (no gap between the rings).
-    if (ring + 1 < terrain::kRings) {
-      const float outer = terrain::kRingHalf[ring], fine = terrain::kRingCells[ring], coarse = terrain::kRingCells[ring + 1];
-      if (std::fabs(std::fabs(x - center.x) - outer) < 1e-3f && std::fabs(x) < d && !on(z, coarse)) {
-        y = 0.5f * (height(x, z - fine) + height(x, z + fine));
-      } else if (std::fabs(std::fabs(z - center.z) - outer) < 1e-3f && std::fabs(z) < d && !on(x, coarse)) {
-        y = 0.5f * (height(x - fine, z) + height(x + fine, z));
-      }
+  const int p = n + 1;
+  std::vector<Point> points(static_cast<size_t>(p * p));
+  Aabb box = empty_aabb();
+  for (int a = 0; a <= n; ++a) {
+    for (int b = 0; b <= n; ++b) {
+      const float x = x0 + cell * static_cast<float>(a), z = z0 + cell * static_cast<float>(b);
+      float y = height(x, z);
+      if ((b & 1) && (((stitch & 1) && a == 0) || ((stitch & 2) && a == n))) y = 0.5f * (height(x, z - cell) + height(x, z + cell));
+      if ((a & 1) && (((stitch & 4) && b == 0) || ((stitch & 8) && b == n))) y = 0.5f * (height(x - cell, z) + height(x + cell, z));
+      uint32_t& c = colors.packed[static_cast<size_t>(index(x) * kPoints + index(z))];
+      if ((c >> 24) == 0) c = pack(ground_color(w, x, z));
+      points[static_cast<size_t>(a * p + b)] = Point{y, unpack(c), w.ground.normal(x, z)};
+      box.add(x, y, z);
     }
-    uint32_t& c = colors.packed[static_cast<size_t>(index(x) * kPoints + index(z))];
-    if ((c >> 24) == 0) c = pack(ground_color(world, x, z));
-    return Point{y, unpack(c), world.ground.normal(x, z)};
-  };
-  m.vertices.reserve(48000 * 6 * MeshData::kFloatsPerVertex);
-  for (int ring = 0; ring < terrain::kRings; ++ring) {
-    const float cell = terrain::kRingCells[ring];
-    const float inner = ring == 0 ? 0.0f : terrain::kRingHalf[ring - 1];
-    const float outer = terrain::kRingHalf[ring];
-    const float x_lo = std::max(-d, center.x - outer), x_hi = std::min(d, center.x + outer);
-    const float z_lo = std::max(-d, center.z - outer), z_hi = std::min(d, center.z + outer);
-    const int nx = static_cast<int>(std::lround((x_hi - x_lo) / cell)), nz = static_cast<int>(std::lround((z_hi - z_lo) / cell));
-    // Each point once (shared by up to four cells), but those inside the finer ring.
-    std::vector<Point> points(static_cast<size_t>((nx + 1) * (nz + 1)));
-    for (int i = 0; i <= nx; ++i) {
-      for (int j = 0; j <= nz; ++j) {
-        const float x = x_lo + cell * static_cast<float>(i), z = z_lo + cell * static_cast<float>(j);
-        if (std::fabs(x - center.x) < inner - 1e-3f && std::fabs(z - center.z) < inner - 1e-3f) continue;
-        points[static_cast<size_t>(i * (nz + 1) + j)] = point(ring, x, z);
-      }
+  }
+  for (int a = 0; a < n; ++a) {
+    for (int b = 0; b < n; ++b) {
+      const float xa = x0 + cell * static_cast<float>(a), xb = xa + cell;
+      const float za = z0 + cell * static_cast<float>(b), zb = za + cell;
+      const auto at = [&](int i, int j) -> const Point& { return points[static_cast<size_t>((a + i) * p + b + j)]; };
+      const Point &p00 = at(0, 0), &p10 = at(1, 0), &p01 = at(0, 1), &p11 = at(1, 1);
+      // Counter-clockwise seen from above; the same triangles as Heightmap::height (in 2 m cells).
+      vertex(m, xa, p00.y, za, p00.c, p00.n); vertex(m, xa, p01.y, zb, p01.c, p01.n); vertex(m, xb, p11.y, zb, p11.c, p11.n);
+      vertex(m, xa, p00.y, za, p00.c, p00.n); vertex(m, xb, p11.y, zb, p11.c, p11.n); vertex(m, xb, p10.y, za, p10.c, p10.n);
     }
-    for (int i = 0; i < nx; ++i) {
-      for (int j = 0; j < nz; ++j) {
-        const float x0 = x_lo + cell * static_cast<float>(i), x1 = x0 + cell;
-        const float z0 = z_lo + cell * static_cast<float>(j), z1 = z0 + cell;
-        // Inside the finer ring: drawn there.
-        if (std::fabs(0.5f * (x0 + x1) - center.x) < inner && std::fabs(0.5f * (z0 + z1) - center.z) < inner) continue;
-        const auto at = [&](int a, int b) { return points[static_cast<size_t>((i + a) * (nz + 1) + j + b)]; };
-        const Point p00 = at(0, 0), p10 = at(1, 0), p01 = at(0, 1), p11 = at(1, 1);
-        // Counter-clockwise seen from above; the same triangles as Heightmap::height (in 2 m cells).
-        vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x0, p01.y, z1, p01.c, p01.n); vertex(m, x1, p11.y, z1, p11.c, p11.n);
-        vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x1, p11.y, z1, p11.c, p11.n); vertex(m, x1, p10.y, z0, p10.c, p10.n);
-      }
+  }
+  box.min_y -= 0.1f;
+  box.max_y += 0.1f;
+  return box;
+}
+
+int cells_per_tile(int lod) { return static_cast<int>(std::lround(terrain::kTile / terrain::kLodCells[lod])); }
+
+double now_ms() {
+  return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+}  // namespace
+
+MeshData build_coarse_ground(const World& world, GroundColors& colors) {
+  MeshData m;
+  constexpr int coarse = terrain::kLods - 1;
+  const int n = cells_per_tile(coarse);
+  m.vertices.reserve(static_cast<size_t>(terrain::kTiles * terrain::kTiles * n * n * 6) * MeshData::kFloatsPerVertex);
+  for (int i = 0; i < terrain::kTiles; ++i) {
+    for (int j = 0; j < terrain::kTiles; ++j) {
+      const auto first = static_cast<uint32_t>(m.vertex_count());
+      const Aabb box = add_cells(m, world, colors, tile_start(i), tile_start(j), terrain::kLodCells[coarse], n, 0);
+      m.parts.push_back({{first, static_cast<uint32_t>(m.vertex_count()) - first}, box});
     }
   }
   return m;
 }
 
+MeshData build_ground_tile(const World& world, GroundColors& colors, TileKey key) {
+  MeshData m;
+  const int n = cells_per_tile(key.lod);
+  m.vertices.reserve(static_cast<size_t>(n * n * 6) * MeshData::kFloatsPerVertex);
+  const Aabb box = add_cells(m, world, colors, tile_start(key.i), tile_start(key.j), terrain::kLodCells[key.lod], n, key.stitch);
+  m.parts.push_back({{0, static_cast<uint32_t>(m.vertex_count())}, box});
+  return m;
+}
+
 MeshData build_ground_mesh(const World& world) {
   GroundColors colors;
-  return build_ground_mesh(world, colors, ground_center(world.player.pos.x, world.player.pos.z));
+  const MeshData coarse = build_coarse_ground(world, colors);
+  const std::vector<TileKey> keys = detailed_tiles(world.player.pos.x, world.player.pos.z);
+  MeshData m;
+  for (int i = 0; i < terrain::kTiles; ++i) {
+    for (int j = 0; j < terrain::kTiles; ++j) {
+      if (std::any_of(keys.begin(), keys.end(), [&](const TileKey& k) { return k.i == i && k.j == j; })) continue;
+      const DrawRange r = coarse.parts[tile_part_index(i, j)].range;
+      const auto from = coarse.vertices.begin() + static_cast<std::ptrdiff_t>(r.first * MeshData::kFloatsPerVertex);
+      m.vertices.insert(m.vertices.end(), from, from + static_cast<std::ptrdiff_t>(r.count * MeshData::kFloatsPerVertex));
+    }
+  }
+  for (const TileKey& k : keys) {
+    const MeshData tile = build_ground_tile(world, colors, k);
+    m.vertices.insert(m.vertices.end(), tile.vertices.begin(), tile.vertices.end());
+  }
+  return m;
+}
+
+// ---- The detailed tiles drawn ----------------------------------------------------
+
+void GroundTiles::reset() {
+  slots_.assign(terrain::kTileSlots, Slot{});
+  drawn_.clear();
+  drawn_keys_.clear();
+  frame_ = 0;
+}
+
+int GroundTiles::find(TileKey key) const {
+  for (size_t s = 0; s < slots_.size(); ++s) {
+    if (slots_[s].used && slots_[s].key == key) return static_cast<int>(s);
+  }
+  return -1;
+}
+
+bool GroundTiles::update(const World& world, GroundColors& colors, Vec2 player, double budget_ms, Upload upload, void* user) {
+  if (slots_.empty()) reset();
+  ++frame_;
+  const std::vector<TileKey> wanted = detailed_tiles(player.x, player.z);
+  if (wanted == drawn_keys_) {
+    for (int s : drawn_) slots_[static_cast<size_t>(s)].last_drawn = frame_;
+    return false;
+  }
+  const bool all_now = drawn_.empty();
+  const double start = now_ms();
+  int built_now = 0;
+  const auto is_wanted = [&](TileKey k) { return std::find(wanted.begin(), wanted.end(), k) != wanted.end(); };
+  for (const TileKey& key : wanted) {
+    if (find(key) >= 0) continue;
+    if (!all_now && built_now > 0 && now_ms() - start >= budget_ms) break;
+    // A free slot, or the one drawn longest ago that is neither drawn nor wanted.
+    int slot = -1;
+    for (size_t s = 0; s < slots_.size(); ++s) {
+      const Slot& c = slots_[s];
+      if (!c.used) {
+        slot = static_cast<int>(s);
+        break;
+      }
+      if (std::find(drawn_.begin(), drawn_.end(), static_cast<int>(s)) != drawn_.end() || is_wanted(c.key)) continue;
+      if (slot < 0 || c.last_drawn < slots_[static_cast<size_t>(slot)].last_drawn) slot = static_cast<int>(s);
+    }
+    if (slot < 0) break;  // cannot happen: more slots than two sets of tiles
+    const MeshData mesh = build_ground_tile(world, colors, key);
+    upload(user, static_cast<size_t>(slot), mesh);
+    slots_[static_cast<size_t>(slot)] = {key, true, frame_, mesh.parts.front().bounds};
+    ++built_;
+    ++built_now;
+  }
+  std::vector<int> slots;
+  for (const TileKey& key : wanted) {
+    const int s = find(key);
+    if (s < 0) return false;  // not all ready yet: the tiles before stay
+    slots.push_back(s);
+  }
+  drawn_ = std::move(slots);
+  drawn_keys_ = wanted;
+  for (int s : drawn_) slots_[static_cast<size_t>(s)].last_drawn = frame_;
+  return true;
+}
+
+void GroundTiles::fill_list(DrawList& list, const std::vector<Part>& coarse_parts, const std::vector<Part>& path_parts) const {
+  const size_t n = kMeshCount + terrain::kTileSlots;
+  list.batches.assign(n, {});
+  list.parts.assign(n, {});
+  list.mesh_parts.assign(n, {});
+  list.visible.clear();
+  list.cached = true;
+  list.far = false;
+  ++list.version;
+  const auto ground = static_cast<size_t>(MeshId::Ground);
+  list.batches[ground].push_back(Instance{});
+  list.mesh_parts[ground] = coarse_parts;
+  for (const TileKey& k : drawn_keys_) {
+    const size_t part = tile_part_index(k.i, k.j);
+    if (part < list.mesh_parts[ground].size()) list.mesh_parts[ground][part].hidden = true;  // drawn in detail
+  }
+  const auto path = static_cast<size_t>(MeshId::Path);
+  list.batches[path].push_back(Instance{});
+  list.mesh_parts[path] = path_parts;
+  Instance water;
+  water.material = kWater;  // the shader adds waves and reflections
+  list.batches[static_cast<size_t>(MeshId::Water)].push_back(water);
+  for (int s : drawn_) {
+    const size_t i = kMeshCount + static_cast<size_t>(s);
+    list.batches[i].push_back(Instance{});
+    list.parts[i].push_back({{0, 1}, slots_[static_cast<size_t>(s)].bounds});
+  }
 }
 
 MeshData build_water_mesh(const World& world) {
@@ -307,7 +453,16 @@ MeshData build_path_mesh(const World& world) {
     c = {kPath.r * shade, kPath.g * shade, kPath.b * shade, alphas[col] * end_fade};
   };
 
+  // By stretches of the path, each a part (culling).
+  constexpr size_t kStretch = 48;
+  uint32_t part_first = 0;
+  Aabb part_box = empty_aabb();
   for (size_t i = 0; i + 1 < n; ++i) {
+    if (i % kStretch == 0 && i > 0) {
+      m.parts.push_back({{part_first, static_cast<uint32_t>(m.vertex_count()) - part_first}, part_box});
+      part_first = static_cast<uint32_t>(m.vertex_count());
+      part_box = empty_aabb();
+    }
     for (int col = 0; col + 1 < kColumns; ++col) {
       float ax, az, bx, bz, cx, cz, dx, dz;
       Color ca, cb, cc, cd;
@@ -319,9 +474,14 @@ MeshData build_path_mesh(const World& world) {
       auto y = [&](float x, float z) { return ground_height(world, x, z) + terrain::kPathHeight; };
       vertex(m, ax, y(ax, az), az, ca); vertex(m, bx, y(bx, bz), bz, cb); vertex(m, cx, y(cx, cz), cz, cc);
       vertex(m, ax, y(ax, az), az, ca); vertex(m, cx, y(cx, cz), cz, cc); vertex(m, dx, y(dx, dz), dz, cd);
+      for (float* v = &m.vertices[m.vertices.size() - 6 * MeshData::kFloatsPerVertex]; v < m.vertices.data() + m.vertices.size();
+           v += MeshData::kFloatsPerVertex) {
+        part_box.add(v[0], v[1], v[2]);
+      }
     }
   }
-  face_up(m);
+  m.parts.push_back({{part_first, static_cast<uint32_t>(m.vertex_count()) - part_first}, part_box});
+  face_up(m);  // swaps vertices within triangles: the parts stay the same
   return m;
 }
 

@@ -278,6 +278,7 @@ public:
     m.transparent = data.transparent;
     m.double_sided = data.double_sided;
     if (m.vertex_count == 0) return;
+    stats_.uploaded_bytes += data.vertices.size() * sizeof(float);
 
     glGenVertexArrays(1, &m.vao);
     glBindVertexArray(m.vao);
@@ -388,15 +389,36 @@ public:
                          instances.data(), GL_STREAM_DRAW);
             stats_.uploaded_bytes += instances.size() * sizeof(Instance);
           }
-          point_instance_attributes();
-          glDrawArraysInstanced(GL_TRIANGLES, 0, m.vertex_count, static_cast<GLsizei>(instances.size()));
-          if (profiling_) {
-            const uint64_t triangles = static_cast<uint64_t>(m.vertex_count / 3) * instances.size();
-            ++stats_.draw_calls;
-            stats_.instances += instances.size();
-            stats_.triangles += triangles;
-            const auto group = static_cast<size_t>(mesh_group(static_cast<MeshId>(std::min(i, kMeshCount - 1))));
-            if (group < kMeshGroups) stats_.triangles_by_group[group] += triangles;
+          const auto draw = [&](uint32_t first_instance, uint32_t instance_count, GLint first_vertex, GLsizei vertex_count) {
+            if (instance_count == 0 || vertex_count <= 0) return;
+            point_instance_attributes(first_instance);
+            glDrawArraysInstanced(GL_TRIANGLES, first_vertex, vertex_count, static_cast<GLsizei>(instance_count));
+            if (profiling_) {
+              const uint64_t triangles = static_cast<uint64_t>(vertex_count / 3) * instance_count;
+              ++stats_.draw_calls;
+              stats_.instances += instance_count;
+              stats_.triangles += triangles;
+              // Beyond the models: the ground's tiles (terrain_mesh.hpp).
+              const auto group = static_cast<size_t>(i < kMeshCount ? mesh_group(static_cast<MeshId>(i)) : MeshGroup::Terrain);
+              if (group < kMeshGroups) stats_.triangles_by_group[group] += triangles;
+            }
+          };
+          const DrawList::Visible* v = i < list->visible.size() ? &list->visible[i] : nullptr;
+          if (!v || v->all) {
+            draw(0, static_cast<uint32_t>(instances.size()), 0, m.vertex_count);
+            continue;
+          }
+          // Culled (cull.hpp): the instances and parts of the mesh in view only.
+          for (const DrawRange& r : v->instances) {
+            const uint32_t count = std::min<uint32_t>(r.count, static_cast<uint32_t>(instances.size()) - std::min<uint32_t>(r.first, static_cast<uint32_t>(instances.size())));
+            if (v->vertices.empty()) {
+              draw(r.first, count, 0, m.vertex_count);
+              continue;
+            }
+            for (const DrawRange& part : v->vertices) {
+              const auto end = std::min<GLsizei>(static_cast<GLsizei>(part.first + part.count), m.vertex_count);
+              draw(r.first, count, static_cast<GLint>(part.first), end - static_cast<GLsizei>(part.first));
+            }
           }
         }
       }
@@ -490,12 +512,14 @@ private:
   }
 
   // Instance attributes read from the buffer bound to GL_ARRAY_BUFFER.
-  static void point_instance_attributes() {
+  // From instance `first` on (WebGL2 has no base instance: the attributes
+  // point further into the buffer instead).
+  static void point_instance_attributes(uint32_t first = 0) {
     constexpr GLsizei stride = sizeof(Instance);
     const size_t offsets[] = {offsetof(Instance, x), offsetof(Instance, rotation), offsetof(Instance, sx),
                               offsetof(Instance, tint)};
     for (GLuint i = 0; i < 4; ++i) {
-      glVertexAttribPointer(3 + i, 4, GL_FLOAT, GL_FALSE, stride, offset(offsets[i]));
+      glVertexAttribPointer(3 + i, 4, GL_FLOAT, GL_FALSE, stride, offset(offsets[i] + first * sizeof(Instance)));
     }
   }
 

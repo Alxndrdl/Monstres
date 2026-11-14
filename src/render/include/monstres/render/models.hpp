@@ -46,8 +46,8 @@ enum class MeshId : size_t {
   Tower, RuinWallLow, RuinWallHigh, Pillar, FallenPillar, Rubble, RuneStone,
   // The castle and the cave.
   CastleWall, CastleTower, CastleGate, CastleKeep, CaveMouth, Crystal, Teleporter,
-  // Seen from afar (simplified).
-  TreeFar, PineFar,
+  // Seen from afar (simplified), and at a middle distance.
+  TreeFar, PineFar, TreeMid, BushFar,
   Ground,  // built at runtime
   FarGround, Lava,  // the continent (far pass), built at runtime
   // Transparent, drawn last, in this order:

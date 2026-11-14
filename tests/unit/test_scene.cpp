@@ -51,8 +51,8 @@ TEST_CASE("each object is drawn with the mesh of its kind, with a shadow") {
   CHECK(count_inside_play_area(batch(list, MeshId::Rock2)) == 1);
   CHECK(batch(list, MeshId::Crate).size() == 1);
   CHECK(count_inside_play_area(batch(list, MeshId::Shadow)) == 5);
-  CHECK(batch(list, MeshId::Ground).size() == 1);
-  CHECK(batch(list, MeshId::Path).size() == 1);
+  CHECK(batch(list, MeshId::Ground).empty());  // the ground, the path and the water: the terrain list (terrain_mesh.hpp)
+  CHECK(batch(list, MeshId::Path).empty());
 
   const Instance& log = batch(list, MeshId::Log)[0];
   CHECK(log.rotation.y == Approx(std::sin(kPi / 4)));  // turned 90° around Y
@@ -69,7 +69,7 @@ TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mount
 
   const auto& short_grass = batch(list, MeshId::GrassShort);
   const auto& tall_grass = batch(list, MeshId::GrassTall);
-  CHECK(short_grass.size() > 2000);
+  CHECK(short_grass.size() > 1500);  // thinning out with the distance
   CHECK(tall_grass.size() > 300);
   CHECK(batch(list, MeshId::Flower).size() > 100);
 
@@ -92,7 +92,7 @@ TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mount
     around += std::hypot(o.pos.x - center.x, o.pos.z - center.z) <= landscape::kObjectsRadius;
   }
   size_t drawn = 0;
-  for (MeshId id : {MeshId::Tree, MeshId::Pine, MeshId::TreeFar, MeshId::PineFar}) {
+  for (MeshId id : {MeshId::Tree, MeshId::Pine, MeshId::TreeMid, MeshId::TreeFar, MeshId::PineFar}) {
     for (const Instance& t : batch(list, id)) {
       ++drawn;
       CHECK(std::hypot(t.x - center.x, t.z - center.z) <= landscape::kObjectsRadius + 1e-3f);
@@ -101,10 +101,13 @@ TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mount
   }
   CHECK(drawn == around);
   CHECK(around < w.objects.size() / 3);  // far from all of them
-  for (MeshId id : {MeshId::Tree, MeshId::Pine}) {  // full trees near the player only
+  for (MeshId id : {MeshId::Tree, MeshId::Pine, MeshId::TreeMid}) {  // full trees near the player only
     for (const Instance& t : batch(list, id)) {
       CHECK(std::hypot(t.x - w.player.pos.x, t.z - w.player.pos.z) < landscape::kDetailRadius + landscape::kStep);
     }
+  }
+  for (const Instance& t : batch(list, MeshId::Tree)) {  // in full very near only, then simpler
+    CHECK(std::hypot(t.x - center.x, t.z - center.z) < landscape::kFullRadius + 1e-3f);
   }
   CHECK(batch(list, MeshId::TreeFar).size() > batch(list, MeshId::Tree).size());
 

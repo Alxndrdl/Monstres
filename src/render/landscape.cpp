@@ -1,0 +1,531 @@
+#include "monstres/render/landscape.hpp"
+
+#include "monstres/render/scene.hpp"
+#include "scene_util.hpp"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+
+namespace monstres {
+
+using scene_util::kTau;
+using scene_util::rand01;
+
+namespace {
+
+constexpr float kDecorationHalfSize = rules::kWorldHalfSize + 13;  // grass and flowers up to here
+constexpr int kGrassCells = static_cast<int>(2 * kDecorationHalfSize);  // 1 m cells
+
+// Mesh scale, matching the sizes of tools/make_models.py and the collision
+// boxes of world.cpp.
+void scale_for(const Object& o, Instance& in) {
+  const Vec3 s = o.size;
+  switch (o.kind) {
+    case ObjectKind::Tree:
+    case ObjectKind::Pine:  in.sx = in.sy = in.sz = s.x; break;
+    case ObjectKind::Rock:  in.sx = s.x; in.sy = s.y; in.sz = s.z; break;
+    case ObjectKind::Log:   in.sx = s.x; in.sy = s.y; in.sz = s.y; break;
+    case ObjectKind::Stump:
+    case ObjectKind::Bush:  in.sx = s.x; in.sy = s.y; in.sz = s.x; break;
+    case ObjectKind::Crate: in.sx = s.x; in.sy = s.y; in.sz = s.z; in.y += s.y; break;  // centered cube
+    case ObjectKind::Pillar: in.sx = in.sz = 1; in.sy = s.y; break;                    // unit height
+    case ObjectKind::Crystal: in.sx = in.sy = in.sz = s.x; break;
+    default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
+  }
+}
+
+float wind_for(ObjectKind kind) {
+  switch (kind) {
+    case ObjectKind::Tree: return 0.25f;
+    case ObjectKind::Pine: return 0.15f;
+    case ObjectKind::Bush: return 0.35f;
+    default:               return 0;
+  }
+}
+
+// Trees, rocks, logs, stumps, bushes: what the wilds are made of.
+bool nature(ObjectKind kind) { return kind <= ObjectKind::Bush; }
+
+// How far an object is drawn: landmarks always, trees simplified far away,
+// small things only near the player.
+enum class Detail { Landmark, Tree, Small };
+Detail detail_of(const Object& o) {
+  switch (o.kind) {
+    case ObjectKind::Tree:
+    case ObjectKind::Pine: return Detail::Tree;
+    case ObjectKind::Rock: return o.size.x >= 1.0f || o.size.z >= 1.0f ? Detail::Landmark : Detail::Small;
+    case ObjectKind::Log:
+    case ObjectKind::Stump:
+    case ObjectKind::Bush:
+    case ObjectKind::Crate:
+    case ObjectKind::Fence:
+    case ObjectKind::Sign:
+    case ObjectKind::Barrel:
+    case ObjectKind::Lamp:
+    case ObjectKind::Rubble: return Detail::Small;
+    default: return Detail::Landmark;
+  }
+}
+
+
+// One object, ready to draw: its models up close, at a middle distance and
+// from afar, and its soft shadow on the ground, sized to it.
+LandscapeCache::Item make_item(const World& w, const Object& o) {
+  LandscapeCache::Item item;
+  item.x = o.pos.x;
+  item.z = o.pos.z;
+  const Detail detail = detail_of(o);
+  item.nature = nature(o.kind);
+  item.small = detail == Detail::Small;
+  Instance& in = item.instance;
+  in.x = o.pos.x;
+  in.y = o.pos.y;
+  in.z = o.pos.z;
+  const float yaw = static_cast<float>(radians_from_angle16(o.yaw));
+  in.rotation = quat_yaw(yaw);
+  scale_for(o, in);
+  in.wind = wind_for(o.kind);
+  const float k = 0.88f + 0.24f * static_cast<float>(o.variant) / 255.0f;  // slight color variation
+  in.tint = {k, k, k, 1};
+  if (detail == Detail::Small) in.material = kFadeFar;  // shrinks away before the edge of the detail
+  else if (item.nature) in.material = kFadeTree;     // shrinks away before landscape::kObjectsRadius
+  item.full = item.mid = item.far = mesh_for(o);
+  if (o.kind == ObjectKind::Tree) {
+    item.mid = MeshId::TreeMid;
+    item.far = MeshId::TreeFar;
+  } else if (o.kind == ObjectKind::Pine) {
+    item.far = MeshId::PineFar;
+  } else if (o.kind == ObjectKind::Bush) {
+    item.mid = MeshId::BushFar;
+  }
+  in.material = scene_util::material_for(item.full, in.material);
+
+  const auto shadow = [&](float rx, float rz, float turn, float alpha = 1) {
+    Instance& s = item.shadow;
+    s.x = o.pos.x;
+    s.y = w.ground.height(o.pos.x, o.pos.z) + kShadowHeight;
+    s.z = o.pos.z;
+    s.rotation = ground_tilt(w, o.pos.x, o.pos.z) * quat_yaw(turn);
+    s.sx = rx;
+    s.sy = 1;
+    s.sz = rz;
+    s.tint = {1, 1, 1, alpha};
+    s.material = detail == Detail::Small ? kFadeFar : kLit;
+    item.has_shadow = true;
+  };
+  const Vec3 s = o.size;
+  switch (o.kind) {
+    case ObjectKind::Tree:  shadow(1.7f * s.x, 1.7f * s.x, 0); break;
+    case ObjectKind::Pine:  shadow(1.4f * s.x, 1.4f * s.x, 0); break;
+    case ObjectKind::Rock:  shadow(1.25f * s.x, 1.25f * s.z, yaw); break;
+    case ObjectKind::Log:   shadow(1.15f * s.x, 1.8f * s.y, yaw); break;
+    case ObjectKind::Stump: shadow(1.5f * s.x, 1.5f * s.x, 0); break;
+    case ObjectKind::Bush:  shadow(1.3f * s.x, 1.3f * s.x, 0); break;
+    case ObjectKind::Crate: shadow(1.5f * s.x, 1.5f * s.z, yaw, 0.9f); break;
+    case ObjectKind::HouseCottage: shadow(3.6f, 3.0f, yaw, 0.7f); break;
+    case ObjectKind::HouseChimney: shadow(3.3f, 3.3f, yaw, 0.7f); break;
+    case ObjectKind::HouseHut: shadow(3.2f, 3.2f, 0, 0.7f); break;
+    case ObjectKind::Well: shadow(1.4f, 1.4f, 0); break;
+    case ObjectKind::Barrel: shadow(0.6f, 0.6f, 0); break;
+    case ObjectKind::Lamp:
+    case ObjectKind::Sign: shadow(0.35f, 0.35f, 0, 0.8f); break;
+    case ObjectKind::Tower: shadow(3.6f, 3.6f, 0, 0.75f); break;
+    case ObjectKind::RuinWall: shadow(1.9f, 0.6f, yaw, 0.7f); break;
+    case ObjectKind::Pillar: shadow(0.6f, 0.6f, 0, 0.8f); break;
+    case ObjectKind::FallenPillar: shadow(1.8f, 0.6f, yaw, 0.7f); break;
+    case ObjectKind::Rubble: shadow(1.0f, 1.0f, 0, 0.6f); break;
+    case ObjectKind::RuneStone: shadow(0.6f, 0.4f, yaw, 0.7f); break;
+    case ObjectKind::CastleWall: shadow(2.6f, 1.2f, yaw, 0.7f); break;
+    case ObjectKind::CastleTower: shadow(3.2f, 3.2f, 0, 0.75f); break;
+    case ObjectKind::CastleKeep: shadow(6.2f, 6.2f, yaw, 0.75f); break;
+    case ObjectKind::Crystal: shadow(0.5f * s.x, 0.5f * s.x, 0, 0.5f); break;
+    case ObjectKind::Teleporter: shadow(2.3f, 2.3f, 0, 0.6f); break;
+    default: break;
+  }
+  return item;
+}
+
+// Boxes of the objects around a place, by cells of 4 m: where grass does not grow.
+class Obstacles {
+public:
+  Obstacles(Vec2 center, float radius) : x0_(center.x - radius), z0_(center.z - radius),
+                                         n_(static_cast<int>(2 * radius / kCell) + 1),
+                                         cells_(static_cast<size_t>(n_ * n_)) {}
+  void add(const Box& b) {
+    for (int i = cell(b.min.x - x0_); i <= cell(b.max.x - x0_); ++i) {
+      for (int j = cell(b.min.z - z0_); j <= cell(b.max.z - z0_); ++j) cells_[static_cast<size_t>(i * n_ + j)].push_back(b);
+    }
+  }
+  bool covered(float x, float z, float margin) const {
+    const auto& boxes = cells_[static_cast<size_t>(cell(x - x0_) * n_ + cell(z - z0_))];
+    return std::any_of(boxes.begin(), boxes.end(), [&](const Box& b) {
+      return x > b.min.x - margin && x < b.max.x + margin && z > b.min.z - margin && z < b.max.z + margin;
+    });
+  }
+
+private:
+  static constexpr float kCell = 4.0f;
+  int cell(float v) const { return std::clamp(static_cast<int>(v / kCell), 0, n_ - 1); }
+  float x0_, z0_;
+  int n_;
+  std::vector<std::vector<Box>> cells_;
+};
+
+
+constexpr Color kFlowerColors[] = {
+    {1.0f, 1.0f, 1.0f, 1}, {1.0f, 0.88f, 0.35f, 1}, {0.80f, 0.55f, 0.95f, 1},
+    {1.0f, 0.62f, 0.75f, 1}, {0.55f, 0.70f, 1.0f, 1},
+};
+
+// What grows in the grass cell (i, j) of 1 m, if anything: a tuft of grass
+// or a flower, somewhere in the cell.
+void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::vector<LandscapeCache::Grass>& out) {
+  const auto ui = static_cast<uint64_t>(i), uj = static_cast<uint64_t>(j);
+  const float x = -kDecorationHalfSize + (static_cast<float>(i) + rand01(w.seed, 1000 + ui, uj));
+  const float z = -kDecorationHalfSize + (static_cast<float>(j) + rand01(w.seed, 2000 + ui, uj));
+  const float on_path = distance_to_path(w.path, x, z, 2 * rules::kPathHalfWidth) / rules::kPathHalfWidth;
+  if (on_path < 0.75f) return;
+  if (obstacles.covered(x, z, 0.05f)) return;
+  if (w.ground.normal(x, z).y < 0.8f) return;  // bare rock on cliffs
+  if (in_lake(w.village.lake, x, z, 0.6f)) return;
+  if (w.ground.height(x, z) < rules::kSeaLevel + 0.6f) return;  // the sea and the wet sand
+  if (w.ruins.radius > 0) {  // the paved courtyard of the ruins
+    const float rx = x - w.ruins.center.x, rz = z - w.ruins.center.z;
+    if (std::max(std::fabs(rx), std::fabs(rz)) < 8.5f && rand01(w.seed, 3500 + ui, uj) < 0.8f) return;
+  }
+  if (w.castle.radius > 0) {  // the castle's courtyard, paved
+    const float kx = x - w.castle.center.x, kz = z - w.castle.center.z;
+    if (std::max(std::fabs(kx), std::fabs(kz)) < rules::kCastleHalf + 0.5f && rand01(w.seed, 3600 + ui, uj) < 0.9f) return;
+  }
+  if (w.village.lake.radius_x > 0) {  // the trodden village square
+    const float vx = x - w.village.center.x, vz = z - w.village.center.z;
+    if (vx * vx + vz * vz < 6.0f * 6.0f) return;
+  }
+  const float roll = rand01(w.seed, 3000 + ui, uj);
+  const float keep = rand01(w.seed, 11000 + ui, uj);
+  // Sparse along the path edges, and thinner outside the playable area
+  // (seen from afar only: saves a lot of triangles on small devices).
+  float edge_factor = on_path < 1.15f ? 0.35f : 1.0f;
+  if (std::max(std::fabs(x), std::fabs(z)) > rules::kWorldHalfSize) edge_factor *= 0.45f;
+
+  Instance in;
+  in.x = x;
+  in.y = w.ground.height(x, z) - 0.02f;
+  in.z = z;
+  in.rotation = quat_yaw(kTau * rand01(w.seed, 4000 + ui, uj));
+  in.wind = 1;
+  in.material = kFadeNear;
+  const float k = 0.85f + 0.25f * rand01(w.seed, 5000 + ui, uj);
+  in.tint = {k, k, k, 1};
+
+  // Flowers grow in clusters.
+  const float meadow = value_noise(w.seed + 21, x, z, 9.0f);
+  const float flower_chance = (meadow > 0.6f ? 0.16f : 0.02f) * edge_factor;
+  if (roll < flower_chance) {
+    const float s = 0.8f + 0.5f * rand01(w.seed, 6000 + ui, uj);
+    in.sx = in.sy = in.sz = s;
+    in.tint = kFlowerColors[static_cast<size_t>(rand01(w.seed, 7000 + ui, uj) * 5) % 5];
+    out.push_back({MeshId::Flower, in, keep});
+    return;
+  }
+  // Tall grass in patches, short grass almost everywhere.
+  const float tall = value_noise(w.seed + 20, x, z, 7.0f);
+  if (tall > 0.62f && roll < 0.85f * edge_factor) {
+    const float s = 0.55f + 0.35f * rand01(w.seed, 8000 + ui, uj);  // up to ~0.85 m
+    in.sx = in.sz = 0.9f + 0.4f * rand01(w.seed, 9000 + ui, uj);
+    in.sy = s;
+    out.push_back({MeshId::GrassTall, in, keep});
+  } else if (roll < 0.6f * edge_factor) {
+    const float s = 0.7f + 0.7f * rand01(w.seed, 8000 + ui, uj);
+    in.sx = in.sz = 0.8f + 0.5f * rand01(w.seed, 9000 + ui, uj);
+    in.sy = s;
+    out.push_back({MeshId::GrassShort, in, keep});
+  }
+}
+
+// ---- Chunks ----------------------------------------------------------------------
+
+int chunk_of(float v) {
+  return std::clamp(static_cast<int>(std::floor((v - landscape::kChunkOrigin) / landscape::kChunk)), 0, landscape::kChunks - 1);
+}
+float chunk_start(int c) { return landscape::kChunkOrigin + landscape::kChunk * static_cast<float>(c); }
+
+// Squared distance from (x, z) to the nearest point of chunk (cx, cz).
+float chunk_distance2(int cx, int cz, float x, float z) {
+  const float x0 = chunk_start(cx), z0 = chunk_start(cz);
+  const float dx = std::max({x0 - x, 0.0f, x - (x0 + landscape::kChunk)});
+  const float dz = std::max({z0 - z, 0.0f, z - (z0 + landscape::kChunk)});
+  return dx * dx + dz * dz;
+}
+
+// The chunks with the valley's buildings, drawn from everywhere.
+bool valley_chunk(int cx, int cz) {
+  const float lo = -rules::kValleyHalfSize, hi = rules::kValleyHalfSize;
+  return chunk_start(cx) + landscape::kChunk > lo && chunk_start(cx) < hi && chunk_start(cz) + landscape::kChunk > lo &&
+         chunk_start(cz) < hi;
+}
+
+std::array<Aabb, kMeshCount> g_mesh_bounds;
+bool g_mesh_bounds_set = false;
+
+double now_ms() {
+  return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+}  // namespace
+
+// ---- Bounds ------------------------------------------------------------------------
+
+void set_mesh_bounds(std::span<const MeshData> meshes) {
+  for (size_t i = 0; i < kMeshCount; ++i) {
+    Aabb b = empty_aabb();
+    if (i < meshes.size()) {
+      const std::vector<float>& v = meshes[i].vertices;
+      for (size_t k = 0; k + 2 < v.size(); k += MeshData::kFloatsPerVertex) b.add(v[k], v[k + 1], v[k + 2]);
+    }
+    g_mesh_bounds[i] = b;
+  }
+  g_mesh_bounds_set = true;
+}
+
+Aabb mesh_bounds(MeshId id) {
+  const auto i = static_cast<size_t>(id);
+  if (g_mesh_bounds_set && i < kMeshCount && !g_mesh_bounds[i].empty()) return g_mesh_bounds[i];
+  return {-8, -1, -8, 8, 20, 8};  // as big as the biggest model (the castle's keep)
+}
+
+Aabb instance_bounds(MeshId id, const Instance& in) {
+  const Aabb m = mesh_bounds(id);
+  // Turned around the vertical axis: within the circle through the box's corners.
+  const float rx = std::max(std::fabs(m.min_x), std::fabs(m.max_x)), rz = std::max(std::fabs(m.min_z), std::fabs(m.max_z));
+  float r = std::sqrt(rx * rx + rz * rz) * std::max(in.sx, in.sz);
+  float lo = m.min_y * in.sy, hi = m.max_y * in.sy;
+  if (std::fabs(in.rotation.x) + std::fabs(in.rotation.z) > 1e-4f) {  // tilted too (shadows on slopes)
+    const float reach = std::max({r, std::fabs(lo), std::fabs(hi)});
+    r = reach;
+    lo = -reach;
+    hi = reach;
+  }
+  if (in.wind > 0) r += 0.15f * hi * in.wind + 0.1f;  // swaying in the wind
+  return {in.x - r, in.y + lo - 0.05f, in.z - r, in.x + r, in.y + hi + 0.05f, in.z + r};
+}
+
+// ---- The cache ---------------------------------------------------------------------
+
+Vec2 landscape_center(float x, float z) {
+  const auto snap = [](float v) { return std::round(v / landscape::kStep) * landscape::kStep; };
+  return {snap(x), snap(z)};
+}
+
+void LandscapeCache::clear() {
+  chunks_.clear();
+  seed_ = ~0ULL;
+  object_count_ = 0;
+  objects_ = nullptr;
+}
+
+void LandscapeCache::check_world(const World& w) {
+  if (seed_ == w.seed && object_count_ == w.objects.size() && objects_ == w.objects.data() && !chunks_.empty()) return;
+  clear();
+  seed_ = w.seed;
+  object_count_ = w.objects.size();
+  objects_ = w.objects.data();
+  chunks_.resize(static_cast<size_t>(landscape::kChunks) * landscape::kChunks);
+}
+
+size_t LandscapeCache::chunks_with_grass() const {
+  return static_cast<size_t>(std::count_if(chunks_.begin(), chunks_.end(), [](const Chunk& c) { return c.grass_done; }));
+}
+
+const LandscapeCache::Chunk& LandscapeCache::chunk(const World& w, int cx, int cz, bool grass) {
+  check_world(w);
+  Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunks + cz)];
+  if (!c.objects_done) {
+    // Its objects: those whose position is in it (through the index, each once).
+    const ObjectIndex& ix = objects_index(w);
+    for (int i = cx * 4; i < cx * 4 + 4; ++i) {
+      for (int j = cz * 4; j < cz * 4 + 4; ++j) {
+        const auto cell = static_cast<size_t>(i * ObjectIndex::kCells + j);
+        for (uint32_t k = ix.cell_start[cell]; k < ix.cell_start[cell + 1]; ++k) {
+          const Object& o = w.objects[ix.items[k]];
+          if (ObjectIndex::cell_of(o.pos.x) != i || ObjectIndex::cell_of(o.pos.z) != j) continue;
+          if (mesh_for(o) == MeshId::Count) continue;  // invisible
+          c.items.push_back(make_item(w, o));
+        }
+      }
+    }
+    c.objects_done = true;
+  }
+  if (grass && !c.grass_done) {
+    // Grass cells whose corner is in the chunk, where no object stands.
+    const float x0 = chunk_start(cx), z0 = chunk_start(cz);
+    Obstacles obstacles({x0 + landscape::kChunk / 2, z0 + landscape::kChunk / 2}, landscape::kChunk / 2 + 2);
+    const Box area{{x0 - 2, -1e9f, z0 - 2}, {x0 + landscape::kChunk + 2, 1e9f, z0 + landscape::kChunk + 2}};
+    for_objects_near(w, area, [&](uint32_t, const Box& b) { obstacles.add(b); });
+    const auto first = [](float start) {
+      return std::clamp(static_cast<int>(std::ceil(start + kDecorationHalfSize)), 0, kGrassCells);
+    };
+    const int i0 = first(x0), i1 = first(x0 + landscape::kChunk), j0 = first(z0), j1 = first(z0 + landscape::kChunk);
+    for (int i = i0; i < i1; ++i) {
+      for (int j = j0; j < j1; ++j) grass_cell(w, obstacles, i, j, c.grass);
+    }
+    c.grass_done = true;
+  }
+  return c;
+}
+
+bool LandscapeCache::ready(const World& w, Vec2 center) {
+  check_world(w);
+  const float reach2 = landscape::kObjectsRadius * landscape::kObjectsRadius;
+  const float grass2 = landscape::kGrassRadius * landscape::kGrassRadius;
+  for (int cx = 0; cx < landscape::kChunks; ++cx) {
+    for (int cz = 0; cz < landscape::kChunks; ++cz) {
+      const Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunks + cz)];
+      const float d2 = chunk_distance2(cx, cz, center.x, center.z);
+      if (!c.objects_done && (d2 <= reach2 || valley_chunk(cx, cz))) return false;
+      if (!c.grass_done && d2 <= grass2) return false;
+    }
+  }
+  return true;
+}
+
+int LandscapeCache::prepare(const World& w, Vec2 at, double budget_ms) {
+  check_world(w);
+  const double start = now_ms();
+  // What the landscape will need when the player has walked a little farther.
+  const float reach = landscape::kObjectsRadius + 1.5f * landscape::kStep;
+  const float grass = landscape::kGrassRadius + 1.5f * landscape::kStep;
+  struct Missing {
+    float d2;
+    int cx, cz;
+    bool grass;
+  };
+  std::vector<Missing> missing;
+  const int lo_x = chunk_of(at.x - reach), hi_x = chunk_of(at.x + reach);
+  const int lo_z = chunk_of(at.z - reach), hi_z = chunk_of(at.z + reach);
+  for (int cx = 0; cx < landscape::kChunks; ++cx) {
+    for (int cz = 0; cz < landscape::kChunks; ++cz) {
+      Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunks + cz)];
+      const float d2 = chunk_distance2(cx, cz, at.x, at.z);
+      const bool near = cx >= lo_x && cx <= hi_x && cz >= lo_z && cz <= hi_z;
+      const bool want_objects = (near && d2 <= reach * reach) || valley_chunk(cx, cz);
+      const bool want_grass = near && d2 <= grass * grass;
+      if (c.grass_done && d2 > (grass + 64) * (grass + 64)) {  // far behind: its grass is not needed any more
+        c.grass_done = false;
+        std::vector<Grass>().swap(c.grass);
+      }
+      if ((want_objects && !c.objects_done) || (want_grass && !c.grass_done)) missing.push_back({d2, cx, cz, want_grass});
+    }
+  }
+  std::sort(missing.begin(), missing.end(), [](const Missing& a, const Missing& b) { return a.d2 < b.d2; });
+  int done = 0;
+  for (const Missing& m : missing) {
+    if (done > 0 && now_ms() - start >= budget_ms) break;
+    chunk(w, m.cx, m.cz, m.grass);
+    ++done;
+  }
+  return done;
+}
+
+// ---- Building ------------------------------------------------------------------------
+
+void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache& cache) {
+  using landscape::kBins;
+  cache.check_world(w);
+  list.batches.assign(kMeshCount, {});
+  list.parts.assign(kMeshCount, {});
+  list.mesh_parts.clear();
+  list.visible.clear();
+  list.cached = true;
+  ++list.version;
+  auto& bins = cache.bins_;
+  auto& bounds = cache.bin_bounds_;
+  bins.resize(kMeshCount * kBins);
+  for (auto& b : bins) b.clear();
+  bounds.assign(kMeshCount * kBins, empty_aabb());
+
+  // Each instance into the bin of its sector around the center.
+  const auto emit = [&](MeshId mesh, const Instance& in) {
+    if (mesh == MeshId::Count) return;
+    const float dx = in.x - center.x, dz = in.z - center.z;
+    const float angle = std::atan2(dz, dx);  // -pi..pi
+    int sector = static_cast<int>((angle + kPi) / (2 * kPi) * landscape::kSectors);
+    sector = std::clamp(sector, 0, landscape::kSectors - 1);
+    const int bin = (dx * dx + dz * dz < landscape::kInnerBand * landscape::kInnerBand ? 0 : landscape::kSectors) + sector;
+    const size_t k = static_cast<size_t>(mesh) * kBins + static_cast<size_t>(bin);
+    bins[k].push_back(in);
+    bounds[k].add(instance_bounds(mesh, in));
+  };
+
+  constexpr float near2 = landscape::kDetailRadius * landscape::kDetailRadius;
+  constexpr float full2 = landscape::kFullRadius * landscape::kFullRadius;
+  constexpr float reach2 = landscape::kObjectsRadius * landscape::kObjectsRadius;
+  constexpr float grass2 = landscape::kGrassRadius * landscape::kGrassRadius;
+  const float r = landscape::kObjectsRadius;
+  const int lo_x = chunk_of(center.x - r), hi_x = chunk_of(center.x + r);
+  const int lo_z = chunk_of(center.z - r), hi_z = chunk_of(center.z + r);
+  for (int cx = 0; cx < landscape::kChunks; ++cx) {
+    for (int cz = 0; cz < landscape::kChunks; ++cz) {
+      const bool around = cx >= lo_x && cx <= hi_x && cz >= lo_z && cz <= hi_z &&
+                          chunk_distance2(cx, cz, center.x, center.z) <= reach2;
+      if (!around && !valley_chunk(cx, cz)) continue;
+      const bool grass = chunk_distance2(cx, cz, center.x, center.z) <= grass2;
+      const LandscapeCache::Chunk& c = cache.chunk(w, cx, cz, grass);
+      for (const LandscapeCache::Item& item : c.items) {
+        const float dx = item.x - center.x, dz = item.z - center.z;
+        const float d2 = dx * dx + dz * dz;
+        if (item.nature && d2 > reach2) continue;  // too far: not drawn (the buildings are, everywhere)
+        const bool near = d2 < near2;
+        if (!near && item.small) continue;
+        emit(near ? (d2 < full2 ? item.full : item.mid) : item.far, item.instance);
+        if (near && item.has_shadow) emit(MeshId::Shadow, item.shadow);
+      }
+      if (!grass) continue;
+      for (const LandscapeCache::Grass& g : c.grass) {
+        const float dx = g.instance.x - center.x, dz = g.instance.z - center.z;
+        const float d2 = dx * dx + dz * dz;
+        if (d2 > grass2) continue;
+        // Thinning out: fewer tufts, a little wider, farther away.
+        const float d = std::sqrt(d2);
+        const float share = d <= landscape::kGrassThinStart
+                                ? 1.0f
+                                : 1.0f - (1.0f - landscape::kGrassThinLeast) * (d - landscape::kGrassThinStart) /
+                                             (landscape::kGrassRadius - landscape::kGrassThinStart);
+        if (g.keep >= share) continue;
+        if (share >= 1.0f) {
+          emit(g.mesh, g.instance);
+          continue;
+        }
+        Instance in = g.instance;
+        const float widen = std::sqrt(1.0f / share);
+        in.sx *= widen;
+        in.sz *= widen;
+        emit(g.mesh, in);
+      }
+    }
+  }
+
+  // Each batch: its bins one after the other, each one a part.
+  for (size_t m = 0; m < kMeshCount; ++m) {
+    std::vector<Instance>& batch = list.batches[m];
+    for (int b = 0; b < kBins; ++b) {
+      const size_t k = m * kBins + static_cast<size_t>(b);
+      if (bins[k].empty()) continue;
+      list.parts[m].push_back({{static_cast<uint32_t>(batch.size()), static_cast<uint32_t>(bins[k].size())}, bounds[k]});
+      batch.insert(batch.end(), bins[k].begin(), bins[k].end());
+    }
+  }
+}
+
+void build_landscape(const World& w, DrawList& list, Vec2 center) {
+  LandscapeCache cache;
+  build_landscape(w, list, center, cache);
+}
+
+void build_landscape(const World& w, DrawList& list) {
+  build_landscape(w, list, landscape_center(w.player.pos.x, w.player.pos.z));
+}
+
+}  // namespace monstres

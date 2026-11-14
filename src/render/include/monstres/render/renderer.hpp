@@ -17,12 +17,51 @@ struct Mat4 {
   float m[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 };
 
+// An axis-aligned box in the world (what culling tests against the view).
+struct Aabb {
+  float min_x = 0, min_y = 0, min_z = 0;
+  float max_x = 0, max_y = 0, max_z = 0;
+  // Grows to contain the point (or the other box). An empty box: see empty_aabb().
+  void add(float x, float y, float z) {
+    min_x = x < min_x ? x : min_x;
+    min_y = y < min_y ? y : min_y;
+    min_z = z < min_z ? z : min_z;
+    max_x = x > max_x ? x : max_x;
+    max_y = y > max_y ? y : max_y;
+    max_z = z > max_z ? z : max_z;
+  }
+  void add(const Aabb& b) {
+    add(b.min_x, b.min_y, b.min_z);
+    add(b.max_x, b.max_y, b.max_z);
+  }
+  bool empty() const { return min_x > max_x; }
+};
+inline Aabb empty_aabb() { return {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f}; }
+
+// A stretch of instances of a batch, or of vertices of a mesh.
+struct DrawRange {
+  uint32_t first = 0, count = 0;
+  bool operator==(const DrawRange&) const = default;
+};
+
+// A part of a batch or of a mesh, with where it is: culling (cull.hpp)
+// draws the parts in view only. `hidden`: never drawn (a part of the coarse
+// ground under a detailed tile).
+struct Part {
+  DrawRange range;
+  Aabb bounds;
+  bool hidden = false;
+};
+
 // A mesh: triangles, 10 floats per vertex
 // (position xyz, normal xyz, color rgba).
 struct MeshData {
   std::vector<float> vertices;
   bool transparent = false;   // alpha-blended, drawn after the opaque meshes
   bool double_sided = false;  // no back-face culling (grass blades, flowers)
+  // Big meshes drawn once (the ground, the continent): their parts, by
+  // where they are, so that only those in view are drawn (vertex ranges).
+  std::vector<Part> parts;
   static constexpr size_t kFloatsPerVertex = 10;
   size_t vertex_count() const { return vertices.size() / kFloatsPerVertex; }
 };
@@ -124,6 +163,18 @@ struct DrawList {
   // things are all outside the playable square, near things inside it: seen
   // from inside, a far thing is never in front of a near one.
   bool far = false;
+  // Culling (cull.hpp). parts[i]: batch i by groups of instances, with where
+  // they are (empty: not culled, all drawn); mesh_parts[i]: the parts of
+  // mesh i, for a batch of one unturned, unscaled instance (the ground).
+  // cull_list() fills `visible` for a view: what of each batch to draw.
+  std::vector<std::vector<Part>> parts;
+  std::vector<std::vector<Part>> mesh_parts;
+  struct Visible {
+    bool all = true;                   // the whole batch (then the rest is unused)
+    std::vector<DrawRange> instances;  // else these instances...
+    std::vector<DrawRange> vertices;   // ...each with these vertices of the mesh (empty: all of them)
+  };
+  std::vector<Visible> visible;  // empty: everything
 };
 
 struct View {
@@ -169,7 +220,7 @@ struct RenderStats {
   uint64_t instances = 0;
   uint64_t triangles = 0;
   uint64_t triangles_by_group[kMeshGroups] = {};
-  uint64_t uploaded_bytes = 0;  // instance data sent to the GPU
+  uint64_t uploaded_bytes = 0;  // instance data and meshes sent to the GPU
   double gpu_ms = -1;           // GPU time of a recent frame, -1: unknown (no timer on this device)
 };
 

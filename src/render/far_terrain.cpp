@@ -1,6 +1,7 @@
 #include "monstres/render/far_terrain.hpp"
 
 #include "monstres/core/heightmap.hpp"
+#include "monstres/render/cull.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -36,6 +37,12 @@ float smooth(float e0, float e1, float x) {
   const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
   return t * t * (3 - 2 * t);
 }
+
+// Cut into parts by where they are, for culling: by sectors around the
+// playable area, then by distance.
+constexpr int kSectors = 24;
+constexpr float kBands[] = {1500.0f, 3000.0f};
+constexpr float kBig = 1500.0f;
 
 float ellipse(Vec2 c, float rx, float rz, float x, float z) {  // 1 in the middle, 0 at the edge
   const float dx = (x - c.x) / rx, dz = (z - c.z) / rz;
@@ -196,6 +203,7 @@ MeshData build_far_ground_mesh(const Continent& k) {
       }
     }
   }
+  split_into_parts(m, 0, 0, kSectors, kBands, kBig);  // culling
   return m;
 }
 
@@ -251,6 +259,7 @@ MeshData build_far_water_mesh(const Continent& k) {
     }
   }
   face_up(m);
+  split_into_parts(m, 0, 0, kSectors, kBands, kBig);  // culling
   return m;
 }
 
