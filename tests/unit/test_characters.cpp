@@ -1,6 +1,7 @@
 // Rigs and animations of the player, the companion and the wild monsters.
 
 #include "monstres/render/characters.hpp"
+#include "monstres/core/quests.hpp"
 #include "test_helpers.hpp"
 
 #include <algorithm>
@@ -173,6 +174,20 @@ TEST_CASE("add_characters draws everyone, each with a shadow") {
   size_t wild = 0;
   for (MeshId id : {MeshId::SlimeBody, MeshId::MushroomStem, MeshId::BirdBody}) wild += batch(list, id).size();
   CHECK(wild == walkers);
+}
+
+TEST_CASE("Odette, the healer, holds a magician's staff") {
+  World w = cached_game(3);
+  DrawList list = empty_list();
+  add_characters(w, 1.0f, list);
+  CHECK(batch(list, MeshId::PlayerStaff).size() == 2);  // the magician's and hers
+  CHECK(batch(list, MeshId::PlayerCrystal).size() == 2);
+  const Instance& staff = batch(list, MeshId::PlayerStaff)[1];
+  const int i = npc_index(w, npc::kOdette);
+  REQUIRE(i > 0);
+  const Vec3 at = w.creatures[static_cast<size_t>(i)].body.pos;
+  CHECK(std::fabs(staff.x - at.x) < 0.6f);  // in her hand
+  CHECK(std::fabs(staff.z - at.z) < 0.6f);
 }
 
 TEST_CASE("wild monsters come in several colors") {

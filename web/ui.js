@@ -287,7 +287,8 @@
       // Its variants: the rare forms first, then its colors and shapes.
       const texts = info.variants || {};
       const ids = [...(c.variants || [])].sort((a, b) => (b.includes('.') ? 0 : 1) - (a.includes('.') ? 0 : 1));
-      const names = ids.map((id) => (id.includes('.') ? '' : '✦ ') + ((texts[id] || {}).name || id));
+      const build = (id) => LORE.builds[id] && `${LORE.builds[id].sign} ${LORE.builds[id].name}`;
+      const names = ids.map((id) => (id.includes('.') ? '' : '✦ ') + ((texts[id] || {}).name || build(id) || id));
       fields.variants.textContent = names.length ? `Variantes : ${names.join(' · ')}` : '';
     }
     const meters = Math.round(c.distance);

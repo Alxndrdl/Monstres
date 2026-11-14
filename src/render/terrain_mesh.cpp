@@ -1,5 +1,7 @@
 #include "monstres/render/terrain_mesh.hpp"
 
+#include "monstres/core/continent.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -112,6 +114,12 @@ Color ground_color(const World& w, float x, float z) {
     const Color stone = lerp(kPaving, kEarth, 0.25f * value_noise(w.seed + 32, x, z, 1.0f));
     c = lerp(c, stone, inside * (0.35f + 0.6f * smooth(0.3f, 0.6f, worn)));
   }
+  // The wilds: the continent's forest floor, the beach and the sea floor.
+  if (region_at(x, z) == Region::Forest) c = lerp(c, kForestFloor, 0.6f);
+  // Near the shore only: the continent's ground there is close to the sea (around the valley it is 2 m above).
+  const float coast = smooth(rules::kSeaLevel + 1.5f, rules::kSeaLevel + 0.2f, w.ground.land_height(x, z));
+  c = lerp(c, kSand, smooth(rules::kSeaLevel + 3.0f, rules::kSeaLevel + 0.8f, h) * coast);
+  c = lerp(c, kLakeBed, smooth(rules::kSeaLevel, rules::kSeaLevel - 2.5f, h) * coast);
   return c;
 }
 
@@ -119,64 +127,129 @@ Color ground_color(const World& w, float x, float z) {
 
 float ground_height(const World& w, float x, float z) { return w.ground.height(x, z); }
 
-MeshData build_ground_mesh(const World& world) {
+Vec2 ground_center(float x, float z) {
+  const auto snap = [](float v) { return std::round(v / terrain::kRecenter) * terrain::kRecenter; };
+  const float limit = terrain::kDetailHalfSize - terrain::kRecenter;
+  return {std::clamp(snap(x), -limit, limit), std::clamp(snap(z), -limit, limit)};
+}
+
+namespace {
+
+uint32_t pack(Color c) {
+  const auto byte = [](float v) { return static_cast<uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
+  return byte(c.r) | (byte(c.g) << 8) | (byte(c.b) << 16) | (255u << 24);
+}
+Color unpack(uint32_t p) {
+  return {static_cast<float>(p & 255u) / 255.0f, static_cast<float>((p >> 8) & 255u) / 255.0f,
+          static_cast<float>((p >> 16) & 255u) / 255.0f, 1};
+}
+
+}  // namespace
+
+MeshData build_ground_mesh(const World& world, GroundColors& colors, Vec2 center) {
   MeshData m;
   const float d = terrain::kDetailHalfSize;
-  constexpr float kCell = Heightmap::kCellSize;
-  const int cells = static_cast<int>(2 * d / kCell);
-  // The grid of the relief (Heightmap), colors at the corners: each point once.
-  const int points = cells + 1;
+  constexpr float kGrid = Heightmap::kCellSize;
+  constexpr int kPoints = Heightmap::kPoints;
+  if (colors.packed.size() != static_cast<size_t>(kPoints) * kPoints) colors.packed.assign(static_cast<size_t>(kPoints) * kPoints, 0);
+  const auto index = [&](float v) { return std::clamp(static_cast<int>(std::lround((v + d) / kGrid)), 0, kPoints - 1); };
+  const auto height = [&](float x, float z) { return world.ground.empty() ? 0.0f : world.ground.at(index(x), index(z)); };
+  const auto on = [](float v, float cell) {  // a multiple of `cell` from the relief's edge
+    const float q = (v + terrain::kDetailHalfSize) / cell;
+    return std::fabs(q - std::round(q)) < 1e-3f;
+  };
   struct Point {
     float y;
     Color c;
     Vec3 n;
   };
-  std::vector<Point> grid(static_cast<size_t>(points * points));
-  for (int i = 0; i < points; ++i) {
-    for (int j = 0; j < points; ++j) {
-      const float x = -d + kCell * static_cast<float>(i), z = -d + kCell * static_cast<float>(j);
-      grid[static_cast<size_t>(i * points + j)] = {ground_height(world, x, z), ground_color(world, x, z),
-                                                  world.ground.normal(x, z)};
+  const auto point = [&](int ring, float x, float z) {
+    float y = height(x, z);
+    // On a ring's outer edge, between two points of the coarser ring: on the
+    // straight line between them (no gap between the rings).
+    if (ring + 1 < terrain::kRings) {
+      const float outer = terrain::kRingHalf[ring], fine = terrain::kRingCells[ring], coarse = terrain::kRingCells[ring + 1];
+      if (std::fabs(std::fabs(x - center.x) - outer) < 1e-3f && std::fabs(x) < d && !on(z, coarse)) {
+        y = 0.5f * (height(x, z - fine) + height(x, z + fine));
+      } else if (std::fabs(std::fabs(z - center.z) - outer) < 1e-3f && std::fabs(z) < d && !on(x, coarse)) {
+        y = 0.5f * (height(x - fine, z) + height(x + fine, z));
+      }
     }
-  }
-  m.vertices.reserve(static_cast<size_t>(cells * cells) * 6 * MeshData::kFloatsPerVertex + 1000);
-  for (int i = 0; i < cells; ++i) {
-    for (int j = 0; j < cells; ++j) {
-      const float x0 = -d + kCell * static_cast<float>(i), x1 = x0 + kCell;
-      const float z0 = -d + kCell * static_cast<float>(j), z1 = z0 + kCell;
-      const Point& p00 = grid[static_cast<size_t>(i * points + j)];
-      const Point& p10 = grid[static_cast<size_t>((i + 1) * points + j)];
-      const Point& p01 = grid[static_cast<size_t>(i * points + j + 1)];
-      const Point& p11 = grid[static_cast<size_t>((i + 1) * points + j + 1)];
-      // Counter-clockwise seen from above; the same triangles as Heightmap::height.
-      vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x0, p01.y, z1, p01.c, p01.n); vertex(m, x1, p11.y, z1, p11.c, p11.n);
-      vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x1, p11.y, z1, p11.c, p11.n); vertex(m, x1, p10.y, z0, p10.c, p10.n);
+    uint32_t& c = colors.packed[static_cast<size_t>(index(x) * kPoints + index(z))];
+    if ((c >> 24) == 0) c = pack(ground_color(world, x, z));
+    return Point{y, unpack(c), world.ground.normal(x, z)};
+  };
+  m.vertices.reserve(48000 * 6 * MeshData::kFloatsPerVertex);
+  for (int ring = 0; ring < terrain::kRings; ++ring) {
+    const float cell = terrain::kRingCells[ring];
+    const float inner = ring == 0 ? 0.0f : terrain::kRingHalf[ring - 1];
+    const float outer = terrain::kRingHalf[ring];
+    const float x_lo = std::max(-d, center.x - outer), x_hi = std::min(d, center.x + outer);
+    const float z_lo = std::max(-d, center.z - outer), z_hi = std::min(d, center.z + outer);
+    const int nx = static_cast<int>(std::lround((x_hi - x_lo) / cell)), nz = static_cast<int>(std::lround((z_hi - z_lo) / cell));
+    // Each point once (shared by up to four cells), but those inside the finer ring.
+    std::vector<Point> points(static_cast<size_t>((nx + 1) * (nz + 1)));
+    for (int i = 0; i <= nx; ++i) {
+      for (int j = 0; j <= nz; ++j) {
+        const float x = x_lo + cell * static_cast<float>(i), z = z_lo + cell * static_cast<float>(j);
+        if (std::fabs(x - center.x) < inner - 1e-3f && std::fabs(z - center.z) < inner - 1e-3f) continue;
+        points[static_cast<size_t>(i * (nz + 1) + j)] = point(ring, x, z);
+      }
     }
-  }
-  // Coarse skirt from the fine grid out to the horizon (4 trapezoids).
-  const float h = terrain::kHorizonHalfSize;
-  const Color far = lerp(kGrassDark, kGrassLight, 0.5f);
-  const float corners_in[4][2] = {{-d, -d}, {d, -d}, {d, d}, {-d, d}};
-  const float corners_out[4][2] = {{-h, -h}, {h, -h}, {h, h}, {-h, h}};
-  for (int k = 0; k < 4; ++k) {
-    const int n = (k + 1) % 4;
-    const Color ci = ground_color(world, corners_in[k][0], corners_in[k][1]);
-    const Color cn = ground_color(world, corners_in[n][0], corners_in[n][1]);
-    vertex(m, corners_in[k][0], 0, corners_in[k][1], ci);
-    vertex(m, corners_in[n][0], 0, corners_in[n][1], cn);
-    vertex(m, corners_out[n][0], 0, corners_out[n][1], far);
-    vertex(m, corners_in[k][0], 0, corners_in[k][1], ci);
-    vertex(m, corners_out[n][0], 0, corners_out[n][1], far);
-    vertex(m, corners_out[k][0], 0, corners_out[k][1], far);
+    for (int i = 0; i < nx; ++i) {
+      for (int j = 0; j < nz; ++j) {
+        const float x0 = x_lo + cell * static_cast<float>(i), x1 = x0 + cell;
+        const float z0 = z_lo + cell * static_cast<float>(j), z1 = z0 + cell;
+        // Inside the finer ring: drawn there.
+        if (std::fabs(0.5f * (x0 + x1) - center.x) < inner && std::fabs(0.5f * (z0 + z1) - center.z) < inner) continue;
+        const auto at = [&](int a, int b) { return points[static_cast<size_t>((i + a) * (nz + 1) + j + b)]; };
+        const Point p00 = at(0, 0), p10 = at(1, 0), p01 = at(0, 1), p11 = at(1, 1);
+        // Counter-clockwise seen from above; the same triangles as Heightmap::height (in 2 m cells).
+        vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x0, p01.y, z1, p01.c, p01.n); vertex(m, x1, p11.y, z1, p11.c, p11.n);
+        vertex(m, x0, p00.y, z0, p00.c, p00.n); vertex(m, x1, p11.y, z1, p11.c, p11.n); vertex(m, x1, p10.y, z0, p10.c, p10.n);
+      }
+    }
   }
   return m;
+}
+
+MeshData build_ground_mesh(const World& world) {
+  GroundColors colors;
+  return build_ground_mesh(world, colors, ground_center(world.player.pos.x, world.player.pos.z));
 }
 
 MeshData build_water_mesh(const World& world) {
   MeshData m;
   m.transparent = true;
+  // The sea, where the relief goes below it (clear in the shallows, deep blue
+  // farther): squares of 8 m at its level, as the continent's water beyond.
+  if (!world.ground.empty()) {
+    constexpr float kCell = 8.0f;
+    const float d = terrain::kDetailHalfSize;
+    const int n = static_cast<int>(2 * d / kCell);
+    const auto water = [&](float x, float z) {
+      const float depth = rules::kSeaLevel - world.ground.height(x, z);
+      return Color{0.18f - 0.08f * smooth(0.0f, 20.0f, depth), 0.44f - 0.18f * smooth(0.0f, 20.0f, depth),
+                   0.56f - 0.16f * smooth(0.0f, 20.0f, depth), 0.55f + 0.45f * smooth(0.0f, 14.0f, depth)};
+    };
+    const float y = rules::kSeaLevel;
+    for (int i = 0; i < n; ++i) {
+      for (int j = 0; j < n; ++j) {
+        const float x0 = -d + kCell * static_cast<float>(i), z0 = -d + kCell * static_cast<float>(j);
+        const float x1 = x0 + kCell, z1 = z0 + kCell;
+        const float lowest = std::min({world.ground.height(x0, z0), world.ground.height(x1, z0), world.ground.height(x0, z1),
+                                       world.ground.height(x1, z1), world.ground.height(x0 + 4, z0 + 4)});
+        if (lowest > rules::kSeaLevel + 0.2f || !world.ground.sea(x0 + 4, z0 + 4)) continue;  // not a hollow of the hills
+        vertex(m, x0, y, z0, water(x0, z0)); vertex(m, x0, y, z1, water(x0, z1)); vertex(m, x1, y, z1, water(x1, z1));
+        vertex(m, x0, y, z0, water(x0, z0)); vertex(m, x1, y, z1, water(x1, z1)); vertex(m, x1, y, z0, water(x1, z0));
+      }
+    }
+  }
   const Lake& lake = world.village.lake;
-  if (lake.radius_x <= 0) return m;
+  if (lake.radius_x <= 0) {
+    face_up(m);
+    return m;
+  }
   constexpr int kSegments = 48;
   constexpr float kTau = 6.28318530718f;
   const float y = rules::kWaterLevel;

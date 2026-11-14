@@ -58,20 +58,27 @@ Contrôles :
     sauvegarde), niveau, expérience, caractéristiques, où l'on se trouve ;
   - Équipe : les monstres de l'équipe (le compagnon d'abord, 6 au plus) ;
     toucher l'un d'eux affiche sa fiche complète : niveau, expérience, points
-    de vie, caractéristiques à son niveau, famille, éléments, variantes et ses
-    trois attaques ; « Relâcher » (confirmé une seconde fois) le rend à la
-    nature : il sort du cristal et s'en va ;
+    de vie, caractéristiques à son niveau, famille, éléments, variantes,
+    gabarit (micro, alpha), taille, poids, âge, ses aptitudes en toile
+    d'araignée (voir Variantes) et ses trois attaques ; « Relâcher » (confirmé
+    une seconde fois) le rend à la nature : il sort du cristal et s'en va ;
   - Quêtes (touche J) : le journal, les quêtes en cours puis terminées ;
     chacune avec qui l'a demandée, son histoire, ses étapes (cochées une fois
     faites) et sa récompense ;
   - Bestiaire : tous les monstres, avec pour chacun un portrait, la famille,
     le ou les éléments, une description, l'habitat, la taille, la vitesse, les
-    caractéristiques et combien vivent dans ce monde ; le bouton ADN
-    « Variantes » montre toutes ses variantes : « ? » si jamais vue, grisée si
-    aperçue (un monstre qui la porte est passé à moins de 20 m), en clair si
-    capturée ; toucher une variante découverte affiche sa fiche à droite de la grille
-    (rareté, où la trouver, description) ;
-  - Carte : locale (autour du joueur, avec les créatures proches) ou globale ;
+    caractéristiques, combien vivent autour du joueur, et son carnet
+    (variantes capturées et aperçues, monstres capturés, dans l'équipe, battus,
+    relâchés) ; le compteur ADN de la liste donne les variantes capturées au
+    moins une fois ; le bouton « Variantes » montre toutes ses variantes : « ? »
+    si jamais vue, grisée si aperçue (un monstre qui la porte est passé à moins
+    de 20 m), en clair si capturée ; toucher une variante découverte affiche sa
+    fiche à droite de la grille (rareté, où la trouver, description) ;
+  - Carte : une seule carte, du terrain autour du joueur jusqu'au continent
+    entier (molette, pincer, boutons − et + ; la faire glisser au doigt ou à
+    la souris ; ⌖ la recentre sur le joueur, une barre donne l'échelle). Elle
+    ne montre que le terrain et les lieux (pas de créatures) : de près les
+    lieux de la zone jouable, de loin les régions du continent ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (exporter / importer la sauvegarde,
   afficher les FPS et le détail du temps de calcul, voir Performances ; ces
@@ -128,6 +135,103 @@ générateur aléatoire PCG32 à graine, sinus/cosinus maison
 partie donne exactement le même état en natif et en WebAssembly ; les tests de
 régression le vérifient.
 
+## Le monde et le continent
+
+Le monde jouable fait 1 160 m de côté (±580 m, `rules::kWorldHalfSize`), soit
+environ 16 fois l'ancienne surface. Au milieu, la Vallée du Départ : l'ancien
+monde de 280 m, inchangé (même chemin, mêmes lieux, mêmes objets ; seule la
+crête qui fermait ses bords a disparu). Autour, les terres sauvages, avec
+leurs zones : la Côte des Embruns à l'ouest (une plage, puis la mer, à
+environ 450 m du départ ; on ne peut pas entrer dans l'eau), les Contreforts
+du Nord vers les montagnes (pins et rochers), et les Terres sauvages
+ailleurs (bois en bosquets, buissons, rochers, souches, et un bord de la
+grande forêt à l'est). Les monstres y vivent comme dans la vallée (Gloubi sur
+la plage, Piou et Champi sur les collines…), de plus en plus forts en
+s'éloignant (un niveau de plus tous les 110 m). Le chemin continue au nord et
+au sud.
+
+Tout cela est sur une île géante d'environ 4 km sur 4
+(`src/core/continent.hpp`). Au nord, les Monts Givrés et leurs pics enneigés ;
+à l'est, une presqu'île avec un volcan actif (lave dans le cratère, panache
+de fumée) ; au sud, un désert de dunes et de mesas ; au centre, les Grandes
+Plaines avec une forêt, un marais, un lac, le Mont Solitaire (un volcan
+éteint) et la Capitale. L'océan entoure l'île. Au-delà du monde jouable, ces
+régions sont vides et inaccessibles, mais on les voit de loin et sur la
+carte. Les noms (`regions` dans `web/lore.js`) sont provisoires.
+
+Le relief :
+- le continent vient de la graine (bruit déterministe) sur une grille de
+  10 m. Il vaut 0 dans la vallée, qui garde son propre relief ;
+- le relief jouable (une grille de 2 m sur ±640 m, `Heightmap`) ajoute au
+  continent les petites collines et les lieux de la vallée. Les collines
+  s'effacent avant ±640 m, où le terrain lointain prend le relais avec
+  exactement les mêmes hauteurs ;
+- la mer est là où le continent lui-même passe sous son niveau (−2 m).
+  Un creux des collines plus bas que la mer reste de la terre sèche (le
+  départ de la graine 42 en est un).
+
+Les terres sauvages ont environ 12 000 à 17 000 objets (`generate_wilds`),
+selon la graine. Ils sont tirés de la graine, avec leur propre flux aléatoire,
+**et ne sont pas sauvegardés** : seuls ceux de la vallée le sont, et les
+autres sont tirés de nouveau à chaque chargement. La sauvegarde reste à
+environ 62 Ko (60 Ko avant l'agrandissement).
+
+Ce qui tient le passage à l'échelle :
+- **index des objets** (`ObjectIndex`, dans `World`, recalculé quand les
+  objets changent) : leurs boîtes rangées par cases de 8 m. Les collisions,
+  les projectiles, les perchoirs, l'apparition des monstres, la caméra et le
+  toucher ne regardent que les objets proches ; plus rien ne parcourt tous les
+  objets à chaque pas ;
+- **sol en anneaux** autour du joueur : mailles de 2 m jusqu'à 96 m (les
+  triangles mêmes sur lesquels on marche), puis 4 m jusqu'à 224 m, puis 8 m
+  jusqu'au bord. Le sol est reconstruit tous les 64 m de marche, les couleurs
+  étant gardées au fur et à mesure. Les bords des anneaux se suivent sans
+  fente, et une bande descend le long du bord du terrain lointain ;
+- **seuls les objets proches sont dessinés** : les arbres et les rochers à
+  moins de 215 m, rapetissant entre 160 et 198 m (pas d'apparition brusque).
+  Les bâtiments sont dessinés partout. Les effets (fumées, lanternes,
+  étincelles) ne parcourent que les objets de la vallée ;
+- **la carte** met ses données en cache, dessine le monde à 1 pixel par
+  mètre et le continent à 1 pixel pour 10 m.
+
+Rendu lointain (`src/render/far_terrain.hpp`) :
+- le sol du continent est un seul maillage en anneaux carrés autour du
+  relief jouable (mailles de 10, 20, 40 puis 80 m) ; le bord fin suit le bord
+  grossier. L'océan profond n'a pas de sol, son eau est opaque ;
+- il est dessiné dans une passe lointaine (`DrawList::far`), avec sa propre
+  plage de profondeur (8 m à 9,5 km). La profondeur est ensuite effacée, et la
+  scène proche (0,1 m à 2 km : tout le relief jouable, même depuis un coin)
+  est dessinée par-dessus. Chaque passe garde ainsi une profondeur précise.
+  C'est correct parce que tout ce qui est lointain est hors du carré du relief
+  et la caméra dedans ;
+- le brouillard est exponentiel (à moitié à 1,8 km, complet à 9 km).
+
+Mesures :
+- natif (graine 21) : 14 500 objets, monde construit en environ 120 ms,
+  0,01 ms par pas de simulation dans les terres sauvages, sauvegarde de
+  62 Ko écrite et relue en environ 120 ms ;
+- continent : grille en environ 50 ms, maillages en environ 20 ms ;
+  64 000 triangles ;
+- dans le navigateur (Chromium sans carte graphique) :
+  - de 477 000 à 510 000 triangles par image, partout, contre 457 000 avant
+    l'agrandissement au départ ;
+  - simulation environ 0,25 ms par image ;
+  - environ 3 à 7 ms pour mettre à jour le paysage tous les 16 m ;
+  - environ 9 ms pour reconstruire le sol tous les 64 m.
+
+  À revérifier sur téléphone (détail du temps de calcul).
+
+Des tests vérifient le budget :
+- `test_wilds.cpp` : construction, temps d'un pas, taille de la sauvegarde ;
+  l'index trouve ce que trouverait un parcours complet ;
+- `test_continent.cpp` : triangles et temps.
+
+Il reste à faire, quand le monde grandira encore ou s'ouvrira au continent :
+- un relief et des objets par tronçons, chargés autour du joueur (tout est
+  encore construit au chargement, environ 120 ms) ;
+- étaler la reconstruction du sol sur plusieurs images ;
+- des maillages indexés, pour alléger la mémoire graphique.
+
 ## Un monde vivant autour du joueur
 
 Le monde est découpé en carrés de 40 m (`update_population`,
@@ -182,6 +286,16 @@ demande à quoi il sert ; il en a vu un près du château. Il faut trouver
 celui du château, aller du village au château par téléporteur, revenir, puis
 tout lui raconter. Récompense : 40 XP au magicien, 25 au compagnon.
 
+Le Champi géant : Lison a vu un Champi gigantesque au cœur de la forêt. Un
+Champi oméga (niveau 8) y vit, à côté du téléporteur, avec deux Champi alpha
+(niveau 5) et deux normaux (niveau 4) ; le groupe revient chaque fois qu'on
+approche tant que l'oméga n'est pas capturé (il rejoint le combat avec les
+siens). Une fois capturé, il faut le montrer à Lison. Récompense : 80 XP au
+magicien, 50 au compagnon. Capturé, il ne réapparaît plus. Relâché, il vit
+dans la nature ; quand il a disparu (le joueur s'est éloigné), Lison propose
+de nouveau la quête et il revient au cœur de la forêt, mais ni sa capture ni
+la quête ne rapportent plus d'expérience.
+
 Un monstre déjà battu une fois, ou relâché, ne rapporte plus d'expérience,
 ni en le battant de nouveau ni en le capturant (et même relâché ensuite).
 
@@ -219,7 +333,39 @@ dans certaines zones (le chapeau bleu des Champi, dans les ruines). Deux
 formes très rares (1 sur 256 chacune, jamais les deux à la fois) s'y ajoutent : chromatique (couleurs
 inhabituelles, par exemple le Croa blanc) et élémentaire (un autre élément,
 entouré d'étincelles). Les gènes sont tirés depuis la graine, un flux par
-créature : ils ne changent rien d'autre au monde. Le bestiaire retient pour
+créature : ils ne changent rien d'autre au monde.
+
+Gabarit : chaque monstre est normal, ou très rarement micro (une femelle sur
+128 : 62 % de la taille, plus faible, plus vif) ou alpha (1 sur 256 : 140 % de
+la taille, plus fort) ; les oméga (230 %, mâles seulement, bien plus forts et
+résistants) ne se trouvent pas dans la nature, seulement lors d'événements
+spéciaux (le Champi géant de la forêt, voir Quêtes). Le gabarit est tiré après
+les autres gènes, et ses trois variantes (micro, alpha, oméga) viennent après
+les formes rares dans le bestiaire (« Gabarits »).
+
+Un monstre qui rejoint l'équipe reçoit ses traits, tirés de la graine et de
+son identifiant (`roll_traits`) : sa taille et son poids (selon l'espèce, le
+sexe, le gabarit et un peu de hasard), son âge (qui grandit avec les jours du
+jeu) et cinq aptitudes : force, dextérité, constitution, charisme,
+intelligence. Chacune a une base tirée de 5 à 15 (sauvegardée), que ses
+variantes modifient (`variant_mods`), entre 0 et 20 :
+- gabarit : alpha +2 partout ; micro +5 dextérité et charisme, -5 force et
+  constitution ; oméga l'inverse ;
+- forme chromatique +2 charisme ; élémentaire +1 charisme et +1 intelligence ;
+  une couleur très rare (le Piou émeraude) +1 charisme ;
+- Gloubi (les autres espèces viendront) : antennes +1 intelligence ; trois yeux
+  +1 intelligence et -1 constitution ; un œil -1 intelligence et +1
+  constitution ; corne -1 charisme et +2 en défense (une caractéristique de
+  combat : affichée « 9 (+2) » sur sa fiche).
+
+Elles n'ont pas encore d'effet. Sur la fiche d'un monstre, elles forment une
+toile d'araignée (le 0 un peu écarté du centre, la plage possible en
+pointillés) ; survoler, toucher ou sélectionner au clavier une aptitude montre
+sa valeur, sa base, son minimum et son maximum, et chaque modificateur avec sa
+source. Dans le bestiaire, la fiche d'une variante dit ses effets (et pour un
+gabarit, sa taille et ses caractéristiques de combat en pourcentage).
+
+Le bestiaire retient pour
 chaque variante si elle est inconnue, aperçue ou capturée (dans la
 sauvegarde) ; le compagnon est capturé dès le départ. Les espèces ont aussi
 une famille (bête, oiseau, poisson, reptile, insecte, végétal, gelée,
@@ -290,9 +436,14 @@ Les adversaires ont les mêmes délais d'attaque que le compagnon (le temps de
 recharge compte depuis le début de leur élan). Ils tournent autour du
 compagnon, s'approchent quand leur morsure est prête et reculent sinon,
 s'écartent les uns des autres, et esquivent parfois les projectiles qui
-arrivent sur eux. Un Croa de l'équipe vole : tant que le bouton de saut (ou
-Espace) est enfoncé sans bouger, il monte (jusqu'à 5 m de plus), puis
-redescend doucement quand on le relâche.
+arrivent sur eux. Chaque espèce a sa façon de se battre (`species_temper`) :
+le Gloubi reste au contact et bondit sur son adversaire, le Champi garde ses
+distances et lance ses spores (il ne mord que ce qui s'approche), le Piou mord
+puis s'enfuit et esquive souvent, le Croa harcèle depuis les airs (3 m) et
+pique pour mordre, le Bloup reste dans le lac. Un Croa de l'équipe vole, y
+compris au-dessus du lac : tant que le bouton de saut (ou Espace) est enfoncé
+sans bouger, il monte (jusqu'à 5 m de plus), puis redescend doucement quand on
+le relâche.
 
 Boutons en bas à droite pendant un combat :
 - esquive (le bouton de saut, Espace) : un bond rapide dans la direction du
@@ -327,8 +478,9 @@ K.O. et soins : un compagnon K.O. en combat retourne dans le cristal, et on en
 fait sortir un autre de l'équipe (barre à gauche) ; le combat n'est perdu que
 quand plus aucun monstre n'est debout (le dernier reste alors allongé). Les
 points de vie ne reviennent plus tout seuls : il faut un sort de soin, ou
-Odette, au village, qui soigne et réveille toute l'équipe gratuitement (en lui
-parlant). Un monstre K.O. ne peut pas sortir du cristal en combat ; hors
+Odette, au village, qui soigne et réveille toute l'équipe et remplit le mana
+du magicien, gratuitement (en lui parlant). On la reconnaît à son bâton de
+magicienne, au cristal vert entouré d'étincelles. Un monstre K.O. ne peut pas sortir du cristal en combat ; hors
 combat, il en sort mais reste à terre jusqu'à ce qu'on le soigne, et retourne
 dans le cristal si le magicien s'éloigne à plus de 15 m.
 
@@ -348,17 +500,29 @@ une partie rechargée pendant un combat reprend sans lui.
 
 ### Sorts
 
-Le magicien lance des sorts sur son monstre sorti du cristal. Onglet « Sorts »
-du grimoire (touche P) : deux sorts de combat (utilisés en combat et à
-l'entraînement) et deux sorts d'aventure (le reste du temps), qu'on change hors
-combat. Ils se lancent avec les deux boutons au-dessus du joystick (touches R
-et G), qui montrent leur recharge.
-- Soin (combat et aventure) : +10 points de vie, ou réveille un monstre K.O.
-  avec 10 points de vie ; recharge 5 s.
-- Bouclier (combat) : aucun coup ne touche le monstre pendant 1 s ; recharge
-  5 s.
+Le magicien lance des sorts. Onglet « Sorts » du grimoire (touche P) : deux
+sorts de combat (utilisés en combat et à l'entraînement) et deux sorts
+d'aventure (le reste du temps), qu'on change hors combat. Ils se lancent avec
+les deux boutons à côté des attaques (touches R et G), qui montrent leur
+recharge ; un sort qui dure brille tant qu'il agit.
 
-Les sorts choisis sont sauvegardés (sauvegarde v17).
+Chaque sort coûte du mana (barre bleue au-dessus des boutons). Le mana ne
+revient pas tout seul : Odette le remplit. Il vaut 20 au niveau 1 et grandit
+de 5 par niveau du magicien (un nouveau niveau ajoute ces 5 points).
+- Soin (combat et aventure, 4 mana) : +10 points de vie, ou réveille un
+  monstre K.O. avec 10 points de vie ; recharge 5 s.
+- Bouclier (combat, 3 mana) : aucun coup ne touche le monstre pendant 1 s ;
+  recharge 5 s.
+- Retenue (combat, 5 mana) : jusqu'à la fin du combat, le prochain coup du
+  monstre qui mettrait un adversaire K.O. le laisse à 1 point de vie (« Retenu
+  ! 1 PV ») : de quoi le capturer. Inutile à l'entraînement.
+- Détection (aventure, 6 mana) : pendant 1 minute, le cristal du bâton cherche
+  les monstres très rares à moins de 50 m (une variante très rare, une forme
+  chromatique ou élémentaire, un micro ou un alpha) ; il pulse, et s'il en sent
+  un, une traînée de lumière dorée part vers le plus proche.
+
+Les sorts choisis, le mana et la Détection en cours sont sauvegardés
+(sauvegarde v18).
 
 ### Combats de dresseurs
 

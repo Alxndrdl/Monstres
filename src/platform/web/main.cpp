@@ -13,6 +13,7 @@
 #include "monstres/core/world.hpp"
 #include "monstres/render/models.hpp"
 #include "monstres/render/terrain_mesh.hpp"
+#include "monstres/render/far_terrain.hpp"
 #include "monstres/render/scene.hpp"
 
 #include <emscripten.h>
@@ -58,6 +59,12 @@ struct App {
   std::unique_ptr<Renderer> renderer;
   DrawList landscape;   // what never moves, rebuilt when the world changes
   DrawList dynamic;     // player, clouds: rebuilt every frame
+  Continent continent;  // the land beyond the playable area (built once per seed)
+  GroundColors ground_colors;    // the ground's colors, kept as the ground is built again
+  Vec2 ground_center{1e9f, 1e9f};  // where the ground's rings are centered
+  DrawList far_landscape;  // its ground and waters (far pass)
+  DrawList far_dynamic;    // the volcano's smoke (far pass)
+  double continent_ms = 0; // how long building it took (profile)
   Camera camera;
   float move_x = 0, move_y = 0;  // -1..1, set by JavaScript
   int jump_buffer = 0;           // ticks left during which a jump press is pending
@@ -163,6 +170,13 @@ void follow_battle(App& app, double dt_ms) {
 
 // The detailed landscape follows the player (see build_landscape).
 bool update_landscape(App& app) {
+  // The ground's rings follow the player too, by bigger steps.
+  const Vec2 ground = ground_center(app.world.player.pos.x, app.world.player.pos.z);
+  if (ground != app.ground_center) {
+    app.ground_center = ground;
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), build_ground_mesh(app.world, app.ground_colors, ground));
+    app.redraw = true;
+  }
   const Vec2 center = landscape_center(app.world.player.pos.x, app.world.player.pos.z);
   if (center == app.landscape_center) return false;
   app.landscape_center = center;
@@ -178,10 +192,21 @@ void world_changed(App& app) {
   app.camera.smooth = false;  // straight to its subject
   app.camera_tick = app.world.tick;
   app.landscape_center = {1e9f, 1e9f};
+  app.ground_center = {1e9f, 1e9f};
+  app.ground_colors = {};  // another world: other colors
   update_landscape(app);
-  app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), build_ground_mesh(app.world));
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), build_path_mesh(app.world));
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), build_water_mesh(app.world));
+  // The continent depends on the seed only: built again for another world.
+  if (app.continent.empty() || app.continent.seed != app.world.seed) {
+    const double start = emscripten_get_now();
+    app.continent = make_continent(app.world.seed);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarGround), build_far_ground_mesh(app.continent));
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarWater), build_far_water_mesh(app.continent));
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::Lava), build_lava_mesh(app.continent));
+    build_far_landscape(app.far_landscape);
+    app.continent_ms = emscripten_get_now() - start;
+  }
 }
 
 void write_save(App& app) {
@@ -227,6 +252,7 @@ void profile_report(App& app, double now, int pw, int ph) {
   static const char* kNames[] = {"sim", "save", "landscape", "scene", "view", "draw", "wasm", "interval"};
   std::string s = "{\"frames\":" + std::to_string(p.frames) + ",\"seconds\":" + std::to_string(span / 1000);
   s += ",\"ticks\":" + std::to_string(p.ticks) + ",\"landscapeBuilds\":" + std::to_string(p.landscape_builds);
+  s += ",\"continentMs\":" + std::to_string(app.continent_ms);
   s += ",\"avg\":{";
   for (int i = 0; i < kProfileParts; ++i) {
     s += std::string(i ? "," : "") + "\"" + kNames[i] + "\":" + std::to_string(p.sum[i] / p.frames);
@@ -323,10 +349,11 @@ void frame(void* user) {
   const float time = static_cast<float>(app.world.tick) / rules::kTicksPerSecond;
   mark = emscripten_get_now();
   build_dynamic(app.world, time, app.dynamic, app.selected);
+  build_far_dynamic(app.world, time, app.far_dynamic);
   measure(kScene);
   const View view = current_view(app, time);
   measure(kView);
-  const DrawList* lists[] = {&app.landscape, &app.dynamic};
+  const DrawList* lists[] = {&app.far_landscape, &app.far_dynamic, &app.landscape, &app.dynamic};
   app.renderer->begin_frame({pw, ph});
   app.renderer->draw(view, lists);
   app.renderer->end_frame();
@@ -541,6 +568,14 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_map_json() {
   g_app->json = map_json(g_app->world);
   return g_app->json.c_str();
 }
+
+EMSCRIPTEN_KEEPALIVE const char* monstres_continent_json() {
+  g_app->json = continent_json(g_app->continent);
+  return g_app->json.c_str();
+}
+
+// Heights of the continent, Continent::kPointsX * kPointsZ floats (see continent_json).
+EMSCRIPTEN_KEEPALIVE const float* monstres_continent_heights() { return g_app->continent.heights.data(); }
 
 // Heights of the ground, Heightmap::kPoints squared floats (see map_json).
 EMSCRIPTEN_KEEPALIVE const float* monstres_heights() { return g_app->world.ground.heights.data(); }

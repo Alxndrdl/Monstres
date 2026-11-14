@@ -63,6 +63,9 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_quests.cpp
   unit/test_trainer.cpp
   unit/test_spells.cpp
+  unit/test_builds.cpp
+  unit/test_continent.cpp
+  unit/test_wilds.cpp
 )
 
 monstres_add_tests(monstres_functional_tests functional

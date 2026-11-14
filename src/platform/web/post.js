@@ -183,6 +183,15 @@ window.monstres = {
     data.heights = n ? HEAPF32.slice(ptr, ptr + n) : new Float32Array(0);
     return data;
   },
+  // The continent around the playable area, plus its heights as a
+  // Float32Array (a copy, about 1 MB: ask once per world).
+  continent: () => {
+    const data = JSON.parse(UTF8ToString(_monstres_continent_json()));
+    const n = data.ready ? data.pointsX * data.pointsZ : 0;
+    const ptr = _monstres_continent_heights() >> 2;
+    data.heights = n ? HEAPF32.slice(ptr, ptr + n) : new Float32Array(0);
+    return data;
+  },
   // Portrait of a species (index in the bestiary order of Species) or of the
   // magician (species -1), as ImageData of size x size pixels. look: the
   // genes of a monster ("look" in the bestiary and creature JSON), 0 = the

@@ -4,8 +4,30 @@
     {
       "name": "monstres-web-debug",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8080", "--bind", "127.0.0.1", "--directory", "build/web-debug/site"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8080",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "build/web-debug/site"
+      ],
       "port": 8080
+    },
+    {
+      "name": "monstres-web-release",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8096",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "build/web-release/site"
+      ],
+      "port": 8096
     }
   ]
 }

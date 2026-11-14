@@ -40,8 +40,21 @@ static_assert(std::size(kMoves) == kSpeciesCount);
 constexpr uint16_t kFoeWindup[] = {12, 24, 30};
 constexpr uint16_t kRecoverTicks = 8;
 constexpr uint16_t kFoeStartCooldown[] = {40, 120, 240};  // it takes a moment to start
-constexpr float kFoeLift = 2.0f;     // a flying foe stays this high above the ground
-constexpr float kSwoopLift = 0.15f;  // and swoops down to bite
+constexpr float kSwoopLift = 0.15f;  // a flying foe swoops down to bite
+
+// How each species fights, in the order of Species (see Temper).
+//                         keep  close throw dodge pace  lift
+constexpr Temper kTempers[] = {
+    {3.5f, 0.7f, 3.0f, 24, 1.0f, 2.0f},   // Companion: a bit of everything
+    {1.8f, 0.6f, 6.0f, 40, 1.15f, 2.0f},  // Slime: stays close, and leaps at its foe
+    {6.0f, 0.7f, 2.0f, 30, 1.0f, 2.0f},   // Mushroom: keeps away, and throws its spores
+    {5.0f, 0.7f, 3.5f, 8, 1.25f, 2.0f},   // Bird: bites and runs, dodges well
+    {3.5f, 0.7f, 3.0f, 24, 1.0f, 2.0f},   // Villager: does not fight
+    {4.5f, 0.7f, 3.0f, 16, 1.0f, 3.2f},   // Crow: harasses from above, swoops down to bite
+    {3.5f, 0.7f, 0.0f, 24, 1.0f, 2.0f},   // Fish: holds its place in the lake
+};
+static_assert(std::size(kTempers) == kSpeciesCount);
+constexpr float kLeapSpeed = 1.9f;  // a slime leaping at its foe: this much faster
 
 float flat_distance(const Body& a, const Body& b, float& dx, float& dz) {
   const float x = b.pos.x - a.pos.x, z = b.pos.z - a.pos.z;
@@ -97,27 +110,25 @@ float aim(const Side& from, const Side& to, float& x, float& y, float& z) {
 // The object a body stands on (a roof, a rock...), or SIZE_MAX.
 size_t standing_on(const World& w, const Body& body) {
   constexpr float kNear = 0.3f;
-  for (size_t k = 0; k < w.objects.size(); ++k) {
-    const Box b = object_box(w.objects[k]);
+  size_t found = SIZE_MAX;
+  const Box area{{body.pos.x - kNear, body.pos.y - kNear, body.pos.z - kNear}, {body.pos.x + kNear, body.pos.y + kNear, body.pos.z + kNear}};
+  for_objects_near(w, area, [&](uint32_t k, const Box& b) {
     if (std::fabs(body.pos.y - b.max.y) < kNear && body.pos.x > b.min.x - kNear && body.pos.x < b.max.x + kNear &&
         body.pos.z > b.min.z - kNear && body.pos.z < b.max.z + kNear) {
-      return k;
+      found = std::min<size_t>(found, k);  // the first one, as when they were all gone through
     }
-  }
-  return SIZE_MAX;
+  });
+  return found;
 }
 
 constexpr float kMeleeHeight = 0.6f;  // highest gap a bite still reaches
 Monster& ally(World& w) { return *active_monster(w); }  // in a battle, there is one (but between a trainer's rounds)
 
-FightStats ally_stats(const World& w) {
-  const Monster& m = *active_monster(w);
-  return monster_fight_stats(m.species, m.level);
-}
+FightStats ally_stats(const World& w) { return monster_fight_stats(*active_monster(w)); }
 FightStats foe_stats(const World& w, size_t k) {
   if (training(w)) return ally_stats(w);  // damage shown as against a monster like itself
   const Creature& e = w.creatures[w.battle.foes[k].index];
-  return monster_fight_stats(e.species, e.level);
+  return monster_fight_stats(e.species, e.level, e.genes);
 }
 
 Element move_element(const Move& m, Species species, const Genes& genes) {
@@ -139,9 +150,9 @@ void grant_monster_xp(Monster& m, uint32_t xp) {
   m.xp += xp;
   while (m.level < 100 && m.xp >= monster_xp_to_next(m.level)) {
     m.xp -= monster_xp_to_next(m.level);
-    const uint16_t before = monster_fight_stats(m.species, m.level).hp;
+    const uint16_t before = monster_fight_stats(m).hp;
     ++m.level;
-    m.hp = static_cast<uint16_t>(m.hp + monster_fight_stats(m.species, m.level).hp - before);
+    m.hp = static_cast<uint16_t>(m.hp + monster_fight_stats(m).hp - before);
   }
 }
 
@@ -149,7 +160,9 @@ void grant_wizard_xp(Wizard& wiz, uint32_t xp) {
   wiz.xp += xp;
   while (wiz.level < 100 && wiz.xp >= wizard_stats(wiz).xp_to_next) {
     wiz.xp -= wizard_stats(wiz).xp_to_next;
+    const uint16_t before = wizard_stats(wiz).mana;
     ++wiz.level;
+    wiz.mana = static_cast<uint16_t>(wiz.mana + wizard_stats(wiz).mana - before);  // its new mana is full
   }
 }
 
@@ -223,6 +236,7 @@ void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
   b.won_xp = 0;
   b.beaten = 0;
   b.no_xp = NoXp::None;
+  b.mercy = false;
   b.rival = {};
   b.outcome = outcome;
   b.outcome_tick = w.tick;
@@ -299,6 +313,8 @@ void beat(World& w, size_t k) {
   } else {
     count_beaten(w, f);
     c.beaten = true;  // after its reward: the next time, none
+    uint16_t& n = w.beaten_count[static_cast<size_t>(c.species)];
+    n = static_cast<uint16_t>(std::min(n + 1, 65535));
   }
   drop_foe(w, k);
 }
@@ -307,7 +323,7 @@ Foe make_foe(const World& w, size_t index, size_t slot) {
   const Creature& c = w.creatures[index];
   Foe f;
   f.index = static_cast<uint16_t>(index);
-  f.max_hp = f.hp = monster_fight_stats(c.species, c.level).hp;
+  f.max_hp = f.hp = monster_fight_stats(c.species, c.level, c.genes).hp;
   f.xp = c.tag == Tag::Rival ? 0 : reward(c);
   f.fighter.cooldown = {static_cast<uint16_t>(kFoeStartCooldown[0] + 25 * slot), kFoeStartCooldown[1],
                         static_cast<uint16_t>(kFoeStartCooldown[2] + 60 * slot)};
@@ -393,7 +409,12 @@ bool hit(World& w, bool on_ally, size_t k, uint16_t damage, bool melee) {
     return false;
   }
   uint16_t& hp = on_ally ? ally(w).hp : b.foes[k].hp;
-  const uint16_t lost = std::min(hp, damage);
+  uint16_t lost = std::min(hp, damage);
+  if (!on_ally && b.mercy && lost >= hp) {  // the Mercy spell holds the blow back: 1 hit point left
+    lost = static_cast<uint16_t>(hp - 1);
+    b.mercy = false;
+    b.mercy_tick = w.tick;
+  }
   hp = static_cast<uint16_t>(hp - lost);
   if (!on_ally && w.active >= 0 && static_cast<size_t>(w.active) < b.dealt.size()) {
     b.dealt[static_cast<size_t>(w.active)] += lost;
@@ -551,9 +572,9 @@ Body beside_player(const World& w, Species species) {
   b.facing_x = p.facing_x;
   b.facing_z = p.facing_z;
   const Box box = body_box(b, species_info(species).shape);
-  const bool blocked = in_lake(w.village.lake, b.pos.x, b.pos.z) ||
-                       std::any_of(w.objects.begin(), w.objects.end(),
-                                   [&](const Object& o) { return overlaps(box, object_box(o)); });
+  bool blocked = in_lake(w.village.lake, b.pos.x, b.pos.z) ||
+                 (w.ground.sea(b.pos.x, b.pos.z) && w.ground.height(b.pos.x, b.pos.z) < rules::kSeaLevel);
+  for_objects_near(w, box, [&](uint32_t, const Box& o) { blocked = blocked || overlaps(box, o); });
   if (blocked) b.pos = p.pos;
   return b;
 }
@@ -601,6 +622,8 @@ void release(World& w, size_t slot) {
   }
   const size_t index = add_creature(w, c);
   w.released_id = w.creatures[index].id;
+  uint16_t& n = w.released_count[static_cast<size_t>(m.species)];
+  n = static_cast<uint16_t>(std::min(n + 1, 65535));
   w.released_tick = beam ? w.tick : 0;  // out of the crystal: a beam of light
   w.team.erase(w.team.begin() + static_cast<std::ptrdiff_t>(slot));
   if (w.active > static_cast<int>(slot)) --w.active;
@@ -648,11 +671,33 @@ const Moves& species_moves(Species species) {
   return kMoves[i < kSpeciesCount ? i : 0];
 }
 
-FightStats monster_fight_stats(Species species, uint16_t level) {
+FightStats build_percent(Form form) {
+  // Hit points, attack, defense, speed, magic.
+  static constexpr FightStats kBuilds[] = {
+      {100, 100, 100, 100, 100},  // Normal
+      {80, 80, 80, 115, 100},     // Micro: small and quick
+      {125, 125, 125, 105, 120},  // Alpha
+      {180, 150, 160, 90, 130},   // Omega
+  };
+  return kBuilds[static_cast<size_t>(form) < std::size(kBuilds) ? static_cast<size_t>(form) : 0];
+}
+
+FightStats monster_fight_stats(Species species, uint16_t level, const Genes& genes) {
   const MonsterStats& s = monster_stats(species);
   const uint32_t l = std::max<uint16_t>(level, 1) - 1u;
-  const auto grow = [&](uint16_t base, uint32_t per) { return static_cast<uint16_t>(base + base * l / per); };
-  return {grow(s.hp, 8), grow(s.attack, 10), grow(s.defense, 10), grow(s.speed, 10), grow(s.magic, 10)};
+  const FightStats k = build_percent(genes.form);
+  const auto grow = [&](uint16_t base, uint32_t per, uint32_t percent, Stat stat) {
+    const int v = static_cast<int>((base + base * l / per) * percent / 100) + stat_mod(species, genes, stat);
+    return static_cast<uint16_t>(std::max(1, v));
+  };
+  return {grow(s.hp, 8, k.hp, Stat::Hp), grow(s.attack, 10, k.attack, Stat::Attack),
+          grow(s.defense, 10, k.defense, Stat::Defense), grow(s.speed, 10, k.speed, Stat::Speed),
+          grow(s.magic, 10, k.magic, Stat::Magic)};
+}
+
+const Temper& species_temper(Species species) {
+  const auto i = static_cast<size_t>(species);
+  return kTempers[i < kSpeciesCount ? i : 0];
 }
 
 uint32_t monster_xp_to_next(uint16_t level) { return 20u * std::max<uint16_t>(level, 1); }
@@ -668,7 +713,7 @@ Monster starting_companion(const Genes& genes) {
   m.species = Species::Companion;
   m.genes = genes;
   m.level = rules::kCompanionStartLevel;
-  m.hp = monster_fight_stats(m.species, m.level).hp;
+  m.hp = monster_fight_stats(m).hp;
   return m;
 }
 
@@ -745,10 +790,11 @@ bool rival_arena(const World& w, Vec2& center, Vec2& axis) {
     const float h0 = w.ground.height(c.x, c.z);
     // Only the objects around this stretch can be in the way.
     std::vector<Box> near;
-    for (const Object& o : w.objects) {
+    for_objects_near(w, Box{{c.x - 18, -1e9f, c.z - 18}, {c.x + 18, 1e9f, c.z + 18}}, [&](uint32_t k, const Box& b) {
+      const Object& o = w.objects[k];
       const float dx = o.pos.x - c.x, dz = o.pos.z - c.z;
-      if (dx * dx + dz * dz < 18.0f * 18.0f) near.push_back(object_box(o));
-    }
+      if (dx * dx + dz * dz < 18.0f * 18.0f) near.push_back(b);
+    });
     bool clear = true;
     for (int t = -10; t <= 10 && clear; t += 2) {
       for (int side = -2; side <= 2 && clear; ++side) {  // 3 m on each side: the magician and the trainer
@@ -812,9 +858,11 @@ bool can_train(const World& w) {
 
 const SpellInfo& spell_info(SpellId spell) {
   static const SpellInfo kSpells[] = {
-      {"none", false, false, 0},
-      {"heal", true, true, rules::kHealCooldown},
-      {"shield", true, false, rules::kShieldCooldown},
+      {"none", false, false, 0, 0},
+      {"heal", true, true, rules::kHealCooldown, 4},
+      {"shield", true, false, rules::kShieldCooldown, 3},
+      {"mercy", true, false, rules::kMercyCooldown, 5},
+      {"detect", false, true, rules::kDetectTicks, 6},
   };
   static_assert(std::size(kSpells) == kSpellCount);
   const auto i = static_cast<size_t>(spell);
@@ -837,10 +885,15 @@ const char* cannot_cast(const World& w, size_t slot) {
   const SpellId s = current_spells(w)[slot];
   if (s == SpellId::None) return "none";
   if (w.battle.phase == BattlePhase::Flee) return "fleeing";
+  if ((s == SpellId::Mercy && w.battle.mercy) || (s == SpellId::Detect && w.detect_ticks > 0)) return "active";
   if (w.spell_cooldowns[static_cast<size_t>(s)] > 0) return "cooldown";
+  if (s == SpellId::Mercy && training(w)) return "training";  // no one is hurt there
   const Monster* a = active_monster(w);
-  if (!a) return "noCompanion";
-  if (s == SpellId::Heal && a->hp >= monster_fight_stats(a->species, a->level).hp) return "full";
+  if (s != SpellId::Detect) {
+    if (!a) return "noCompanion";
+    if (s == SpellId::Heal && a->hp >= monster_fight_stats(*a).hp) return "full";
+  }
+  if (w.wizard.mana < spell_info(s).mana) return "mana";
   return nullptr;
 }
 
@@ -906,7 +959,9 @@ void challenge(World& w, uint8_t n) {
   Rival& r = b.rival;
   r.npc = n;
   r.team = rival_team(n, r.count);
-  for (uint8_t k = 0; k < r.count; ++k) r.team[k].hp = monster_fight_stats(r.team[k].species, r.team[k].level).hp;
+  for (uint8_t k = 0; k < r.count; ++k) {
+    r.team[k].hp = monster_fight_stats(r.team[k].species, r.team[k].level, r.team[k].genes).hp;
+  }
   r.team[0].seen = true;  // it stands beside him
   const float half = rules::kRivalSpacing / 2;
   r.ally_spot = {center.x - axis.x * half, center.z - axis.z * half};
@@ -947,13 +1002,18 @@ void battle_command(World& w, const Input& in) {
     case Command::Cast: {
       if (in.target >= kSpellSlots || cannot_cast(w, in.target)) break;
       const SpellId s = current_spells(w)[in.target];
-      Monster& a = ally(w);
       if (s == SpellId::Heal) {
-        a.hp = std::min<uint16_t>(static_cast<uint16_t>(a.hp + rules::kHealPoints), monster_fight_stats(a.species, a.level).hp);
+        Monster& a = ally(w);
+        a.hp = std::min<uint16_t>(static_cast<uint16_t>(a.hp + rules::kHealPoints), monster_fight_stats(a).hp);
         if (companion(w).mind == Mind::KnockedOut) companion(w).mind = Mind::Idle;  // it wakes up
       } else if (s == SpellId::Shield) {
         b.ally.shield_ticks = rules::kShieldTicks;
+      } else if (s == SpellId::Mercy) {
+        b.mercy = true;
+      } else if (s == SpellId::Detect) {
+        w.detect_ticks = rules::kDetectTicks;
       }
+      w.wizard.mana = static_cast<uint16_t>(w.wizard.mana - spell_info(s).mana);
       w.spell_cooldowns[static_cast<size_t>(s)] = spell_info(s).cooldown;
       w.spell_tick = w.tick;
       w.spell_cast = s;
@@ -977,8 +1037,9 @@ void battle_command(World& w, const Input& in) {
     }
     case Command::HealTeam:
       if (in.target >= 256 || !can_heal_team(w, static_cast<uint8_t>(in.target))) break;
-      for (Monster& m : w.team) m.hp = monster_fight_stats(m.species, m.level).hp;
+      for (Monster& m : w.team) m.hp = monster_fight_stats(m).hp;
       if (w.active >= 0 && companion(w).mind == Mind::KnockedOut) companion(w).mind = Mind::Idle;
+      w.wizard.mana = wizard_stats(w.wizard).mana;  // and the magician's mana
       w.healed_tick = w.tick;
       break;
     case Command::Target:
@@ -1036,6 +1097,10 @@ void battle_command(World& w, const Input& in) {
       m.hp = f.hp;
       m.tag = e.tag;
       m.beaten = e.beaten || e.released;
+      give_traits(m, roll_traits(w.seed, e.id, e.species, e.genes), world_day(w));
+      uint16_t& n = w.captured_count[static_cast<size_t>(e.species)];
+      n = static_cast<uint16_t>(std::min(n + 1, 65535));
+      if (e.tag == Tag::Giant) w.quests[static_cast<size_t>(QuestId::GiantChampi)].progress |= kGiantCaught;
       capture(w, f.index);
       w.went_in = {w.tick, true, e.species, e.genes, e.body};  // runes, then into the crystal
       count_beaten(w, f);
@@ -1110,9 +1175,11 @@ Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {
 }
 
 // A foe's mind: it attacks when it can; else it circles the companion,
-// closing in when its bite is ready, keeping a little away while it is not;
-// it dodges what is thrown at it, now and then; a crow flies, and swoops
-// down to bite.
+// closing in when its bite is ready, keeping away while it is not; it dodges
+// what is thrown at it, now and then. Each species in its own way (Temper):
+// a slime stays close and leaps at its foe, a mushroom keeps away and throws
+// its spores, a bird bites and runs, a crow harasses from above and swoops
+// down to bite, a fish holds its place.
 Steer battle_foe(World& w, size_t k) {
   Battle& b = w.battle;
   Fighter& f = b.foes[k].fighter;
@@ -1120,10 +1187,11 @@ Steer battle_foe(World& w, size_t k) {
   Creature& e = foe_creature(w, k);
   const SpeciesInfo& info = species_info(e.species);
   const Moves& moves = species_moves(e.species);
+  const Temper& temper = species_temper(e.species);
   const bool stays = holds_its_place(e.species);  // a fish in the lake
   Steer s;
   s.fly = e.species == Species::Crow;
-  s.lift = kFoeLift;
+  s.lift = temper.lift;
   if (!active_monster(w) || b.phase != BattlePhase::Fight) return s;  // no one to fight: it waits
 
   const Side me = foe_side(w, k), other = ally_side(w);
@@ -1160,7 +1228,7 @@ Steer battle_foe(World& w, size_t k) {
       const float pd = std::sqrt(px * px + pz * pz);
       const float flat = std::sqrt(p.dir_x * p.dir_x + p.dir_z * p.dir_z);
       if (pd > 5.0f || pd < 0.4f || flat < 0.2f || (px * p.dir_x + pz * p.dir_z) / (pd * flat) < 0.85f) continue;
-      if (w.rng.below(24) != 0) break;
+      if (w.rng.below(temper.dodge_odds) != 0) break;
       const float side = f.strafe < 0 ? -1.0f : 1.0f;
       f.state = FighterState::Dodge;
       f.state_ticks = rules::kDodgeTicks;
@@ -1188,7 +1256,7 @@ Steer battle_foe(World& w, size_t k) {
     windup(2);
     return s;
   }
-  if ((d > 3.0f || stays) && d3 < moves[1].range && f.cooldown[1] == 0) {
+  if ((d > temper.throw_from || stays) && d3 < moves[1].range && f.cooldown[1] == 0) {
     windup(1);
     return s;
   }
@@ -1202,7 +1270,9 @@ Steer battle_foe(World& w, size_t k) {
     f.strafe = static_cast<int8_t>(roll < 2 ? 1 : roll < 4 ? -1 : 0);
     f.think = static_cast<uint16_t>(rules::kTicksPerSecond / 2 + w.rng.below(2 * rules::kTicksPerSecond));
   }
-  const float wanted = f.cooldown[0] < 20 ? reach * 0.7f : 3.5f;
+  // A mushroom never comes to bite: it keeps away (and bites what comes close).
+  const bool bites = f.cooldown[0] < 20 && e.species != Species::Mushroom;
+  const float wanted = bites ? reach * temper.close_in : temper.keep_away;
   const float closer = std::clamp((d - wanted) / 1.5f, -1.0f, 1.0f);
   const float around = 0.8f * static_cast<float>(f.strafe);
   float mx = dx * closer - dz * around;
@@ -1222,10 +1292,12 @@ Steer battle_foe(World& w, size_t k) {
   const float pace = std::min(len, 1.0f);
   s.dir_x = mx / len;
   s.dir_z = mz / len;
-  s.speed = std::max(info.walk_speed, info.run_speed * 0.6f) * pace;
+  s.speed = std::max(info.walk_speed, info.run_speed * 0.6f) * pace * temper.pace;
   if (e.species == Species::Slime) {  // slimes hop: they only move in the air
     s.jump = e.body.on_ground;
     if (e.body.on_ground) s.speed = 0;
+    // Its bite ready and its foe near: it leaps at it.
+    else if (bites && d < 3.5f && closer > 0) s.speed *= kLeapSpeed;
   }
   return s;
 }
@@ -1323,9 +1395,9 @@ void battle_resolve(World& w) {
     // Objects stop it, but not what a fighter stands on (the roof of a crow).
     if (!gone) {
       const Box box{{p.pos.x - 0.1f, p.pos.y - 0.1f, p.pos.z - 0.1f}, {p.pos.x + 0.1f, p.pos.y + 0.1f, p.pos.z + 0.1f}};
-      for (size_t k = 0; k < w.objects.size() && !gone; ++k) {
-        gone = std::find(perches.begin(), perches.end(), k) == perches.end() && overlaps(box, object_box(w.objects[k]));
-      }
+      for_objects_near(w, box, [&](uint32_t k, const Box& o) {
+        gone = gone || (std::find(perches.begin(), perches.end(), k) == perches.end() && overlaps(box, o));
+      });
     }
     if (gone) b.projectiles.erase(b.projectiles.begin() + static_cast<std::ptrdiff_t>(i));
     else ++i;
@@ -1409,6 +1481,7 @@ void battle_resolve(World& w) {
 
 void spells_step(World& w) {
   for (uint16_t& c : w.spell_cooldowns) c = c > 0 ? static_cast<uint16_t>(c - 1) : 0;
+  if (w.detect_ticks > 0) --w.detect_ticks;
 }
 
 }  // namespace monstres

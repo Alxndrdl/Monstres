@@ -107,6 +107,7 @@ TEST_CASE("the world has its places: forest, cave, castle") {
   int trees_in_forest = 0, trees_outside = 0;
   for (const Object& o : w.objects) {
     if (o.kind != ObjectKind::Tree && o.kind != ObjectKind::Pine) continue;
+    if (std::max(std::fabs(o.pos.x), std::fabs(o.pos.z)) > rules::kValleyHalfSize) continue;  // the valley's
     (in_forest(w.forest, o.pos.x, o.pos.z) ? trees_in_forest : trees_outside) += 1;
   }
   CHECK(trees_in_forest > trees_outside / 2);  // denser there (a much smaller area)

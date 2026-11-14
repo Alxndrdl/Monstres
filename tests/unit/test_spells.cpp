@@ -210,8 +210,10 @@ TEST_CASE("Odette, the healer, heals the whole team and wakes the knocked out") 
   REQUIRE(can_heal_team(w, npc::kOdette));
   CHECK(creature_json(w, i).find("\"healer\":true") != std::string::npos);
   CHECK_FALSE(can_heal_team(w, npc::kGaspard));  // not him
+  w.wizard.mana = 2;
   step(w, command(Command::HealTeam, npc::kOdette));
   for (const Monster& m : w.team) CHECK(m.hp == max_hp(m));
+  CHECK(w.wizard.mana == wizard_stats(w.wizard).mana);  // the magician's mana too
   CHECK(w.creatures[0].mind != Mind::KnockedOut);
   CHECK(w.healed_tick == w.tick);
 }

@@ -3,6 +3,7 @@
 #include "monstres/render/scene.hpp"
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
@@ -210,13 +211,14 @@ void blink(std::vector<PartPose>& poses, std::span<const RigPart> rig, float tim
 float support_height(const World& w, const Body& b, const BodyShape& shape) {
   const Box bb = body_box(b, shape);
   float support = w.ground.height(b.pos.x, b.pos.z);
-  for (const Object& o : w.objects) {
-    const Box ob = object_box(o);
+  Box column = bb;
+  column.min.y = -1e9f;
+  for_objects_near(w, column, [&](uint32_t, const Box& ob) {
     if (bb.min.x < ob.max.x && bb.max.x > ob.min.x && bb.min.z < ob.max.z && bb.max.z > ob.min.z &&
         ob.max.y <= b.pos.y + 0.01f) {
       support = std::max(support, ob.max.y);
     }
-  }
+  });
   return support;
 }
 
@@ -256,6 +258,7 @@ CreatureLook creature_look(Species species, const Genes& g) {
     look.aura_color = element_glow(creature_elements(species, g).first);
   }
   if (genetics(species).gene_count > 0 && g.allele[0] == 1) look.size = kFemaleSize;
+  look.size *= build_scale(g.form);  // micro, alpha, omega
   auto& parts = look.parts;
   const auto at = [&](int i) -> RigPart& { return parts[static_cast<size_t>(i)]; };
   switch (species) {
@@ -645,7 +648,8 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
     add_aura(list, c.body, (shape.half_width * 1.5f + 0.1f) * look.size, height * look.size, look.aura_color, time,
              0.4f);
   }
-  return height;  // framed for a male: a female looks smaller
+  // Framed for a normal male: a female or a micro looks smaller; a bigger build is framed whole.
+  return height * std::max(1.0f, build_scale(c.genes.form));
 }
 
 // A monster appearing (t from 0 to 1) or vanishing (t from 1 to 0) in the
@@ -741,7 +745,7 @@ void add_characters(const World& w, float time, DrawList& list) {
   add_rig(list, player_rig(), poses, w.player, kCrystalGlow, 1, kPlayerGlowSlot);
   add_body_shadow(w, w.player, kPlayerShape, 0.5f, list);
 
-  std::array<RigPart, std::size(kVillagerRig)> villager_rig;
+  std::array<RigPart, std::size(kVillagerRig) + 2> villager_rig;
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     if (i == 0 && w.active < 0) continue;  // in the crystal
     const Creature& c = w.creatures[i];
@@ -752,8 +756,37 @@ void add_characters(const World& w, float time, DrawList& list) {
       std::copy(std::begin(kVillagerRig), std::end(kVillagerRig), villager_rig.begin());
       villager_rig[kVHair].mesh = look.hair_mesh;
       villager_rig[kVHat].mesh = look.hat_mesh;
-      const Color tints[] = {look.shirt, look.pants, look.skin, look.hair, look.hat};
-      add_rig(list, villager_rig, poses, c.body, tints, look.child ? 0.75f : 1.0f);
+      const Color tints[] = {look.shirt, look.pants, look.skin, look.hair, look.hat, {1.0f, 2.8f, 1.4f, 1}};
+      size_t parts = std::size(kVillagerRig);
+      if (c.npc == npc::kOdette) {
+        // The healer holds a magician's staff, its crystal glowing green: easy to spot.
+        villager_rig[parts] = {MeshId::PlayerStaff, kVArmR, {0, -0.29f, -0.02f}};
+        villager_rig[parts + 1] = {MeshId::PlayerCrystal, static_cast<int>(parts), {0, 0.95f, 0}, {1.7f, 1.7f, 1.7f}, 6};
+        poses.resize(parts + 2, PartPose{});
+        if (c.mind != Mind::Greet) poses[kVArmR].rotation = quat_x(0.2f) * quat_z(0.4f);  // held up, out to her side
+        const Quat arm = poses[kVArmR].rotation;
+        poses[parts].rotation = Quat{-arm.x, -arm.y, -arm.z, arm.w} * quat_x(0.12f);
+        poses[parts + 1].rotation = quat_yaw(time * 1.6f);
+        poses[parts + 1].offset.y = 0.015f * std::sin(time * 2.5f);
+        parts += 2;
+      }
+      add_rig(list, std::span<const RigPart>(villager_rig.data(), parts), poses, c.body, tints,
+              look.child ? 0.75f : 1.0f, 6);
+      if (c.npc == npc::kOdette) {  // two sparks turn around her crystal
+        const Vec3 at = crystal_position(c.body);
+        for (int k = 0; k < 2; ++k) {
+          const float a = time * 2.2f + static_cast<float>(k) * kTau / 2;
+          Instance spark;
+          spark.x = at.x + std::cos(a) * 0.22f;
+          spark.y = at.y + 0.05f + 0.06f * std::sin(time * 3 + static_cast<float>(k));
+          spark.z = at.z + std::sin(a) * 0.22f;
+          spark.sx = spark.sy = spark.sz = 0.05f;
+          spark.rotation = quat_yaw(a);
+          spark.tint = {1.0f, 2.6f, 1.3f, 1};
+          spark.material = kGlowing;
+          list.batches[static_cast<size_t>(MeshId::Sparkle)].push_back(spark);
+        }
+      }
     } else {
       CreatureLook look = creature_look(c.species, c.genes);
       Body body = c.body;
@@ -948,7 +981,7 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
   const Vec3 crystal = crystal_position(p);
   PointLight staff{crystal.x, crystal.y, crystal.z, 6.5f, scaled({0.55f, 0.75f, 1.0f, 1}, 1.2f * night * flicker)};
 
-  for (const Object& o : w.objects) {
+  for (const Object& o : valley_objects(w)) {
     if (o.kind == ObjectKind::Lamp) offer(o.pos.x, o.pos.y + 2.2f, o.pos.z, 8.0f, scaled({1.0f, 0.68f, 0.32f, 1}, 1.5f * night));
     // Crystals glow in the dark of the cave, and at night.
     if (o.kind == ObjectKind::Crystal) {
@@ -981,6 +1014,11 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
   }
   for (const Projectile& pr : w.battle.projectiles) {
     offer(pr.pos.x, pr.pos.y, pr.pos.z, 4.0f, scaled(element_glow(pr.element), 0.15f + 0.5f * night));
+  }
+  // The healer's staff glows green at night.
+  if (const int odette = npc_index(w, npc::kOdette); odette > 0 && night > 0.01f) {
+    const Vec3 at = crystal_position(w.creatures[static_cast<size_t>(odette)].body);
+    offer(at.x, at.y, at.z, 5.0f, scaled({0.45f, 1.0f, 0.55f, 1}, 0.9f * night));
   }
 
   std::sort(found.begin(), found.end(), [](const Candidate& a, const Candidate& b) { return a.distance2 < b.distance2; });

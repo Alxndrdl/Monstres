@@ -5,6 +5,7 @@
 
 #include "monstres/render/characters.hpp"
 #include "monstres/render/terrain_mesh.hpp"
+#include "monstres/core/continent.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -123,7 +124,6 @@ namespace {
 
 constexpr float kTau = 6.28318530718f;
 constexpr float kDecorationHalfSize = rules::kWorldHalfSize + 13; // grass and flowers up to here
-constexpr float kForestOuter = rules::kWorldHalfSize + 19;        // trees beyond the edges, up to here
 
 // Deterministic pseudo-random number in [0, 1) for decoration.
 float rand01(uint64_t seed, uint64_t a, uint64_t b = 0) {
@@ -200,6 +200,9 @@ float wind_for(ObjectKind kind) {
   }
 }
 
+// Trees, rocks, logs, stumps, bushes: what the wilds are made of.
+bool nature(ObjectKind kind) { return kind <= ObjectKind::Bush; }
+
 // How far an object is drawn: landmarks always, trees simplified far away,
 // small things only near the player.
 enum class Detail { Landmark, Tree, Small };
@@ -236,6 +239,7 @@ void add_object(DrawList& list, const World& w, const Object& o, bool near = tru
   const float k = 0.88f + 0.24f * static_cast<float>(o.variant) / 255.0f;  // slight color variation
   in.tint = {k, k, k, 1};
   if (detail == Detail::Small) in.material = kFadeFar;  // shrinks away before the edge of the detail
+  else if (nature(o.kind)) in.material = kFadeTree;     // shrinks away before landscape::kObjectsRadius
   MeshId mesh = mesh_for(o);
   if (!near && o.kind == ObjectKind::Tree) mesh = MeshId::TreeFar;
   if (!near && o.kind == ObjectKind::Pine) mesh = MeshId::PineFar;
@@ -279,46 +283,6 @@ void add_object(DrawList& list, const World& w, const Object& o, bool near = tru
 
 // Trees, pines and a few rocks beyond the edges of the playable area, so the
 // world ends in a forest instead of a wall.
-std::vector<Object> border_forest(const World& w) {
-  std::vector<Object> forest;
-  constexpr float kCell = 4.0f;
-  const int cells = static_cast<int>(2 * kForestOuter / kCell);
-  for (int i = 0; i < cells; ++i) {
-    for (int j = 0; j < cells; ++j) {
-      const auto ui = static_cast<uint64_t>(i), uj = static_cast<uint64_t>(j);
-      const float x = -kForestOuter + kCell * (static_cast<float>(i) + 0.2f + 0.6f * rand01(w.seed, 100 + ui, uj));
-      const float z = -kForestOuter + kCell * (static_cast<float>(j) + 0.2f + 0.6f * rand01(w.seed, 200 + ui, uj));
-      const float edge = std::max(std::fabs(x), std::fabs(z));
-      if (edge < rules::kWorldHalfSize + 2.0f) continue;
-      const float density = std::clamp((edge - rules::kWorldHalfSize) / 10.0f, 0.35f, 0.8f);
-      if (rand01(w.seed, 300 + ui, uj) > density) continue;
-      if (distance_to_path(w.path, x, z, rules::kPathHalfWidth + 3.0f) < rules::kPathHalfWidth + 2.0f) continue;
-      Object o;
-      o.pos = {x, w.ground.height(x, z) - 0.1f, z};
-      o.variant = static_cast<uint8_t>(rand01(w.seed, 400 + ui, uj) * 255);
-      o.yaw = static_cast<Angle16>(rand01(w.seed, 500 + ui, uj) * 65535);
-      const float r = rand01(w.seed, 600 + ui, uj);
-      const float s = 0.9f + 0.6f * rand01(w.seed, 700 + ui, uj);
-      if (r < 0.48f) {
-        o.kind = ObjectKind::Pine;
-        o.size = {s, s, s};
-      } else if (r < 0.88f) {
-        o.kind = ObjectKind::Tree;
-        o.size = {s, s, s};
-      } else if (r < 0.96f) {
-        o.kind = ObjectKind::Rock;
-        o.size = {0.8f * s, 0.6f * s, 0.9f * s};
-        o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
-      } else {
-        o.kind = ObjectKind::Bush;
-        o.size = {0.7f * s, 0.7f * s, 0};
-      }
-      forest.push_back(o);
-    }
-  }
-  return forest;
-}
-
 // Boxes of the objects around a place, by cells of 4 m: where grass does not grow.
 class Obstacles {
 public:
@@ -368,6 +332,7 @@ void add_vegetation(const World& w, const Obstacles& obstacles, Vec2 center, Dra
       if (obstacles.covered(x, z, 0.05f)) continue;
       if (w.ground.normal(x, z).y < 0.8f) continue;  // bare rock on cliffs
       if (in_lake(w.village.lake, x, z, 0.6f)) continue;
+      if (w.ground.height(x, z) < rules::kSeaLevel + 0.6f) continue;  // the sea and the wet sand
       if (w.ruins.radius > 0) {  // the paved courtyard of the ruins
         const float rx = x - w.ruins.center.x, rz = z - w.ruins.center.z;
         if (std::max(std::fabs(rx), std::fabs(rz)) < 8.5f && rand01(w.seed, 3500 + ui, uj) < 0.8f) continue;
@@ -423,29 +388,11 @@ void add_vegetation(const World& w, const Obstacles& obstacles, Vec2 center, Dra
   }
 }
 
-void add_mountains(const World& w, DrawList& list) {
-  constexpr int kCount = 18;
-  for (int i = 0; i < kCount; ++i) {
-    const auto u = static_cast<uint64_t>(i);
-    const float angle = kTau * (static_cast<float>(i) + 0.6f * rand01(w.seed, 10000 + u)) / kCount;
-    const float distance = 270.0f + 80.0f * rand01(w.seed, 10100 + u);
-    Instance in;
-    in.x = std::cos(angle) * distance;
-    in.z = std::sin(angle) * distance;
-    in.rotation = quat_yaw(kTau * rand01(w.seed, 10200 + u));
-    const float width = 70.0f + 50.0f * rand01(w.seed, 10300 + u);
-    in.sx = width;
-    in.sz = width * (0.8f + 0.4f * rand01(w.seed, 10400 + u));
-    in.sy = 30.0f + 36.0f * rand01(w.seed, 10500 + u);
-    add(list, mesh_offset(MeshId::Mountain0, u % kMountainVariants), in);
-  }
-}
-
 // Teleporters: a circle of runes on the stones, bright and turning once the
 // teleporter is known, sparks rising from it; a column of light where the
 // player just left and arrived.
 void add_teleporter_effects(const World& w, float time, DrawList& list) {
-  for (const Object& o : w.objects) {
+  for (const Object& o : valley_objects(w)) {
     if (o.kind != ObjectKind::Teleporter) continue;
     const float dx = o.pos.x - w.player.pos.x, dz = o.pos.z - w.player.pos.z;
     if (dx * dx + dz * dz > 120.0f * 120.0f) continue;
@@ -491,7 +438,7 @@ void add_teleporter_effects(const World& w, float time, DrawList& list) {
 // Smoke rising from chimneys, ripples around fish.
 void add_village_effects(const World& w, float time, DrawList& list) {
   constexpr int kPuffs = 7;
-  for (const Object& o : w.objects) {
+  for (const Object& o : valley_objects(w)) {
     if (o.kind != ObjectKind::HouseChimney) continue;
     // Chimney top, in the house's space (see house_chimney in tools/make_models.py).
     const SinCos sc = sincos16(o.yaw);
@@ -514,7 +461,7 @@ void add_village_effects(const World& w, float time, DrawList& list) {
     }
   }
   // Magic sparks drifting up around the rune stones and the top of the tower.
-  for (size_t k = 0; k < w.objects.size(); ++k) {
+  for (size_t k = 0; k < valley_objects(w).size(); ++k) {
     const Object& o = w.objects[k];
     if (o.kind != ObjectKind::RuneStone && o.kind != ObjectKind::Tower) continue;
     const bool tower = o.kind == ObjectKind::Tower;
@@ -581,16 +528,74 @@ void build_landscape(const World& w, DrawList& list, Vec2 center) {
 
   Obstacles obstacles(center, landscape::kGrassRadius + 4);
   constexpr float near2 = landscape::kDetailRadius * landscape::kDetailRadius;
+  constexpr float reach2 = landscape::kObjectsRadius * landscape::kObjectsRadius;
   const auto place = [&](const Object& o) {
     const float dx = o.pos.x - center.x, dz = o.pos.z - center.z;
-    const bool near = dx * dx + dz * dz < near2;
+    const float d2 = dx * dx + dz * dz;
+    if (nature(o.kind) && d2 > reach2) return;  // too far: not drawn (the buildings are, everywhere)
+    const bool near = d2 < near2;
     add_object(list, w, o, near);
     if (near) obstacles.add(object_box(o));
   };
-  for (const Object& o : w.objects) place(o);
-  for (const Object& o : border_forest(w)) place(o);
+  // The valley's objects (a few thousand), then the wilds' around the center
+  // only: through the objects' index, each once (in the cell of its position).
+  const std::span<const Object> valley = valley_objects(w);
+  for (const Object& o : valley) place(o);
+  const ObjectIndex& ix = objects_index(w);
+  const float r = landscape::kObjectsRadius;
+  for (int cx = ObjectIndex::cell_of(center.x - r); cx <= ObjectIndex::cell_of(center.x + r); ++cx) {
+    for (int cz = ObjectIndex::cell_of(center.z - r); cz <= ObjectIndex::cell_of(center.z + r); ++cz) {
+      const auto c = static_cast<size_t>(cx * ObjectIndex::kCells + cz);
+      for (uint32_t k = ix.cell_start[c]; k < ix.cell_start[c + 1]; ++k) {
+        const uint32_t i = ix.items[k];
+        const Object& o = w.objects[i];
+        if (i < valley.size() || ObjectIndex::cell_of(o.pos.x) != cx || ObjectIndex::cell_of(o.pos.z) != cz) continue;
+        place(o);
+      }
+    }
+  }
   add_vegetation(w, obstacles, center, list);
-  add_mountains(w, list);
+}
+
+void build_far_landscape(DrawList& list) {
+  list.batches.assign(kMeshCount, {});
+  list.cached = true;
+  list.far = true;
+  ++list.version;
+  add(list, MeshId::FarGround, Instance{});
+  Instance water;
+  water.material = kWater;
+  add(list, MeshId::FarWater, water);
+  Instance lava;
+  lava.material = kGlowing;
+  add(list, MeshId::Lava, lava);
+}
+
+void build_far_dynamic(const World& w, float time, DrawList& list) {
+  list.batches.resize(kMeshCount);
+  for (auto& batch : list.batches) batch.clear();
+  list.far = true;
+  // The active volcano smokes: big puffs rising from its crater, drifting
+  // away with the wind; lit by the lava from below at night.
+  const Crater c = volcano_crater();
+  const float night = 1 - sky_at(hour_of_day(w)).daylight;
+  constexpr int kPuffs = 16;
+  for (int i = 0; i < kPuffs; ++i) {
+    const float t = std::fmod(time * 0.012f + static_cast<float>(i) / kPuffs, 1.0f);  // 0 = just out
+    Instance puff;
+    puff.x = c.center.x + t * t * 380.0f + std::sin(time * 0.05f + static_cast<float>(i)) * 25.0f * t;
+    puff.y = c.lava_level + 30.0f + t * 520.0f;
+    puff.z = c.center.z - t * t * 160.0f;
+    const float size = 35.0f + 190.0f * t;
+    puff.sx = puff.sz = size;
+    puff.sy = size * 0.8f;
+    puff.rotation = quat_yaw(static_cast<float>(i) * 1.7f + t);
+    const float alpha = std::min(1.0f, t * 5.0f) * (1.0f - t) * 0.85f;
+    const float grey = 0.62f - 0.12f * t;
+    const float glow = night * (1 - std::clamp(t * 3.0f, 0.0f, 1.0f));
+    puff.tint = {grey + glow * 0.9f, grey + glow * 0.3f, grey, alpha};
+    add(list, MeshId::Smoke, puff);
+  }
 }
 
 namespace {
@@ -708,6 +713,43 @@ void add_spell_effects(const World& w, float time, DrawList& list) {
     const float k = static_cast<float>(w.battle.ally.shield_ticks) / rules::kShieldTicks;
     add_spark(list, c.pos.x, c.pos.y + sh.height * 0.5f, c.pos.z, sh.height * 0.9f + 0.3f + 0.03f * std::sin(time * 9),
               {2.0f, 1.7f, 0.6f, 1}, 0.2f + 0.2f * k, time);
+  }
+  // Mercy: three pale sparks turn slowly around the monster until it holds a blow back.
+  if (w.active >= 0 && w.battle.mercy) {
+    const BodyShape& sh = species_info(w.creatures[0].species).shape;
+    for (int k = 0; k < 3; ++k) {
+      const float a = time * 1.8f + kTau * static_cast<float>(k) / 3;
+      add_spark(list, c.pos.x + std::cos(a) * (sh.half_width + 0.3f), c.pos.y + sh.height * 0.6f,
+                c.pos.z + std::sin(a) * (sh.half_width + 0.3f), 0.06f, {1.6f, 1.8f, 2.2f, 1}, 0.8f, a);
+    }
+  }
+  // Detection: the staff's crystal pulses; a very rare monster near: a trail
+  // of light runs from it towards the monster.
+  if (w.detect_ticks > 0) {
+    const Vec3 at = crystal_position(w.player);
+    const float fade = std::min(1.0f, static_cast<float>(w.detect_ticks) / 120.0f);
+    const float pulse = 0.5f + 0.5f * std::sin(time * 5.0f);
+    for (int k = 0; k < 6; ++k) {
+      const float a = time * 2.5f + kTau * static_cast<float>(k) / 6;
+      add_spark(list, at.x + std::cos(a) * 0.2f, at.y + 0.05f * std::sin(a * 2), at.z + std::sin(a) * 0.2f, 0.05f,
+                {1.2f, 1.4f, 2.4f, 1}, (0.5f + 0.4f * pulse) * fade, a);
+    }
+    if (const int found = detect_rare(w); found > 0) {
+      const Body& m = w.creatures[static_cast<size_t>(found)].body;
+      const float dx = m.pos.x - at.x, dz = m.pos.z - at.z;
+      const float d = std::sqrt(dx * dx + dz * dz);
+      if (d > 0.1f) {
+        // Closer: brighter.
+        const float near = 1.0f - std::min(d / rules::kDetectRadius, 1.0f) * 0.6f;
+        for (int k = 0; k < 7; ++k) {
+          const float u = std::fmod(time * 1.4f + static_cast<float>(k) / 7, 1.0f);
+          const float r = 0.25f + 1.6f * u;
+          add_spark(list, at.x + dx / d * r, at.y - 0.1f * u, at.z + dz / d * r, 0.07f - 0.03f * u,
+                    {2.4f, 1.9f, 0.7f, 1}, (1 - u) * near * fade, time * 4 + static_cast<float>(k));
+        }
+        add_spark(list, at.x, at.y, at.z, 0.16f + 0.05f * pulse, {2.4f, 1.9f, 0.7f, 1}, 0.45f * near * fade, time);
+      }
+    }
   }
 }
 
@@ -838,7 +880,7 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected) {
   // At night: a glowing halo around each lantern (their light is in build_view).
   const float dark = night_amount(w);
   if (dark > 0.01f) {
-    for (const Object& o : w.objects) {
+    for (const Object& o : valley_objects(w)) {
       if (o.kind != ObjectKind::Lamp) continue;
       Instance halo;
       halo.x = o.pos.x;
@@ -874,8 +916,14 @@ float camera_distance(const World& w, float tx, float ty, float tz, float dx, fl
   constexpr float kMargin = 0.25f;   // keep the camera this far from objects
   constexpr float kClosest = 1.2f;
   float best = wanted;
-  for (const Object& o : w.objects) {
-    const Box b = object_box(o);
+  // Only the objects around the line from the target to where the camera would be.
+  const float ex = tx + dx * wanted, ey = ty + dy * wanted, ez = tz + dz * wanted;
+  const Box around{{std::min(tx, ex) - 1, std::min(ty, ey) - 1, std::min(tz, ez) - 1},
+                   {std::max(tx, ex) + 1, std::max(ty, ey) + 1, std::max(tz, ez) + 1}};
+  std::vector<uint32_t> near;
+  for_objects_near(w, around, [&](uint32_t k, const Box&) { near.push_back(k); });
+  for (const uint32_t k : near) {
+    const Box b = objects_index(w).boxes[k];
     // Ray (t, d) against the box widened by the margin (slab method).
     const float lo[3] = {b.min.x - kMargin, b.min.y - kMargin, b.min.z - kMargin};
     const float hi[3] = {b.max.x + kMargin, b.max.y + kMargin, b.max.z + kMargin};
@@ -933,6 +981,26 @@ Ray screen_ray(const View& view, float ndc_x, float ndc_y) {
   return ray;
 }
 
+float ray_box(const Ray& ray, const Box& b);
+
+// Whether an object (but `skip`) is on the ray before `until` (the objects
+// around that stretch of the ray only).
+bool ray_hits_object(const World& w, const Ray& ray, float until, int skip) {
+  float lo[3], hi[3];
+  for (int i = 0; i < 3; ++i) {
+    const float a = ray.origin[i], b = ray.origin[i] + ray.dir[i] * until;
+    lo[i] = std::min(a, b) - 0.5f;
+    hi[i] = std::max(a, b) + 0.5f;
+  }
+  bool hit = false;
+  for_objects_near(w, Box{{lo[0], lo[1], lo[2]}, {hi[0], hi[1], hi[2]}}, [&](uint32_t k, const Box& b) {
+    if (hit || static_cast<int>(k) == skip) return;
+    const float t = ray_box(ray, b);
+    hit = t >= 0 && t < until;
+  });
+  return hit;
+}
+
 // Where the ray enters the box (t in [0, 1]), or a negative value if it misses.
 float ray_box(const Ray& ray, const Box& b) {
   const float lo[3] = {b.min.x, b.min.y, b.min.z};
@@ -973,10 +1041,7 @@ int pick_creature(const World& w, const View& view, float ndc_x, float ndc_y) {
   }
   if (best < 0) return -1;
   // Hidden behind an object or a hill?
-  for (const Object& o : w.objects) {
-    const float t = ray_box(ray, object_box(o));
-    if (t >= 0 && t < best_t) return -1;
-  }
+  if (ray_hits_object(w, ray, best_t, -1)) return -1;
   float hit[3];
   for (int i = 0; i < 3; ++i) hit[i] = ray.origin[i] + ray.dir[i] * best_t;
   const float dx = hit[0] - ray.origin[0], dy = hit[1] - ray.origin[1], dz = hit[2] - ray.origin[2];
@@ -992,7 +1057,7 @@ int pick_object(const World& w, const View& view, float ndc_x, float ndc_y) {
   const Ray ray = screen_ray(view, ndc_x, ndc_y);
   int best = -1;
   float best_t = 2;
-  for (size_t i = 0; i < w.objects.size(); ++i) {
+  for (size_t i = 0; i < valley_objects(w).size(); ++i) {
     const Object& o = w.objects[i];
     if (o.kind != ObjectKind::Sign && o.kind != ObjectKind::Teleporter) continue;
     // A signpost's planks, wider than the post (easier to tap); a teleporter's circle and stones.
@@ -1010,11 +1075,7 @@ int pick_object(const World& w, const View& view, float ndc_x, float ndc_y) {
   const Object& sign = w.objects[static_cast<size_t>(best)];
   const float px = sign.pos.x - w.player.pos.x, pz = sign.pos.z - w.player.pos.z;
   if (px * px + pz * pz > kReadDistance * kReadDistance) return -1;
-  for (size_t i = 0; i < w.objects.size(); ++i) {
-    if (static_cast<int>(i) == best) continue;
-    const float t = ray_box(ray, object_box(w.objects[i]));
-    if (t >= 0 && t < best_t - 1e-4f) return -1;
-  }
+  if (ray_hits_object(w, ray, best_t - 1e-4f, best)) return -1;
   return best;
 }
 
@@ -1219,7 +1280,12 @@ View build_view(const World& w, const Camera& cam, float aspect, float time) {
   ey = std::max(ey, w.ground.height(ex, ez) + 0.2f);  // never below the ground
 
   View v;
-  v.view_projection = multiply(perspective(1.0f, aspect, 0.1f, 800.0f), look_at(ex, ey, ez, look_x, look_y, look_z));
+  const Mat4 look = look_at(ex, ey, ez, look_x, look_y, look_z);
+  v.view_projection = multiply(perspective(1.0f, aspect, 0.1f, view_range::kNearFar), look);
+  v.far_view_projection = multiply(perspective(1.0f, aspect, view_range::kFarNear, view_range::kFarFar), look);
+  v.fog_start = view_range::kFogStart;
+  v.fog_half = view_range::kFogHalf;
+  v.fog_end = view_range::kFogEnd;
   v.inverse_view_projection = inverse(v.view_projection);
   v.camera_x = ex;
   v.camera_y = ey;
@@ -1254,6 +1320,8 @@ View build_view(const World& w, const Camera& cam, float aspect, float time) {
   v.fade_near_end = landscape::kGrassFadeEnd;
   v.fade_far_start = landscape::kDetailFadeStart;
   v.fade_far_end = landscape::kDetailFadeEnd;
+  v.fade_tree_start = landscape::kTreeFadeStart;
+  v.fade_tree_end = landscape::kTreeFadeEnd;
   return v;
 }
 

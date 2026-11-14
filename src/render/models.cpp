@@ -22,7 +22,7 @@ constexpr const char* kNames[kMeshCount] = {
     "crow_body", "crow_wing", "crow_leg", "fish_body", "fish_tail", "fish_fin", "eye_iris", "horn", "bulb",
     "tower", "ruin_wall_low", "ruin_wall_high", "pillar", "fallen_pillar", "rubble", "rune_stone",
     "castle_wall", "castle_tower", "castle_gate", "castle_keep", "cave_mouth", "crystal", "teleporter", "tree_far", "pine_far",
-    nullptr, nullptr, nullptr, "shadow", "ripple", "smoke", "sparkle", "rune_circle",
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "shadow", "ripple", "smoke", "sparkle", "rune_circle",
 };
 
 struct DataDeleter {

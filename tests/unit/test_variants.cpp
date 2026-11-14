@@ -141,8 +141,8 @@ TEST_CASE("the monsters of a world get their genes from the seed") {
 TEST_CASE("elements: two for the crow, another one in the elemental form") {
   CHECK(creature_elements(Species::Slime, {}).first == Element::Water);
   CHECK(creature_elements(Species::Slime, {}).second == Element::Count);
-  CHECK(creature_elements(Species::Slime, genes_with(Species::Slime, variant_count(Species::Slime) - 1)).first ==
-        Element::Fire);
+  CHECK(creature_elements(Species::Slime, genes_with(Species::Slime, variant_count(Species::Slime) - 4)).first ==
+        Element::Fire);  // the elemental form, before the micro, alpha and omega builds
   const Elements crow = creature_elements(Species::Crow, {});
   CHECK(crow.first == Element::Shadow);
   CHECK(crow.second == Element::Air);
@@ -198,7 +198,9 @@ TEST_CASE("the companion's variants are captured from the start, the others are 
   // The bestiary tells the page.
   const std::string json = bestiary_json(w);
   CHECK(json.find("{\"id\":\"color.blue\",\"kind\":\"color\",\"rarity\":\"uncommon\",\"zones\":[],"
-                  "\"elements\":[\"water\"],\"look\":4,\"status\":\"captured\"}") != std::string::npos);
+                  "\"elements\":[\"water\"],\"look\":4,\"mods\":[],\"status\":\"captured\"}") != std::string::npos);
+  CHECK(json.find("{\"id\":\"top.horn\",") != std::string::npos);
+  CHECK(json.find("\"mods\":[{\"stat\":\"charisma\",\"value\":-1},{\"stat\":\"defense\",\"value\":2}]") != std::string::npos);
   CHECK(json.find("{\"id\":\"cap.blue\",\"kind\":\"color\",\"rarity\":\"rare\",\"zones\":[\"ruins\"],") !=
         std::string::npos);
 }

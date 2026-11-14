@@ -1,5 +1,6 @@
 #include "monstres/core/heightmap.hpp"
 
+#include "monstres/core/continent.hpp"
 #include "monstres/core/world.hpp"
 
 #include <algorithm>
@@ -46,9 +47,10 @@ float add_knoll(float h, Vec2 center, float x, float z, float top, float height,
   return h + knoll + (top - (h + knoll)) * flat;
 }
 
-// knoll_top, castle_top: heights of the flat tops of the knolls (see make_heightmap).
+// knoll_top, castle_top: heights of the flat tops of the knolls (see make_heightmap);
+// land: the continent's height there (0 in the valley).
 float relief(uint64_t seed, const Path& path, const Places& places, float knoll_top, float castle_top, float x,
-             float z) {
+             float z, float land) {
   const VillageLayout& village = places.village;
   const RuinsLayout& ruins = places.ruins;
   // Three octaves of hills; the smallest bumps fade out along the path.
@@ -78,11 +80,10 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
     h += rise * (1 - passage);
   }
 
-  // Hills rise around the playable area, then the relief fades out far
-  // beyond it, where the flat horizon ground takes over.
+  // The hills fade out towards the edge of the relief, where the continent's
+  // ground (drawn far away from its own grid) takes over: both then meet exactly.
   const float edge = std::max(std::fabs(x), std::fabs(z));
-  h += smooth(rules::kWorldHalfSize - 9, rules::kWorldHalfSize + 11, edge) * 5.0f;
-  h *= 1 - smooth(rules::kReliefHalfSize - 10, rules::kReliefHalfSize - 1, edge);
+  h = h * (1 - smooth(rules::kReliefHalfSize - 80, rules::kReliefHalfSize - 8, edge)) + land;
 
   if (village.lake.radius_x > 0) {
     // Flat village and shore, at y = 0.
@@ -131,17 +132,50 @@ Vec3 Heightmap::normal(float x, float z) const {
   return {-gx / len, 1 / len, -gz / len};
 }
 
+float Heightmap::land_height(float x, float z) const {
+  if (land.empty()) return 0;
+  const float fx = std::clamp((x + rules::kReliefHalfSize) / kLandCell, 0.0f, static_cast<float>(kLandPoints - 1));
+  const float fz = std::clamp((z + rules::kReliefHalfSize) / kLandCell, 0.0f, static_cast<float>(kLandPoints - 1));
+  const int i = std::min(static_cast<int>(fx), kLandPoints - 2), j = std::min(static_cast<int>(fz), kLandPoints - 2);
+  const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
+  const auto at = [&](int a, int b) { return land[static_cast<size_t>(a * kLandPoints + b)]; };
+  const float top = at(i, j) + (at(i + 1, j) - at(i, j)) * tx;
+  const float bottom = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * tx;
+  return top + (bottom - top) * tz;
+}
+
 Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) {
   Heightmap m;
   m.heights.resize(static_cast<size_t>(Heightmap::kPoints * Heightmap::kPoints));
   const float knoll_top = hills(seed, places.ruins.center.x, places.ruins.center.z) + kKnollHeight;
   const float castle_top = hills(seed, places.castle.center.x, places.castle.center.z) + kCastleKnollHeight;
+  // The continent's ground on its 10 m grid (the same points as Continent's),
+  // between them in a straight line: as the far terrain draws it.
+  constexpr float kLandCell = Heightmap::kLandCell;
+  constexpr int kLand = Heightmap::kLandPoints;
+  std::vector<float>& land = m.land;
+  land.resize(static_cast<size_t>(kLand * kLand));
+  for (int i = 0; i < kLand; ++i) {
+    for (int j = 0; j < kLand; ++j) {
+      land[static_cast<size_t>(i * kLand + j)] =
+          continent_height(seed, -rules::kReliefHalfSize + kLandCell * static_cast<float>(i),
+                           -rules::kReliefHalfSize + kLandCell * static_cast<float>(j));
+    }
+  }
+  const auto land_at = [&](float x, float z) {
+    const float fx = (x + rules::kReliefHalfSize) / kLandCell, fz = (z + rules::kReliefHalfSize) / kLandCell;
+    const int i = std::min(static_cast<int>(fx), kLand - 2), j = std::min(static_cast<int>(fz), kLand - 2);
+    const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
+    const float a = land[static_cast<size_t>(i * kLand + j)], b = land[static_cast<size_t>((i + 1) * kLand + j)];
+    const float c = land[static_cast<size_t>(i * kLand + j + 1)], d = land[static_cast<size_t>((i + 1) * kLand + j + 1)];
+    return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * tz;
+  };
   for (int i = 0; i < Heightmap::kPoints; ++i) {
     for (int j = 0; j < Heightmap::kPoints; ++j) {
       const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
       const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
       m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] =
-          relief(seed, path, places, knoll_top, castle_top, x, z);
+          relief(seed, path, places, knoll_top, castle_top, x, z, land_at(x, z));
     }
   }
   return m;

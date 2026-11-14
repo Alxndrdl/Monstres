@@ -169,9 +169,17 @@ TEST_CASE("the lake has water above a sunken bed, chimneys smoke") {
   const MeshData water = build_water_mesh(w);
   CHECK(water.transparent);
   REQUIRE(water.vertex_count() > 0);
+  size_t in_lake_vertices = 0;
   for (size_t i = 0; i < water.vertices.size(); i += MeshData::kFloatsPerVertex) {
+    const float x = water.vertices[i], z = water.vertices[i + 2];
+    if (!in_lake(lake, x, z, 1.0f)) {  // the sea, far to the west
+      CHECK(water.vertices[i + 1] == Approx(rules::kSeaLevel));
+      continue;
+    }
     CHECK(water.vertices[i + 1] == Approx(rules::kWaterLevel));
+    ++in_lake_vertices;
   }
+  CHECK(in_lake_vertices > 0);
 
   DrawList list;
   build_dynamic(w, 3.0f, list);

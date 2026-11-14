@@ -61,18 +61,28 @@ inline constexpr uint16_t kHealPoints = 10;
 inline constexpr uint16_t kHealCooldown = 5 * rules::kTicksPerSecond;
 inline constexpr uint16_t kShieldTicks = rules::kTicksPerSecond;
 inline constexpr uint16_t kShieldCooldown = 5 * rules::kTicksPerSecond;
+inline constexpr uint16_t kMercyCooldown = rules::kTicksPerSecond;
+inline constexpr uint16_t kDetectTicks = 60 * rules::kTicksPerSecond;
+inline constexpr uint16_t kWizardManaPerLevel = 5;  // see wizard_stats
 }  // namespace rules
 
-// Spells: the magician casts them on its monster out of the crystal.
+// Spells: the magician casts them, paying their mana (it does not come back
+// by itself: the healer fills it up).
 // Heal (combat and adventure): +10 hit points; a knocked out monster lying
 // there wakes up with them (in a battle, a knocked out one is in the crystal).
-// Shield (combat): for a second, no hit lands on the monster. Two combat
-// spells and two adventure spells are chosen out of battles (Command::EquipSpell);
-// training uses the combat ones.
+// Shield (combat): for a second, no hit lands on the monster.
+// Mercy (combat): until the battle ends, the next blow of the monster that
+// would beat a foe leaves it 1 hit point instead (to capture it).
+// Detection (adventure): for a minute, the staff's crystal looks for very
+// rare monsters within 50 m (see variants.hpp, detect_rare), and points at
+// the closest one.
+// Two combat spells and two adventure spells are chosen out of battles
+// (Command::EquipSpell); training uses the combat ones.
 struct SpellInfo {
   const char* id;  // names and texts in web/lore.js (spells)
   bool combat, adventure;
   uint16_t cooldown;
+  uint16_t mana;   // what casting it costs
 };
 const SpellInfo& spell_info(SpellId spell);
 // The spells that can be cast now (a battle or training: the combat ones).
@@ -101,11 +111,15 @@ struct Move {
 using Moves = std::array<Move, 3>;  // quick attack, then two special ones
 const Moves& species_moves(Species species);
 
-// Characteristics of a monster at a level.
+// Characteristics of a monster at a level: its build makes it weaker or
+// stronger (percent), some variants add a few points (variants.hpp, stat_mod).
 struct FightStats {
   uint16_t hp, attack, defense, speed, magic;
 };
-FightStats monster_fight_stats(Species species, uint16_t level);
+FightStats monster_fight_stats(Species species, uint16_t level, const Genes& genes = {});
+inline FightStats monster_fight_stats(const Monster& m) { return monster_fight_stats(m.species, m.level, m.genes); }
+// A build's fight stats, in percent of a normal one's.
+FightStats build_percent(Form form);
 uint32_t monster_xp_to_next(uint16_t level);
 
 // Hit points dealt by `move` of an attacker with these characteristics.
@@ -117,6 +131,18 @@ void grant_wizard_xp(Wizard& wizard, uint32_t xp);
 
 // The companion as a new team member (new game, old saves).
 Monster starting_companion(const Genes& genes);
+
+// How a species fights (wild and trainers' monsters): how far it keeps while
+// its bite is not ready, whether it throws from afar, how often it dodges.
+struct Temper {
+  float keep_away;      // meters from the companion while its bite recharges
+  float close_in;       // with its bite ready: this part of its reach
+  float throw_from;     // throws its projectile from this far
+  uint32_t dodge_odds;  // dodges one projectile in ...
+  float pace;           // speed, compared to the others
+  float lift;           // flying: its usual height
+};
+const Temper& species_temper(Species species);
 
 // Can a battle against creatures[index] start now?
 enum class EngageCheck : uint8_t {

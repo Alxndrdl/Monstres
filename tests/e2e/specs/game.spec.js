@@ -365,7 +365,7 @@ test.describe('grimoire', () => {
     await expect(detail.locator('h2')).toHaveText('Champi');
     await expect(detail.locator('.badge')).toHaveText(['Végétal', 'Nature']);
     await expect(detail).toContainText('Défense');
-    await expect(detail).toContainText(/Dans ce monde : \d+ individu/);
+    await expect(detail).toContainText(/Autour de toi : \d+ individu/);
     await expect(detail.locator('img')).toHaveAttribute('src', /^data:image\/png/);
   });
 
@@ -390,7 +390,10 @@ test.describe('grimoire', () => {
     await page.keyboard.press('b');
     const entry = page.locator(`.bestiary-entry[data-species="${seenSpecies.species}"]`);
     const seen = seenSpecies.variants.filter((v) => v.status === 'seen').length;
-    await expect(entry.locator('.dna-count')).toHaveText(`${seen}/${seenSpecies.variants.length}`);
+    // The count: variants captured at least once (none yet); the seen ones in its record.
+    await expect(entry.locator('.dna-count')).toHaveText(`0/${seenSpecies.variants.length}`);
+    await entry.click();
+    await expect(page.locator('.record')).toContainText(`${seen} / ${seenSpecies.variants.length}`);
     await entry.click();
     await page.locator('#dna-button').click();
     const cells = page.locator('.variant-cell');
@@ -423,7 +426,7 @@ test.describe('grimoire', () => {
     await expect(page.locator('#bestiary-detail h2')).toHaveText('Pompon');
   });
 
-  test('the map shows where the player is, nearby or the whole world', async ({ page }) => {
+  test('the map: the player up close, then the whole continent, zooming out; no creatures', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     await page.keyboard.press('m');  // shortcut
     await expect(page.getByRole('tab', { name: 'Carte' })).toHaveAttribute('aria-selected', 'true');
@@ -436,9 +439,25 @@ test.describe('grimoire', () => {
       return colors.size;
     });
     expect(await painted()).toBeGreaterThan(20);  // terrain, path, trees...
-    await page.getByRole('button', { name: 'Globale' }).click();
-    await expect(page.getByRole('button', { name: 'Globale' })).toHaveAttribute('aria-pressed', 'true');
-    expect(await painted()).toBeGreaterThan(20);
+    const scale = () => page.locator('#map-scale').textContent();
+    const close = await scale();
+    // Zooming out, down to the whole continent (then the button gives up).
+    const out = page.getByRole('button', { name: 'Dézoomer' });
+    for (let i = 0; i < 20 && !(await out.isDisabled()); ++i) await out.click();
+    await expect(out).toBeDisabled();
+    expect(await scale()).toMatch(/km$/);
+    expect(await scale()).not.toBe(close);
+    expect(await painted()).toBeGreaterThan(20);  // sea, beaches, snow, desert...
+    const continent = await page.evaluate(() => window.monstres.continent());
+    expect(continent.ready).toBe(true);
+    expect(continent.heights.length).toBe(continent.pointsX * continent.pointsZ);
+    expect(continent.landmarks.map((m) => m.region)).toContain('capital');
+    // The wheel zooms back in; the button recenters on the player.
+    const box = await page.locator('#map-canvas').boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -1500);
+    await expect(out).toBeEnabled();
+    await page.getByRole('button', { name: 'Recentrer sur toi' }).click();
     await page.keyboard.press('m');
     await expect(page.locator('#game-menu')).toBeHidden();
   });
@@ -541,17 +560,27 @@ test.describe('battles', () => {
   });
 
   test('a weakened monster is captured and joins the team, and can be let go', async ({ page }) => {
-    await page.evaluate((i) => window.monstres.engage(i), BIRD);
-    // Fight until it is weak enough (or beaten: then try again).
+    // Mercy first: the blow that would beat it leaves it 1 hit point.
+    await page.evaluate((i) => {
+      const m = window.monstres;
+      m.equipSpell(0, 3);
+      m.step(1);
+      m.engage(i);
+      m.step(1);
+      m.cast(0);
+      m.step(1);
+    }, BIRD);
+    // Fight until it is weak enough.
     const result = await page.evaluate(() => {
       const m = window.monstres;
-      for (let i = 0; i < 400; i++) {
+      for (let i = 0; i < 600; i++) {
         const b = m.battle();
         if (b.phase !== 'fight') return b.outcome.result;
         if (b.capture === 'ok') return 'weak';
-        // Its attacks are shown first: parried. One ember weakens it enough (it may dodge: again).
+        // Its attacks are shown first: parried. Embers, bites when close.
         if (b.enemy.fighter.state === 'windup') m.input.parry();
-        else if (b.enemy.hp === b.enemy.maxHp && b.ally.fighter.cooldowns[1] === 0) m.input.attack(2);
+        else if (b.ally.fighter.cooldowns[1] === 0) m.input.attack(2);
+        else m.input.attack(1);
         m.step(4);
       }
       return 'timeout';
@@ -718,7 +747,7 @@ test.describe('the bigger world', () => {
     await expect(page.locator('#spell-detail h2')).toHaveText('Soin');
     // Emptied (the menu stops time: it happens at once).
     await page.locator('#spell-edit').click();
-    await expect(page.locator('.spell-choice')).toHaveCount(2);  // none, heal (the shield is for battles)
+    await expect(page.locator('.spell-choice')).toHaveCount(3);  // none, heal, detection (the shield is for battles)
     await page.locator('#spell-choice-none').click();
     await page.locator('#spell-confirm').click();
     await expect(page.locator('#spell-slot-2')).toHaveAttribute('data-spell', 'none');
@@ -763,9 +792,15 @@ test.describe('the bigger world', () => {
         if (near.length >= 2) {
           m.teleport(c.x + 5, c.z);
           m.step(1);
-          m.engage(i);
+          // Moving may bring new monsters around (their indices change): the slime again, by where it is.
+          const after = m.state().creatures;
+          let best = -1;
+          after.forEach((d, k) => {
+            if (d.species === 'slime' && (best < 0 || Math.hypot(d.x - c.x, d.z - c.z) < Math.hypot(after[best].x - c.x, after[best].z - c.z))) best = k;
+          });
+          m.engage(best);
           m.step(1);
-          return m.battle().foes.length;
+          return (m.battle().foes || []).length;
         }
       }
       return 0;
@@ -776,6 +811,109 @@ test.describe('the bigger world', () => {
     await page.locator('.foe-icon').nth(1).click();
     expect((await page.evaluate(() => window.monstres.battle())).target).toBe(1);
     await expect(page.locator('.foe-icon').nth(1)).toHaveClass(/targeted/);
+  });
+
+  test('mana, Detection, Mercy; traits and gifts of a monster; the record of the bestiary', async ({ page }) => {
+    await openGame(page, '?seed=3&new&frozen');
+    await expect(page.locator('#mana .mana-text')).toHaveText('20/20');
+    // The character sheet: the mana left of its most.
+    await page.keyboard.press('c');
+    await expect(page.locator('#wizard-stats')).toContainText('20 / 20');
+    // Detection in the second adventure slot, cast: 6 mana.
+    await page.keyboard.press('p');
+    await page.locator('#spell-slot-3').click();
+    await page.locator('#spell-edit').click();
+    await page.locator('#spell-choice-detect').click();
+    await expect(page.locator('#spell-detail')).toContainText('6 mana');
+    await page.locator('#spell-confirm').click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#spell-1')).toBeVisible();
+    await page.evaluate(() => { window.monstres.cast(1); window.monstres.step(1); });
+    const s = await page.evaluate(() => window.monstres.spells());
+    expect(s.manaNow).toBe(14);
+    expect(s.detect).toBeGreaterThan(59);
+    await expect(page.locator('#mana .mana-text')).toHaveText('14/20');
+    await expect(page.locator('#spell-1')).toHaveClass(/active/);
+    // Pompon's sheet: size, weight, age; its gifts as a web.
+    await page.keyboard.press('e');
+    await expect(page.locator('#team-detail .measures')).toContainText(/Taille : [\d,]+ cm · poids : [\d,]+ kg · âge :/);
+    await expect(page.locator('#team-detail .gift-web .web-label')).toHaveCount(5);
+    await expect(page.locator('#team-detail .gift-web')).toHaveAttribute('aria-label', /Force \d+, Dextérité \d+/);
+    const team = await page.evaluate(() => window.monstres.team());
+    for (const g of team[0].gifts) {
+      expect(g).toBeGreaterThanOrEqual(5);
+      expect(g).toBeLessThanOrEqual(15);
+    }
+    // The bestiary: the record of a species, the builds among the variants.
+    await page.keyboard.press('b');
+    await page.locator('.bestiary-entry[data-species="slime"]').click();
+    await expect(page.locator('.record')).toContainText('Monstres capturés');
+    await page.locator('#dna-button').click();
+    await expect(page.locator('.dna-group h3').last()).toHaveText('Gabarits');
+    await page.keyboard.press('Escape');
+    // Mercy, in a battle: active until it holds a blow back.
+    await page.evaluate(() => {
+      const m = window.monstres;
+      m.equipSpell(0, 3);
+      m.step(1);
+      const st = m.state();
+      const i = st.creatures.findIndex((c, k) => k > 0 && ['slime', 'mushroom', 'bird'].includes(c.species));
+      m.teleport(st.creatures[i].x + 4, st.creatures[i].z);
+      m.step(1);
+      m.engage(i);
+      m.step(2);
+      m.cast(0);
+      m.step(1);
+    });
+    const b = await page.evaluate(() => window.monstres.spells());
+    expect(b.mercy).toBe(true);
+    expect(b.manaNow).toBe(9);
+    await expect(page.locator('#spell-0')).toHaveAttribute('data-spell', 'mercy');
+  });
+
+  test('a gift tells its range and modifiers; variants tell their effects; Lison and the giant Champi', async ({ page }) => {
+    await openGame(page, '?seed=3&new&frozen');
+    await page.keyboard.press('e');
+    // Focused (hovered, or touched): the detail of the gift. (Hover is not
+    // simulated here: WebKit's pointer lands beside the label in this scrolled panel.)
+    await page.locator('.web-hit').first().focus();
+    const tip = page.locator('.gift-tip');
+    await expect(tip).toBeVisible();
+    await expect(tip).toContainText('Force');
+    await expect(tip).toContainText('Minimum 5 · maximum 15');
+    await expect(tip).toContainText('Aucun modificateur');
+    // The bestiary: the omega's effects.
+    await page.keyboard.press('b');
+    await page.locator('.bestiary-entry[data-species="mushroom"]').click();
+    await page.locator('#dna-button').click();
+    await expect(page.locator('.variant-cell[data-id="omega"]')).toHaveCount(1);
+    const bestiary = await page.evaluate(() => window.monstres.bestiary());
+    const horn = bestiary.find((e) => e.species === 'slime').variants.find((v) => v.id === 'top.horn');
+    expect(horn.mods).toEqual([{ stat: 'charisma', value: -1 }, { stat: 'defense', value: 2 }]);
+    await page.keyboard.press('Escape');
+    // Lison tells of the giant Champi: the quest, in the journal.
+    const i = await page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 1; i < m.state().creatures.length; i++) {
+        m.select(i);
+        const c = m.selected();
+        if (c && c.npc === 3) { m.teleport(c.x + 1.5, c.z); m.step(1); return i; }
+      }
+      return -1;
+    });
+    expect(i).toBeGreaterThan(0);
+    await page.evaluate((i) => { window.monstres.select(i); window.monstresDialogue.open(window.monstres.selected()); }, i);
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Lison');
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('Champi gigantesque');
+    await page.locator('#accept-quest').click();
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('costaud');
+    const quest = (await page.evaluate(() => window.monstres.quests())).find((q) => q.id === 'giantChampi');
+    expect(quest.stage).toBe('active');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('j');
+    await expect(page.locator('.quest-entry[data-quest="giantChampi"]')).toBeVisible();
+    await page.locator('.quest-entry[data-quest="giantChampi"]').click();
+    await expect(page.locator('#quest-detail')).toContainText('Capturer le Champi géant');
   });
 
   test('talking to Mirabelle gives a quest, found in the journal', async ({ page }) => {
@@ -853,13 +991,13 @@ test.describe('the bigger world', () => {
   test('far from the start, the monsters of the start are gone, others live there', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     const near = (s) => s.creatures.filter((c, i) => i > 0 && ['slime', 'mushroom', 'bird'].includes(c.species) &&
-      Math.hypot(c.x, c.z) < 18).length;
+      Math.hypot(c.x, c.z) < 30).length;
     expect(near(await state(page))).toBeGreaterThan(1);
-    const castle = await page.evaluate(() => window.monstres.map().castle);
-    await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(31); }, [castle.x, castle.z]);
+    // Far into the wilds, east of the valley.
+    await page.evaluate(() => { window.monstres.teleport(420, 300); window.monstres.step(31); });
     const far = await state(page);
     expect(near(far)).toBe(0);
-    expect(far.player.zone).toBe('castle');
+    expect(far.player.zone).toBe('plains');
     expect(far.creatures.filter((c) => Math.hypot(c.x - far.player.x, c.z - far.player.z) < 60).length).toBeGreaterThan(3);
   });
 

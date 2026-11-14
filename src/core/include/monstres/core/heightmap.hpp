@@ -10,8 +10,9 @@
 namespace monstres {
 
 namespace rules {
-inline constexpr float kReliefHalfSize = 170.0f;  // the relief spans [-170, 170]; flat (y = 0) beyond
+inline constexpr float kReliefHalfSize = 640.0f;  // the relief spans [-640, 640]; the continent beyond (continent.hpp)
 inline constexpr float kMaxWalkSlope = 1.0f;     // 45°: steeper ground cannot be walked up (jump instead)
+inline constexpr float kSeaLevel = -2.0f;        // the ocean: walkers do not go below it
 }  // namespace rules
 
 // Smooth pseudo-random field in [0, 1] (value noise), stable for a seed.
@@ -28,8 +29,12 @@ struct Heightmap {
   static constexpr float kCellSize = 2.0f;  // meters
   static constexpr int kCells = static_cast<int>(2 * rules::kReliefHalfSize / kCellSize);  // per side
   static constexpr int kPoints = kCells + 1;
-  // kPoints * kPoints, index = i * kPoints + j for (x = i * kCellSize - 170, z = j * kCellSize - 170)
+  // kPoints * kPoints, index = i * kPoints + j for (x = i * kCellSize - kReliefHalfSize, z = ...)
   std::vector<float> heights;
+  // The continent's own ground (no hills) on its 10 m grid: where the sea is.
+  static constexpr float kLandCell = 10.0f;
+  static constexpr int kLandPoints = static_cast<int>(2 * rules::kReliefHalfSize / kLandCell) + 1;
+  std::vector<float> land;
 
   bool empty() const { return heights.empty(); }
   float at(int i, int j) const { return heights[static_cast<size_t>(i * kPoints + j)]; }
@@ -39,6 +44,12 @@ struct Heightmap {
 
   // Unit normal of the ground around (x, z), smoothed over about one cell.
   Vec3 normal(float x, float z) const;
+
+  // The continent's ground at (x, z), without the hills (0 in the valley).
+  float land_height(float x, float z) const;
+  // Whether (x, z) is in the sea: the continent's ground there is below it.
+  // (A hollow of the hills going below the sea's level is not the sea.)
+  bool sea(float x, float z) const { return !land.empty() && land_height(x, z) < rules::kSeaLevel; }
 
   bool operator==(const Heightmap&) const = default;
 };

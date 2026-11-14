@@ -81,7 +81,7 @@ TEST_CASE("invalid saves are rejected with the right error") {
     CHECK(error == LoadError::Corrupt);
   }
   SUBCASE("unknown species") {
-    const size_t objects = some_game().objects.size();
+    const size_t objects = some_game().objects.size() - some_game().wild_objects;  // the wilds' are not saved
     bytes[kFirstObject + objects * kObjectSize + 4] = 200;  // after the objects and the creature count
     CHECK_FALSE(deserialize(bytes, &error));
     CHECK(error == LoadError::Corrupt);
@@ -137,7 +137,7 @@ TEST_CASE("a version 4 save (before creatures) loads and gets its creatures") {
   std::vector<uint8_t> v4(v5.begin(), v5.begin() + 40 + 12 + 4 + 1 + 8);  // up to the player's speed
   v4[4] = 4;
   const size_t objects_start = kFirstObject - 4;
-  const size_t objects_end = kFirstObject + original.objects.size() * kObjectSize;
+  const size_t objects_end = kFirstObject + (original.objects.size() - original.wild_objects) * kObjectSize;
   v4.insert(v4.end(), v5.begin() + static_cast<std::ptrdiff_t>(objects_start),
             v5.begin() + static_cast<std::ptrdiff_t>(objects_end));
 

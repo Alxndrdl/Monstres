@@ -334,7 +334,12 @@
     }
     .segmented button[aria-pressed="true"] { background: rgba(242, 201, 76, 0.25); color: #f2c94c; font-weight: 600; }
     .map-frame { flex: 1; min-height: 0; position: relative; }
-    #map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
+    #map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; touch-action: none; cursor: grab; }
+    #map-canvas:active { cursor: grabbing; }
+    .segmented button { min-width: 36px; font-size: 16px; font-weight: 700; }
+    .segmented button:disabled { opacity: 0.35; cursor: default; }
+    .map-scale { display: inline-flex; align-items: center; gap: 6px; color: rgba(255, 255, 255, 0.8); }
+    .map-scale-bar { width: 100px; height: 6px; border: 2px solid rgba(255, 255, 255, 0.8); border-top: none; }
 
     @media (max-height: 460px) {
       .tab-panel { padding: 10px 12px; }
@@ -384,6 +389,54 @@
     .team-entry .hp-bar { width: 110px; margin-top: 4px; }
     .bar.hp-bar { height: 6px; }
     .bestiary-detail.member .moves-box { grid-column: 1 / -1; }
+    /* Gifts: a spider web. */
+    .gifts-box { grid-column: 1 / -1; }
+    .gifts-box h3 { margin: 0 0 4px; font-size: 13px; color: #f2c94c; }
+    .gift-web-box { position: relative; max-width: 440px; margin: 0 auto; }
+    .gift-web { display: block; width: 100%; height: auto; overflow: visible; }
+    .gift-web .web-ring { fill: none; stroke: rgba(255, 255, 255, 0.12); }
+    .gift-web .web-zero { fill: rgba(0, 0, 0, 0.25); stroke: rgba(255, 255, 255, 0.18); stroke-dasharray: 2 3; }
+    .gift-web .web-edge { fill: rgba(255, 255, 255, 0.04); stroke: rgba(255, 255, 255, 0.3); }
+    .gift-web .web-axis { stroke: rgba(255, 255, 255, 0.15); }
+    .gift-web .web-range { fill: rgba(242, 201, 76, 0.08); stroke: rgba(242, 201, 76, 0.35); stroke-dasharray: 3 3; }
+    .gift-web .web-range-low { fill: rgba(20, 24, 40, 0.5); stroke: rgba(242, 201, 76, 0.25); stroke-dasharray: 3 3; }
+    .gift-web .web-value { fill: rgba(127, 200, 255, 0.35); stroke: #7fc8ff; stroke-width: 2; stroke-linejoin: round; }
+    .gift-web .web-dot { fill: #fff; }
+    .gift-web .web-label { fill: #fff; font: 600 11px system-ui, sans-serif; }
+    .gift-web polygon, .gift-web .web-axis { pointer-events: none; }  /* only the gifts answer the pointer */
+    .gift-web .web-hit { cursor: pointer; outline: none; }
+    .gift-web .web-hit-area { stroke: transparent; stroke-width: 18; }
+    .gift-web .web-hit-label { fill: transparent; pointer-events: all; }
+    .gift-web .web-hit.on .web-label, .gift-web .web-hit:hover .web-label { fill: #f2c94c; }
+    .gift-web .web-hit.on .web-dot { fill: #f2c94c; r: 5.5; }
+    /* A gift's detail, beside its label. */
+    .gift-tip {
+      position: absolute; z-index: 2; width: 210px; padding: 8px 10px; border-radius: 9px; pointer-events: none;
+      background: rgba(14, 16, 32, 0.96); border: 1px solid rgba(242, 201, 76, 0.6); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      transform: translate(-50%, 12px); font-size: 12px;
+    }
+    .gift-tip[hidden] { display: none; }
+    .gift-tip .tip-head { display: flex; justify-content: space-between; font-size: 14px; color: #f2c94c; }
+    .gift-tip p { margin: 4px 0 0; color: rgba(255, 255, 255, 0.8); }
+    .gift-tip ul { list-style: none; margin: 6px 0 0; padding: 0; }
+    .gift-tip li { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+    .gift-tip li.none { color: rgba(255, 255, 255, 0.6); }
+    .gift-tip .tip-range { padding-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.15); }
+    .gift-tip .up, .variant-effects .up { color: #8fd16a; }
+    .gift-tip .down, .variant-effects .down { color: #ff9a8b; }
+    .variant-effects { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 6px 0; }
+    .variant-effects ul { display: contents; list-style: none; }
+    .variant-effects li { font-size: 13px; font-weight: 600; }
+    .badge.build { background: #f2c94c; color: #2b1d10; }
+    .badge.build.micro { background: #f6a6d8; }
+    .measures { margin-top: 4px; }
+    /* What the player did with a species (bestiary). */
+    .record-box { grid-column: 1 / -1; }
+    .record-box h3 { margin: 0 0 6px; font-size: 13px; color: #f2c94c; }
+    .record { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 18px; margin: 0; }
+    .record div { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+    .record dt { color: rgba(255, 255, 255, 0.75); font-size: 13px; }
+    .record dd { margin: 0; font-weight: 700; white-space: nowrap; }
     .moves-box h3 { margin: 0 0 8px; font-size: 13px; color: #f2c94c; }
     .moves { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
     .move { padding: 8px 10px; border-radius: 9px; background: rgba(255, 255, 255, 0.06); }
@@ -449,6 +502,25 @@
     #spell-1 { left: -150px; top: -94px; }
     .action.spell-button[hidden] { display: none; }
     .spell-button[data-spell="shield"] { border-color: rgba(242, 201, 76, 0.9); }
+    .spell-button[data-spell="mercy"] { border-color: rgba(200, 225, 255, 0.9); }
+    .spell-button[data-spell="detect"] { border-color: rgba(150, 170, 255, 0.95); }
+    /* A spell that lasts (Mercy, Detection): glowing while it holds. */
+    .spell-button.active { opacity: 1; box-shadow: 0 0 12px rgba(170, 200, 255, 0.9); }
+    .spell-button.no-mana { border-color: rgba(120, 140, 220, 0.6); }
+    /* The magician's mana, above the spells. */
+    #mana {
+      position: absolute; left: -176px; top: -132px; width: 92px; height: 18px; border-radius: 9px; overflow: hidden;
+      background: rgba(10, 12, 30, 0.6); border: 1px solid rgba(140, 170, 255, 0.7); pointer-events: none;
+    }
+    #mana .mana-fill {
+      position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #4f6cff, #8fb0ff); transition: width 0.2s;
+    }
+    #mana .mana-text {
+      position: relative; display: block; text-align: center; font: 700 11px/18px system-ui, sans-serif;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+    }
+    #mana .mana-text::before { content: '✦ '; color: #c8d6ff; }
+    #mana.low { border-color: rgba(255, 122, 107, 0.8); }
     .spell-button .spell-icon { position: relative; z-index: 1; display: grid; place-items: center; }
     .spell-button .spell-icon svg { width: 24px; height: 24px; }
     .spell-button .cooldown {
@@ -572,6 +644,7 @@
     }
     .damage.ally { color: #ff8a7a; }
     .damage.blocked { color: #a8d8ff; font-size: 16px; }
+    .damage.mercy { color: #d9ecff; font-size: 16px; }
     .damage.shield { color: #bfe6ff; font-size: 18px; }
     @keyframes float-up { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -46px; } }
 
@@ -782,10 +855,12 @@
 
       <section id="tab-map" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-map" hidden>
         <div class="map-tools">
-          <div class="segmented" role="group" aria-label="Échelle de la carte">
-            <button type="button" data-map="local" aria-pressed="true">Locale</button>
-            <button type="button" data-map="global" aria-pressed="false">Globale</button>
+          <div class="segmented" role="group" aria-label="Zoom de la carte">
+            <button type="button" id="map-zoom-out" aria-label="Dézoomer" title="Dézoomer (molette, pincer)">−</button>
+            <button type="button" id="map-zoom-in" aria-label="Zoomer" title="Zoomer (molette, écarter)">+</button>
+            <button type="button" id="map-recenter" aria-label="Recentrer sur toi" title="Recentrer sur toi">⌖</button>
           </div>
+          <span class="map-scale"><span class="map-scale-bar"></span><span id="map-scale"></span></span>
           <span id="map-where"></span>
         </div>
         <div class="map-frame"><canvas id="map-canvas" aria-label="Carte du monde"></canvas></div>
@@ -909,6 +984,7 @@
       <!-- The magician's spells, beside the attacks (spells.js). -->
       <button id="spell-0" class="action spell-button" type="button" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>R</kbd></button>
       <button id="spell-1" class="action spell-button" type="button" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>G</kbd></button>
+      <div id="mana" role="meter" aria-label="Mana"><span class="mana-fill"></span><span class="mana-text"></span></div>
     </div>
     <div class="hint" id="jump-hint"><kbd>Espace</kbd> pour sauter</div>
   </div>

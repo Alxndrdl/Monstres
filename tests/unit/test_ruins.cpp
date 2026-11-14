@@ -167,10 +167,10 @@ TEST_CASE("the menus get their data as JSON") {
   CHECK(best.find("\"elements\":[\"water\"],\"family\":\"ooze\"") != std::string::npos);
   CHECK(best.find("\"elements\":[\"shadow\",\"air\"],\"family\":\"bird\"") != std::string::npos);  // the crow
   CHECK(best.find("\"id\":\"ears.pointed\"") != std::string::npos);
-  CHECK(best.find("\"count\":1}") != std::string::npos);  // the companion
+  CHECK(best.find("\"count\":1,") != std::string::npos);  // the companion
 
   const std::string map = map_json(w);
-  CHECK(map.find("\"points\":171") != std::string::npos);
+  CHECK(map.find("\"points\":641") != std::string::npos);
   CHECK(map.find("\"castle\":{") != std::string::npos);
   CHECK(map.find("\"cave\":{") != std::string::npos);
   CHECK(map.find("\"forest\":{") != std::string::npos);

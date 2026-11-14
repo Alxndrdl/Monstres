@@ -13,9 +13,10 @@
     for (const child of children) node.append(child);
     return node;
   };
-  const QUEST_INDEX = { lostPiou: 0, teleporters: 1 };  // QuestId
+  const QUEST_INDEX = { lostPiou: 0, teleporters: 1, giantChampi: 2 };  // QuestId
   const MIRABELLE = 1;
   const GASPARD = 2;
+  const LISON = 3;
   const BASTIEN = 4;
   const ODETTE = 5;
 
@@ -138,6 +139,45 @@
     }
   }
 
+  // ---- Lison: the giant Champi of the forest ----
+  function lison() {
+    const q = quest('giantChampi');
+    const s = q.steps;
+    if (q.stage === 'done') {
+      show('Le Champi géant… dans ton équipe ! Je n’en reviens toujours pas. Prends-en bien soin.',
+        [['Encore un mot ?', () => villager(LISON)], ['Au revoir', close]]);
+    } else if (q.stage === 'unknown' && s.again) {
+      show('On raconte que le Champi géant est retourné au cœur de la forêt… Tu veux retenter ta chance ?', [
+        ['J’y retourne', () => {
+          game.acceptQuest(QUEST_INDEX.giantChampi);
+          afterTick(() => show('Bonne chance ! Cette fois, il n’y aura rien à gagner… à part le plaisir de l’avoir avec toi.'));
+        }, 'accept-quest'],
+        ['Au revoir', close],
+      ]);
+    } else if (q.stage === 'unknown') {
+      show('J’étais allée cueillir des champignons au cœur de la forêt… et j’ai vu un Champi gigantesque ! ' +
+        'Plus grand que moi ! D’autres Champi l’entouraient, plus grands que d’habitude eux aussi. ' +
+        'Tu crois que tu pourrais l’attraper ?', [
+        ['Je vais le chercher', () => {
+          game.acceptQuest(QUEST_INDEX.giantChampi);
+          afterTick(() => show('Sois prudent : il est très costaud, et il n’est pas seul. ' +
+            'Si tu connais un sort pour retenir tes coups, c’est le moment de t’en servir !'));
+        }, 'accept-quest'],
+        ['Au revoir', close],
+      ]);
+    } else if (q.ready) {
+      show('C’est… c’est lui ! Tu as capturé le Champi géant ?', [
+        ['Le lui montrer', () => {
+          game.completeQuest(QUEST_INDEX.giantChampi);
+          afterTick(() => show(s.rewarded ? 'Toujours aussi impressionnant ! Je suis contente qu’il soit revenu avec toi.'
+            : 'Incroyable ! Personne au village ne voudra me croire. Merci, magicien !'));
+        }, 'complete-quest'],
+      ]);
+    } else {
+      show('Le Champi géant vit au cœur de la forêt, entouré des siens. Il est très costaud : affaiblis-le bien avant de le capturer.');
+    }
+  }
+
   // ---- Bastien: battles against his monsters ----
   function bastien(c) {
     const wins = c.wins || 0;
@@ -158,20 +198,25 @@
     }
   }
 
-  // ---- Odette: she heals the team ----
+  // ---- Odette: she heals the team, and fills the magician's mana ----
   function odette() {
     const tired = game.team().filter((m) => m.hp < m.maxHp);
-    if (!tired.length) {
-      show('Tes monstres sont en pleine forme ! Reviens me voir s’ils sont fatigués.',
+    const w = game.wizard();
+    const drained = w.manaNow < w.mana;
+    if (!tired.length && !drained) {
+      show('Tes monstres sont en pleine forme, et ton bâton brille de tout son mana ! Reviens me voir si besoin.',
         [['Encore un mot ?', () => villager(ODETTE)], ['Au revoir', close]]);
       return;
     }
     const ko = tired.filter((m) => m.hp === 0).length;
-    show(ko ? 'Oh, tes pauvres monstres ! Laisse-moi les soigner, ça ne coûte rien.'
-      : 'Tes monstres ont l’air fatigués. Je les soigne ? C’est gratuit, bien sûr.', [
+    const ask = ko ? 'Oh, tes pauvres monstres ! Laisse-moi les soigner, ça ne coûte rien.'
+      : tired.length ? 'Tes monstres ont l’air fatigués. Je les soigne ? C’est gratuit, bien sûr.'
+        : 'Ton bâton a perdu de son éclat… Je te rends ton mana ? C’est gratuit, bien sûr.';
+    show(tired.length && drained ? `${ask} Et je remplirai ton mana avec mon bâton.` : ask, [
       ['Oui, merci !', () => {
         game.healTeam(ODETTE);
-        afterTick(() => show('Et voilà, ils sont comme neufs ! Prends soin d’eux.'));
+        afterTick(() => show(tired.length ? 'Et voilà, ils sont comme neufs ! Prends soin d’eux.'
+          : 'Et voilà, ton mana est plein ! Dépense-le bien.'));
       }, 'heal-team'],
       ['Non merci', close],
     ]);
@@ -186,6 +231,8 @@
     };
     const piou = quests.find((q) => q.id === 'lostPiou');
     const stones = quests.find((q) => q.id === 'teleporters');
+    const giant = quests.find((q) => q.id === 'giantChampi');
+    if (n !== LISON && giant && giant.stage !== 'done' && n % 2 === 0) add(LORE.rumors.giantChampi, 0);
     if (piou.stage !== 'done') add(LORE.rumors.lostPiou, 0);
     else if (n % 2 === 1) add(LORE.rumors.lostPiouDone, 0);  // some of them thank the player
     if (stones.stage !== 'done') { if (n % 2 === 0) add(LORE.rumors.teleporters, 1); }
@@ -204,6 +251,7 @@
     box.hidden = false;
     if (c.npc === MIRABELLE) mirabelle();
     else if (c.npc === GASPARD) gaspard();
+    else if (c.npc === LISON) lison();
     else if (c.npc === BASTIEN) bastien(c);
     else if (c.npc === ODETTE) odette();
     else villager(c.npc);
@@ -233,23 +281,26 @@
     toastTimer = setTimeout(() => { toast.hidden = true; }, 3500);
   }
   let known = null;
-  let stages = null;
+  let before = null;  // the quests as they were
   function watchWorld() {
     if (!game || typeof game.quests !== 'function') return;
     const t = game.teleporters().list.filter((x) => x.known).map((x) => x.place);
-    const q = game.quests().map((x) => x.stage);
+    const quests = game.quests();
     if (known) {
       for (const place of t) {
         if (!known.includes(place)) note('Téléporteur découvert', LORE.teleporters[place]);
       }
-      game.quests().forEach((x, i) => {
+      quests.forEach((x, i) => {
         const info = LORE.quests[x.id];
-        if (stages[i] === 'unknown' && x.stage === 'active') note('Nouvelle quête', info.title);
-        if (stages[i] !== 'done' && x.stage === 'done') note('Quête terminée !', `${info.title} · +${info.xp} XP`);
+        const was = before[i];
+        if (was.stage === 'unknown' && x.stage === 'active') note('Nouvelle quête', info.title);
+        // The giant Champi's second time gives nothing.
+        const xp = was.steps && was.steps.rewarded ? '' : ` · +${info.xp} XP`;
+        if (was.stage !== 'done' && x.stage === 'done') note('Quête terminée !', `${info.title}${xp}`);
       });
     }
     known = t;
-    stages = q;
+    before = quests;
   }
 
   const start = () => {

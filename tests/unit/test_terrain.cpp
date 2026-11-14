@@ -33,7 +33,9 @@ TEST_CASE("the path crosses the world and passes by the spawn point") {
     CHECK(path.points.back().z > rules::kWorldHalfSize);
     CHECK(distance_to_path(path, 0, 0) <= 1.0f + 1e-4f);
     for (size_t i = 0; i < path.points.size(); ++i) {
-      CHECK(std::fabs(path.points[i].x) <= rules::kPathMaxX + 0.5f);
+      // Within the valley as it always was; beyond it, winding farther.
+      const bool valley = std::fabs(path.points[i].z) < rules::kPathExtent - 6.0f;
+      CHECK(std::fabs(path.points[i].x) <= (valley ? rules::kPathMaxX : rules::kPathFarMaxX) + 0.5f);
       if (i > 0) CHECK(path.points[i].z > path.points[i - 1].z);  // by increasing z
       if (i > 0) {
         const float dx = path.points[i].x - path.points[i - 1].x;
@@ -68,12 +70,14 @@ TEST_CASE("no object is placed on the path") {
   }
 }
 
-TEST_CASE("the ground mesh covers the world up to the horizon and faces up") {
+TEST_CASE("the ground mesh covers the playable area's relief and faces up (the continent goes on beyond)") {
   const World& w = cached_game(3);
   const MeshData ground = build_ground_mesh(w);
   CHECK_FALSE(ground.transparent);
+  // In rings: far fewer triangles than the relief's 2 m cells everywhere.
   const auto cells = static_cast<size_t>(2 * terrain::kDetailHalfSize / Heightmap::kCellSize);
-  CHECK(ground.vertex_count() == cells * cells * 6 + 24);
+  CHECK(ground.vertex_count() / 3 < cells * cells * 2 / 6);
+  CHECK(ground.vertex_count() / 3 < 100000);
   float max_x = 0;
   bool all_up = true;
   for_each_triangle(ground, [&](const float* a, const float* b, const float* c, float ny) {
@@ -81,7 +85,7 @@ TEST_CASE("the ground mesh covers the world up to the horizon and faces up") {
     max_x = std::max({max_x, std::fabs(a[0]), std::fabs(b[0]), std::fabs(c[0])});
   });
   CHECK(all_up);
-  CHECK(max_x == Approx(terrain::kHorizonHalfSize));
+  CHECK(max_x == Approx(terrain::kDetailHalfSize));
 }
 
 TEST_CASE("the ground has grass and patches of earth, the same for a seed") {

@@ -6,8 +6,10 @@
 #include "monstres/core/terrain.hpp"
 #include "monstres/core/village.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -20,7 +22,11 @@ namespace monstres {
 namespace rules {
 inline constexpr int32_t kTicksPerSecond = 60;
 inline constexpr float kDt = 1.0f / kTicksPerSecond;
-inline constexpr float kWorldHalfSize = 140.0f; // the playable ground spans [-140, 140] on X and Z
+inline constexpr float kWorldHalfSize = 580.0f; // the playable ground spans [-580, 580] on X and Z
+// The starting valley: the whole world until it grew (its objects come
+// from the world's random stream and are saved; the rest of the world's
+// are drawn from the seed again at each load, see generate_wilds).
+inline constexpr float kValleyHalfSize = 140.0f;
 inline constexpr float kPlayerHalfWidth = 0.28f; // collision box of the explorer
 inline constexpr float kPlayerHeight = 1.1f;
 inline constexpr float kWalkSpeed = 5.0f;       // m/s
@@ -82,7 +88,7 @@ enum class Command : uint8_t {
 };
 
 // The magician's spells (see battle.hpp: what each does, where it can be cast).
-enum class SpellId : uint8_t { None, Heal, Shield, Count };
+enum class SpellId : uint8_t { None, Heal, Shield, Mercy, Detect, Count };
 inline constexpr size_t kSpellCount = static_cast<size_t>(SpellId::Count);
 inline constexpr size_t kSpellSlots = 2;  // combat spells, and adventure spells
 inline constexpr uint16_t kNoTarget = 0xFFFF;
@@ -191,21 +197,28 @@ const SpeciesInfo& species_info(Species species);
 // A crow flies at the magician's side, a fish swims in the air.
 float companion_hover(Species species);
 
+// A monster's build: micro ones are small and weak (only females), alpha
+// ones bigger and stronger, omega ones huge, strong and tough (only males,
+// bosses of special events). Most are normal.
+enum class Form : uint8_t { Normal, Micro, Alpha, Omega, Count };
+
 // What makes one monster differ from the others of its species (variants,
 // see variants.hpp): one allele per gene of its species (colors, shapes),
-// and two very rare forms. Visual only, except the elemental form, which
-// changes its element.
+// two very rare looks, and its build. Colors and shapes are visual only; the
+// elemental look changes its element, the build its size and strength.
 inline constexpr size_t kMaxGenes = 4;  // the sex, then up to three others
 struct Genes {
   std::array<uint8_t, kMaxGenes> allele{};  // index into each gene's alleles; 0 = the most common
   bool chromatic = false;                   // unusual colors
   bool elemental = false;                   // another element than its species
+  Form form = Form::Normal;
   bool operator==(const Genes&) const = default;
 };
 
 // What a creature is doing. Battle: fighting the companion (battle.hpp).
 // What ties a creature or a team member to a quest.
-enum class Tag : uint8_t { None, LostPiou, Rival };  // Rival: the monster out of a trainer's team
+// Rival: the monster out of a trainer's team. Giant: the omega Champi of the forest.
+enum class Tag : uint8_t { None, LostPiou, Rival, Giant };
 
 // KnockedOut: beaten in a battle, it lies on the ground for a while.
 enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly, Battle, KnockedOut };
@@ -229,6 +242,12 @@ struct Creature {
   bool operator==(const Creature&) const = default;
 };
 
+// A monster's own gifts: strength, dexterity, constitution, charisma,
+// intelligence. Drawn from 5 to 15, moved by its variants, within 0 to 20.
+// No effect yet.
+inline constexpr size_t kGiftCount = 5;
+using Gifts = std::array<uint8_t, kGiftCount>;
+
 // A monster of the player's team. team[World::active] is the companion: out
 // of the staff's crystal, it is creatures[0], follows the player and fights
 // for it. team[0] is Pompon, the first companion.
@@ -240,14 +259,21 @@ struct Monster {
   uint16_t hp = 0;     // hit points left (monster_fight_stats(...).hp at most)
   Tag tag = Tag::None;
   bool beaten = false; // captured after being beaten, or let go before: no experience if it goes wild again
+  // Who it is (see variants.hpp, roll_traits): drawn when it joins the team.
+  Gifts gifts{10, 10, 10, 10, 10};  // drawn bases (5 to 15): variants move them (monster_gifts)
+  uint16_t size_mm = 0;
+  uint32_t weight_g = 0;
+  int32_t born_day = 0; // its age: world_day() - born_day days
   bool operator==(const Monster&) const = default;
 };
 
-// The player's magician. Level and experience are not used by the rules yet.
+// The player's magician. Its mana pays for its spells; it does not come
+// back by itself (the healer fills it up), its most grows with its level.
 struct Wizard {
   std::string name;    // chosen by the player (UTF-8, at most kMaxNameBytes), may be empty
   uint16_t level = 1;
   uint32_t xp = 0;
+  uint16_t mana = 20;  // left (wizard_stats(...).mana at most)
   bool operator==(const Wizard&) const = default;
 };
 inline constexpr size_t kMaxNameBytes = 24;
@@ -273,7 +299,9 @@ struct MonsterStats {
 const MonsterStats& monster_stats(Species species);
 
 // Named parts of the world, for maps and the interface.
-enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Count };
+// Coast, Hills and Plains: the wilds around the valley (the west coast, the
+// north towards the mountains, the rest).
+enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Coast, Hills, Plains, Count };
 
 // What the player knows of each variant of each species (bestiary): every
 // variant listed by variants.hpp, in the same order.
@@ -393,6 +421,8 @@ struct Battle {
   uint8_t beaten = 0;     // how many foes were beaten or caught
   NoXp no_xp = NoXp::None;
   Species last_species = Species::Companion;  // the last one beaten
+  bool mercy = false;       // the Mercy spell holds: the next blow that would beat a foe leaves it 1 hit point
+  uint64_t mercy_tick = 0;  // when it last held one back (for the interface)
   Rival rival;
   // How the last battle ended, for the interface.
   BattleOutcome outcome = BattleOutcome::None;
@@ -431,6 +461,7 @@ struct Population {
 namespace npc {
 inline constexpr uint8_t kMirabelle = 1;  // lost her Piou (Tag::LostPiou)
 inline constexpr uint8_t kGaspard = 2;    // stands by the village's teleporter, curious about it
+inline constexpr uint8_t kLison = 3;      // saw a giant Champi in the heart of the forest
 inline constexpr uint8_t kBastien = 4;    // a trainer: he offers battles against his monsters
 inline constexpr uint8_t kOdette = 5;     // the healer: she heals the team, for free
 }  // namespace npc
@@ -442,13 +473,37 @@ enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Count 
 inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Count);
 
 // Quests (see quests.hpp).
-enum class QuestId : uint8_t { LostPiou, Teleporters, Count };
+enum class QuestId : uint8_t { LostPiou, Teleporters, GiantChampi, Count };
 inline constexpr size_t kQuestCount = static_cast<size_t>(QuestId::Count);
 enum class QuestStage : uint8_t { Unknown, Active, Done };
 struct QuestState {
   QuestStage stage = QuestStage::Unknown;
   uint8_t progress = 0;  // steps done, as bits (meaning per quest)
   bool operator==(const QuestState&) const = default;
+};
+
+struct Box {
+  Vec3 min, max;
+};
+
+// Where the objects are, for collisions and placing things: their boxes
+// (object_box), and by cells of 8 m which ones touch each cell. Derived
+// from World::objects, rebuilt by objects_index() when they change (not
+// saved, not compared). With the grown world (tens of thousands of trees
+// and rocks), nothing goes through every object any more.
+struct ObjectIndex {
+  static constexpr float kCell = 8.0f;
+  static constexpr float kHalf = rules::kReliefHalfSize + 16.0f;
+  static constexpr int kCells = static_cast<int>(2 * kHalf / kCell);
+  std::vector<Box> boxes;          // boxes[i]: World::objects[i]'s
+  std::vector<uint32_t> cell_start;  // objects of cell c: items[cell_start[c] .. cell_start[c + 1])
+  std::vector<uint32_t> items;
+  // What it was built from (rebuilt when the objects change).
+  size_t count = SIZE_MAX;
+  const void* data = nullptr;
+  Vec3 last;
+  static int cell_of(float v) { return std::clamp(static_cast<int>((v + kHalf) / kCell), 0, kCells - 1); }
+  bool operator==(const ObjectIndex&) const { return true; }  // derived data
 };
 
 struct World {
@@ -464,6 +519,10 @@ struct World {
   Heightmap ground;    // derived from the seed (not saved)
   Body player;
   std::vector<Object> objects;
+  // The last `wild_objects` of them are the wilds' (outside the valley): drawn
+  // from the seed again at each load (generate_wilds), not saved.
+  uint32_t wild_objects = 0;
+  mutable ObjectIndex object_index;  // see objects_index()
   std::vector<Creature> creatures;  // creatures[0] is the companion
   Wizard wizard;
   Dex dex{};           // variants seen and captured
@@ -480,6 +539,9 @@ struct World {
   uint8_t teleporters = 0;  // known teleporters, as bits (1 << TeleporterId)
   std::array<QuestState, kQuestCount> quests{};
   uint8_t rival_wins = 0;      // battles won against Bastien (only the first one gives experience)
+  // How many monsters of each species the player captured, beat (wild ones), let go.
+  std::array<uint16_t, kSpeciesCount> captured_count{}, beaten_count{}, released_count{};
+  uint16_t detect_ticks = 0;   // the Detection spell: ticks left
   std::array<SpellId, kSpellSlots> combat_spells{SpellId::Heal, SpellId::Shield};  // chosen out of battles
   std::array<SpellId, kSpellSlots> adventure_spells{SpellId::Heal, SpellId::None};
   std::array<uint16_t, kSpellCount> spell_cooldowns{};  // not saved: ticks before each spell can be cast again
@@ -504,6 +566,11 @@ inline const Monster* active_monster(const World& w) {
 }
 inline Monster* active_monster(World& w) {
   return const_cast<Monster*>(active_monster(static_cast<const World&>(w)));
+}
+
+// Days since the world began (a new game starts on day 0, at 8:00).
+inline int32_t world_day(const World& w) {
+  return static_cast<int32_t>((w.tick + rules::kStartClock) / rules::kTicksPerDay);
 }
 
 // Time of day in hours, [0, 24).
@@ -558,10 +625,19 @@ bool teleporter_position(const World& world, TeleporterId id, Vec3& at);
 // Which named part of the world (x, z) is in.
 Zone zone_at(const World& world, float x, float z);
 
-// Sets every object on the ground: its base goes to the lowest point of the
-// ground under it, slightly sunk, so that no edge floats on a slope. Low
-// objects sink at most 40 % of their height (an edge may float a little).
-void settle_objects(World& world);
+// Sets every object (from objects[first] on) on the ground: its base goes to
+// the lowest point of the ground under it, slightly sunk, so that no edge
+// floats on a slope. Low objects sink at most 40 % of their height (an edge
+// may float a little).
+void settle_objects(World& world, size_t first = 0);
+
+// The wilds around the valley: trees, rocks, bushes, logs... from the seed
+// (their own random stream), over the whole relief beyond the valley:
+// woods in patches, the continent's forest, rocks and pines on the hills
+// to the north, an almost bare beach, nothing at sea. Appended to
+// World::objects (World::wild_objects of them). Not saved: drawn again at
+// each load. Nothing in hand-made worlds without relief.
+void generate_wilds(World& world);
 
 // Places on roofs (and the well) where crows land.
 std::vector<Vec3> crow_perches(const World& world);
@@ -570,10 +646,29 @@ std::vector<Vec3> crow_perches(const World& world);
 // input always gives the same result, on every platform.
 void step(World& world, const Input& input);
 
-struct Box {
-  Vec3 min, max;
-};
 inline constexpr BodyShape kPlayerShape{rules::kPlayerHalfWidth, rules::kPlayerHeight};
+// The objects' index, up to date (rebuilt if the objects changed).
+const ObjectIndex& objects_index(const World& world);
+// Calls f(object index, its box) for each object whose box may touch `area`
+// (one may come more than once: callers do not mind).
+template <typename F>
+void for_objects_near(const World& world, const Box& area, F f) {
+  const ObjectIndex& ix = objects_index(world);
+  for (int cx = ObjectIndex::cell_of(area.min.x); cx <= ObjectIndex::cell_of(area.max.x); ++cx) {
+    for (int cz = ObjectIndex::cell_of(area.min.z); cz <= ObjectIndex::cell_of(area.max.z); ++cz) {
+      const auto c = static_cast<size_t>(cx * ObjectIndex::kCells + cz);
+      for (uint32_t k = ix.cell_start[c]; k < ix.cell_start[c + 1]; ++k) f(ix.items[k], ix.boxes[ix.items[k]]);
+    }
+  }
+}
+// The objects saved with the game (the valley's: houses, ruins, castle, cave,
+// teleporters, its trees and rocks), without the wilds'.
+inline std::span<const Object> valley_objects(const World& w) {
+  return {w.objects.data(), w.objects.size() - std::min<size_t>(w.wild_objects, w.objects.size())};
+}
+// Whether a body there would be inside an object.
+bool inside_any_object(const World& world, const Body& body, const BodyShape& shape);
+
 Box body_box(const Body& b, const BodyShape& shape);
 Box player_box(const Player& p);
 Box object_box(const Object& o);

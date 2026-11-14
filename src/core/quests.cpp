@@ -147,6 +147,75 @@ Creature make_lost_piou(const World& w, uint32_t visit) {
   return c;
 }
 
+Vec2 giant_home(const World& w) {
+  // The heart of the forest, beside the teleporter that may stand there.
+  const Vec2 c = w.forest.center;
+  Vec3 t;
+  if (!teleporter_position(w, TeleporterId::Forest, t)) return c;
+  float dx = c.x - t.x, dz = c.z - t.z;
+  const float d = std::sqrt(dx * dx + dz * dz);
+  constexpr float kAway = 12.0f;
+  if (d >= kAway) return c;
+  dx = d > 0.1f ? dx / d : 0.0f;
+  dz = d > 0.1f ? dz / d : 1.0f;
+  return {t.x + dx * kAway, t.z + dz * kAway};
+}
+
+bool giant_exists(const World& w) {
+  for (const Monster& m : w.team) {
+    if (m.tag == Tag::Giant) return true;
+  }
+  for (const Creature& c : w.creatures) {
+    if (c.tag == Tag::Giant) return true;
+  }
+  return false;
+}
+
+bool giant_wanted(const World& w) {
+  if (w.forest.radius_x <= 0 || giant_exists(w)) return false;
+  const QuestState& q = w.quests[static_cast<size_t>(QuestId::GiantChampi)];
+  // Never caught: it lives there. Caught once: only when the quest is taken again.
+  return !(q.progress & kGiantCaught) || q.stage == QuestStage::Active;
+}
+
+std::array<Creature, 5> make_giant_group(const World& w, uint32_t visit) {
+  Rng rng(w.seed ^ 0x4749414E54ULL, visit);  // "GIANT"
+  const bool again = (w.quests[static_cast<size_t>(QuestId::GiantChampi)].progress & kGiantCaught) != 0;
+  std::array<Creature, 5> group;
+  const Vec2 home = giant_home(w);
+  for (size_t k = 0; k < group.size(); ++k) {
+    Creature& c = group[k];
+    c.species = Species::Mushroom;
+    c.genes = roll_genes(Species::Mushroom, Zone::Forest, rng);
+    c.genes.chromatic = c.genes.elemental = false;
+    c.genes.form = Form::Normal;
+    if (k == 0) {
+      c.genes.allele[0] = 0;  // a male: only males become omega
+      c.genes.form = Form::Omega;
+      c.level = rules::kGiantLevel;
+      c.tag = Tag::Giant;
+      c.released = again;  // caught before: no experience any more
+    } else if (k <= 2) {
+      c.genes.form = Form::Alpha;
+      c.level = rules::kGiantAlphaLevel;
+    } else {
+      c.level = rules::kGiantEscortLevel;
+    }
+    c.home = home;
+    c.body.pos = {home.x, w.ground.height(home.x, home.z), home.z};
+    c.timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
+  }
+  return group;
+}
+
+uint8_t quest_giver(QuestId q) {
+  switch (q) {
+    case QuestId::LostPiou: return npc::kMirabelle;
+    case QuestId::Teleporters: return npc::kGaspard;
+    default: return npc::kLison;
+  }
+}
+
 bool quest_ready(const World& w, QuestId q) {
   const QuestState& s = w.quests[static_cast<size_t>(q)];
   switch (q) {
@@ -156,6 +225,11 @@ bool quest_ready(const World& w, QuestId q) {
       }
       return false;
     case QuestId::Teleporters: return (s.progress & (kWentToCastle | kCameBack)) == (kWentToCastle | kCameBack);
+    case QuestId::GiantChampi:
+      for (const Monster& m : w.team) {
+        if (m.tag == Tag::Giant) return true;
+      }
+      return false;
     default: return false;
   }
 }
@@ -168,15 +242,26 @@ void quest_command(World& w, const Input& in) {
     case Command::QuestAccept: {
       if (in.target >= kQuestCount) break;
       const auto id = static_cast<QuestId>(in.target);
-      const uint8_t giver = id == QuestId::LostPiou ? npc::kMirabelle : npc::kGaspard;
       QuestState& q = quest(w, id);
-      if (q.stage == QuestStage::Unknown && near_npc(w, giver)) q.stage = QuestStage::Active;
+      if (q.stage == QuestStage::Unknown && near_npc(w, quest_giver(id))) q.stage = QuestStage::Active;
       break;
     }
     case Command::QuestGive:
       give(w, in.target);
       break;
     case Command::QuestComplete: {
+      if (in.target == static_cast<uint16_t>(QuestId::GiantChampi)) {
+        QuestState& q = quest(w, QuestId::GiantChampi);
+        if (q.stage == QuestStage::Active && quest_ready(w, QuestId::GiantChampi) && near_npc(w, npc::kLison) &&
+            w.battle.phase == BattlePhase::None) {
+          q.stage = QuestStage::Done;
+          if (!(q.progress & kGiantRewarded)) {  // only the first time
+            q.progress |= kGiantRewarded;
+            reward(w, rules::kGiantWizardXp, rules::kGiantMonsterXp);
+          }
+        }
+        break;
+      }
       if (in.target != static_cast<uint16_t>(QuestId::Teleporters)) break;
       QuestState& q = quest(w, QuestId::Teleporters);
       if (q.stage == QuestStage::Active && quest_ready(w, QuestId::Teleporters) && near_npc(w, npc::kGaspard)) {
@@ -190,6 +275,11 @@ void quest_command(World& w, const Input& in) {
 }
 
 void quests_step(World& w) {
+  // The giant Champi caught once, let go, and gone: the quest can be taken again.
+  QuestState& giant = quest(w, QuestId::GiantChampi);
+  if (giant.stage == QuestStage::Done && (giant.progress & kGiantCaught) && !giant_exists(w)) {
+    giant.stage = QuestStage::Unknown;
+  }
   // Teleporters become known when the player walks near them.
   for (size_t k = 0; k < kTeleporterCount; ++k) {
     Vec3 at;

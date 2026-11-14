@@ -122,7 +122,14 @@ TEST_CASE("the ground is drawn where bodies walk") {
     const float* a = &ground.vertices[t];
     const float* b = &ground.vertices[t + MeshData::kFloatsPerVertex];
     const float* c = &ground.vertices[t + 2 * MeshData::kFloatsPerVertex];
-    if (std::fabs(a[0]) > rules::kWorldHalfSize || std::fabs(a[2]) > rules::kWorldHalfSize) continue;
+    // Around the player, the ground is drawn in the relief's own 2 m cells (farther, coarser).
+    const Vec2 center = ground_center(w.player.pos.x, w.player.pos.z);
+    bool inside = true;  // the whole triangle (the ring's edge follows the next ring)
+    for (const float* v : {a, b, c}) {
+      inside = inside && std::fabs(v[0] - center.x) < terrain::kRingHalf[0] - 1e-3f &&
+               std::fabs(v[2] - center.z) < terrain::kRingHalf[0] - 1e-3f;
+    }
+    if (!inside) continue;
     if (in_cave_hill(w.cave, a[0], a[2], 3.0f)) continue;  // cliffs
     if (t % (97 * 3 * MeshData::kFloatsPerVertex) != 0) continue;  // a sample is enough
     // The middle of the triangle is on the plane through its corners.

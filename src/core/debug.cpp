@@ -1,6 +1,7 @@
 #include "monstres/core/debug.hpp"
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
 
@@ -19,6 +20,46 @@ const char* species_name(Species s) {
   static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish"};
   const auto i = static_cast<size_t>(s);
   return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+const char* form_name(Form f) {
+  static const char* kNames[] = {"normal", "micro", "alpha", "omega"};
+  const auto i = static_cast<size_t>(f);
+  return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+const char* stat_name(Stat s) {
+  static const char* kNames[] = {"strength", "dexterity", "constitution", "charisma", "intelligence",
+                                 "hp",       "attack",    "defense",      "speed",    "magic"};
+  static_assert(std::size(kNames) == static_cast<size_t>(Stat::Count));
+  const auto i = static_cast<size_t>(s);
+  return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+// The modifiers of one variant: [{"stat":..., "value":...}].
+std::string mods_json(Species species, size_t index) {
+  const StatMods m = variant_mods(species, index);
+  std::string s = "[";
+  for (uint8_t k = 0; k < m.count; ++k) {
+    if (k) s += ',';
+    s += std::string("{\"stat\":\"") + stat_name(m.mods[k].stat) + "\",\"value\":" + std::to_string(m.mods[k].value) + "}";
+  }
+  return s + "]";
+}
+
+// Where the modifiers of one stat of a monster come from: [{"source": variant id, "value":...}].
+std::string sources_json(Species species, const Genes& genes, Stat stat) {
+  std::string s = "[";
+  for (size_t i = 0; i < variant_count(species); ++i) {
+    if (!has_variant(species, genes, i)) continue;
+    const StatMods m = variant_mods(species, i);
+    for (uint8_t k = 0; k < m.count; ++k) {
+      if (m.mods[k].stat != stat) continue;
+      if (s.size() > 1) s += ',';
+      s += "{\"source\":\"" + variant_id(species, i) + "\",\"value\":" + std::to_string(m.mods[k].value) + "}";
+    }
+  }
+  return s + "]";
 }
 
 const char* mind_name(Mind m) {
@@ -72,12 +113,16 @@ std::string creature_json(const World& w, int index) {
     s += ",\"variants\":" + carried_variants_json(c.species, c.genes);
     s += std::string(",\"chromatic\":") + (c.genes.chromatic ? "true" : "false");
     s += std::string(",\"elemental\":") + (c.genes.elemental ? "true" : "false");
+    s += std::string(",\"form\":\"") + form_name(c.genes.form) + "\"";
+    s += std::string(",\"veryRare\":") + (very_rare(c.species, c.genes) ? "true" : "false");
+    s += ",\"id\":" + std::to_string(c.id);
     s += ",\"level\":" + std::to_string(index == 0 && active_monster(w) ? active_monster(w)->level : c.level);
     s += std::string(",\"engage\":\"") + engage_check_name(can_engage(w, static_cast<size_t>(index))) + "\"";
     s += std::string(",\"released\":") + (c.released ? "true" : "false");
     s += std::string(",\"beaten\":") + (c.beaten ? "true" : "false");
     if (c.tag == Tag::LostPiou) s += ",\"tag\":\"lostPiou\"";
     if (c.tag == Tag::Rival) s += ",\"tag\":\"rival\"";
+    if (c.tag == Tag::Giant) s += ",\"tag\":\"giant\"";
     if (const int k = foe_slot(w, static_cast<size_t>(index)); k >= 0) s += ",\"foe\":" + std::to_string(k);
     if (index == 0) s += std::string(",\"train\":") + (can_train(w) ? "true" : "false");
   }
@@ -105,7 +150,7 @@ std::string creature_json(const World& w, int index) {
 namespace monstres {
 
 const char* zone_name(Zone zone) {
-  static const char* kNames[] = {"meadow", "village", "lake", "ruins", "forest", "cave", "castle"};
+  static const char* kNames[] = {"meadow", "village", "lake", "ruins", "forest", "cave", "castle", "coast", "hills", "plains"};
   static_assert(std::size(kNames) == static_cast<size_t>(Zone::Count));
   const auto i = static_cast<size_t>(zone);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -190,6 +235,7 @@ std::string wizard_json(const World& w) {
   s += ",\"level\":" + std::to_string(w.wizard.level) + ",\"xp\":" + std::to_string(w.wizard.xp);
   s += ",\"xpToNext\":" + std::to_string(st.xp_to_next);
   s += ",\"hp\":" + std::to_string(st.hp) + ",\"mana\":" + std::to_string(st.mana);
+  s += ",\"manaNow\":" + std::to_string(w.wizard.mana);
   s += ",\"power\":" + std::to_string(st.power) + ",\"wisdom\":" + std::to_string(st.wisdom);
   s += ",\"agility\":" + std::to_string(st.agility) + ",\"endurance\":" + std::to_string(st.endurance) + "}";
   return s;
@@ -217,6 +263,7 @@ std::string spells_json(const World& w) {
     s += std::string("{\"id\":\"") + info.id + "\",\"value\":" + std::to_string(i);
     s += std::string(",\"combat\":") + (info.combat ? "true" : "false");
     s += std::string(",\"adventure\":") + (info.adventure ? "true" : "false");
+    s += ",\"mana\":" + std::to_string(info.mana);
     s += ",\"cooldown\":" + seconds(info.cooldown) + "}";
   }
   s += "],\"now\":[";
@@ -228,11 +275,25 @@ std::string spells_json(const World& w) {
     s += std::string("{\"slot\":") + std::to_string(k) + ",\"id\":\"" + info.id + "\"";
     s += ",\"cooldown\":" + seconds(w.spell_cooldowns[static_cast<size_t>(now[k])]);
     s += ",\"cooldownTotal\":" + seconds(info.cooldown);
+    s += ",\"mana\":" + std::to_string(info.mana);
     s += std::string(",\"why\":") + (why ? std::string("\"") + why + "\"" : "null") + "}";
   }
   s += "],\"castTick\":" + std::to_string(w.spell_tick) + ",\"cast\":\"" + spell_info(w.spell_cast).id + "\"";
-  s += ",\"healedTick\":" + std::to_string(w.healed_tick) + "}";
-  return s;
+  s += ",\"healedTick\":" + std::to_string(w.healed_tick);
+  s += ",\"manaNow\":" + std::to_string(w.wizard.mana) + ",\"manaMax\":" + std::to_string(wizard_stats(w.wizard).mana);
+  s += std::string(",\"mercy\":") + (w.battle.mercy ? "true" : "false");
+  s += ",\"mercyTick\":" + std::to_string(w.battle.mercy_tick);
+  s += ",\"detect\":" + seconds(w.detect_ticks);
+  const int found = detect_rare(w);
+  if (found > 0) {
+    const Creature& c = w.creatures[static_cast<size_t>(found)];
+    const float dx = c.body.pos.x - w.player.pos.x, dz = c.body.pos.z - w.player.pos.z;
+    s += ",\"found\":{\"index\":" + std::to_string(found) + ",\"species\":\"" + species_name(c.species) +
+         "\",\"dx\":" + num(dx) + ",\"dz\":" + num(dz) + ",\"distance\":" + num(std::sqrt(dx * dx + dz * dz)) + "}";
+  } else {
+    s += ",\"found\":null";
+  }
+  return s + "}";
 }
 
 std::string bestiary_json(const World& w) {
@@ -257,7 +318,7 @@ std::string bestiary_json(const World& w) {
     const auto& known = w.dex[i];
     for (size_t v = 0; v < variant_count(species); ++v) {
       const Variant var = variant_at(species, v);
-      static const char* kKinds[] = {"sex", "color", "shape", "chromatic", "elemental"};
+      static const char* kKinds[] = {"sex", "color", "shape", "chromatic", "elemental", "build"};
       static const char* kStatus[] = {"unknown", "seen", "captured"};
       if (v) s += ',';
       s += "{\"id\":\"" + variant_id(species, v) + "\"";
@@ -274,11 +335,23 @@ std::string bestiary_json(const World& w) {
       const Genes genes = genes_with(species, v);
       s += "],\"elements\":" + elements_json(creature_elements(species, genes));
       s += ",\"look\":" + std::to_string(genes_code(genes));
+      s += ",\"mods\":" + mods_json(species, v);
+      if (var.kind == VariantKind::Build) {
+        const FightStats p = build_percent(static_cast<Form>(var.gene));
+        s += ",\"fight\":{\"hp\":" + std::to_string(p.hp) + ",\"attack\":" + std::to_string(p.attack) +
+             ",\"defense\":" + std::to_string(p.defense) + ",\"speed\":" + std::to_string(p.speed) +
+             ",\"magic\":" + std::to_string(p.magic) + ",\"size\":" + num(build_scale(static_cast<Form>(var.gene))) + "}";
+      }
       s += std::string(",\"status\":\"") + kStatus[static_cast<size_t>(known[v])] + "\"}";
     }
     s += "]";
     s += ",\"height\":" + num(info.shape.height) + ",\"walkSpeed\":" + num(info.walk_speed);
-    s += ",\"runSpeed\":" + num(info.run_speed) + ",\"count\":" + std::to_string(count) + "}";
+    s += ",\"runSpeed\":" + num(info.run_speed) + ",\"count\":" + std::to_string(count);
+    s += ",\"captured\":" + std::to_string(w.captured_count[i]) + ",\"beaten\":" + std::to_string(w.beaten_count[i]);
+    s += ",\"released\":" + std::to_string(w.released_count[i]);
+    size_t owned = 0;
+    for (const Monster& m : w.team) owned += m.species == species;
+    s += ",\"inTeam\":" + std::to_string(owned) + "}";
   }
   return s + "]";
 }
@@ -292,7 +365,7 @@ const char* teleporter_name(TeleporterId id) {
 }
 
 const char* quest_name(QuestId id) {
-  static const char* kNames[] = {"lostPiou", "teleporters"};
+  static const char* kNames[] = {"lostPiou", "teleporters", "giantChampi"};
   static_assert(std::size(kNames) == kQuestCount);
   return kNames[static_cast<size_t>(id)];
 }
@@ -330,6 +403,12 @@ std::string quests_json(const World& w) {
       s += std::string("\"find\":") + (done || ready ? "true" : "false");
       s += std::string(",\"bring\":") + (done ? "true" : "false");
       s += std::string(",\"near\":") + (near_npc(w, npc::kMirabelle) ? "true" : "false");
+    } else if (id == QuestId::GiantChampi) {
+      s += std::string("\"catch\":") + (done || ready ? "true" : "false");
+      s += std::string(",\"show\":") + (done ? "true" : "false");
+      s += std::string(",\"near\":") + (near_npc(w, npc::kLison) ? "true" : "false");
+      s += std::string(",\"again\":") + ((q.progress & kGiantCaught) ? "true" : "false");
+      s += std::string(",\"rewarded\":") + ((q.progress & kGiantRewarded) ? "true" : "false");
     } else {
       s += std::string("\"discover\":") + (teleporter_known(w, TeleporterId::Castle) ? "true" : "false");
       s += std::string(",\"go\":") + ((q.progress & kWentToCastle) || done ? "true" : "false");
@@ -388,11 +467,43 @@ std::string sign_json(const World& w, int index) {
   return s + "]}";
 }
 
+const char* region_name(Region r) {
+  static const char* kNames[] = {"ocean", "start", "mountains", "volcano", "desert", "plains",
+                                 "forest", "marsh", "lake", "loneMountain", "capital"};
+  static_assert(std::size(kNames) == static_cast<size_t>(Region::Count));
+  const auto i = static_cast<size_t>(r);
+  return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+std::string continent_json(const Continent& c) {
+  std::string s = "{\"minX\":" + num(Continent::kMinX) + ",\"minZ\":" + num(Continent::kMinZ);
+  s += ",\"cell\":" + num(Continent::kCell) + ",\"pointsX\":" + std::to_string(Continent::kPointsX);
+  s += ",\"pointsZ\":" + std::to_string(Continent::kPointsZ) + ",\"seaLevel\":" + num(rules::kSeaLevel);
+  s += ",\"snowLine\":" + num(rules::kSnowLine) + ",\"start\":" + num(rules::kReliefHalfSize);
+  s += ",\"ready\":" + std::string(c.empty() ? "false" : "true") + ",\"landmarks\":[";
+  const auto& marks = continent_landmarks();
+  for (size_t k = 0; k < marks.size(); ++k) {
+    const Landmark& m = marks[k];
+    s += std::string(k ? "," : "") + "{\"region\":\"" + region_name(m.region) + "\",\"x\":" + num(m.at.x) +
+         ",\"z\":" + num(m.at.z) + ",\"r\":" + num(m.radius) + "}";
+  }
+  s += "],\"ponds\":[";
+  const auto& ponds = continent_ponds();
+  for (size_t k = 0; k < ponds.size(); ++k) {
+    const Pond& p = ponds[k];
+    s += std::string(k ? "," : "") + "{\"x\":" + num(p.center.x) + ",\"z\":" + num(p.center.z) + ",\"rx\":" +
+         num(p.radius_x) + ",\"rz\":" + num(p.radius_z) + ",\"level\":" + num(p.level) + "}";
+  }
+  const Crater cr = volcano_crater();
+  s += "],\"crater\":{\"x\":" + num(cr.center.x) + ",\"z\":" + num(cr.center.z) + ",\"r\":" + num(cr.radius) + "}}";
+  return s;
+}
+
 std::string map_json(const World& w) {
   std::string s = "{\"relief\":" + num(rules::kReliefHalfSize) + ",\"world\":" + num(rules::kWorldHalfSize);
   s += ",\"points\":" + std::to_string(w.ground.empty() ? 0 : Heightmap::kPoints);
   s += ",\"cell\":" + num(Heightmap::kCellSize);
-  s += ",\"waterLevel\":" + num(rules::kWaterLevel);
+  s += ",\"waterLevel\":" + num(rules::kWaterLevel) + ",\"seaLevel\":" + num(rules::kSeaLevel);
   const Lake& l = w.village.lake;
   s += ",\"lake\":" + (l.radius_x > 0 ? "{\"x\":" + num(l.center.x) + ",\"z\":" + num(l.center.z) +
                                           ",\"rx\":" + num(l.radius_x) + ",\"rz\":" + num(l.radius_z) + "}"
@@ -508,7 +619,7 @@ std::string team_json(const World& w) {
   std::string s = "[";
   for (size_t i = 0; i < w.team.size(); ++i) {
     const Monster& m = w.team[i];
-    const FightStats st = monster_fight_stats(m.species, m.level);
+    const FightStats st = monster_fight_stats(m);
     if (i) s += ',';
     s += "{\"slot\":" + std::to_string(i) + ",\"species\":\"" + species_name(m.species) + "\"";
     s += std::string(",\"active\":") + (static_cast<int>(i) == w.active ? "true" : "false");
@@ -522,7 +633,34 @@ std::string team_json(const World& w) {
     s += ",\"look\":" + std::to_string(genes_code(m.genes));
     s += ",\"variants\":" + carried_variants_json(m.species, m.genes);
     s += std::string(",\"female\":") + (m.genes.allele[0] == 1 ? "true" : "false");
+    s += std::string(",\"form\":\"") + form_name(m.genes.form) + "\"";
+    // Each gift: its value, its drawn base, the lowest and highest it could
+    // be with these genes, and where its modifiers come from.
+    const Gifts gifts = monster_gifts(m);
+    s += ",\"gifts\":[";
+    for (size_t k = 0; k < kGiftCount; ++k) s += (k ? "," : "") + std::to_string(gifts[k]);
+    s += "],\"giftDetails\":[";
+    for (size_t k = 0; k < kGiftCount; ++k) {
+      const auto stat = static_cast<Stat>(k);
+      s += std::string(k ? "," : "") + "{\"stat\":\"" + stat_name(stat) + "\",\"value\":" + std::to_string(gifts[k]);
+      s += ",\"base\":" + std::to_string(m.gifts[k]);
+      s += ",\"min\":" + std::to_string(gift_value(m.species, m.genes, k, kGiftBaseMin));
+      s += ",\"max\":" + std::to_string(gift_value(m.species, m.genes, k, kGiftBaseMax));
+      s += ",\"mods\":" + sources_json(m.species, m.genes, stat) + "}";
+    }
+    // The fight stats some variants change (the build's percent apart).
+    s += "],\"statMods\":{";
+    bool first_mod = true;
+    for (Stat stat : {Stat::Hp, Stat::Attack, Stat::Defense, Stat::Speed, Stat::Magic}) {
+      const std::string sources = sources_json(m.species, m.genes, stat);
+      if (sources == "[]") continue;
+      s += std::string(first_mod ? "" : ",") + "\"" + stat_name(stat) + "\":" + sources;
+      first_mod = false;
+    }
+    s += "},\"sizeMm\":" + std::to_string(m.size_mm) + ",\"weightG\":" + std::to_string(m.weight_g);
+    s += ",\"ageDays\":" + std::to_string(std::max(0, world_day(w) - m.born_day));
     if (m.tag == Tag::LostPiou) s += ",\"tag\":\"lostPiou\"";
+    if (m.tag == Tag::Giant) s += ",\"tag\":\"giant\"";
     s += ",\"moves\":" + moves_json(m.species, m.genes, st) + "}";
   }
   return s + "]";
@@ -581,7 +719,7 @@ const char* no_xp_name(NoXp n) {
 
 std::string ally_json(const World& w, const Fighter& f) {
   const Monster& a = *active_monster(w);
-  const FightStats st = monster_fight_stats(a.species, a.level);
+  const FightStats st = monster_fight_stats(a);
   std::string s = "{\"species\":\"" + std::string(species_name(a.species)) + "\"";
   s += ",\"slot\":" + std::to_string(w.active);
   s += ",\"level\":" + std::to_string(a.level) + ",\"hp\":" + std::to_string(a.hp);
@@ -602,6 +740,7 @@ std::string foe_json(const World& w, size_t k) {
   s += ",\"maxHp\":" + std::to_string(f.max_hp) + ",\"xp\":" + std::to_string(f.xp);
   s += ",\"elements\":" + elements_json(creature_elements(e.species, e.genes));
   s += ",\"look\":" + std::to_string(genes_code(e.genes));
+  s += std::string(",\"form\":\"") + form_name(e.genes.form) + "\"";
   s += std::string(",\"targeted\":") + (w.battle.target == k ? "true" : "false");
   s += ",\"y\":" + num(e.body.pos.y - w.ground.height(e.body.pos.x, e.body.pos.z));
   s += ",\"fighter\":" + fighter_json(w, f.fighter, species_moves(e.species), false) + "}";

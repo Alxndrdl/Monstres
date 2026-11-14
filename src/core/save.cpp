@@ -114,6 +114,19 @@ namespace {
 
 constexpr uint32_t kMaxCreaturesInSave = 4096;
 
+// Chromatic (1), elemental (2), the build (bits 2-3).
+uint8_t forms_byte(const Genes& g) {
+  return static_cast<uint8_t>((g.chromatic ? 1 : 0) | (g.elemental ? 2 : 0) | (static_cast<unsigned>(g.form) << 2));
+}
+// Before version 18 there was no build: only chromatic and elemental.
+bool read_forms(uint8_t forms, bool with_builds, Genes& g) {
+  if (forms > (with_builds ? 15 : 3)) return false;
+  g.chromatic = (forms & 1) != 0;
+  g.elemental = (forms & 2) != 0;
+  g.form = static_cast<Form>(forms >> 2);
+  return true;
+}
+
 void write_body(Writer& out, const Body& b) {
   out.vec3(b.pos);
   out.f32(b.velocity_y);
@@ -143,8 +156,11 @@ std::vector<uint8_t> serialize(const World& w) {
   out.u64(w.rng.raw_state());
   out.u64(w.rng.raw_inc());
   write_body(out, w.player);
-  out.u32(static_cast<uint32_t>(w.objects.size()));
-  for (const Object& o : w.objects) {
+  // The wilds' objects are not saved: drawn again from the seed at each load.
+  const size_t saved_objects = w.objects.size() - std::min<size_t>(w.wild_objects, w.objects.size());
+  out.u32(static_cast<uint32_t>(saved_objects));
+  for (size_t k = 0; k < saved_objects; ++k) {
+    const Object& o = w.objects[k];
     out.u8(static_cast<uint8_t>(o.kind));
     out.vec3(o.pos);
     out.vec3(o.size);
@@ -164,7 +180,7 @@ std::vector<uint8_t> serialize(const World& w) {
     out.f32(c.home.z);
     out.u8(c.variant);
     for (uint8_t a : c.genes.allele) out.u8(a);
-    out.u8(static_cast<uint8_t>((c.genes.chromatic ? 1 : 0) | (c.genes.elemental ? 2 : 0)));
+    out.u8(forms_byte(c.genes));
     out.u8(c.level);
     out.u32(c.id);
     out.u8(static_cast<uint8_t>((c.released ? 1 : 0) | (c.beaten ? 2 : 0)));
@@ -176,6 +192,7 @@ std::vector<uint8_t> serialize(const World& w) {
   out.bytes(reinterpret_cast<const uint8_t*>(w.wizard.name.data()), name_bytes);
   out.u16(w.wizard.level);
   out.u32(w.wizard.xp);
+  out.u16(w.wizard.mana);
   out.u8(static_cast<uint8_t>(kSpeciesCount));
   out.u8(static_cast<uint8_t>(kMaxVariants));
   for (const auto& species : w.dex) {
@@ -185,12 +202,16 @@ std::vector<uint8_t> serialize(const World& w) {
   for (const Monster& m : w.team) {
     out.u8(static_cast<uint8_t>(m.species));
     for (uint8_t a : m.genes.allele) out.u8(a);
-    out.u8(static_cast<uint8_t>((m.genes.chromatic ? 1 : 0) | (m.genes.elemental ? 2 : 0)));
+    out.u8(forms_byte(m.genes));
     out.u16(m.level);
     out.u32(m.xp);
     out.u16(m.hp);
     out.u8(static_cast<uint8_t>(m.tag));
     out.u8(m.beaten ? 1 : 0);
+    for (uint8_t g : m.gifts) out.u8(g);
+    out.u16(m.size_mm);
+    out.u32(m.weight_g);
+    out.u32(static_cast<uint32_t>(m.born_day));
   }
   out.u32(w.clock);
   out.u8(w.active < 0 ? 0xff : static_cast<uint8_t>(w.active));
@@ -209,6 +230,13 @@ std::vector<uint8_t> serialize(const World& w) {
   out.u8(w.rival_wins);
   for (SpellId sp : w.combat_spells) out.u8(static_cast<uint8_t>(sp));
   for (SpellId sp : w.adventure_spells) out.u8(static_cast<uint8_t>(sp));
+  out.u16(w.detect_ticks);
+  out.u8(static_cast<uint8_t>(kSpeciesCount));
+  for (size_t s = 0; s < kSpeciesCount; ++s) {
+    out.u16(w.captured_count[s]);
+    out.u16(w.beaten_count[s]);
+    out.u16(w.released_count[s]);
+  }
   return out.take();
 }
 
@@ -235,6 +263,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   const bool with_quests = version >= 15;  // teleporters, quests, named villagers
   const bool with_rival = version >= 16;   // Bastien, the trainer: battles won against him
   const bool with_spells = version >= 17;  // the magician's spells
+  const bool with_builds = version >= 18;  // builds, mana, traits of the team, counts of the bestiary
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -282,9 +311,8 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
         uint8_t forms = 0;
         bool genes_ok = true;
         for (size_t g = without_sex ? 1 : 0; g < kMaxGenes; ++g) genes_ok = genes_ok && in.u8(c.genes.allele[g]);
-        if (!genes_ok || !in.u8(forms) || forms > 3) return fail(error, LoadError::Corrupt);
-        c.genes.chromatic = (forms & 1) != 0;
-        c.genes.elemental = (forms & 2) != 0 && !(without_sex && c.genes.chromatic);  // both: allowed before 10
+        if (!genes_ok || !in.u8(forms) || !read_forms(forms, with_builds, c.genes)) return fail(error, LoadError::Corrupt);
+        c.genes.elemental = c.genes.elemental && !(without_sex && c.genes.chromatic);  // both: allowed before 10
         if (!valid_genes(c.species, c.genes)) return fail(error, LoadError::Corrupt);
       }
       if (with_team && (!in.u8(c.level) || c.level == 0)) return fail(error, LoadError::Corrupt);
@@ -296,7 +324,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       }
       if (with_quests) {
         uint8_t tag = 0;
-        if (!in.u8(c.npc) || !in.u8(tag) || tag > static_cast<uint8_t>(Tag::Rival)) {
+        if (!in.u8(c.npc) || !in.u8(tag) || tag > static_cast<uint8_t>(with_builds ? Tag::Giant : Tag::Rival)) {
           return fail(error, LoadError::Corrupt);
         }
         c.tag = static_cast<Tag>(tag);
@@ -310,7 +338,11 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
         !in.u16(w.wizard.level) || !in.u32(w.wizard.xp) || w.wizard.level == 0) {
       return fail(error, LoadError::Corrupt);
     }
+    if (with_builds && (!in.u16(w.wizard.mana) || w.wizard.mana > wizard_stats(w.wizard).mana)) {
+      return fail(error, LoadError::Corrupt);
+    }
   }
+  if (!with_builds) w.wizard.mana = wizard_stats(w.wizard).mana;
   if (with_genes) {
     uint8_t species_count = 0, variants = 0;
     if (!in.u8(species_count) || !in.u8(variants) || species_count != kSpeciesCount || variants != kMaxVariants) {
@@ -337,17 +369,24 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       for (uint8_t& a : m.genes.allele) ok = ok && in.u8(a);
       ok = ok && in.u8(forms) && in.u16(m.level) && in.u32(m.xp) && in.u16(m.hp);
       uint8_t tag = 0, beaten = 0;
-      if (with_quests) ok = ok && in.u8(tag) && in.u8(beaten) && tag <= static_cast<uint8_t>(Tag::LostPiou) && beaten <= 1;  // never a trainer's
+      if (with_quests) ok = ok && in.u8(tag) && in.u8(beaten) && beaten <= 1;
+      // Never a trainer's monster; the giant Champi from version 18.
+      ok = ok && (tag <= static_cast<uint8_t>(Tag::LostPiou) || (with_builds && tag == static_cast<uint8_t>(Tag::Giant)));
       m.tag = static_cast<Tag>(tag);
       m.beaten = beaten == 1;
-      if (!ok || species >= static_cast<uint8_t>(Species::Count) || forms > 2 || m.level == 0) {
+      uint32_t born = 0;
+      if (with_builds) {
+        for (uint8_t& g : m.gifts) ok = ok && in.u8(g) && g >= kGiftBaseMin && g <= kGiftBaseMax;  // drawn bases
+        ok = ok && in.u16(m.size_mm) && in.u32(m.weight_g) && in.u32(born);
+        m.born_day = static_cast<int32_t>(born);
+      }
+      // Before version 18, forms was 0, 1 (chromatic) or 2 (elemental).
+      if (!ok || species >= static_cast<uint8_t>(Species::Count) || (!with_builds && forms > 2) ||
+          !read_forms(forms, with_builds, m.genes) || m.level == 0) {
         return fail(error, LoadError::Corrupt);
       }
       m.species = static_cast<Species>(species);
-      m.genes.chromatic = forms == 1;
-      m.genes.elemental = forms == 2;
-      if (!monster_stats(m.species).is_monster || !valid_genes(m.species, m.genes) ||
-          m.hp > monster_fight_stats(m.species, m.level).hp) {
+      if (!monster_stats(m.species).is_monster || !valid_genes(m.species, m.genes) || m.hp > monster_fight_stats(m).hp) {
         return fail(error, LoadError::Corrupt);
       }
     }
@@ -365,12 +404,22 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     }
   }
   if (grown) {
+    // Before version 18 the world was the valley: 7 squares a side, now in
+    // the middle of the grown world's (the valley's edge on a square's edge).
     uint8_t cells = 0;
-    if (!in.u32(w.next_id) || !in.u8(cells) || cells != rules::kPopulationCells) return fail(error, LoadError::Corrupt);
-    for (size_t k = 0; k < kPopulationCellCount; ++k) {
-      if (!in.u8(w.population.active[k]) || !in.u16(w.population.visits[k]) || w.population.active[k] > 1) {
-        return fail(error, LoadError::Corrupt);
-      }
+    constexpr int kOldCells = 7;
+    const int offset = static_cast<int>((rules::kWorldHalfSize - rules::kValleyHalfSize) / rules::kPopulationCell);
+    if (!in.u32(w.next_id) || !in.u8(cells) || cells != (with_builds ? rules::kPopulationCells : kOldCells)) {
+      return fail(error, LoadError::Corrupt);
+    }
+    for (int k = 0; k < cells * cells; ++k) {
+      uint8_t active = 0;
+      uint16_t visits = 0;
+      if (!in.u8(active) || !in.u16(visits) || active > 1) return fail(error, LoadError::Corrupt);
+      const int i = k / cells + (with_builds ? 0 : offset), j = k % cells + (with_builds ? 0 : offset);
+      const auto at = static_cast<size_t>(i * rules::kPopulationCells + j);
+      w.population.active[at] = active;
+      w.population.visits[at] = visits;
     }
     for (const Creature& c : w.creatures) {
       if (c.id == 0 || c.id >= w.next_id) return fail(error, LoadError::Corrupt);
@@ -378,10 +427,13 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   }
   if (with_quests) {
     uint8_t quests = 0;
-    if (!in.u8(w.teleporters) || w.teleporters >= (1u << kTeleporterCount) || !in.u8(quests) || quests != kQuestCount) {
+    // Before version 18 there were two quests (the giant Champi's came then).
+    if (!in.u8(w.teleporters) || w.teleporters >= (1u << kTeleporterCount) || !in.u8(quests) ||
+        quests != (with_builds ? kQuestCount : 2)) {
       return fail(error, LoadError::Corrupt);
     }
-    for (QuestState& q : w.quests) {
+    for (size_t k = 0; k < quests; ++k) {
+      QuestState& q = w.quests[k];
       uint8_t stage = 0;
       if (!in.u8(stage) || stage > static_cast<uint8_t>(QuestStage::Done) || !in.u8(q.progress)) {
         return fail(error, LoadError::Corrupt);
@@ -403,6 +455,17 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     };
     if (!read_spells(w.combat_spells, true) || !read_spells(w.adventure_spells, false)) {
       return fail(error, LoadError::Corrupt);
+    }
+  }
+  if (with_builds) {
+    uint8_t species = 0;
+    if (!in.u16(w.detect_ticks) || w.detect_ticks > rules::kDetectTicks || !in.u8(species) || species != kSpeciesCount) {
+      return fail(error, LoadError::Corrupt);
+    }
+    for (size_t s = 0; s < kSpeciesCount; ++s) {
+      if (!in.u16(w.captured_count[s]) || !in.u16(w.beaten_count[s]) || !in.u16(w.released_count[s])) {
+        return fail(error, LoadError::Corrupt);
+      }
     }
   }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
@@ -467,6 +530,20 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
   // moved them in the list, and they were missed): put them back up.
   for (Object& o : w.objects) {
     if (o.kind == ObjectKind::Teleporter && !w.ground.empty()) o.pos.y = w.ground.height(o.pos.x, o.pos.z) - 0.05f;
+  }
+  // The wilds around the valley (not saved). Before version 18 the relief at
+  // the valley's edge rose into hills: it changed, the objects there settle again.
+  if (grown && !with_builds) settle_objects(w);
+  generate_wilds(w);
+  if (!with_builds) {
+    // Before version 18: the team members get their traits (as if they
+    // joined today), the captures are counted from the team.
+    w.captured_count = {};
+    for (size_t k = 0; k < w.team.size(); ++k) {
+      Monster& m = w.team[k];
+      give_traits(m, roll_traits(w.seed, 0xFFFF0000u + static_cast<uint32_t>(k), m.species, m.genes), world_day(w));
+      if (m.species != Species::Companion) ++w.captured_count[static_cast<size_t>(m.species)];
+    }
   }
   return w;
 }

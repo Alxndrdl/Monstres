@@ -9,8 +9,11 @@ namespace monstres {
 
 namespace {
 
-// Every 6 m, from beyond one edge of the world to beyond the other.
-constexpr int kControlPoints = 2 * (static_cast<int>(rules::kPathExtent / 6.0f) + 1) + 1;
+// Every 6 m: the valley's part first (as it always was), then on to beyond
+// the edges of the grown world.
+constexpr int kValleyControlPoints = 2 * (static_cast<int>(rules::kPathExtent / 6.0f) + 1) + 1;
+constexpr int kExtraControlPoints = static_cast<int>((rules::kPathFullExtent - rules::kPathExtent) / 6.0f) + 1;  // per end
+constexpr int kControlPoints = kValleyControlPoints + 2 * kExtraControlPoints;
 constexpr float kControlStep = 6.0f;
 constexpr int kSamplesPerSegment = 8;
 
@@ -28,11 +31,21 @@ Path make_path(uint64_t seed) {
   float xs[kControlPoints];
   const int middle = kControlPoints / 2;
   xs[middle] = static_cast<float>(static_cast<int>(rng.below(201)) - 100) / 100.0f;  // ±1 m from spawn
-  // Random walk outwards from the middle, at most ±3.5 m per step, kept within ±kPathMaxX.
+  // Random walk outwards from the middle, at most ±3.5 m per step, kept within ±kPathMaxX
+  // (the valley's part: the same draws as before the world grew).
+  const int valley_half = kValleyControlPoints / 2;
   for (int dir : {1, -1}) {
-    for (int i = middle + dir; i >= 0 && i < kControlPoints; i += dir) {
+    for (int i = middle + dir; i >= middle - valley_half && i <= middle + valley_half; i += dir) {
       const float step = static_cast<float>(static_cast<int>(rng.below(701)) - 350) / 100.0f;
       xs[i] = std::clamp(xs[i - dir] + step, -rules::kPathMaxX, rules::kPathMaxX);
+    }
+  }
+  // Beyond the valley: its own stream, winding farther.
+  Rng far(seed ^ 0x5041544846415252ULL, 8);
+  for (int dir : {1, -1}) {
+    for (int i = middle + dir * (valley_half + 1); i >= 0 && i < kControlPoints; i += dir) {
+      const float step = static_cast<float>(static_cast<int>(far.below(701)) - 350) / 100.0f;
+      xs[i] = std::clamp(xs[i - dir] + step, -rules::kPathFarMaxX, rules::kPathFarMaxX);
     }
   }
 

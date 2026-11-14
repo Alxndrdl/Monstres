@@ -431,7 +431,7 @@
 
   // ---- Damage numbers and the outcome ----
   const layer = $('damage-layer');
-  const seen = { allyHit: 0, allyParried: 0, shield: 0, outcome: -1 };
+  const seen = { allyHit: 0, allyParried: 0, shield: 0, outcome: -1, mercy: -1 };
   const seenFoes = new Map();  // creature index -> { hit, parried }
 
   function floatText(index, text, className) {
@@ -455,10 +455,15 @@
       return;
     }
     if (b.phase !== 'fight') return;
+    // The Mercy spell held a blow back: the foe left at 1 hit point.
+    const mercy = game.spells().mercyTick;
+    const held = mercy > seen.mercy && seen.mercy >= 0;
+    seen.mercy = mercy;
     for (const f of b.foes || []) {
       const e = f.fighter;
       const was = seenFoes.get(f.index) || { hit: e.hitTick, parried: e.parriedTick };
-      if (e.hitTick > was.hit) floatText(f.index, `${e.lastDamage}`, 'enemy');
+      if (held && f.hp === 1 && e.hitTick === mercy) floatText(f.index, 'Retenu ! 1 PV', 'mercy');
+      else if (e.hitTick > was.hit) floatText(f.index, `${e.lastDamage}`, 'enemy');
       if (e.parriedTick > was.parried) floatText(f.index, 'Paré !', 'blocked');
       seenFoes.set(f.index, { hit: e.hitTick, parried: e.parriedTick });
     }

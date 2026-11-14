@@ -77,17 +77,35 @@ inline constexpr float kGrassRadius = 56.0f;
 // From the player: the center is at most kStep * 0.71 away.
 inline constexpr float kGrassFadeStart = 33.0f, kGrassFadeEnd = 43.0f;
 inline constexpr float kDetailFadeStart = 42.0f, kDetailFadeEnd = 52.0f;
+// Trees and rocks (the world has tens of thousands): only within this far
+// of the center, shrinking away before (from the player).
+inline constexpr float kObjectsRadius = 215.0f;
+inline constexpr float kTreeFadeStart = 160.0f, kTreeFadeEnd = 198.0f;
 }  // namespace landscape
 
 // Center of the detailed landscape for a player at (x, z).
 Vec2 landscape_center(float x, float z);
 
 // Everything that never moves in a world: the ground, the path, the objects
-// and their shadows, grass, flowers, the forest beyond the edges and the
-// mountains, detailed around `center` (the player's landscape_center by
-// default). Rebuild it when the world changes or the center moves.
+// and their shadows, grass and flowers, detailed around `center` (the
+// player's landscape_center by default): the trees and rocks within
+// landscape::kObjectsRadius only, the buildings everywhere.
+// Rebuild it when the world changes or the center moves.
 void build_landscape(const World& world, DrawList& list);
 void build_landscape(const World& world, DrawList& list, Vec2 center);
+
+// The continent beyond the playable area (a far list, see DrawList::far):
+// its ground, waters and lava (meshes from far_terrain.hpp, set once per
+// world); and what moves there: the active volcano's smoke.
+void build_far_landscape(DrawList& list);
+void build_far_dynamic(const World& world, float time, DrawList& list);
+
+namespace view_range {
+inline constexpr float kNearFar = 2000.0f;  // the near pass: up to here (the whole relief, from anywhere on it)
+inline constexpr float kFarNear = 8.0f;    // the far pass: from here...
+inline constexpr float kFarFar = 9500.0f;  // ...to the horizon
+inline constexpr float kFogStart = 30.0f, kFogHalf = 1800.0f, kFogEnd = 9000.0f;
+}  // namespace view_range
 
 // What moves: the player, its shadow, the clouds. `time` in seconds.
 // `selected`: index of a creature to mark with a ring at its feet (-1: none).

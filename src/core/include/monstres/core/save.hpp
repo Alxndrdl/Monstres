@@ -67,7 +67,22 @@ namespace monstres {
 //      end the known teleporters (u8 bits), the number of quests (u8) and per
 //      quest its stage and progress (u8 each). Version 14 still loads: the
 //      teleporters are built where they go, the villagers get their names.
-inline constexpr uint32_t kSaveVersion = 17;
+//  16  at the end, the battles won against Bastien (u8). Before: Bastien goes
+//      to the edge of the village, where he offers battles.
+//  17  at the end, the combat then adventure spells (2 + 2 u8 SpellId).
+//  18  monsters' builds: the forms byte of creatures and team members holds
+//      chromatic (1), elemental (2) and the Form (bits 2-3); the magician's
+//      mana (u16) after its experience; each team member's gift bases (5 u8), size
+//      (u16 mm), weight (u32 g) and birth day (i32); at the end the Detection
+//      spell's ticks left (u16), the number of species (u8) and per species
+//      how many were captured, beaten, let go (u16 each); three quests (the
+//      giant Champi's), and the tag Giant. The world grew: 29 squares a side;
+//      only the valley's objects are saved (the wilds' are drawn again from
+//      the seed, generate_wilds). Before: the mana is full, the team members'
+//      traits are drawn, the counts are guessed from the team, the giant
+//      Champi's quest is unknown, the valley's 7 x 7 squares go in the middle,
+//      the objects settle on the valley's new edge, the wilds are added.
+inline constexpr uint32_t kSaveVersion = 18;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

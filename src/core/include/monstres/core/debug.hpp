@@ -42,6 +42,12 @@ std::string bestiary_json(const World& world);
 // during a game.
 std::string map_json(const World& world);
 
+// The continent for the map: its grid (the heights come apart, see
+// main.cpp), sea level, regions with their remarkable places, waters, the
+// active volcano's crater.
+struct Continent;
+std::string continent_json(const Continent& continent);
+
 // The player's team: per monster its level, experience, hit points,
 // characteristics at its level, family, elements, look, variants and its
 // three attacks (identifier, shape, element, power, cooldown in seconds).

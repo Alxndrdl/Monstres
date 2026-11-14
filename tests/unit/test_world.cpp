@@ -27,8 +27,10 @@ TEST_CASE("new_game builds a valid world") {
       for (float x : {b.min.x, b.max.x}) {
         for (float z : {b.min.z, b.max.z}) CHECK(o.pos.y < w.ground.height(x, z) + 0.2f * height + 0.05f);
       }
-      CHECK(b.max.x <= rules::kWorldHalfSize);
-      CHECK(b.min.x >= -rules::kWorldHalfSize);
+      // The valley's objects within the valley; the wilds' over the whole relief.
+      const float bound = i + w.wild_objects < w.objects.size() ? rules::kValleyHalfSize : rules::kReliefHalfSize;
+      CHECK(b.max.x <= bound);
+      CHECK(b.min.x >= -bound);
       if (!is_round(o.kind)) CHECK((o.yaw & 0x3FFF) == 0);  // boxy objects turn by quarters
     }
     std::vector<Box> boxes;
@@ -160,7 +162,7 @@ TEST_CASE("the player slides along an object when walking diagonally into it") {
 
 TEST_CASE("the world has edges") {
   World w = empty_world();
-  run(w, forward(), 30 * rules::kTicksPerSecond);
+  run(w, forward(), static_cast<int>(rules::kWorldHalfSize / rules::kWalkSpeed + 2) * rules::kTicksPerSecond);
   CHECK(w.player.pos.z == Approx(-(rules::kWorldHalfSize - rules::kPlayerHalfWidth)));
 }
 

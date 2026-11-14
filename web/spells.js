@@ -1,7 +1,8 @@
-// The magician's spells, on the page: two buttons above the joystick (the
+// The magician's spells, on the page: two buttons beside the attacks (the
 // adventure spells; in a battle or training, the combat ones), keys R and G,
-// and the "Sorts" tab of the grimoire, where they are chosen (out of
-// battles). The rules are in the game (src/core/battle.cpp).
+// the magician's mana above them, and the "Sorts" tab of the grimoire, where
+// they are chosen (out of battles). The rules are in the game
+// (src/core/battle.cpp).
 (() => {
   'use strict';
 
@@ -15,12 +16,23 @@
     shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
       'stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/>' +
       '<path d="M9 12l2 2 4-4"/></svg>',
+    // Mercy: a hand held open.
+    mercy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M7 11V6.5a1.5 1.5 0 0 1 3 0V11M10 10V5a1.5 1.5 0 0 1 3 0v5"/>' +
+      '<path d="M13 10V6a1.5 1.5 0 0 1 3 0v6M16 11.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4.5 14.5a1.6 1.6 0 0 1 2.5-2L7 11"/></svg>',
+    // Detection: waves around a point.
+    detect: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/>' +
+      '<path d="M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>',
   };
   const WHY = {
     cooldown: 'en recharge',
     noCompanion: 'aucun monstre sorti',
     full: 'PV au maximum',
     fleeing: 'pendant la fuite',
+    mana: 'pas assez de mana',
+    active: 'déjà actif',
+    training: 'inutile à l’entraînement',
   };
   const spellName = (id) => (LORE.spells[id] || { name: id }).name;
 
@@ -49,8 +61,19 @@
     setTimeout(() => button.classList.remove('pressed'), 120);
   });
 
+  // The magician's mana, above the spells.
+  const mana = $('mana');
+  function renderMana(s) {
+    mana.querySelector('.mana-fill').style.width = `${s.manaMax ? (100 * s.manaNow) / s.manaMax : 0}%`;
+    mana.querySelector('.mana-text').textContent = `${s.manaNow}/${s.manaMax}`;
+    mana.classList.toggle('low', s.manaNow < 6);
+    mana.title = `Mana : ${s.manaNow} / ${s.manaMax}`;
+    mana.setAttribute('aria-label', mana.title);
+  }
+
   function render() {
     const s = game.spells();
+    renderMana(s);
     const key = s.now.map((x) => x.id).join();
     if (key !== shown) {
       shown = key;
@@ -64,9 +87,12 @@
     s.now.forEach((x, i) => {
       const button = buttons[i];
       if (button.hidden) return;
+      const active = x.why === 'active';
       button.disabled = !!x.why;
-      button.style.setProperty('--cd', x.cooldownTotal ? x.cooldown / x.cooldownTotal : 0);
-      const label = `${spellName(x.id)}${x.why ? ` (${WHY[x.why] || x.why})` : ''}`;
+      button.classList.toggle('active', active);
+      button.classList.toggle('no-mana', x.why === 'mana');
+      button.style.setProperty('--cd', x.cooldownTotal && !(active && x.id === 'mercy') ? x.cooldown / x.cooldownTotal : 0);
+      const label = `${spellName(x.id)} · ${x.mana} mana${x.why ? ` (${WHY[x.why] || x.why})` : ''}`;
       button.title = label;
       button.setAttribute('aria-label', label);
     });
@@ -96,9 +122,11 @@
     if (id === 'none') return [el('p', { className: 'facts', textContent: 'Aucun sort : le bouton n’apparaît pas.' })];
     const known = game.spells().known.find((k) => k.id === id) || {};
     const kinds = known.combat && known.adventure ? 'combat et aventure' : known.combat ? 'combat seulement' : 'aventure seulement';
+    const wait = id === 'mercy' ? 'jusqu’à la fin du combat' : id === 'detect' ? 'dure 1 min'
+      : `recharge ${known.cooldown} s`;
     return [
       el('p', { textContent: (LORE.spells[id] || {}).text || '' }),
-      el('p', { className: 'facts', textContent: `Recharge : ${known.cooldown} s · ${kinds}` }),
+      el('p', { className: 'facts', textContent: `Coût : ${known.mana} mana · ${wait} · ${kinds}` }),
     ];
   }
 
@@ -116,7 +144,8 @@
         const button = el('button', { type: 'button', className: 'bestiary-entry spell-entry', id: `spell-slot-${y.slot}` }, [
           icon(id),
           el('span', {}, [el('strong', { textContent: id === 'none' ? 'Vide' : spellName(id) }),
-            el('small', { textContent: `${KIND[kind]} · touche ${y.key}` })]),
+            el('small', { textContent: `${KIND[kind]} · touche ${y.key}${id === 'none' ? '' :
+              ` · ${(s.known.find((k) => k.id === id) || {}).mana} mana`}` })]),
         ]);
         button.dataset.spell = id;
         if (y.slot === chosen) button.setAttribute('aria-current', 'true');
@@ -147,7 +176,8 @@
       el('div', {}, [el('h2', { textContent: id === 'none' ? 'Emplacement vide' : spellName(id) }),
         el('p', { className: 'facts', textContent: `Sort ${x.kind === 'combat' ? 'de combat' : 'd’aventure'} · touche ${x.key}` })]),
       edit]);
-    const body = [head];
+    const body = [head, el('p', { className: 'facts mana-line', textContent: `Ton mana : ${s.manaNow} / ${s.manaMax}. Il ne ` +
+      'revient pas tout seul : Odette, la soigneuse du village, le remplit. Il grandit avec ton niveau.' })];
     if (!editing) {
       body.push(...spellFacts(id));
       if (!s.editable) body.push(el('p', { className: 'facts', textContent: 'Les sorts se changent hors combat.' }));

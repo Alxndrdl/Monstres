@@ -153,6 +153,28 @@ window.MonstresLore = {
   spells: {
     heal: { name: 'Soin', text: 'Soigne ton monstre de 10 PV, ou le réveille s’il est K.O.' },
     shield: { name: 'Bouclier', text: 'Protège ton monstre : aucun coup ne le touche pendant 1 seconde.' },
+    mercy: { name: 'Retenue', text: 'Jusqu’à la fin du combat, le prochain coup de ton monstre qui mettrait ' +
+      'son adversaire K.O. le laisse à 1 PV : idéal pour le capturer.' },
+    detect: { name: 'Détection', text: 'Pendant 1 minute, le cristal de ton bâton cherche les monstres très rares à ' +
+      'moins de 50 m : variante très rare, forme chromatique ou élémentaire, micro ou alpha. S’il en sent un, ' +
+      'sa lumière pointe vers lui.' },
+  },
+  // Builds of the monsters (Form in src/core/world.hpp): variants of every species.
+  builds: {
+    micro: { name: 'Micro', sign: 'µ', description: 'Toute petite et plus faible que les autres, mais vive et ' +
+      'pleine de charme. Seules les femelles naissent micro.' },
+    alpha: { name: 'Alpha', sign: 'α', description: 'Plus grand et plus fort que ses semblables. On n’en croise ' +
+      'que très rarement.' },
+    omega: { name: 'Oméga', sign: 'Ω', description: 'Un géant, fort et résistant. Seuls des mâles deviennent oméga ; ' +
+      'on ne les voit que lors d’événements exceptionnels.' },
+  },
+  // A monster's gifts (in this order), from 0 to 20: no effect yet.
+  gifts: ['Force', 'Dextérité', 'Constitution', 'Charisme', 'Intelligence'],
+  // What variants change (Stat in src/core/variants.hpp).
+  stats: {
+    strength: 'force', dexterity: 'dextérité', constitution: 'constitution', charisma: 'charisme',
+    intelligence: 'intelligence', hp: 'points de vie', attack: 'attaque', defense: 'défense', speed: 'vitesse',
+    magic: 'magie',
   },
   moves: {
     bite: { name: 'Morsure', description: 'Un petit coup de dents rapide. On peut l’enchaîner.' },
@@ -189,6 +211,23 @@ window.MonstresLore = {
     forest: 'Forêt des Murmures',
     cave: 'Grotte aux Cristaux',
     castle: 'Château de Corbeval',
+    coast: 'Côte des Embruns',
+    hills: 'Contreforts du Nord',
+    plains: 'Terres sauvages',
+  },
+  // The regions of the continent (src/core/continent.hpp), for the map. Not
+  // reachable yet: names to refine.
+  regions: {
+    start: 'Vallée du Départ',
+    mountains: 'Monts Givrés',
+    volcano: 'Presqu’île du Volcan',
+    desert: 'Désert d’Ocre',
+    plains: 'Grandes Plaines',
+    forest: 'Forêt Profonde',
+    marsh: 'Marais des Brumes',
+    lake: 'Lac Miroir',
+    loneMountain: 'Mont Solitaire',
+    capital: 'La Capitale',
   },
   // Teleporters, by place (src/core: TeleporterId).
   teleporters: {
@@ -225,7 +264,10 @@ window.MonstresLore = {
       'Gaspard dit qu’il a vu le même cercle de pierres près du château.',
       'Ces vieilles pierres à runes, sur la place… Gaspard est persuadé qu’elles sont magiques.'],
     odette: ['Si tes monstres sont épuisés, va voir Odette : elle les soigne pour rien.',
-      'Odette a toujours une tisane pour les monstres fatigués.'],
+      'Odette a toujours une tisane pour les monstres fatigués.',
+      'Odette a un bâton de magicienne, comme toi. Elle peut te rendre ton mana.'],
+    giantChampi: ['Lison jure qu’elle a vu un Champi grand comme elle dans la forêt. Elle exagère sûrement…',
+      'Il paraît qu’au cœur de la forêt, les Champi sont plus grands qu’ailleurs. Demande à Lison !'],
     bastien: ['Bastien s’entraîne tous les jours avec son Champi, au bord du village. Il cherche un adversaire !',
       'Si tu veux te mesurer à un vrai dresseur, va voir Bastien, à l’entrée du village.'],
     teleportersDone: ['Gaspard raconte à tout le monde que tu as disparu dans un éclair de lumière !',
@@ -249,6 +291,14 @@ window.MonstresLore = {
         tell: 'Raconter tout à Gaspard',
       },
       done: 'Les cercles de pierres sont des téléporteurs ! Gaspard n’en revient pas.',
+    },
+    giantChampi: {
+      title: 'Le Champi géant', giver: 3, xp: 80,
+      summary: 'Lison a vu un Champi gigantesque au cœur de la forêt, entouré d’autres Champi plus grands que d’habitude. ' +
+        'Un Champi oméga ? Il est très costaud : il faudra bien l’affaiblir pour le capturer.',
+      steps: { catch: 'Capturer le Champi géant, au cœur de la forêt', show: 'Le montrer à Lison' },
+      done: 'Le Champi géant fait partie de ton équipe. Lison n’en revient pas.',
+      again: 'Tu l’avais relâché : cette fois, ni la quête ni sa capture ne rapportent d’expérience.',
     },
   },
 

@@ -80,6 +80,7 @@ inline constexpr float kWater = 1;    // waves and reflections
 inline constexpr float kGlowing = 2;  // gives its own light: as bright by night as by day
 inline constexpr float kFadeNear = 3; // lit, shrinks away between View::fade_near_* (grass, flowers)
 inline constexpr float kFadeFar = 4;  // lit, shrinks away between View::fade_far_* (small things)
+inline constexpr float kFadeTree = 5; // lit, shrinks away between View::fade_tree_* (trees and rocks far away)
 
 // Vertex colors with this alpha (opaque meshes: windows, lanterns) light up
 // at night (View::night).
@@ -117,10 +118,17 @@ struct DrawList {
   // version changes (for the landscape, which never moves).
   bool cached = false;
   uint32_t version = 0;
+  // Far lists (the continent beyond the playable area) are drawn first, with
+  // View::far_view_projection; then the depth is cleared and the others are
+  // drawn over them: each pass keeps a fine depth over its own range. Far
+  // things are all outside the playable square, near things inside it: seen
+  // from inside, a far thing is never in front of a near one.
+  bool far = false;
 };
 
 struct View {
   Mat4 view_projection;
+  Mat4 far_view_projection;  // for the far lists (DrawList::far)
   Mat4 inverse_view_projection;  // for the sky
   float camera_x = 0, camera_y = 0, camera_z = 0;
   float sun_x = 0, sun_y = 1, sun_z = 0;  // direction towards the sun disc, normalized
@@ -136,11 +144,14 @@ struct View {
   float night = 0;                              // 0 day .. 1 night: stars, lit windows
   PointLight lights[kMaxPointLights];
   size_t light_count = 0;
-  float fog_start = 45, fog_end = 320;
+  // Fog: none before fog_start, half of it fog_half meters farther, thickening
+  // on (exponentially), complete at fog_end.
+  float fog_start = 45, fog_half = 400, fog_end = 2000;
   // Where kFadeNear and kFadeFar instances shrink away: from (fade_x, fade_z), between start and end meters.
   float fade_x = 0, fade_z = 0;
   float fade_near_start = 1e6f, fade_near_end = 2e6f;
   float fade_far_start = 1e6f, fade_far_end = 2e6f;
+  float fade_tree_start = 1e6f, fade_tree_end = 2e6f;
   float time = 0;  // seconds, drives the wind
   bool sky = true;  // false: no sky, the background stays transparent (portraits)
 };

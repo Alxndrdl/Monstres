@@ -10,6 +10,7 @@ add_library(monstres_core STATIC
   variants.cpp
   battle.cpp
   quests.cpp
+  continent.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

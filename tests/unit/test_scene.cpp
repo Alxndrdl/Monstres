@@ -1,4 +1,5 @@
 #include "monstres/render/scene.hpp"
+#include "monstres/core/continent.hpp"
 #include "test_helpers.hpp"
 
 #include <cmath>
@@ -83,19 +84,23 @@ TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mount
     }
   }
 
-  // Extra trees only outside the playable area; far from the player, simplified.
-  size_t world_trees = 0;
-  for (const Object& o : w.objects) world_trees += o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine;
-  size_t border_trees = 0;
+  // The trees around the center are drawn (simplified far from the player), not the others.
+  const Vec2 center = landscape_center(w.player.pos.x, w.player.pos.z);
+  size_t around = 0;
+  for (const Object& o : w.objects) {
+    if (o.kind != ObjectKind::Tree && o.kind != ObjectKind::Pine) continue;
+    around += std::hypot(o.pos.x - center.x, o.pos.z - center.z) <= landscape::kObjectsRadius;
+  }
+  size_t drawn = 0;
   for (MeshId id : {MeshId::Tree, MeshId::Pine, MeshId::TreeFar, MeshId::PineFar}) {
     for (const Instance& t : batch(list, id)) {
-      if (std::max(std::fabs(t.x), std::fabs(t.z)) > rules::kWorldHalfSize + 1) ++border_trees;
+      ++drawn;
+      CHECK(std::hypot(t.x - center.x, t.z - center.z) <= landscape::kObjectsRadius + 1e-3f);
+      CHECK(t.material == kFadeTree);  // they shrink away before the edge
     }
   }
-  CHECK(border_trees > 200);
-  size_t drawn = 0;
-  for (MeshId id : {MeshId::Tree, MeshId::Pine, MeshId::TreeFar, MeshId::PineFar}) drawn += batch(list, id).size();
-  CHECK(drawn == world_trees + border_trees);
+  CHECK(drawn == around);
+  CHECK(around < w.objects.size() / 3);  // far from all of them
   for (MeshId id : {MeshId::Tree, MeshId::Pine}) {  // full trees near the player only
     for (const Instance& t : batch(list, id)) {
       CHECK(std::hypot(t.x - w.player.pos.x, t.z - w.player.pos.z) < landscape::kDetailRadius + landscape::kStep);
@@ -103,14 +108,36 @@ TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mount
   }
   CHECK(batch(list, MeshId::TreeFar).size() > batch(list, MeshId::Tree).size());
 
-  size_t mountains = 0;
-  for (size_t i = 0; i < kMountainVariants; ++i) {
-    for (const Instance& m : batch(list, mesh_offset(MeshId::Mountain0, i))) {
-      CHECK(std::sqrt(m.x * m.x + m.z * m.z) > 190.0f);
-      ++mountains;
-    }
+  // No painted mountains any more: the continent's relief is drawn instead (far lists).
+  for (size_t i = 0; i < kMountainVariants; ++i) CHECK(batch(list, mesh_offset(MeshId::Mountain0, i)).empty());
+  CHECK_FALSE(list.far);
+}
+
+TEST_CASE("the continent is drawn in the far pass: its ground, waters, lava, and the volcano's smoke") {
+  DrawList far;
+  build_far_landscape(far);
+  CHECK(far.far);
+  CHECK(far.cached);
+  CHECK(batch(far, MeshId::FarGround).size() == 1);
+  CHECK(batch(far, MeshId::FarWater).size() == 1);
+  CHECK(batch(far, MeshId::FarWater)[0].material == kWater);
+  CHECK(batch(far, MeshId::Lava)[0].material == kGlowing);
+  CHECK(batch(far, MeshId::Ground).empty());
+  DrawList smoke;
+  const World& w = cached_game(3);
+  build_far_dynamic(w, 12.0f, smoke);
+  CHECK(smoke.far);
+  const Crater crater = volcano_crater();
+  REQUIRE(batch(smoke, MeshId::Smoke).size() == 16);
+  for (const Instance& puff : batch(smoke, MeshId::Smoke)) {
+    CHECK(std::hypot(puff.x - crater.center.x, puff.z - crater.center.z) < 600.0f);
+    CHECK(puff.y > crater.lava_level);
   }
-  CHECK(mountains == 18);
+  // The near pass reaches beyond the playable area; the far one to the horizon, with a fog thick enough there.
+  const View v = build_view(w, Camera{}, 1.5f, 0);
+  CHECK(view_range::kNearFar > rules::kReliefHalfSize * 2.9f);  // the whole relief, from one of its corners
+  CHECK(v.fog_end <= view_range::kFarFar);
+  CHECK(v.fog_half < 3000.0f);
 }
 
 TEST_CASE("the landscape depends on the world only") {

@@ -30,6 +30,7 @@ uniform float uTime;
 uniform vec2 uFadeCenter;
 uniform vec2 uFadeNear;  // grass, flowers: shrink away between these distances
 uniform vec2 uFadeFar;   // small things
+uniform vec2 uFadeTree;  // trees and rocks far away
 out vec3 vNormal;
 out vec3 vWorld;
 out vec4 vColor;
@@ -41,7 +42,7 @@ void main() {
   float material = iScale.w;
   float fade = 1.0;
   if (material > 2.5) {
-    vec2 range = material > 3.5 ? uFadeFar : uFadeNear;
+    vec2 range = material > 4.5 ? uFadeTree : material > 3.5 ? uFadeFar : uFadeNear;
     fade = 1.0 - smoothstep(range.x, range.y, distance(iPosWind.xz, uFadeCenter));
     material = 0.0;  // then lit as usual
   }
@@ -78,7 +79,7 @@ uniform float uNight;
 uniform bool uOpaquePass;
 uniform float uTimeFs;
 uniform vec3 uFog;
-uniform vec2 uFogRange;
+uniform vec3 uFogRange;  // start, half (distance for half of it), end
 uniform int uLightCount;
 uniform vec4 uLightPos[MAX_LIGHTS];    // xyz, radius
 uniform vec3 uLightColors[MAX_LIGHTS];
@@ -117,7 +118,8 @@ void main() {
     color += uLightColor * (1.0 / 0.62) * glint * 0.8;  // the sun at noon: (1, 0.95, 0.85)
     alpha = max(alpha, fresnel * 0.9 * step(0.01, vColor.a));
   }
-  float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uCamera));
+  float d = distance(vWorld, uCamera);
+  float fog = max(1.0 - exp2(-max(d - uFogRange.x, 0.0) / uFogRange.y), smoothstep(uFogRange.z * 0.75, uFogRange.z, d));
   outColor = vec4(mix(color, uFog, fog), alpha);
 }
 )";
@@ -237,6 +239,7 @@ public:
     u_fade_center_ = glGetUniformLocation(mesh_program_, "uFadeCenter");
     u_fade_near_ = glGetUniformLocation(mesh_program_, "uFadeNear");
     u_fade_far_ = glGetUniformLocation(mesh_program_, "uFadeFar");
+    u_fade_tree_ = glGetUniformLocation(mesh_program_, "uFadeTree");
     u_sky_moon_ = glGetUniformLocation(sky_program_, "uMoon");
     u_sky_night_ = glGetUniformLocation(sky_program_, "uNight");
     u_fog_ = glGetUniformLocation(mesh_program_, "uFog");
@@ -338,16 +341,33 @@ public:
       }
     }
     glUniform3f(u_fog_, view.fog.r, view.fog.g, view.fog.b);
-    glUniform2f(u_fog_range_, view.fog_start, view.fog_end);
+    glUniform3f(u_fog_range_, view.fog_start, view.fog_half, view.fog_end);
     glUniform2f(u_fade_center_, view.fade_x, view.fade_z);
     glUniform2f(u_fade_near_, view.fade_near_start, view.fade_near_end);
     glUniform2f(u_fade_far_, view.fade_far_start, view.fade_far_end);
+    glUniform2f(u_fade_tree_, view.fade_tree_start, view.fade_tree_end);
     glEnable(GL_DEPTH_TEST);
     for (const DrawList* list : lists) {
       if (list->cached) update_cache(*list);
     }
+    // The far lists first, with their own depth range; then the near ones over them.
+    const bool any_far = std::any_of(lists.begin(), lists.end(), [](const DrawList* l) { return l->far; });
+    if (any_far) {
+      glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.far_view_projection.m);
+      draw_lists(lists, true);
+      glDepthMask(GL_TRUE);
+      glClear(GL_DEPTH_BUFFER_BIT);
+      glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.view_projection.m);
+    }
+    draw_lists(lists, false);
+    glBindVertexArray(0);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+  }
 
-    // Opaque first (depth writes on), then transparent (blended, no depth writes).
+  // The lists of one pass (far or near): opaque meshes first (depth writes
+  // on), then transparent ones (blended, no depth writes).
+  void draw_lists(std::span<const DrawList* const> lists, bool far) {
     for (bool transparent : {false, true}) {
       glDepthMask(transparent ? GL_FALSE : GL_TRUE);
       if (transparent) glEnable(GL_BLEND); else glDisable(GL_BLEND);
@@ -358,7 +378,7 @@ public:
         if (m.double_sided) glDisable(GL_CULL_FACE); else glEnable(GL_CULL_FACE);
         glBindVertexArray(m.vao);
         for (const DrawList* list : lists) {
-          if (i >= list->batches.size() || list->batches[i].empty()) continue;
+          if (list->far != far || i >= list->batches.size() || list->batches[i].empty()) continue;
           const auto& instances = list->batches[i];
           if (list->cached) {
             glBindBuffer(GL_ARRAY_BUFFER, cache_[list].buffers[i]);
@@ -539,7 +559,7 @@ private:
   GLint u_opaque_pass_ = -1;
   GLint u_light_color_ = -1, u_ambient_sky_ = -1, u_ambient_ground_ = -1, u_night_ = -1;
   GLint u_light_count_ = -1, u_light_pos_ = -1, u_light_colors_ = -1, u_sky_moon_ = -1, u_sky_night_ = -1;
-  GLint u_fade_center_ = -1, u_fade_near_ = -1, u_fade_far_ = -1;
+  GLint u_fade_center_ = -1, u_fade_near_ = -1, u_fade_far_ = -1, u_fade_tree_ = -1;
   GLuint sky_vao_ = 0;
   GLuint instance_vbo_ = 0;
   bool profiling_ = false;
