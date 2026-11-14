@@ -671,28 +671,16 @@ const Moves& species_moves(Species species) {
   return kMoves[i < kSpeciesCount ? i : 0];
 }
 
-FightStats build_percent(Form form) {
-  // Hit points, attack, defense, speed, magic.
-  static constexpr FightStats kBuilds[] = {
-      {100, 100, 100, 100, 100},  // Normal
-      {80, 80, 80, 115, 100},     // Micro: small and quick
-      {125, 125, 125, 105, 120},  // Alpha
-      {180, 150, 160, 90, 130},   // Omega
-  };
-  return kBuilds[static_cast<size_t>(form) < std::size(kBuilds) ? static_cast<size_t>(form) : 0];
-}
-
 FightStats monster_fight_stats(Species species, uint16_t level, const Genes& genes) {
   const MonsterStats& s = monster_stats(species);
   const uint32_t l = std::max<uint16_t>(level, 1) - 1u;
-  const FightStats k = build_percent(genes.form);
-  const auto grow = [&](uint16_t base, uint32_t per, uint32_t percent, Stat stat) {
-    const int v = static_cast<int>((base + base * l / per) * percent / 100) + stat_mod(species, genes, stat);
+  // The variants (builds too) change only the gifts' bonuses (stat_mod).
+  const auto grow = [&](uint16_t base, uint32_t per, Stat stat) {
+    const int v = static_cast<int>(base + base * l / per) + stat_mod(species, genes, stat);
     return static_cast<uint16_t>(std::max(1, v));
   };
-  return {grow(s.hp, 8, k.hp, Stat::Hp), grow(s.attack, 10, k.attack, Stat::Attack),
-          grow(s.defense, 10, k.defense, Stat::Defense), grow(s.speed, 10, k.speed, Stat::Speed),
-          grow(s.magic, 10, k.magic, Stat::Magic)};
+  return {grow(s.hp, 8, Stat::Hp), grow(s.attack, 10, Stat::Attack), grow(s.defense, 10, Stat::Defense),
+          grow(s.speed, 10, Stat::Speed), grow(s.magic, 10, Stat::Magic)};
 }
 
 const Temper& species_temper(Species species) {

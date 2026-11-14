@@ -213,21 +213,21 @@ TEST_CASE("the bestiary lists the micro, alpha and omega builds after the rare f
   CHECK(bestiary_json(cached_game(3)).find("\"id\":\"alpha\",\"kind\":\"build\"") != std::string::npos);
 }
 
-TEST_CASE("builds: an alpha is stronger, a micro weaker, an omega much stronger") {
+TEST_CASE("builds change the gifts' bonuses only, not the fight stats (but the size the monster is drawn)") {
   const FightStats normal = monster_fight_stats(Species::Slime, 5);
-  const auto with = [](Form form) {
+  for (const Form form : {Form::Micro, Form::Alpha, Form::Omega}) {
     Genes g;
     g.form = form;
     g.allele[0] = form == Form::Micro ? 1 : 0;
-    return monster_fight_stats(Species::Slime, 5, g);
-  };
-  const FightStats micro = with(Form::Micro), alpha = with(Form::Alpha), omega = with(Form::Omega);
-  CHECK(micro.hp < normal.hp);
-  CHECK(micro.attack < normal.attack);
-  CHECK(alpha.hp > normal.hp);
-  CHECK(alpha.attack > normal.attack);
-  CHECK(omega.hp > alpha.hp);
-  CHECK(omega.defense > alpha.defense);
+    const FightStats f = monster_fight_stats(Species::Slime, 5, g);
+    CHECK(f.hp == normal.hp);
+    CHECK(f.attack == normal.attack);
+    CHECK(f.defense == normal.defense);
+    CHECK(f.speed == normal.speed);
+    CHECK(f.magic == normal.magic);
+  }
+  CHECK(build_scale(Form::Omega) > build_scale(Form::Alpha));
+  CHECK(build_scale(Form::Micro) < 1);
 }
 
 TEST_CASE("traits: gifts drawn from 5 to 15, moved by the build; sizes by build; the same for one monster") {

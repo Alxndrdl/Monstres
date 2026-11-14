@@ -336,12 +336,6 @@ std::string bestiary_json(const World& w) {
       s += "],\"elements\":" + elements_json(creature_elements(species, genes));
       s += ",\"look\":" + std::to_string(genes_code(genes));
       s += ",\"mods\":" + mods_json(species, v);
-      if (var.kind == VariantKind::Build) {
-        const FightStats p = build_percent(static_cast<Form>(var.gene));
-        s += ",\"fight\":{\"hp\":" + std::to_string(p.hp) + ",\"attack\":" + std::to_string(p.attack) +
-             ",\"defense\":" + std::to_string(p.defense) + ",\"speed\":" + std::to_string(p.speed) +
-             ",\"magic\":" + std::to_string(p.magic) + ",\"size\":" + num(build_scale(static_cast<Form>(var.gene))) + "}";
-      }
       s += std::string(",\"status\":\"") + kStatus[static_cast<size_t>(known[v])] + "\"}";
     }
     s += "]";

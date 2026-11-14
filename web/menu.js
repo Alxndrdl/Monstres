@@ -287,8 +287,9 @@
 
   // The gifts as a spider web: one axis each, 0 a little away from the
   // middle (the lowest values stay apart), 20 at the edge; the range its
-  // variants allow drawn faintly behind. Hovering (or touching) a gift tells
-  // its value, its range, and where its modifiers come from.
+  // variants allow drawn faintly behind. Beside it, the chosen gift (touched,
+  // or the first one; hovering shows another for a moment): its value, its
+  // range, and where its modifiers come from.
   function giftWeb(m) {
     const NS = 'http://www.w3.org/2000/svg';
     const details = m.giftDetails;
@@ -322,9 +323,9 @@
     add('polygon', { points: poly(details.map((d) => d.min)), class: 'web-range-low' });
     add('polygon', { points: poly(details.map((d) => d.value)), class: 'web-value' });
 
-    const tip = el('div', { className: 'gift-tip', hidden: true });
-    tip.setAttribute('role', 'tooltip');
-    let pinned = -1;  // touched: it stays until touched again
+    const tip = el('div', { className: 'gift-info' });
+    tip.setAttribute('aria-live', 'polite');
+    let chosen = 0;  // touched (or the first one): shown when nothing is hovered
     const showTip = (k) => {
       const d = details[k];
       const mods = d.mods.length ? d.mods.map((x) => el('li', {}, [
@@ -339,19 +340,9 @@
         el('ul', {}, mods),
         el('p', { className: 'tip-range', textContent: `Minimum ${d.min} · maximum ${d.max}` }),
       );
-      const [x, y] = point(k, 26);
-      // Beside its label, towards the middle; above it for the gifts at the bottom.
-      tip.style.transform = `translate(${x > 20 ? '-100%' : x < -20 ? '0' : '-50%'}, ${y > 10 ? 'calc(-100% - 22px)' : '12px'})`;
-      tip.style.left = `${50 + (x / 370) * 100}%`;
-      tip.style.top = `${50 + (y / 200) * 100}%`;
-      tip.hidden = false;
       for (const g of svg.querySelectorAll('.web-hit')) g.classList.toggle('on', Number(g.dataset.gift) === k);
     };
-    const hideTip = () => {
-      if (pinned >= 0) return;
-      tip.hidden = true;
-      for (const g of svg.querySelectorAll('.web-hit')) g.classList.remove('on');
-    };
+    const hideTip = () => showTip(chosen);
     details.forEach((d, k) => {
       const [x, y] = point(k, d.value);
       const [lx, ly] = point(k, 26);
@@ -370,39 +361,16 @@
       label.textContent = text;
       group.addEventListener('pointerenter', (event) => { if (event.pointerType === 'mouse') showTip(k); });
       group.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse') hideTip(); });
-      group.addEventListener('focus', () => showTip(k));
-      group.addEventListener('blur', hideTip);
-      group.addEventListener('click', () => {
-        pinned = pinned === k ? -1 : k;
-        if (pinned >= 0) showTip(k);
-        else hideTip();
-      });
+      group.addEventListener('focus', () => { chosen = k; showTip(k); });
+      group.addEventListener('click', () => { chosen = k; showTip(k); });
     });
-    box.append(svg, tip);
-    return box;
-  }
-
-  // The fight stats, with the points some variants add (hover: from where).
-  function fightStats(m) {
-    const stats = el('dl', { className: 'stats' });
-    const rows = [['hp', 'Points de vie', m.maxHp, 80], ['attack', 'Attaque', m.attack, 25],
-      ['defense', 'Défense', m.defense, 25], ['speed', 'Vitesse', m.speed, 25], ['magic', 'Magie', m.magic, 25]];
-    statList(stats, rows.map(([key, label, value, max]) => {
-      const mods = (m.statMods || {})[key] || [];
-      const total = mods.reduce((a, x) => a + x.value, 0);
-      return [label, value, max, total ? `${value} (${signed(total)})` : undefined];
-    }));
-    rows.forEach(([key], i) => {
-      const mods = (m.statMods || {})[key];
-      if (mods) stats.children[i].title = mods.map((x) => `${sourceName(m.species, x.source)} : ${signed(x.value)}`).join('\n');
-    });
-    return stats;
+    box.append(svg);
+    showTip(chosen);
+    return el('div', { className: 'gift-layout' }, [box, tip]);
   }
 
   function renderMember(m, teamSize) {
     const info = LORE.species[m.species];
-    const texts = info.variants || {};
-    const stats = fightStats(m);
     const variants = m.variants.filter((id) => !id.startsWith('sex.') && !LORE.builds[id])
       .map((id) => (id.includes('.') ? '' : '✦ ') + (variantText(m.species, id).name || id));
     const build = m.form !== 'normal' ? el('span', { className: `badge build ${m.form}`,
@@ -440,7 +408,6 @@
         el('p', { className: 'facts measures', textContent: `Taille : ${sizeText(m.sizeMm)} · poids : ` +
           `${weightText(m.weightG)} · âge : ${ageText(m.ageDays)}` }),
       ]),
-      stats,
       el('section', { className: 'gifts-box' }, [el('h3', { textContent: 'Aptitudes' }), giftWeb(m)]),
       el('section', { className: 'moves-box' }, [el('h3', { textContent: 'Attaques' }), moves]),
       releaseBox(m, teamSize),
@@ -685,20 +652,10 @@
     }));
   }
 
-  // What a variant changes: gifts and fight stats; a build, its size and
-  // its fight stats in percent too.
+  // What a variant changes: the bonuses of its gifts and stats.
   function variantEffects(v) {
     const items = (v.mods || []).map((x) => el('li', { className: x.value > 0 ? 'up' : 'down',
       textContent: `${signed(x.value)} ${LORE.stats[x.stat] || x.stat}` }));
-    if (v.fight) {
-      const f = v.fight;
-      items.push(el('li', { className: f.size > 1 ? 'up' : 'down',
-        textContent: `taille ×${f.size.toLocaleString('fr-FR', { maximumFractionDigits: 2 })}` }));
-      for (const key of ['hp', 'attack', 'defense', 'speed', 'magic']) {
-        if (f[key] === 100) continue;
-        items.push(el('li', { className: f[key] > 100 ? 'up' : 'down', textContent: `${signed(f[key] - 100)} % ${LORE.stats[key]}` }));
-      }
-    }
     if (!items.length) return el('p', { className: 'facts variant-effects none', textContent: 'Effets : aucun sur ses aptitudes.' });
     return el('div', { className: 'variant-effects' }, [el('span', { className: 'facts', textContent: 'Effets :' }),
       el('ul', {}, items)]);

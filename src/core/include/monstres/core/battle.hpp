@@ -119,7 +119,7 @@ struct FightStats {
 FightStats monster_fight_stats(Species species, uint16_t level, const Genes& genes = {});
 inline FightStats monster_fight_stats(const Monster& m) { return monster_fight_stats(m.species, m.level, m.genes); }
 // A build's fight stats, in percent of a normal one's.
-FightStats build_percent(Form form);
+
 uint32_t monster_xp_to_next(uint16_t level);
 
 // Hit points dealt by `move` of an attacker with these characteristics.

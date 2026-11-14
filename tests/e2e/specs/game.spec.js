@@ -678,7 +678,19 @@ test.describe('battles', () => {
     await page.evaluate(() => window.monstres.step(1));
     expect((await page.evaluate(() => window.monstres.battle())).phase).toBe('training');
     await expect(page.locator('#attack-1')).toBeVisible();
-    await expect(page.locator('.fighter.enemy')).toBeHidden();  // no hit points: no one is hurt
+    // The same screen as against a monster: the magician at the top (behind
+    // its shield, no hit points), the companion's hit points at the bottom,
+    // the mana beside them.
+    await expect(page.locator('.fighter.enemy')).toBeVisible();
+    await expect(page.locator('.fighter.enemy .hp-text')).toContainText('bouclier');
+    await expect(page.locator('.fighter.enemy .hp-bar')).toBeHidden();
+    await expect(page.locator('.fighter.ally')).toBeVisible();
+    await expect(page.locator('.fighter.ally strong')).toHaveText('Pompon');
+    await expect(page.locator('.fighter.ally .hp-text')).toContainText('PV');
+    await expect(page.locator('#mana')).toBeVisible();
+    const [ally, mana] = await Promise.all(['.fighter.ally', '#mana'].map((s) => page.locator(s).boundingBox()));
+    expect(mana.x).toBeGreaterThan(ally.x + ally.width - 1);  // just right of it
+    expect(Math.abs(mana.y + mana.height - (ally.y + ally.height))).toBeLessThan(2);  // on the same line
     const hp = (await page.evaluate(() => window.monstres.team()))[0].hp;
     await page.evaluate(() => {
       const m = window.monstres;
@@ -698,6 +710,7 @@ test.describe('battles', () => {
     await page.evaluate(() => window.monstres.step(1));
     expect((await page.evaluate(() => window.monstres.battle())).phase).toBe('none');
     await expect(page.locator('#attack-1')).toBeHidden();
+    await expect(page.locator('.fighter.ally')).toBeHidden();
   });
 });
 
@@ -874,14 +887,19 @@ test.describe('the bigger world', () => {
   test('a gift tells its range and modifiers; variants tell their effects; Lison and the giant Champi', async ({ page }) => {
     await openGame(page, '?seed=3&new&frozen');
     await page.keyboard.press('e');
-    // Focused (hovered, or touched): the detail of the gift. (Hover is not
-    // simulated here: WebKit's pointer lands beside the label in this scrolled panel.)
-    await page.locator('.web-hit').first().focus();
-    const tip = page.locator('.gift-tip');
+    // Beside the web: the detail of the first gift, then of the one chosen.
+    // (Hover is not simulated here: WebKit's pointer lands beside the label.)
+    const tip = page.locator('#team-detail .gift-info');
     await expect(tip).toBeVisible();
     await expect(tip).toContainText('Force');
     await expect(tip).toContainText('Minimum 5 · maximum 15');
     await expect(tip).toContainText('Aucun modificateur');
+    await page.locator('.web-hit').nth(1).focus();
+    await expect(tip).toContainText('Dextérité');
+    // No more fight-stat bars on the sheet; the list and the sheet scroll each on their own.
+    await expect(page.locator('#team-detail > .stats')).toHaveCount(0);
+    const scroll = await page.evaluate(() => ['team-detail', 'tab-team'].map((id) => getComputedStyle(document.getElementById(id)).overflowY));
+    expect(scroll).toEqual(['auto', 'hidden']);
     // The bestiary: the omega's effects.
     await page.keyboard.press('b');
     await page.locator('.bestiary-entry[data-species="mushroom"]').click();

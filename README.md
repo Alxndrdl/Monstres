@@ -371,12 +371,14 @@ entouré d'étincelles). Les gènes sont tirés depuis la graine, un flux par
 créature : ils ne changent rien d'autre au monde.
 
 Gabarit : chaque monstre est normal, ou très rarement micro (une femelle sur
-128 : 62 % de la taille, plus faible, plus vif) ou alpha (1 sur 256 : 140 % de
-la taille, plus fort) ; les oméga (230 %, mâles seulement, bien plus forts et
-résistants) ne se trouvent pas dans la nature, seulement lors d'événements
+128 : 62 % de la taille) ou alpha (1 sur 256 : 140 % de la taille) ; les oméga
+(230 %, mâles seulement) ne se trouvent pas dans la nature, seulement lors d'événements
 spéciaux (le Champi géant de la forêt, voir Quêtes). Le gabarit est tiré après
 les autres gènes, et ses trois variantes (micro, alpha, oméga) viennent après
-les formes rares dans le bestiaire (« Gabarits »).
+les formes rares dans le bestiaire (« Gabarits »). Comme les autres variantes,
+un gabarit ne change que les bonus des aptitudes (voir plus bas), pas les
+points de vie, l'attaque, la défense, la vitesse ni la magie ; seule sa taille
+à l'écran change.
 
 Un monstre qui rejoint l'équipe reçoit ses traits, tirés de la graine et de
 son identifiant (`roll_traits`) : sa taille et son poids (selon l'espèce, le
@@ -391,14 +393,20 @@ variantes modifient (`variant_mods`), entre 0 et 20 :
 - Gloubi (les autres espèces viendront) : antennes +1 intelligence ; trois yeux
   +1 intelligence et -1 constitution ; un œil -1 intelligence et +1
   constitution ; corne -1 charisme et +2 en défense (une caractéristique de
-  combat : affichée « 9 (+2) » sur sa fiche).
+  combat).
 
-Elles n'ont pas encore d'effet. Sur la fiche d'un monstre, elles forment une
-toile d'araignée (le 0 un peu écarté du centre, la plage possible en
-pointillés) ; survoler, toucher ou sélectionner au clavier une aptitude montre
-sa valeur, sa base, son minimum et son maximum, et chaque modificateur avec sa
-source. Dans le bestiaire, la fiche d'une variante dit ses effets (et pour un
-gabarit, sa taille et ses caractéristiques de combat en pourcentage).
+Elles n'ont pas encore d'effet. Sur la fiche d'un monstre (Équipe), sous
+« Aptitudes », elles forment une toile d'araignée (le 0 un peu écarté du
+centre, la plage possible en pointillés) ; à sa droite, le détail de
+l'aptitude choisie (la première au départ ; toucher, cliquer ou sélectionner
+au clavier en choisit une autre, la survoler la montre un instant) : sa
+valeur, sa base, son minimum et son maximum, et chaque modificateur avec sa
+source. Dans le bestiaire, la fiche d'une variante dit ses effets sur les
+aptitudes.
+
+Dans le grimoire, les pages en deux colonnes (Équipe, Sorts, Quêtes,
+Bestiaire) font défiler la liste de gauche et la fiche de droite chacune de
+son côté.
 
 Le bestiaire retient pour
 chaque variante si elle est inconnue, aperçue ou capturée (dans la
@@ -528,8 +536,10 @@ en combat, mais face au magicien, qui lève son bâton et se protège d'un
 bouclier de lumière : chaque coup s'y brise (le nombre affiché est ce que
 l'attaque aurait infligé à un monstre de même niveau), personne n'est blessé.
 L'icône du magicien en haut de l'écran (ou le magicien lui-même) se vise ou se
-« dévise » comme un adversaire. « Arrêter l'entraînement » (ou rappeler le
-compagnon) y met fin. Pas de forces ni de
+« dévise » comme un adversaire. L'écran est celui d'un combat : le magicien
+en haut (sans points de vie : son bouclier encaisse tout), les points de vie
+du compagnon en bas. « Arrêter l'entraînement » (ou rappeler le compagnon) y
+met fin. Pas de forces ni de
 faiblesses entre éléments pour l'instant. Les combats ne sont pas sauvegardés :
 une partie rechargée pendant un combat reprend sans lui.
 
@@ -541,7 +551,8 @@ d'aventure (le reste du temps), qu'on change hors combat. Ils se lancent avec
 les deux boutons à côté des attaques (touches R et G), qui montrent leur
 recharge ; un sort qui dure brille tant qu'il agit.
 
-Chaque sort coûte du mana (barre bleue au-dessus des boutons). Le mana ne
+Chaque sort coûte du mana (en bas de l'écran, juste à droite des points de
+vie du compagnon, dans le même cadre avec une barre bleue). Le mana ne
 revient pas tout seul : Odette le remplit. Il vaut 20 au niveau 1 et grandit
 de 5 par niveau du magicien (un nouveau niveau ajoute ces 5 points).
 - Soin (combat et aventure, 4 mana) : +10 points de vie, ou réveille un

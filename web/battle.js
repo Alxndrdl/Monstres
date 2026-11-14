@@ -245,10 +245,34 @@
   }
 
   let tagsFor = '';
+  let trainer = null;  // the magician's name and level, read when a training starts
   function renderHud(b) {
-    hud.hidden = b.phase === 'none' || b.phase === 'training' || b.phase === 'prepare';
+    hud.hidden = b.phase === 'none' || b.phase === 'prepare';
     renderFoeIcons(b);
-    if (hud.hidden) return;
+    if (hud.hidden) {
+      trainer = null;
+      return;
+    }
+    if (b.phase === 'training') {
+      // As against a monster: the one trained against at the top (the magician,
+      // behind its shield: no hit points), the companion's hit points at the bottom.
+      if (!trainer) {
+        const w = typeof game.wizard === 'function' ? game.wizard() : {};
+        trainer = { name: (w.name || '').trim() || 'Ton magicien', level: w.level || 1 };
+      }
+      sides.enemy.classList.add('free');
+      sides.enemy.classList.remove('windup');
+      sides.enemy.querySelector('strong').textContent = trainer.name;
+      sides.enemy.querySelector('.level').textContent = `niv. ${trainer.level}`;
+      sides.enemy.querySelector('.hp-text').textContent = 'Entraînement : son bouclier encaisse tes attaques.';
+      sides.enemy.querySelector('.tags').replaceChildren();
+      tagsFor = '';
+      captureMark.hidden = true;
+      sides.ally.hidden = !b.ally;
+      if (b.ally) showSide(sides.ally, speciesName(b.ally.species), b.ally.level, b.ally.hp, b.ally.maxHp);
+      return;
+    }
+    trainer = null;
     const aimed = b.target >= 0 && b.enemy;
     sides.enemy.classList.toggle('free', !aimed);
     if (aimed) {
