@@ -47,7 +47,7 @@ struct Scene {
   float flash = 0;
   DrawList far_list, near_list;
 };
-Scene look(const WeatherField& field, float yaw = 0) {
+Scene look_at_sky(const WeatherField& field, float yaw = 0) {
   World w = cached_game(42);
   w.clock = 12 * rules::kTicksPerHour;
   Camera camera;
@@ -161,9 +161,9 @@ TEST_CASE("lightning strikes in storms only, now and then, briefly") {
 }
 
 TEST_CASE("a clear sky has few clouds, an overcast one is full of grey ones") {
-  const Scene clear = look(forced(WeatherKind::Clear));
-  const Scene few = look(forced(WeatherKind::FewClouds));
-  const Scene overcast = look(forced(WeatherKind::Overcast));
+  const Scene clear = look_at_sky(forced(WeatherKind::Clear));
+  const Scene few = look_at_sky(forced(WeatherKind::FewClouds));
+  const Scene overcast = look_at_sky(forced(WeatherKind::Overcast));
   CHECK(clouds(clear.far_list) < clouds(few.far_list));
   CHECK(clouds(few.far_list) < clouds(overcast.far_list));
   CHECK(clouds(few.far_list) > 10);
@@ -186,18 +186,18 @@ TEST_CASE("a clear sky has few clouds, an overcast one is full of grey ones") {
 }
 
 TEST_CASE("rain falls around the camera, and is seen afar under its clouds") {
-  const Scene rain = look(forced(WeatherKind::Rain));
+  const Scene rain = look_at_sky(forced(WeatherKind::Rain));
   CHECK(count(rain.near_list, MeshId::Rain) > 10);
   CHECK(count(rain.near_list, MeshId::Snow) == 0);
   for (const Instance& d : rain.near_list.batches[static_cast<size_t>(MeshId::Rain)]) {
     CHECK(std::hypot(d.x - rain.view.camera_x, d.z - rain.view.camera_z) < 40);
   }
-  CHECK(rain.view.fog_half < look(forced(WeatherKind::Clear)).view.fog_half * 0.6f);  // hazy
+  CHECK(rain.view.fog_half < look_at_sky(forced(WeatherKind::Clear)).view.fog_half * 0.6f);  // hazy
   // Fine weather here, a storm ahead: its curtains of rain, its dark clouds.
   WeatherField afar = forced(WeatherKind::Clear);
   afar.afar = true;
   afar.afar_at = {0, -weather::kAfarDistance};  // ahead: the camera looks towards -Z
-  const Scene s = look(afar);
+  const Scene s = look_at_sky(afar);
   CHECK(count(s.near_list, MeshId::Rain) == 0);
   int afar_shafts = 0;
   for (const Instance& shaft : s.far_list.batches[static_cast<size_t>(MeshId::RainShaft)]) {
@@ -217,13 +217,13 @@ TEST_CASE("rain falls around the camera, and is seen afar under its clouds") {
 }
 
 TEST_CASE("snow falls slowly, fog closes in, and a bolt nearby lights everything") {
-  const Scene snow = look(forced(WeatherKind::Snow));
+  const Scene snow = look_at_sky(forced(WeatherKind::Snow));
   CHECK(count(snow.near_list, MeshId::Snow) > 10);
   CHECK(count(snow.near_list, MeshId::Rain) == 0);
-  const Scene fog = look(forced(WeatherKind::Fog));
+  const Scene fog = look_at_sky(forced(WeatherKind::Fog));
   CHECK(fog.view.fog_end < 600);
   CHECK(fog.view.fog_half < 100);
-  CHECK(clouds(fog.far_list) < clouds(look(forced(WeatherKind::FewClouds)).far_list));  // lost in it
+  CHECK(clouds(fog.far_list) < clouds(look_at_sky(forced(WeatherKind::FewClouds)).far_list));  // lost in it
   // A storm: wait for a bolt near the camera.
   WeatherField storm = forced(WeatherKind::Storm);
   Lightning bolt;
@@ -232,10 +232,10 @@ TEST_CASE("snow falls slowly, fog closes in, and a bolt nearby lights everything
     bolt = lightning_at(storm, 0, 0);
   }
   REQUIRE(bolt.on);
-  const Scene lit = look(storm);
+  const Scene lit = look_at_sky(storm);
   CHECK(lit.flash > 0.5f);
   CHECK(count(lit.far_list, MeshId::Bolt) == 1);
   storm.tick += weather::kBoltTicks + 1;
   WeatherField dark = storm;
-  if (!lightning_at(dark, 0, 0).on) CHECK(look(dark).view.light_color.r < lit.view.light_color.r);
+  if (!lightning_at(dark, 0, 0).on) CHECK(look_at_sky(dark).view.light_color.r < lit.view.light_color.r);
 }

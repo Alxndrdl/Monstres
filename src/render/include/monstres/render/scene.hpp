@@ -109,6 +109,8 @@ float night_amount(const World& world);
 
 // Camera matrices, sky and lighting (time of day, lanterns...) for one frame.
 View build_view(const World& world, const Camera& camera, float aspect, float time);
+// The same from any place, looking at `target` (the arrival's flight, intro.hpp).
+View build_view_from(const World& world, Vec3 eye, Vec3 target, float aspect, float time);
 
 // A portrait for the menus: one figure (see add_portrait_figure), framed
 // from a little above, lit from the front, without sky (draw it with
@@ -118,6 +120,15 @@ struct Portrait {
   View view;
 };
 Portrait build_portrait(const PortraitSubject& subject, float aspect);
+
+// The same figure, seen from wherever the player turns, zooms and moves the
+// camera (the character creation): `yaw` turns around it (0: from the
+// front, +Z), `pitch` from above, `zoom` closer (1: the whole figure),
+// `pan` moves its middle (meters). `time`: its breathing.
+struct PreviewCamera {
+  float yaw = 0.3f, pitch = 0.15f, zoom = 1, pan_x = 0, pan_y = 0;
+};
+Portrait build_preview(const PortraitSubject& subject, float aspect, const PreviewCamera& camera, float time);
 
 // The creature under a point of the screen, given in normalized device
 // coordinates (-1..1, y up), or -1. Creatures are a little easier to hit

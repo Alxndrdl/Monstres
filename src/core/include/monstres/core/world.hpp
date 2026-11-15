@@ -183,6 +183,8 @@ enum class Species : uint8_t {
   Villager,   // village people, variant = look
   Crow,       // Croa, perches on roofs, flies away when approached
   Fish,       // Bloup, swims in the lake and jumps out of it
+  Spark,      // Zapou, a little mouse of lightning, quick on its feet
+  Axolotl,    // Ploufi, an axolotl walking on the banks
   Count
 };
 
@@ -268,6 +270,32 @@ struct Monster {
   bool operator==(const Monster&) const = default;
 };
 
+// How the player's magician looks, chosen with a new game: each a choice
+// among a few (the colors themselves are the renderer's, see
+// characters.cpp). Visual only.
+namespace look {
+inline constexpr uint8_t kSkins = 6, kHairStyles = 4, kHairColors = 8, kEyeColors = 6, kRobeColors = 8;
+inline constexpr uint8_t kShortHair = 0, kLongHair = 1, kBun = 2, kShaved = 3;
+inline constexpr uint8_t kStaff = 0, kWand = 1;
+inline constexpr uint8_t kHat = 0, kHood = 1, kBareHead = 2;
+}  // namespace look
+struct WizardLook {
+  bool woman = false;      // also its silhouette
+  uint8_t skin = 0;        // < look::kSkins
+  uint8_t hair = look::kShortHair;
+  uint8_t hair_color = 0;  // < look::kHairColors
+  uint8_t eyes = 0;        // < look::kEyeColors
+  uint8_t staff = look::kStaff;
+  uint8_t robe = 0;        // < look::kRobeColors
+  uint8_t headwear = look::kHat;
+  bool operator==(const WizardLook&) const = default;
+};
+bool valid_look(const WizardLook& look);
+// A look as one number and back (the page's): bits 0 woman, 1-3 skin, 4-5
+// hair, 6-8 hair color, 9-11 eyes, 12 wand, 13-15 robe, 16-17 headwear.
+uint32_t look_code(const WizardLook& look);
+WizardLook look_from_code(uint32_t code);
+
 // The player's magician. Its mana pays for its spells; it does not come
 // back by itself (the healer fills it up), its most grows with its level.
 struct Wizard {
@@ -275,6 +303,7 @@ struct Wizard {
   uint16_t level = 1;
   uint32_t xp = 0;
   uint16_t mana = 20;  // left (wizard_stats(...).mana at most)
+  WizardLook look;
   bool operator==(const Wizard&) const = default;
 };
 inline constexpr size_t kMaxNameBytes = 24;
@@ -465,6 +494,7 @@ inline constexpr uint8_t kGaspard = 2;    // stands by the village's teleporter,
 inline constexpr uint8_t kLison = 3;      // saw a giant Champi in the heart of the forest
 inline constexpr uint8_t kBastien = 4;    // a trainer: he offers battles against his monsters
 inline constexpr uint8_t kOdette = 5;     // the healer: she heals the team, for free
+inline constexpr uint8_t kMentor = 9;     // Isidore, the old magician: the main quest (after the 8 villagers)
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
@@ -474,7 +504,10 @@ enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Count 
 inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Count);
 
 // Quests (see quests.hpp).
-enum class QuestId : uint8_t { LostPiou, Teleporters, GiantChampi, Count };
+// The main quest (Isidore's): its first part is the village's quests that
+// teach the game: the lost Piou (capturing), the teleporters, Bastien's
+// battle (fighting), Odette's (healing).
+enum class QuestId : uint8_t { LostPiou, Teleporters, GiantChampi, Combat, Healing, Main, Count };
 inline constexpr size_t kQuestCount = static_cast<size_t>(QuestId::Count);
 enum class QuestStage : uint8_t { Unknown, Active, Done };
 struct QuestState {
@@ -555,6 +588,21 @@ struct World {
 };
 
 World new_game(uint64_t seed);
+
+// What the player chooses for a new game (the character creation): the
+// magician's name and look, and the first monster of its team, one of the
+// three starters, of the magician's sex and with the most common variants.
+inline constexpr Species kStarters[] = {Species::Companion, Species::Spark, Species::Axolotl};
+struct NewGame {
+  std::string name;
+  WizardLook look;
+  Species starter = Species::Companion;
+};
+bool valid_starter(Species species);
+World new_game(uint64_t seed, const NewGame& choices);
+
+// Puts Isidore, the old magician, in the village (once: new games, and saves from before him).
+void add_mentor(World& world);
 
 // Rebuilds what derives from the seed alone: the path, the places, the relief.
 void build_layouts(World& world);

@@ -18,6 +18,7 @@
 #include "monstres/render/far_terrain.hpp"
 #include "monstres/render/scene.hpp"
 #include "monstres/render/weather_view.hpp"
+#include "monstres/render/intro.hpp"
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -120,6 +121,13 @@ struct App {
   double accumulator = 0;
   uint64_t last_saved_tick = 0;
   int slot = 0;                  // the save played (kSavePaths)
+  // No save yet (the very first visit): a world is shown behind the
+  // character creation, but not saved; the first new game replaces it.
+  bool placeholder = false;
+  // The arrival (intro.hpp), after a new game: how far into it (ms).
+  bool intro = false;
+  double intro_ms = 0;
+  bool covered = false;  // the page covers the view (the character creation): not drawn
   std::vector<uint8_t> export_buffer;
   std::string json;
 };
@@ -323,6 +331,7 @@ void write_save(App& app) {
   // Even when it fails (storage full or refused): the next try is the next
   // autosave, not every frame.
   app.last_saved_tick = app.world.tick;
+  if (app.placeholder) return;  // not a game of the player's yet
   if (write_file(kSavePaths[app.slot], serialize(app.world))) js_sync_save();
 }
 
@@ -510,12 +519,25 @@ void frame(void* user) {
     app.redraw = true;
   }
   if (app.frozen && !app.redraw) return;  // nothing moved: keep the last image
+  if (app.covered) return;                // hidden behind the page: not drawn at all
   app.redraw = false;
 
   // Time follows the simulation, so ?frozen screenshots are reproducible.
   const float time = static_cast<float>(app.world.tick) / rules::kTicksPerSecond;
   mark = emscripten_get_now();
   View view = current_view(app, time);
+  if (app.intro) {
+    // The arrival's flight, ending where the game's camera is.
+    if (!app.paused) app.intro_ms += app.frozen ? 0 : dt;
+    const float seconds = static_cast<float>(app.intro_ms / 1000.0);
+    const Shot last{{view.camera_x, view.camera_y, view.camera_z},
+                    {app.world.player.pos.x, app.world.player.pos.y + 1.0f, app.world.player.pos.z}};
+    const Shot shot = intro_shot(app.world, seconds, last);
+    const float aspect = app.canvas_h > 0 ? static_cast<float>(app.canvas_w) / static_cast<float>(app.canvas_h) : 1.0f;
+    view = build_view_from(app.world, shot.eye, shot.target, aspect, time);
+    if (seconds >= kIntroSeconds) app.intro = false;
+    app.redraw = true;
+  }
   follow_weather_choice(app, dt);
   const WeatherField weather = weather_field(app);
   const float flash = apply_weather(view, weather);
@@ -549,6 +571,8 @@ void frame(void* user) {
 void enter_world(App& app, World world, int slot) {
   app.world = std::move(world);
   app.slot = slot;
+  app.placeholder = false;
+  app.intro = false;
   app.command = Command::None;
   app.jump_buffer = app.attack_buffer = app.parry_buffer = 0;
   app.accumulator = 0;
@@ -690,6 +714,9 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_state_json() {
   char camera[128];
   std::snprintf(camera, sizeof camera, ",\"camera\":{\"yaw\":%.4f,\"pitch\":%.4f},\"active\":%d,",
                 static_cast<double>(c.yaw), static_cast<double>(c.pitch), g_app->world.active);
+  // The arrival's flight, the first visit (no game of the player's yet).
+  const std::string arrival = std::string("\"intro\":") + (g_app->intro ? "true" : "false") + ",\"placeholder\":" +
+                              (g_app->placeholder ? "true" : "false") + ",";
   // The weather where the player is (and the debug menu's choice).
   const WeatherField field = weather_field(*g_app);
   const Weather w = field.at(g_app->world.player.pos.x, g_app->world.player.pos.z);
@@ -702,7 +729,7 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_state_json() {
                 static_cast<double>(w.dark), static_cast<double>(w.rain), static_cast<double>(w.snow),
                 static_cast<double>(w.fog), static_cast<double>(w.storm), static_cast<double>(w.wind),
                 bolt.on ? "true" : "false");
-  g_app->json = json + camera + weather;
+  g_app->json = json + camera + arrival + weather;
   return g_app->json.c_str();
 }
 
@@ -829,19 +856,75 @@ EMSCRIPTEN_KEEPALIVE int monstres_delete_slot(int slot) {
   return 1;
 }
 
-// A new game in an empty slot, played right away: the magician's name
-// (UTF-8, cut to kMaxNameBytes) and the world's seed (a number; any other
-// text gives a number too; empty: drawn at random). Neither changes afterwards.
-EMSCRIPTEN_KEEPALIVE int monstres_new_game(int slot, const char* name, const char* seed) {
+// A new game in an empty slot (the character creation), played right away,
+// after the arrival's flight: the magician's name (UTF-8, cut to
+// kMaxNameBytes), the world's seed (a number; any other text gives a number
+// too; empty: drawn at random), its look (look_code) and its first monster
+// (a Species among kStarters). None of them changes afterwards.
+EMSCRIPTEN_KEEPALIVE int monstres_new_game(int slot, const char* name, const char* seed, int look, int starter) {
   App& app = *g_app;
   std::vector<uint8_t> bytes;
-  if (!valid_slot(slot) || slot == app.slot || read_file(kSavePaths[slot], bytes)) return 0;
+  const bool free = !read_file(kSavePaths[slot < 0 ? 0 : slot % kSaveSlots], bytes);
+  if (!valid_slot(slot) || !free || (slot == app.slot && !app.placeholder)) return 0;
+  const WizardLook chosen = look_from_code(static_cast<uint32_t>(look));
+  if (!valid_look(chosen) || starter < 0 || starter >= static_cast<int>(Species::Count) ||
+      !valid_starter(static_cast<Species>(starter))) {
+    return 0;
+  }
   write_save(app);
-  World world = new_game(seed_from_text(seed ? seed : ""));
-  world.wizard.name = clean_name(name ? name : "");
+  NewGame choices;
+  choices.name = clean_name(name ? name : "");
+  choices.look = chosen;
+  choices.starter = static_cast<Species>(starter);
+  World world = new_game(seed_from_text(seed ? seed : ""), choices);
   enter_world(app, std::move(world), slot);
   write_save(app);
+  app.intro = true;
+  app.intro_ms = 0;
   return 1;
+}
+
+// The page covers the whole view (the character creation): the world is not drawn.
+EMSCRIPTEN_KEEPALIVE void monstres_set_covered(int covered) {
+  g_app->covered = covered != 0;
+  g_app->redraw = true;
+}
+
+// The very first visit: no save, the character creation must come first.
+EMSCRIPTEN_KEEPALIVE int monstres_needs_creation() { return g_app->placeholder ? 1 : 0; }
+
+// The arrival's flight: skipped (a button), or whether it is on.
+EMSCRIPTEN_KEEPALIVE void monstres_skip_intro() {
+  g_app->intro = false;
+  g_app->redraw = true;
+}
+EMSCRIPTEN_KEEPALIVE int monstres_intro_on() { return g_app->intro ? 1 : 0; }
+
+// The character creation's picture of the magician (look_code; flags: 1
+// without its hat or hood), seen from where the player turns, zooms and
+// moves the camera; `time` (seconds) makes it breathe. RGBA pixels, rows
+// from the top, valid until the next portrait.
+EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_wizard_preview(int look, int flags, float yaw, float pitch, float zoom,
+                                                           float pan_x, float pan_y, float time, int width,
+                                                           int height) {
+  width = std::clamp(width, 1, kMaxPortraitSize);
+  height = std::clamp(height, 1, kMaxPortraitSize);
+  PortraitSubject subject;
+  subject.wizard = true;
+  const WizardLook l = look_from_code(static_cast<uint32_t>(look));
+  if (valid_look(l)) subject.look = l;
+  subject.bare_head = (flags & 1) != 0;
+  PreviewCamera cam;
+  cam.yaw = finite_or_zero(yaw);
+  cam.pitch = finite_or_zero(pitch);
+  cam.zoom = std::isfinite(zoom) ? zoom : 1;
+  cam.pan_x = std::clamp(finite_or_zero(pan_x), -1.0f, 1.0f);
+  cam.pan_y = std::clamp(finite_or_zero(pan_y), -1.0f, 1.0f);
+  Portrait p = build_preview(subject, static_cast<float>(width) / static_cast<float>(height), cam, finite_or_zero(time));
+  const DrawList* lists[] = {&p.list};
+  g_app->portrait = g_app->renderer->draw_offscreen(p.view, lists, width, height);
+  g_app->redraw = true;
+  return g_app->portrait.data();
 }
 
 JSON_EXPORT(monstres_wizard_json, wizard_json(g_app->world))
@@ -865,6 +948,7 @@ EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_portrait(int species, int look, int
   size = std::clamp(size, 1, kMaxPortraitSize);  // post.js reads size * size pixels
   PortraitSubject subject;
   subject.wizard = species < 0;
+  subject.look = g_app->world.wizard.look;  // the magician's portrait: as the player made it
   subject.species = static_cast<Species>(std::clamp(species, 0, static_cast<int>(Species::Count) - 1));
   const Genes genes = genes_from_code(static_cast<uint32_t>(look));
   if (valid_genes(subject.species, genes)) subject.genes = genes;
@@ -973,6 +1057,12 @@ int main(int argc, char** argv) {
   app.slot = read_current_slot();
   if (force_new || !read_save(app.world, app.slot)) {
     app.world = new_game(has_seed ? seed : random_seed());
+    // No save at all and nothing asked by the address: the first visit, the
+    // character creation comes first (this world is only seen behind it).
+    std::vector<uint8_t> any;
+    bool saved = false;
+    for (int s = 0; s < kSaveSlots && !saved; ++s) saved = read_file(kSavePaths[s], any);
+    app.placeholder = !force_new && !has_seed && !saved;
     write_save(app);
   }
   app.last_saved_tick = app.world.tick;

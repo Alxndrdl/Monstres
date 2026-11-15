@@ -736,32 +736,74 @@ def player_leg():
     return m
 
 
-def player_torso():
-    """The robe, in one piece: the skirt flaring down to the ankles with its
-    golden hem, the belt, the chest and round shoulders, the collar and the neck."""
+# The magician's parts are white where the player chooses the color (the game
+# tints them: robe, skin, hair, eyes), golden where they stay golden. Dark
+# white (ROBE_SHADE) is the inside of the robe and of the hat, darker.
+ROBE_SHADE = (0.72, 0.72, 0.72, 1)
+
+
+def robe_profile(woman):
+    """The robe from its hem up to the collar (going up, the outside on the left)."""
+    if woman:  # a narrower waist and shoulders, a skirt flaring wider
+        profile = [(0.0, -0.29, ROBE_SHADE), (0.262, -0.29, WHITE), (0.258, -0.25, WHITE),
+                   (0.162, -0.012, WHITE), (0.166, 0.054, WHITE)]
+        profile += arc(0.166, 0.054, 0.146, 0.25, 0.022, 4, WHITE)    # the chest
+        profile += arc(0.146, 0.25, 0.078, 0.33, 0.016, 4, WHITE)     # the shoulders
+        profile += [(0.078, 0.33, ROBE_SHADE), (0.092, 0.345, ROBE_SHADE), (0.0, 0.35, ROBE_SHADE)]
+    else:
+        profile = [(0.0, -0.29, ROBE_SHADE), (0.248, -0.29, WHITE), (0.247, -0.25, WHITE),
+                   (0.176, -0.012, WHITE), (0.18, 0.054, WHITE)]
+        profile += arc(0.18, 0.054, 0.15, 0.26, 0.012, 3, WHITE)
+        profile += arc(0.15, 0.26, 0.085, 0.335, 0.018, 4, WHITE)     # the shoulders
+        profile += [(0.085, 0.335, ROBE_SHADE), (0.1, 0.35, ROBE_SHADE), (0.0, 0.352, ROBE_SHADE)]
+    return profile
+
+
+def band(m, r0, y0, r1, y1, thick, color, segments=16):
+    """A golden band around a robe, from (r0, y0) to (r1, y1), standing out by `thick`."""
+    lathe(m, [(r0, y0 - 0.004, color), (r0 + thick, y0, color), (r1 + thick, y1, color), (r1, y1 + 0.004, color)], segments)
+
+
+def player_robe(woman=False):
+    """The robe (white: the game tints it), from the ankles to the collar."""
     m = Mesh()
-    profile = [(0.0, -0.29, ROBE_DARK), (0.243, -0.29, GOLD), (0.256, -0.285, GOLD), (0.247, -0.25, ROBE),
-               (0.176, -0.012, GOLD), (0.184, -0.004, GOLD), (0.184, 0.044, GOLD), (0.172, 0.054, ROBE)]
-    profile += arc(0.172, 0.054, 0.15, 0.26, 0.012, 3, ROBE)
-    profile += arc(0.15, 0.26, 0.085, 0.335, 0.018, 4, ROBE)       # the shoulders
-    profile += [(0.085, 0.335, ROBE_DARK), (0.1, 0.35, ROBE_DARK), (0.062, 0.352, SKIN),  # the collar, the neck
-                (0.052, 0.41, SKIN), (0.0, 0.41, SKIN)]
-    lathe(m, profile, 16)
+    lathe(m, robe_profile(woman), 16)
+    return m
+
+
+def player_trims(woman=False):
+    """What stays golden on the robe: the hem, the belt, the stars of the skirt."""
+    m = Mesh()
+    hem = 0.262 if woman else 0.248
+    band(m, hem - 0.004, -0.292, hem - 0.008, -0.255, 0.008, GOLD)
+    waist = 0.162 if woman else 0.176
+    band(m, waist + 0.002, -0.008, waist + 0.004, 0.05, 0.008, GOLD)
     for a, y in ((2.0, -0.17), (2.6, -0.08), (3.4, -0.2), (3.9, -0.1), (4.5, -0.18), (1.2, -0.2)):
-        r = 0.178 - y * 0.29  # on the skirt's surface (radius 0.176 at y = -0.012, 0.247 at y = -0.25)
+        r = profile_radius([(hem, -0.25, None), (waist, -0.012, None)], y) + 0.003
         star(m, (r * math.cos(a), y, r * math.sin(a)), 0.03, (math.cos(a), 0.25, math.sin(a)), STAR)
     return m
 
 
-def player_arm():
-    """A wide sleeve with a golden cuff, round at the shoulder, and the hand."""
+def player_neck():
     m = Mesh()
-    profile = [(0.0, -0.215, ROBE_DARK), (0.074, -0.225, GOLD), (0.085, -0.232, GOLD), (0.084, -0.2, ROBE)]
-    profile += arc(0.084, -0.2, 0.054, -0.03, 0.006, 3, ROBE)
-    profile += arc(0.054, -0.03, 0.0, 0.018, 0.016, 4, ROBE)
-    profile += [(0.0, 0.018, ROBE)]
+    frustum(m, translate(0, 0.33, 0), 0.056, 0.05, 0.08, 10, WHITE)
+    return m
+
+
+def player_arm():
+    """A wide sleeve (white: tinted like the robe), round at the shoulder."""
+    m = Mesh()
+    profile = [(0.0, -0.215, ROBE_SHADE), (0.078, -0.225, WHITE), (0.084, -0.2, WHITE)]
+    profile += arc(0.084, -0.2, 0.054, -0.03, 0.006, 3, WHITE)
+    profile += arc(0.054, -0.03, 0.0, 0.018, 0.016, 4, WHITE)
+    profile += [(0.0, 0.018, WHITE)]
     lathe(m, profile, 12)
-    blob(m, (0, -0.29, 0), (0.048, 0.055, 0.048), 0.05, 910, solid(SKIN))
+    return m
+
+
+def player_cuff():
+    m = Mesh()
+    band(m, 0.078, -0.232, 0.082, -0.205, 0.006, GOLD, 12)
     return m
 
 
@@ -773,41 +815,159 @@ def profile_radius(profile, y):
     return 0.0
 
 
-def player_head():
-    """Face, hair and the pointed hat: one smooth piece, from its wide
-    drooping brim up its crown to the tip, bent backwards."""
+def player_head(woman=False):
+    """The face (white: tinted with the skin), its nose and cheeks; a woman's
+    has lashes over the eyes and a touch of color on the lips."""
     m = Mesh()
-    blob(m, (0, 0.2, 0), (0.21, 0.2, 0.2), 0.02, 920, solid(SKIN), detail=2)
-    blob(m, (0, 0.27, 0.06), (0.22, 0.16, 0.2), 0.05, 921, jitter(HAIR, 921, 0.05), detail=2)
-    blob(m, (0, 0.165, -0.2), (0.03, 0.028, 0.03), 0.0, 922, solid(shade(SKIN, 0.92)))  # nose
+    blob(m, (0, 0.2, 0), (0.21, 0.2, 0.2), 0.02, 920, solid(WHITE), detail=2)
+    blob(m, (0, 0.165, -0.2), (0.03, 0.028, 0.03), 0.0, 922, solid(shade(WHITE, 0.92)))  # nose
     for side in (-1, 1):
-        blob(m, (side * 0.12, 0.135, -0.155), (0.04, 0.025, 0.02), 0.0, 923, solid(CHEEK))
-    # The hat, around its own axis (x = 0, z = 0.02). Under the brim it is
-    # closed, inside the hair.
-    under = [(0.0, 0.31, ROBE_DARK), (0.16, 0.31, ROBE_DARK)]
-    under += arc(0.16, 0.31, 0.37, 0.298, -0.006, 4, ROBE_DARK)
-    brim = [(0.37, 0.298, ROBE), (0.376, 0.306, ROBE)] + arc(0.376, 0.306, 0.215, 0.345, -0.012, 5, ROBE)
-    crown = [(0.215, 0.345, GOLD), (0.198, 0.352, GOLD), (0.18, 0.395, ROBE)]
-    crown += arc(0.18, 0.395, 0.0, 0.86, -0.028, 11, ROBE) + [(0.0, 0.86, ROBE)]
-    bend_from, bend_to, tilt = 0.5, 0.86, 1.0
+        blob(m, (side * 0.12, 0.135, -0.155), (0.04, 0.025, 0.02), 0.0, 923, solid((1.0, 0.8, 0.78, 1)))
+    if woman:
+        for side in (-1, 1):
+            for k in range(3):  # three lashes at the outer corner of each eye
+                a = 0.5 + 0.35 * k
+                blob(m, (side * (0.085 + 0.02 * math.cos(a)), 0.245 + 0.012 * math.sin(a), -0.18),
+                     (0.012, 0.004, 0.006), 0.0, 924, solid(EYE_BLACK), detail=0)
+        blob(m, (0, 0.105, -0.188), (0.03, 0.009, 0.012), 0.0, 925, solid((1.0, 0.62, 0.62, 1)), detail=0)
+    return m
 
-    def bend(p):  # the tip leans backwards (+Z), more and more as it goes up
-        x, y, z = p
-        if y > bend_from:
-            h = y - bend_from
-            a = tilt * (h / (bend_to - bend_from)) ** 1.3
-            y, z = bend_from + h * math.cos(a) - z * math.sin(a), h * math.sin(a) + z * math.cos(a)
-        return (x, y, z + 0.02)
-    lathe(m, under + brim + crown, 18, bend)
+
+def under_hat(p):
+    """Hair pressed under the hat: above the brim, inside its crown."""
+    x, y, z = p
+    if y > 0.29:
+        dz = z - HAT_AXIS_Z
+        r = math.hypot(x, dz)
+        room = max(0.05, profile_radius(HAT_CROWN, max(y, 0.345)) - 0.02) if y > 0.345 else 0.19
+        if r > room:
+            x, dz = x * room / r, dz * room / r
+        y = min(y, 0.33 + 0.4 * (y - 0.33)) if y > 0.33 else y  # flattened by it
+        z = dz + HAT_AXIS_Z
+    return (x, y, z)
+
+
+def under_hood(p):
+    """Hair inside the hood (only what falls below its opening stays out)."""
+    c, room = (0.0, 0.215, 0.025), 0.228
+    x, y, z = p
+    if y > 0.07:
+        d = (x - c[0], y - c[1], z - c[2])
+        r = length(d)
+        if r > room:
+            x, y, z = c[0] + d[0] * room / r, c[1] + d[1] * room / r, c[2] + d[2] * room / r
+    return (x, y, z)
+
+
+def player_hair(style, cover=None):
+    """Hair (white: tinted): short, long down to the shoulders, or a bun;
+    `cover`: shaped to stay inside the hat or the hood ("hat", "hood")."""
+    m = Mesh()
+    fit = {"hat": under_hat, "hood": under_hood}.get(cover)
+
+    def part(center, radii, noise, seed):
+        # blob() reshapes around the ball's center: the fit is in the head's space.
+        shape = (lambda q: sub(fit(add(center, q)), center)) if fit else None
+        blob(m, center, radii, noise, seed, jitter(WHITE, seed, 0.05), shape, detail=2)
+    part((0, 0.27, 0.06), (0.22, 0.16, 0.2), 0.05, 921)
+    if style == "long":
+        part((0, 0.13, 0.11), (0.22, 0.24, 0.13), 0.06, 926)
+    elif style == "bun" and cover != "hood":
+        part((0, 0.36, 0.19), (0.085, 0.085, 0.085), 0.05, 927)
+    return m
+
+
+def player_beard():
+    """A long beard and a mustache (Isidore's), white: tinted with the hair."""
+    m = Mesh()
+    blob(m, (0, 0.05, -0.15), (0.14, 0.16, 0.08), 0.06, 928, jitter(WHITE, 928, 0.05),
+         lambda p: (p[0] * (0.55 + 0.45 * max(0.0, min(1.0, (p[1] + 0.16) / 0.2))), p[1], p[2]), detail=2)
+    for side in (-1, 1):
+        blob(m, (side * 0.05, 0.13, -0.195), (0.055, 0.022, 0.03), 0.03, 929, solid(WHITE))
+    return m
+
+
+HAT_AXIS_Z = 0.02
+
+
+def hat_bend(p):
+    """The hat's tip leans backwards (+Z), more and more as it goes up."""
+    bend_from, bend_to, tilt = 0.5, 0.86, 1.0
+    x, y, z = p
+    if y > bend_from:
+        h = y - bend_from
+        a = tilt * (h / (bend_to - bend_from)) ** 1.3
+        y, z = bend_from + h * math.cos(a) - z * math.sin(a), h * math.sin(a) + z * math.cos(a)
+    return (x, y, z + HAT_AXIS_Z)
+
+
+HAT_CROWN = [(0.205, 0.345, WHITE), (0.18, 0.395, WHITE)]
+HAT_CROWN += arc(0.18, 0.395, 0.0, 0.86, -0.028, 11, WHITE) + [(0.0, 0.86, WHITE)]
+
+
+def player_hat():
+    """The pointed hat (white: tinted like the robe), one smooth piece from its
+    wide drooping brim up its crown to the tip, bent backwards. Closed under
+    the brim (inside the hair)."""
+    m = Mesh()
+    under = [(0.0, 0.31, ROBE_SHADE), (0.16, 0.31, ROBE_SHADE)]
+    under += arc(0.16, 0.31, 0.37, 0.298, -0.006, 4, ROBE_SHADE)
+    brim = [(0.37, 0.298, WHITE), (0.376, 0.306, WHITE)] + arc(0.376, 0.306, 0.205, 0.345, -0.012, 5, WHITE)
+    lathe(m, under + brim + HAT_CROWN, 18, hat_bend)
+    return m
+
+
+def player_hat_band():
+    """The hat's golden band and its star."""
+    m = Mesh()
+    band(m, 0.2, 0.343, 0.182, 0.392, 0.008, GOLD, 18)
+    for k in range(len(m.positions)):
+        x, y, z = m.positions[k]
+        m.positions[k] = (x, y, z + HAT_AXIS_Z)
     y = 0.47
-    star(m, (0, y, 0.02 - profile_radius(crown, y) - 0.002), 0.045, (0, 0.38, -1), STAR)
+    star(m, (0, y, HAT_AXIS_Z - profile_radius(HAT_CROWN, y) - 0.003), 0.045, (0, 0.38, -1), STAR)
+    return m
+
+
+def player_hood():
+    """The robe's hood (white: tinted like the robe), up over the head, open
+    on the face, with a little point at the back. Double-sided: its inside
+    shows around the face."""
+    m = Mesh(double_sided=True)
+    verts, faces = icosphere(2)
+    c, r = (0, 0.215, 0.025), (0.245, 0.245, 0.245)
+    for a, b, d in faces:
+        pa, pb, pd = verts[a], verts[b], verts[d]
+        mid = normalize(add(add(pa, pb), pd))
+        if mid[2] < -0.42 or (mid[2] < -0.1 and mid[1] < -0.45):  # the face's opening, down to the chin
+            continue
+        if mid[1] < -0.62:  # open underneath, on the neck
+            continue
+        tri = [add(c, mulv(p, r)) for p in (pa, pb, pd)]
+        n = cross(sub(tri[1], tri[0]), sub(tri[2], tri[0]))
+        if dot(n, sub(tri[0], c)) < 0:
+            tri[1], tri[2] = tri[2], tri[1]
+        m.tri(tri[0], tri[1], tri[2], WHITE, kind=ROUND)
+    # The point at the back, and the hood's drape down onto the shoulders.
+    frustum(m, lambda p: (p[0], 0.33 + p[2] * 0.2 - p[1] * 0.3, 0.22 + p[1] * 0.9 + p[2] * 0.1), 0.07, 0.0, 0.16, 10,
+            WHITE, open_ends=True)
+    frustum(m, translate(0, -0.04, 0.02), 0.2, 0.19, 0.1, 16, WHITE, open_ends=True)
+    return m
+
+
+def player_wand():
+    """A wand, held in the right hand (origin at the grip), a small crystal at its tip."""
+    m = Mesh()
+    frustum(m, translate(0, -0.07, 0), 0.016, 0.009, 0.36, 8, STAFF_WOOD)
+    frustum(m, translate(0, -0.08, 0), 0.02, 0.019, 0.07, 8, GOLD)  # the handle
+    frustum(m, translate(0, 0.27, 0), 0.01, 0.018, 0.025, 8, GOLD)  # the tip, holding the crystal
     return m
 
 
 def player_staff():
     """Held in the right hand (origin at the grip), a crystal sits on top (player_crystal)."""
     m = Mesh()
-    frustum(m, translate(0, -0.3, 0), 0.022, 0.026, 1.05, 8, STAFF_WOOD, bottom_cap=STAFF_WOOD)
+    frustum(m, translate(0, -0.24, 0), 0.022, 0.026, 0.99, 8, STAFF_WOOD, bottom_cap=STAFF_WOOD)
     frustum(m, translate(0, 0.72, 0), 0.03, 0.05, 0.06, 8, GOLD)
     for i in range(3):  # claws holding the crystal
         a = TAU * i / 3
@@ -928,6 +1088,141 @@ def bird_leg():
     m = Mesh()
     frustum(m, translate(0, -0.11, 0), 0.016, 0.018, 0.11, 7, BEAK)
     box(m, (0, -0.113, -0.03), (0.035, 0.008, 0.045), BEAK)
+    return m
+
+
+# ---------------------------------------------------------------- Zapou (spark) and Ploufi (axolotl)
+
+SPARK_SKIN = (0.44, 0.40, 0.50, 1)    # Zapou: a slate-grey hedgehog...
+SPARK_FACE = (0.93, 0.86, 0.76, 1)
+SPARK_DARK = (0.18, 0.15, 0.18, 1)
+SPARK_BODY_R = (0.17, 0.14, 0.2)      # ...whose quills crackle (spark_quills, tinted and glowing)
+AXOLOTL = (0.98, 0.66, 0.74, 1)
+AXOLOTL_BELLY = (1.0, 0.86, 0.88, 1)
+GILL = (0.92, 0.36, 0.50, 1)
+
+
+def spark_body():
+    """Zapou: a little hedgehog of lightning, on four paws (rig as Pompon's)."""
+    m = Mesh()
+    blob(m, (0, 0, 0), SPARK_BODY_R, 0.02, 1600,
+         lambda n, face: SPARK_FACE if n[1] < -0.45 else shade(SPARK_SKIN, 0.97 + 0.06 * hash01(1600, face)), detail=2)
+    return m
+
+
+def spark_quills(long=False):
+    """Its quills, over its back and sides, pointing out and back (white: the
+    game tints them with their glowing color). Origin: the body's center."""
+    m = Mesh()
+    verts, _ = icosphere(2)
+    k = 0
+    for v in verts:
+        # The upper back and the sides: not the belly, not the face.
+        if v[1] < -0.2 or v[2] < -0.55 + 0.4 * max(v[1], 0):
+            continue
+        k += 1
+        if hash01(1601, k) < 0.35:
+            continue
+        base = mulv(v, SPARK_BODY_R)
+        out = normalize(add(normalize(mulv(v, (1 / SPARK_BODY_R[0], 1 / SPARK_BODY_R[1], 1 / SPARK_BODY_R[2]))),
+                            (0.0, 0.25, 0.7)))  # swept back
+        length = (0.075 + 0.04 * hash01(1602, k)) * (1.45 if long else 1.0)
+        base = sub(base, mul(out, 0.01))
+        axis = normalize(cross((0.0, 1.0, 0.0), out)) if abs(out[1]) < 0.999 else (1.0, 0.0, 0.0)
+        angle = math.acos(max(-1.0, min(1.0, out[1])))
+
+        def turn(p, axis=axis, angle=angle, base=base):
+            c, s = math.cos(angle), math.sin(angle)
+            q = add(add(mul(p, c), mul(cross(axis, p), s)), mul(axis, dot(axis, p) * (1 - c)))
+            return add(base, q)
+        frustum(m, turn, 0.016, 0.0, length, 5, WHITE, open_ends=True)
+    return m
+
+
+def spark_head():
+    """A small head with a pointed snout, a pale face and a black nose."""
+    m = Mesh()
+    blob(m, (0, 0.07, 0), (0.125, 0.11, 0.12), 0.02, 1603,
+         lambda n, face: SPARK_FACE if n[2] < -0.35 or n[1] < -0.5 else SPARK_SKIN, detail=2)
+    # The snout, turned towards -Z.
+    frustum(m, lambda p: (p[0], 0.045 - p[2] * 0.3, -0.08 - p[1]), 0.06, 0.025, 0.09, 10, SPARK_FACE)
+    blob(m, (0, 0.05, -0.172), (0.022, 0.019, 0.018), 0.0, 1604, solid(SPARK_DARK))
+    return m
+
+
+def spark_ear():
+    """A small round ear (origin at its base)."""
+    m = Mesh()
+    blob(m, (0, 0.03, 0), (0.035, 0.035, 0.015), 0.0, 1605, solid(SPARK_FACE), detail=1)
+    return m
+
+
+def spark_tail():
+    """A short tuft (origin at its base, backwards)."""
+    m = Mesh()
+    blob(m, (0, 0.0, 0.03), (0.03, 0.025, 0.04), 0.0, 1606, solid(SPARK_SKIN))
+    return m
+
+
+def spark_leg():
+    m = Mesh()
+    frustum(m, translate(0, -0.11, 0), 0.03, 0.038, 0.11, 8, SPARK_SKIN)
+    blob(m, (0, -0.115, -0.012), (0.036, 0.022, 0.045), 0.0, 1607, solid(SPARK_DARK))
+    return m
+
+
+def axolotl_body():
+    """Ploufi: an axolotl walking low on its four short legs (rig as Pompon's)."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (0.15, 0.11, 0.26), 0.02, 1610,
+         lambda n, face: AXOLOTL_BELLY if n[1] < -0.35 else shade(AXOLOTL, 0.98 + 0.04 * hash01(1610, face)), detail=2)
+    return m
+
+
+def axolotl_head():
+    """A wide flat head with a smile."""
+    m = Mesh()
+    blob(m, (0, 0.04, -0.02), (0.18, 0.105, 0.14), 0.02, 1611, solid(AXOLOTL), detail=2)
+    for k in range(7):  # the smile, a thin dark arc under the snout
+        a = -0.6 + 1.2 * k / 6
+        blob(m, (0.11 * math.sin(a), 0.005 - 0.012 * math.cos(a * 1.5), -0.02 - 0.13 * math.cos(a)),
+             (0.012, 0.005, 0.008), 0.0, 1612, solid(shade(GILL, 0.6)), detail=0)
+    return m
+
+
+def axolotl_gills():
+    """Three feathery fronds on each side of its head; one side here (origin at
+    its base, the fronds fanning out along +X, up and down: the game turns
+    them back)."""
+    m = Mesh()
+    for k, up in enumerate((0.75, 0.15, -0.45)):
+        d = normalize((1.0, up, 0.0))
+        length = 0.11 - 0.015 * k
+        # A tapering stalk, turned from +Y to its direction, with feathery bumps along it.
+        axis = normalize(cross((0.0, 1.0, 0.0), d))
+        angle = math.acos(max(-1.0, min(1.0, d[1])))
+
+        def turn(p, axis=axis, angle=angle):
+            c, s = math.cos(angle), math.sin(angle)
+            return add(add(mul(p, c), mul(cross(axis, p), s)), mul(axis, dot(axis, p) * (1 - c)))
+        frustum(m, turn, 0.022, 0.006, length, 7, GILL)
+        for j in range(3):
+            t = length * (0.35 + 0.28 * j)
+            blob(m, mul(d, t), (0.017 - 0.003 * j,) * 3, 0.0, 1613 + k * 4 + j, solid(shade(GILL, 1.08)), detail=0)
+    return m
+
+
+def axolotl_tail():
+    """A flat paddle, backwards (+Z) from its base."""
+    m = Mesh()
+    blob(m, (0, 0.02, 0.15), (0.035, 0.09, 0.17), 0.0, 1620, solid(AXOLOTL), lambda p: (p[0] * (1 - 0.5 * max(p[2], 0) / 0.17), p[1], p[2]), detail=2)
+    return m
+
+
+def axolotl_leg():
+    m = Mesh()
+    frustum(m, translate(0, -0.09, 0), 0.03, 0.04, 0.09, 8, AXOLOTL)
+    blob(m, (0, -0.095, -0.012), (0.045, 0.018, 0.045), 0.0, 1621, solid(shade(AXOLOTL, 0.9)))
     return m
 
 
@@ -1882,11 +2177,30 @@ def all_models():
         "shadow": shadow(),
         "eye": eye(),
         "player_leg": player_leg(),
-        "player_torso": player_torso(),
+        "player_torso": player_robe(),
         "player_arm": player_arm(),
         "player_head": player_head(),
         "player_staff": player_staff(),
         "player_crystal": player_crystal(),
+        "player_torso_woman": player_robe(woman=True),
+        "player_trims": player_trims(),
+        "player_trims_woman": player_trims(woman=True),
+        "player_neck": player_neck(),
+        "player_cuff": player_cuff(),
+        "player_head_woman": player_head(woman=True),
+        "player_hair_short": player_hair("short"),
+        "player_hair_long": player_hair("long"),
+        "player_hair_bun": player_hair("bun"),
+        "player_hair_short_hat": player_hair("short", "hat"),
+        "player_hair_long_hat": player_hair("long", "hat"),
+        "player_hair_bun_hat": player_hair("bun", "hat"),
+        "player_hair_short_hood": player_hair("short", "hood"),
+        "player_hair_long_hood": player_hair("long", "hood"),
+        "player_beard": player_beard(),
+        "player_hat": player_hat(),
+        "player_hat_band": player_hat_band(),
+        "player_hood": player_hood(),
+        "player_wand": player_wand(),
         "companion_body": companion_body(),
         "companion_leg": companion_leg(),
         "companion_head": companion_head(),
@@ -1899,6 +2213,18 @@ def all_models():
         "bird_body": bird_body(),
         "bird_wing": bird_wing(),
         "bird_leg": bird_leg(),
+        "spark_body": spark_body(),
+        "spark_quills": spark_quills(),
+        "spark_quills_long": spark_quills(long=True),
+        "spark_head": spark_head(),
+        "spark_ear": spark_ear(),
+        "spark_tail": spark_tail(),
+        "spark_leg": spark_leg(),
+        "axolotl_body": axolotl_body(),
+        "axolotl_head": axolotl_head(),
+        "axolotl_gills": axolotl_gills(),
+        "axolotl_tail": axolotl_tail(),
+        "axolotl_leg": axolotl_leg(),
         "house_cottage": house_cottage(),
         "house_chimney": house_chimney(),
         "house_hut": house_hut(),
@@ -1963,7 +2289,7 @@ def all_models():
         models[f"mountain{v}"] = mountain(v)
     # The characters' parts are soft (their lumps are smooth); the rest keeps its facets.
     soft = ("player_", "companion_", "slime_", "mushroom_", "bird_", "villager_", "hair_", "hat_", "crow_", "fish_",
-            "eye", "horn", "bulb")
+            "eye", "horn", "bulb", "spark_", "axolotl_")
     for name, mesh in models.items():
         mesh.finish(soft=name.startswith(soft))
     return models

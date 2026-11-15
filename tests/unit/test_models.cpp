@@ -178,3 +178,24 @@ TEST_CASE("a missing or broken file is reported, not loaded") {
   CHECK(error.find("does-not-exist") != std::string::npos);
   CHECK_FALSE(load_model(std::string(MONSTRES_ASSETS_DIR) + "/../README.md", &error));
 }
+
+TEST_CASE("hair under the hat or the hood stays inside it") {
+  // Under the hat: above the brim, nothing wider than the crown there.
+  for (MeshId id : {MeshId::PlayerHairShortHat, MeshId::PlayerHairLongHat, MeshId::PlayerHairBunHat}) {
+    CAPTURE(model_name(id));
+    const MeshData& m = models()[static_cast<size_t>(id)];
+    for (size_t v = 0; v < m.vertex_count(); ++v) {
+      const float* p = &m.vertices[v * MeshData::kFloatsPerVertex];
+      if (p[1] > 0.35f) CHECK(std::hypot(p[0], p[2] - 0.02f) < 0.2f);
+    }
+  }
+  // Under the hood: within it, but what falls below its opening.
+  for (MeshId id : {MeshId::PlayerHairShortHood, MeshId::PlayerHairLongHood}) {
+    CAPTURE(model_name(id));
+    const MeshData& m = models()[static_cast<size_t>(id)];
+    for (size_t v = 0; v < m.vertex_count(); ++v) {
+      const float* p = &m.vertices[v * MeshData::kFloatsPerVertex];
+      if (p[1] > 0.08f) CHECK(std::hypot(p[0], p[1] - 0.215f, p[2] - 0.025f) < 0.235f);
+    }
+  }
+}

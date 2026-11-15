@@ -8,12 +8,13 @@
 
   const LORE = window.MonstresLore;
   const { $, el, whenReady } = window.MonstresUtil;
-  const QUEST_INDEX = { lostPiou: 0, teleporters: 1, giantChampi: 2 };  // QuestId
+  const QUEST_INDEX = { lostPiou: 0, teleporters: 1, giantChampi: 2, combat: 3, healing: 4, main: 5 };  // QuestId
   const MIRABELLE = 1;
   const GASPARD = 2;
   const LISON = 3;
   const BASTIEN = 4;
   const ODETTE = 5;
+  const ISIDORE = 9;
 
   let game = null;
   const box = $('dialogue');
@@ -173,15 +174,36 @@
     }
   }
 
-  // ---- Bastien: battles against his monsters ----
+  // ---- Bastien: battles against his monsters (his lesson: win one) ----
   function bastien(c) {
     const wins = c.wins || 0;
+    const lesson = quest('combat');
     const challenge = () => {
       game.challenge(BASTIEN);
       close();
     };
     const offer = c.challenge ? [['Combattre !', challenge, 'challenge']] : [];
     const why = !c.challenge ? ' Mais d’abord, fais sortir un monstre en forme de ton cristal.' : '';
+    if (lesson.stage === 'unknown') {
+      show('Toi, tu es le nouvel apprenti d’Isidore ! Un magicien doit savoir mener ses monstres au combat : ' +
+        'attaquer, esquiver avec Espace, parer avec F. Je te propose une initiation : un vrai combat de dresseurs, contre moi.', [
+        ['J’accepte', () => {
+          game.acceptQuest(QUEST_INDEX.combat);
+          afterTick(() => bastien(game.selected() || c));
+        }, 'accept-quest'],
+        ['Une autre fois', close],
+      ]);
+      return;
+    }
+    if (lesson.stage === 'active' && lesson.ready) {
+      show('Bien joué ! Tu as su lire mes attaques et y répondre. Tu as tout compris.', [
+        ['Merci, Bastien', () => {
+          game.completeQuest(QUEST_INDEX.combat);
+          afterTick(() => show('Reviens quand tu veux pour une revanche. Et passe le bonjour à Isidore !'));
+        }, 'complete-quest'],
+      ]);
+      return;
+    }
     if (!wins) {
       show('Tu as un monstre, toi aussi ? Moi, c’est Champi, et j’en garde un autre en réserve. ' +
         'Un combat de dresseurs, ça te dit ? Gagne, et tu apprendras beaucoup !' + why,
@@ -193,8 +215,30 @@
     }
   }
 
-  // ---- Odette: she heals the team, and fills the magician's mana ----
+  // ---- Odette: she heals the team, and fills the magician's mana (her lesson: the Heal spell) ----
   function odette() {
+    const lesson = quest('healing');
+    if (lesson.stage === 'unknown') {
+      show('Bonjour, petit magicien. Je soigne les monstres du village… mais je ne serai pas toujours là quand les tiens ' +
+        'seront blessés. Ton bâton connaît le sort de Soin : veux-tu que je t’apprenne à t’en servir ?', [
+        ['Oui, apprends-moi', () => {
+          game.acceptQuest(QUEST_INDEX.healing);
+          afterTick(() => show('Quand un de tes monstres est blessé, lance le sort de Soin : le bouton à côté des attaques, ' +
+            'ou la touche R. Ça coûte un peu de mana. Reviens me voir quand ce sera fait !'));
+        }, 'accept-quest'],
+        ['Plus tard', close],
+      ]);
+      return;
+    }
+    if (lesson.stage === 'active' && lesson.ready) {
+      show('Je l’ai vu, ton monstre va déjà mieux ! Tu sais soigner, maintenant.', [
+        ['Merci, Odette', () => {
+          game.completeQuest(QUEST_INDEX.healing);
+          afterTick(() => odette());
+        }, 'complete-quest'],
+      ]);
+      return;
+    }
     const tired = game.team().filter((m) => m.hp < m.maxHp);
     const w = game.wizard();
     const drained = w.manaNow < w.mana;
@@ -215,6 +259,43 @@
       }, 'heal-team'],
       ['Non merci', close],
     ]);
+  }
+
+  // ---- Isidore, the old magician: the main quest ----
+  function isidore() {
+    const q = quest('main');
+    const s = q.steps;
+    const name = (game.wizard().name || '').trim() || 'jeune magicien';
+    if (q.stage === 'unknown') {
+      show(`Ah, te voilà enfin, ${name} ! Je suis Isidore, le magicien du village. Ton cristal brille bien… ` +
+        'Avant de t’enseigner la vraie magie, il te faut apprendre les bases. Les villageois ont besoin d’aide, ' +
+        'et chacun t’apprendra quelque chose : Mirabelle a perdu son Piou, Gaspard s’intéresse aux cercles de pierres, ' +
+        'Bastien t’apprendra à combattre, et Odette à soigner.', [
+        ['Je m’y mets !', () => {
+          game.acceptQuest(QUEST_INDEX.main);
+          afterTick(() => show('Parfait. Reviens me voir quand tu les auras tous aidés. Ton grimoire (touche J) garde la liste.'));
+        }, 'accept-quest'],
+        ['Plus tard', close],
+      ]);
+    } else if (q.stage === 'active' && q.ready) {
+      show('Tout le village ne parle que de toi ! Tu as aidé chacun d’eux.', [
+        ['Raconter', () => {
+          game.completeQuest(QUEST_INDEX.main);
+          afterTick(() => show(`Tu as bien appris, ${name}. Je suis fier de toi. La suite de ton apprentissage ` +
+            'viendra bientôt… En attendant, explore le pays, et prends soin de tes monstres.'));
+        }, 'complete-quest'],
+      ]);
+    } else if (q.stage === 'active') {
+      const left = [
+        [s.lostPiou, 'retrouver le Piou de Mirabelle'], [s.teleporters, 'aider Gaspard avec les cercles de pierres'],
+        [s.combat, 'l’initiation au combat de Bastien'], [s.healing, 'l’initiation aux soins d’Odette'],
+      ].filter(([done]) => !done).map(([, what]) => what);
+      show(`Il te reste à ${left.join(', ').replace(/, ([^,]*)$/, ' et $1')}. Courage !`,
+        [['Encore un mot ?', () => villager(ISIDORE)], ['Au revoir', close]]);
+    } else {
+      show('La suite de ton apprentissage viendra bientôt. Explore le pays en attendant !',
+        [['Encore un mot ?', () => villager(ISIDORE)], ['Au revoir', close]]);
+    }
   }
 
   // ---- The other villagers: rumors about the quests, and chatter ----
@@ -249,6 +330,7 @@
     else if (c.npc === LISON) lison();
     else if (c.npc === BASTIEN) bastien(c);
     else if (c.npc === ODETTE) odette();
+    else if (c.npc === ISIDORE) isidore();
     else villager(c.npc);
     // Walking away ends the talk.
     clearInterval(watch);
@@ -278,6 +360,9 @@
   let known = null;
   let before = null;  // the quests as they were
   // Another world is played (saves.js): its teleporters and quests are not news.
+  // After the arrival of a new game: Isidore waits (said once, when the flight is over).
+  let welcomed = true;
+  window.addEventListener('monstres-created', () => { welcomed = false; });
   window.addEventListener('monstres-world', () => {
     known = null;
     before = null;
@@ -302,6 +387,12 @@
     }
     known = t;
     before = quests;
+    // After the arrival: Isidore waits.
+    const main = quests.find((q) => q.id === 'main');
+    if (!welcomed && main && main.stage === 'unknown' && !game.introOn() && !game.needsCreation()) {
+      welcomed = true;
+      note('Bienvenue !', 'Isidore, le vieux magicien, t’attend sur la place du village.');
+    }
   }
 
   const start = () => {

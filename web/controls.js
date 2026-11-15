@@ -113,6 +113,7 @@
 
   // ---- Look around: drag on the 3D view (several fingers are fine) ----
   const canvas = document.getElementById('canvas');
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());  // a right drag looks around
   canvas.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     canvas.setPointerCapture(event.pointerId);

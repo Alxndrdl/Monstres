@@ -57,14 +57,14 @@ TEST_CASE("the player stands on its feet, head on top") {
 
   REQUIRE(batch(list, MeshId::PlayerLeg).size() == 2);
   REQUIRE(batch(list, MeshId::PlayerArm).size() == 2);
-  REQUIRE(batch(list, MeshId::Eye).size() == 2);
+  REQUIRE(batch(list, MeshId::EyeIris).size() == 2);  // tinted with the eyes' color
   const Instance& leg = batch(list, MeshId::PlayerLeg)[0];
   const Instance& head = batch(list, MeshId::PlayerHead)[0];
   CHECK(leg.y == Approx(0.38f));  // the leg mesh hangs 0.38 m down to the ground
   CHECK(head.y > 0.7f);
   CHECK(head.x == Approx(2));
   // Eyes on the front of the head (-Z when facing -Z).
-  CHECK(batch(list, MeshId::Eye)[0].z < head.z);
+  CHECK(batch(list, MeshId::EyeIris)[0].z < head.z);
 }
 
 TEST_CASE("the rig turns with the body") {
@@ -162,13 +162,14 @@ TEST_CASE("add_characters draws everyone, each with a shadow") {
   World w = cached_game(3);
   DrawList list = empty_list();
   add_characters(w, 1.0f, list);
-  CHECK(batch(list, MeshId::PlayerTorso).size() == 1);
-  CHECK(batch(list, MeshId::CompanionBody).size() == 1);
-  size_t fish = 0, walkers = 0;
+  CHECK(batch(list, MeshId::PlayerTorso).size() == 2);  // the magician, and Isidore
+  size_t fish = 0, walkers = 0, pompons = 0;
   for (const Creature& c : w.creatures) {
+    pompons += c.species == Species::Companion;  // the companion, and wild ones
     fish += c.species == Species::Fish;
     walkers += c.species == Species::Slime || c.species == Species::Mushroom || c.species == Species::Bird;
   }
+  CHECK(batch(list, MeshId::CompanionBody).size() == pompons);
   CHECK(fish > 0);
   CHECK(batch(list, MeshId::Shadow).size() == 1 + w.creatures.size() - fish);  // no shadow on water
   size_t wild = 0;
@@ -180,11 +181,16 @@ TEST_CASE("Odette, the healer, holds a magician's staff") {
   World w = cached_game(3);
   DrawList list = empty_list();
   add_characters(w, 1.0f, list);
-  CHECK(batch(list, MeshId::PlayerStaff).size() == 2);  // the magician's and hers
-  CHECK(batch(list, MeshId::PlayerCrystal).size() == 2);
-  const Instance& staff = batch(list, MeshId::PlayerStaff)[1];
+  CHECK(batch(list, MeshId::PlayerStaff).size() == 3);  // the magician's, Isidore's and hers
+  CHECK(batch(list, MeshId::PlayerCrystal).size() == 3);
   const int i = npc_index(w, npc::kOdette);
   REQUIRE(i > 0);
+  // Hers: the one nearest to her.
+  const Vec3 her = w.creatures[static_cast<size_t>(i)].body.pos;
+  const auto& staves = batch(list, MeshId::PlayerStaff);
+  const Instance& staff = *std::min_element(staves.begin(), staves.end(), [&](const Instance& a, const Instance& b) {
+    return std::hypot(a.x - her.x, a.z - her.z) < std::hypot(b.x - her.x, b.z - her.z);
+  });
   const Vec3 at = w.creatures[static_cast<size_t>(i)].body.pos;
   CHECK(std::fabs(staff.x - at.x) < 0.6f);  // in her hand
   CHECK(std::fabs(staff.z - at.z) < 0.6f);

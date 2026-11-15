@@ -190,24 +190,71 @@
     .save-facts { margin: 0; padding: 0; list-style: none; font-size: 13px; color: rgba(255, 255, 255, 0.8); flex: 1; }
     .save-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .save-actions .button { flex: 1 1 auto; padding: 6px 8px; }
-    .new-game {
-      margin-top: 10px; padding: 10px; border-radius: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
-      background: rgba(242, 201, 76, 0.08); border: 1px solid rgba(242, 201, 76, 0.5);
-    }
-    .new-game[hidden] { display: none; }
-    .new-game h3, .new-game .note, .new-game .row { grid-column: 1 / -1; margin: 0; }
-    .new-game h3 { font-size: 14px; }
-    .new-game .note { font-size: 12px; color: rgba(255, 255, 255, 0.7); }
-    .new-game .row { display: flex; gap: 8px; }
-    .new-game label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: rgba(255, 255, 255, 0.75); min-width: 0; }
-    .new-game input {
-      font: inherit; font-size: 16px; color: #fff; padding: 6px 8px; min-width: 0;
-      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
-    }
-    .new-game input:focus { outline: 2px solid rgba(242, 201, 76, 0.7); outline-offset: 1px; }
     .saves-note { margin: 8px 0 0; min-height: 1.3em; font-size: 13px; color: #f2c94c; }
     @media (max-width: 520px) {
-      .saves-list, .new-game { grid-template-columns: 1fr; }
+      .saves-list { grid-template-columns: 1fr; }
+    }
+
+    /* The character creation: the magician on the left, the choices on the right. */
+    #create {
+      position: fixed; inset: 0; z-index: 9; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+      gap: 12px; padding: max(10px, env(safe-area-inset-top)) var(--edge-right) 10px var(--edge);
+      background: radial-gradient(circle at 30% 40%, #3b4a78, #141829 75%);
+    }
+    #create[hidden] { display: none; }
+    html.creating body > :not(#create):not(#canvas):not(script) { visibility: hidden; }
+    .create-stage { position: relative; min-height: 0; display: flex; flex-direction: column; }
+    #create-view { flex: 1; min-height: 0; width: 100%; touch-action: none; cursor: grab; }
+    .create-view-tools { display: flex; gap: 6px; justify-content: center; }
+    .create-view-hint { margin: 4px 0 0; text-align: center; font-size: 11px; color: rgba(255, 255, 255, 0.6); }
+    .create-panel { min-height: 0; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; background: #1c2033; }
+    .create-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .create-head h2 { margin: 0; font-size: 17px; }
+    .create-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+    .create-tab {
+      font: inherit; font-size: 12px; color: rgba(255, 255, 255, 0.75); background: none; cursor: pointer;
+      border: 0; border-bottom: 2px solid transparent; padding: 4px 6px;
+    }
+    .create-tab[aria-selected="true"] { color: #fff; border-bottom-color: #f2c94c; }
+    .create-step { flex: 1; }
+    .create-step h3 { margin: 8px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.65); }
+    .create-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+    .swatch {
+      width: 30px; height: 30px; border-radius: 50%; padding: 0; cursor: pointer;
+      background: var(--swatch); border: 2px solid rgba(255, 255, 255, 0.3);
+    }
+    .swatch[aria-pressed="true"] { border-color: #f2c94c; box-shadow: 0 0 0 2px rgba(242, 201, 76, 0.5); }
+    .choice[aria-pressed="true"] { background: rgba(242, 201, 76, 0.35); border-color: rgba(242, 201, 76, 0.9); }
+    .create-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255, 255, 255, 0.75); }
+    .create-field input {
+      font: inherit; font-size: 17px; color: #fff; padding: 7px 9px; min-width: 0;
+      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
+    }
+    .create-field input:focus { outline: 2px solid rgba(242, 201, 76, 0.7); outline-offset: 1px; }
+    .create-seed { display: flex; gap: 6px; }
+    .create-seed input { flex: 1; }
+    .create-starters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .starter {
+      display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px; cursor: pointer; min-width: 0;
+      font: inherit; color: #fff; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px;
+    }
+    .starter canvas { width: 100%; max-width: 110px; aspect-ratio: 1; }
+    .starter small { font-size: 11px; color: rgba(255, 255, 255, 0.7); text-align: center; }
+    .starter[aria-pressed="true"] { border-color: #f2c94c; background: rgba(242, 201, 76, 0.16); }
+    .create-note { margin: 0; min-height: 1.2em; font-size: 13px; color: #f2c94c; }
+    .create-nav { display: flex; justify-content: space-between; gap: 8px; }
+    .create-nav .button { padding: 8px 16px; font-size: 14px; }
+    #create-back[hidden] { visibility: hidden; display: inline-block; }
+    @media (max-height: 460px) {
+      .create-step h3 { margin: 4px 0 2px; }
+      .swatch { width: 26px; height: 26px; }
+    }
+
+    /* The arrival's flight: only the world, and a button to skip it. */
+    html.intro body > :not(#canvas):not(#skip-intro):not(#toast):not(script) { visibility: hidden; }
+    #skip-intro {
+      position: fixed; right: var(--edge-right); bottom: max(16px, env(safe-area-inset-bottom)); z-index: 10;
+      padding: 8px 16px; font-size: 14px;
     }
 
     /* Info about the creature that was clicked, top left (the creature is
@@ -787,7 +834,7 @@
   </style>
 </head>
 <body>
-  <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  <canvas id="canvas" tabindex="-1"></canvas>
   <div id="message" hidden></div>
   <div id="rotate" role="alert">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
@@ -965,6 +1012,67 @@
     <div class="hp-bar mana-bar"><span class="mana-fill"></span></div>
     <span class="hp-text mana-text"></span>
   </div>
+  <!-- The character creation (create.js): at the first visit, or for a new game. -->
+  <div id="create" role="dialog" aria-modal="true" aria-labelledby="create-title" hidden>
+    <div class="create-stage">
+      <canvas id="create-view" aria-label="Ton magicien : fais-le tourner, zoome, déplace-le"></canvas>
+      <div class="create-view-tools">
+        <button id="create-zoom-out" class="icon-button" type="button" aria-label="Dézoomer">−</button>
+        <button id="create-zoom-in" class="icon-button" type="button" aria-label="Zoomer">+</button>
+        <button id="create-face" class="button" type="button">Visage</button>
+        <button id="create-reset" class="button" type="button">En pied</button>
+      </div>
+      <p class="create-view-hint">Glisse pour tourner · molette ou deux doigts pour zoomer et déplacer</p>
+    </div>
+    <div class="panel create-panel">
+      <div class="create-head">
+        <h2 id="create-title">Nouveau magicien</h2>
+        <button id="create-cancel" class="button" type="button">Annuler</button>
+      </div>
+      <div class="create-tabs" role="tablist">
+        <button class="create-tab" type="button" role="tab">Nom</button>
+        <button class="create-tab" type="button" role="tab">Apparence</button>
+        <button class="create-tab" type="button" role="tab">Équipement</button>
+        <button class="create-tab" type="button" role="tab">Compagnon</button>
+        <button class="create-tab" type="button" role="tab">Monde</button>
+      </div>
+      <section class="create-step">
+        <label class="create-field">Nom du magicien
+          <input id="create-name" type="text" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Comment t’appelles-tu ?">
+        </label>
+        <p class="note">Ton nom ne pourra plus être changé.</p>
+      </section>
+      <section class="create-step" hidden>
+        <h3>Silhouette</h3><div class="create-row" id="create-sex"></div>
+        <h3>Peau</h3><div class="create-row" id="create-skin"></div>
+        <h3>Cheveux</h3><div class="create-row" id="create-hair"></div><div class="create-row" id="create-hair-color"></div>
+        <h3>Yeux</h3><div class="create-row" id="create-eyes"></div>
+      </section>
+      <section class="create-step" hidden>
+        <h3>Dans ta main</h3><div class="create-row" id="create-staff"></div>
+        <h3>Robe de magicien</h3><div class="create-row" id="create-robe"></div>
+        <h3>Sur la tête</h3><div class="create-row" id="create-headwear"></div>
+      </section>
+      <section class="create-step" hidden>
+        <h3>Ton premier monstre</h3>
+        <div class="create-starters" id="create-starters"></div>
+        <p class="note" id="create-starter-text"></p>
+      </section>
+      <section class="create-step" hidden>
+        <label class="create-field">Graine du monde
+          <span class="create-seed"><input id="create-seed" type="text" inputmode="numeric" maxlength="19" autocomplete="off" spellcheck="false">
+          <button id="create-dice" class="button" type="button" aria-label="Tirer une graine au hasard">🎲</button></span>
+        </label>
+        <p class="note">La même graine donne le même monde. Elle ne pourra plus être changée.</p>
+      </section>
+      <p class="create-note" id="create-note" role="status"></p>
+      <div class="create-nav">
+        <button id="create-back" class="button" type="button">Retour</button>
+        <button id="create-next" class="button" type="button">Suivant</button>
+      </div>
+    </div>
+  </div>
+  <button id="skip-intro" class="button" type="button" hidden>Passer ▸</button>
   <!-- The saves: three slots (saves.js), opened from the settings menu. -->
   <div id="saves" role="dialog" aria-modal="true" aria-labelledby="saves-title" hidden>
     <div class="panel saves-window">
@@ -973,20 +1081,6 @@
         <button id="saves-close" class="button" type="button">Fermer</button>
       </div>
       <div id="saves-list" class="saves-list"></div>
-      <form id="new-game" class="new-game" autocomplete="off" hidden>
-        <h3 id="new-game-title">Nouvelle partie</h3>
-        <label>Nom du magicien
-          <input id="new-game-name" type="text" maxlength="24" required spellcheck="false">
-        </label>
-        <label><span>Graine du monde <small>(facultatif)</small></span>
-          <input id="new-game-seed" type="text" maxlength="32" spellcheck="false" placeholder="au hasard">
-        </label>
-        <p class="note">Le nom et la graine ne pourront plus être changés. La même graine donne le même monde.</p>
-        <div class="row">
-          <button type="submit" class="button primary" id="new-game-create">Créer la partie</button>
-          <button type="button" class="button" id="new-game-cancel">Annuler</button>
-        </div>
-      </form>
       <p class="saves-note" id="saves-note" role="status"></p>
       <input id="import-file" type="file" accept=".sav,application/octet-stream" hidden>
     </div>
@@ -1075,6 +1169,7 @@
   <script src="lore.js"></script>
   <script src="controls.js"></script>
   <script src="ui.js"></script>
+  <script src="create.js"></script>
   <script src="saves.js"></script>
   <script src="menu.js"></script>
   <script src="battle.js"></script>

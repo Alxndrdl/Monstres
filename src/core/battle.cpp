@@ -32,6 +32,10 @@ constexpr Moves kMoves[] = {
       {"flock", Burst, true, 18, kBig, 3.0f}}},  // Crow
     {{{"tail_slap", Melee, false, 6, kQuick, 0.8f}, {"bubble", Projectile, true, 12, kSpecial, 10.0f},
       {"wave", Burst, true, 18, kBig, 2.8f}}},  // Fish
+    {{{"zap", Melee, false, 6, kQuick, 0.85f}, {"thunderbolt", Projectile, true, 13, kSpecial, 12.0f},
+      {"discharge", Burst, true, 19, kBig, 3.0f}}},  // Spark
+    {{{"nip", Melee, false, 6, kQuick, 0.8f}, {"water_jet", Projectile, true, 13, kSpecial, 11.0f},
+      {"geyser", Burst, true, 18, kBig, 2.8f}}},  // Axolotl
 };
 static_assert(std::size(kMoves) == kSpeciesCount);
 
@@ -52,6 +56,8 @@ constexpr Temper kTempers[] = {
     {3.5f, 0.7f, 3.0f, 24, 1.0f, 2.0f},   // Villager: does not fight
     {4.5f, 0.7f, 3.0f, 16, 1.0f, 3.2f},   // Crow: harasses from above, swoops down to bite
     {3.5f, 0.7f, 0.0f, 24, 1.0f, 2.0f},   // Fish: holds its place in the lake
+    {4.5f, 0.7f, 3.0f, 12, 1.2f, 2.0f},   // Spark: quick, darts in and out
+    {3.0f, 0.7f, 3.0f, 28, 0.95f, 2.0f},  // Axolotl: patient, sprays from close by
 };
 static_assert(std::size(kTempers) == kSpeciesCount);
 constexpr float kLeapSpeed = 1.9f;  // a slime leaping at its foe: this much faster
@@ -992,6 +998,7 @@ void battle_command(World& w, const Input& in) {
       const SpellId s = current_spells(w)[in.target];
       if (s == SpellId::Heal) {
         Monster& a = ally(w);
+        if (a.hp < monster_fight_stats(a).hp) healed_monster(w);  // Odette's lesson
         a.hp = std::min<uint16_t>(static_cast<uint16_t>(a.hp + rules::kHealPoints), monster_fight_stats(a).hp);
         if (companion(w).mind == Mind::KnockedOut) companion(w).mind = Mind::Idle;  // it wakes up
       } else if (s == SpellId::Shield) {

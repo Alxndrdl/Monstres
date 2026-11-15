@@ -67,6 +67,20 @@ constexpr Genetics kGenetics[] = {
        {"fins", Shape, 2, {{{"small", Common}, {"veil", Uncommon}}}},
        {"lure", Shape, 2, {{{"none", Common}, {"lantern", Rare}}}}}},
      Element::Electric},
+    // Spark: Zapou, a hedgehog whose quills crackle.
+    {Family::Beast, 4,
+     {{kSex,
+       {"quills", Color, 3, {{{"blue", Common}, {"yellow", Uncommon}, {"violet", Rare}}}},
+       {"spines", Shape, 2, {{{"short", Common}, {"long", Uncommon}}}},
+       {"ears", Shape, 2, {{{"round", Common}, {"tufted", Rare}}}}}},
+     Element::Shadow},
+    // Axolotl: Ploufi.
+    {Family::Reptile, 4,
+     {{kSex,
+       {"skin", Color, 3, {{{"pink", Common}, {"blue", Uncommon}, {"gold", Rare}}}},
+       {"gills", Shape, 2, {{{"small", Common}, {"large", Uncommon}}}},
+       {"tail", Shape, 2, {{{"short", Common}, {"long", Rare}}}}}},
+     Element::Nature},
 };
 static_assert(std::size(kGenetics) == kSpeciesCount);
 
@@ -196,7 +210,7 @@ Genes roll_genes(Species species, Zone zone, Rng& rng) {
 void assign_genes(World& w) {
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     Creature& c = w.creatures[i];
-    if (c.species == Species::Companion || genetics(c.species).gene_count == 0) {
+    if (i == 0 || genetics(c.species).gene_count == 0) {  // the companion's genes are the team member's
       c.genes = {};
       continue;
     }
@@ -411,6 +425,8 @@ Traits roll_traits(uint64_t seed, uint32_t id, Species species, const Genes& gen
       {0, 0},       // Villager
       {420, 650},   // Crow
       {350, 2400},  // Fish
+      {260, 900},   // Spark
+      {300, 1300},  // Axolotl
   };
   static_assert(std::size(kMeasures) == kSpeciesCount);
   Rng rng(seed ^ 0x545241495453ULL, id);  // "TRAITS", one stream per creature

@@ -802,6 +802,40 @@ Portrait build_portrait(const PortraitSubject& subject, float aspect) {
   return p;
 }
 
+Portrait build_preview(const PortraitSubject& subject, float aspect, const PreviewCamera& cam, float time) {
+  Portrait p;
+  p.list.batches.assign(kMeshCount, {});
+  const float height = add_portrait_figure(p.list, subject, time);
+  // Around the figure: turned by yaw, from above by pitch, closer with zoom,
+  // its middle moved by pan (meters, in the picture's plane).
+  const float zoom = std::clamp(cam.zoom, 0.5f, 4.0f);
+  const float pitch = std::clamp(cam.pitch, -0.3f, 1.2f);
+  const float distance = (height * 1.3f + 0.3f) / zoom;
+  const float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw), cp = std::cos(pitch), sp = std::sin(pitch);
+  const float fx = sy * cp, fy = sp, fz = cy * cp;  // from the target towards the camera
+  const float rx = cy, rz = -sy;                     // the picture's right
+  const float ux = -sy * sp, uy = cp, uz = -cy * sp; // and its up
+  const float tx = rx * cam.pan_x + ux * cam.pan_y, ty = height * 0.48f + uy * cam.pan_y,
+              tz = rz * cam.pan_x + uz * cam.pan_y;
+  const float ex = tx + fx * distance, ey = ty + fy * distance, ez = tz + fz * distance;
+  p.view.view_projection = multiply(perspective(0.8f, aspect, 0.05f, 50.0f), look_at(ex, ey, ez, tx, ty, tz));
+  p.view.inverse_view_projection = inverse(p.view.view_projection);
+  p.view.camera_x = ex;
+  p.view.camera_y = ey;
+  p.view.camera_z = ez;
+  // Lit from the camera's upper left, whichever way it looks.
+  const float lx = -0.5f * cy + 0.8f * sy, lz = 0.5f * sy + 0.8f * cy;
+  const float l = std::sqrt(lx * lx + 0.9f * 0.9f + lz * lz);
+  p.view.light_x = p.view.sun_x = lx / l;
+  p.view.light_y = p.view.sun_y = 0.9f / l;
+  p.view.light_z = p.view.sun_z = lz / l;
+  p.view.fog = palette::kSkyHorizon;
+  p.view.fog_start = 1000;
+  p.view.fog_end = 2000;
+  p.view.sky = false;
+  return p;
+}
+
 bool creature_on_screen(const World& w, const View& view, int index, float& ndc_x, float& ndc_y) {
   if (index < -1 || index >= static_cast<int>(w.creatures.size())) return false;
   Vec3 p = w.player.pos + Vec3{0, rules::kPlayerHeight * 0.6f, 0};  // -1: the magician
@@ -974,9 +1008,14 @@ View build_view(const World& w, const Camera& cam, float aspect, float time) {
   float ey = ty + sp * distance;
   float ez = tz - fz * distance;
   ey = std::max(ey, w.ground.height(ex, ez) + 0.2f);  // never below the ground
+  return build_view_from(w, {ex, ey, ez}, {look_x, look_y, look_z}, aspect, time);
+}
 
+View build_view_from(const World& w, Vec3 eye, Vec3 target, float aspect, float time) {
+  const float ex = eye.x, ey = eye.y, ez = eye.z;
+  const float tx = w.player.pos.x, tz = w.player.pos.z;  // the lights around the player
   View v;
-  const Mat4 look = look_at(ex, ey, ez, look_x, look_y, look_z);
+  const Mat4 look = look_at(ex, ey, ez, target.x, target.y, target.z);
   v.view_projection = multiply(perspective(1.0f, aspect, 0.1f, view_range::kNearFar), look);
   v.far_view_projection = multiply(perspective(1.0f, aspect, view_range::kFarNear, view_range::kFarFar), look);
   v.fog_start = view_range::kFogStart;

@@ -212,8 +212,16 @@ uint8_t quest_giver(QuestId q) {
   switch (q) {
     case QuestId::LostPiou: return npc::kMirabelle;
     case QuestId::Teleporters: return npc::kGaspard;
+    case QuestId::Combat: return npc::kBastien;
+    case QuestId::Healing: return npc::kOdette;
+    case QuestId::Main: return npc::kMentor;
     default: return npc::kLison;
   }
+}
+
+void healed_monster(World& w) {
+  QuestState& q = quest(w, QuestId::Healing);
+  if (q.stage == QuestStage::Active) q.progress |= kHealedMonster;
 }
 
 bool quest_ready(const World& w, QuestId q) {
@@ -230,6 +238,13 @@ bool quest_ready(const World& w, QuestId q) {
         if (m.tag == Tag::Giant) return true;
       }
       return false;
+    case QuestId::Combat: return w.rival_wins > 0;
+    case QuestId::Healing: return (s.progress & kHealedMonster) != 0;
+    case QuestId::Main:
+      for (const QuestId part : kMainPart1) {
+        if (w.quests[static_cast<size_t>(part)].stage != QuestStage::Done) return false;
+      }
+      return true;
     default: return false;
   }
 }
@@ -262,11 +277,24 @@ void quest_command(World& w, const Input& in) {
         }
         break;
       }
-      if (in.target != static_cast<uint16_t>(QuestId::Teleporters)) break;
-      QuestState& q = quest(w, QuestId::Teleporters);
-      if (q.stage == QuestStage::Active && quest_ready(w, QuestId::Teleporters) && near_npc(w, npc::kGaspard)) {
-        q.stage = QuestStage::Done;
-        reward(w, rules::kTeleportersWizardXp, rules::kTeleportersMonsterXp);
+      // The others: told to their giver, when ready.
+      if (in.target >= kQuestCount || in.target == static_cast<uint16_t>(QuestId::LostPiou)) break;
+      const auto id = static_cast<QuestId>(in.target);
+      QuestState& q = quest(w, id);
+      if (q.stage != QuestStage::Active || !quest_ready(w, id) || !near_npc(w, quest_giver(id)) ||
+          w.battle.phase != BattlePhase::None) {
+        break;
+      }
+      q.stage = QuestStage::Done;
+      switch (id) {
+        case QuestId::Teleporters: reward(w, rules::kTeleportersWizardXp, rules::kTeleportersMonsterXp); break;
+        case QuestId::Combat: reward(w, rules::kCombatWizardXp, rules::kCombatMonsterXp); break;
+        case QuestId::Healing: reward(w, rules::kHealingWizardXp, rules::kHealingMonsterXp); break;
+        case QuestId::Main:
+          q.progress |= kMainPart1Done;
+          reward(w, rules::kMainPart1WizardXp, rules::kMainPart1MonsterXp);
+          break;
+        default: break;
       }
       break;
     }

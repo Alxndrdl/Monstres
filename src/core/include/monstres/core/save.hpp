@@ -82,7 +82,13 @@ namespace monstres {
 //      traits are drawn, the counts are guessed from the team, the giant
 //      Champi's quest is unknown, the valley's 7 x 7 squares go in the middle,
 //      the objects settle on the valley's new edge, the wilds are added.
-inline constexpr uint32_t kSaveVersion = 18;
+//  19  the magician's look (8 u8 after its mana: woman, skin, hair style,
+//      hair color, eyes, staff or wand, robe color, headwear); two more
+//      species (Zapou, Ploufi: the bestiary and the counts list 9); six
+//      quests (fighting, healing and the main quest); Isidore the magician
+//      among the villagers (npc 9). Before: the default look, Isidore comes
+//      to the village.
+inline constexpr uint32_t kSaveVersion = 19;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

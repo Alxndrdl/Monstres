@@ -443,6 +443,8 @@ constexpr SpeciesInfo kSpecies[] = {
     {{0.25f, 1.10f}, 1.4f, 1.4f, 0.0f},  // Villager
     {{0.18f, 0.40f}, 0.0f, 6.0f, 0.0f},  // Crow: flies at run_speed
     {{0.30f, 0.30f}, 1.3f, 1.3f, 5.0f},  // Fish: swims, jumps out of the water
+    {{0.24f, 0.55f}, 2.6f, 5.8f, 5.5f},  // Spark
+    {{0.28f, 0.42f}, 1.7f, 3.4f, 4.0f},  // Axolotl
 };
 
 // A companion that flies: it moves like a walker (objects stop it) but stays
@@ -635,8 +637,10 @@ void step_villager(World& w, const Surroundings& s, Creature& c) {
     } else {
       c.mind = Mind::Wander;
       c.timer = 10 * rules::kTicksPerSecond;
-      // Gaspard stays by the teleporter, Bastien at the edge of the village.
-      const float r = c.npc == npc::kGaspard || c.npc == npc::kBastien ? 2.5f : rules::kVillageRadius - 4.0f;
+      // Gaspard stays by the teleporter, Bastien at the edge of the village, Isidore on the square.
+      const float r = c.npc == npc::kGaspard || c.npc == npc::kBastien ? 2.5f
+                      : c.npc == npc::kMentor                         ? 1.5f
+                                                                      : rules::kVillageRadius - 4.0f;
       c.target = {c.home.x + random_range(w.rng, -r, r), c.home.z + random_range(w.rng, -r, r)};
     }
   } else {
@@ -813,16 +817,29 @@ uint8_t level_in(Zone zone, Rng& rng, float x = 0, float z = 0) {
   return static_cast<uint8_t>(base + rng.below(3));
 }
 
-// Which monster lives in a zone (birds, slimes and mushrooms; crows and fish have their own places).
+// Which monster lives in a zone (crows and fish have their own places).
+// Zapou like the open hills and old stones, Ploufi the water's edge.
 Species species_in(Zone zone, Rng& rng) {
   const uint32_t r = rng.below(100);
+  const auto pick = [r](std::initializer_list<std::pair<uint32_t, Species>> odds) {
+    uint32_t sum = 0;
+    for (const auto& [chance, species] : odds) {
+      sum += chance;
+      if (r < sum) return species;
+    }
+    return odds.begin()->second;
+  };
+  using enum Species;
   switch (zone) {
-    case Zone::Forest: return r < 50 ? Species::Mushroom : r < 80 ? Species::Bird : Species::Slime;
-    case Zone::Cave: return r < 60 ? Species::Slime : Species::Mushroom;
-    case Zone::Castle: return r < 45 ? Species::Bird : r < 75 ? Species::Slime : Species::Mushroom;
-    case Zone::Coast: return r < 60 ? Species::Slime : Species::Bird;  // slimes like the wet sand
-    case Zone::Hills: return r < 45 ? Species::Bird : r < 80 ? Species::Mushroom : Species::Slime;
-    default: return r < 34 ? Species::Slime : r < 67 ? Species::Mushroom : Species::Bird;
+    case Zone::Forest: return pick({{45, Mushroom}, {25, Bird}, {15, Slime}, {15, Axolotl}});
+    case Zone::Cave: return pick({{50, Slime}, {30, Mushroom}, {20, Spark}});
+    case Zone::Castle: return pick({{40, Bird}, {25, Slime}, {20, Mushroom}, {15, Spark}});
+    case Zone::Coast: return pick({{45, Slime}, {35, Axolotl}, {20, Bird}});  // slimes like the wet sand
+    case Zone::Hills: return pick({{40, Bird}, {30, Mushroom}, {20, Spark}, {10, Slime}});
+    case Zone::Ruins: return pick({{30, Slime}, {30, Mushroom}, {20, Bird}, {20, Spark}});
+    case Zone::Lake: return pick({{40, Axolotl}, {30, Slime}, {30, Bird}});
+    // Pompon too, now and then, in the open (a starter that may not have been chosen).
+    default: return pick({{27, Slime}, {27, Mushroom}, {27, Bird}, {7, Spark}, {7, Axolotl}, {5, Companion}});
   }
 }
 
@@ -1149,8 +1166,32 @@ void spawn_creatures(World& w) {
       ++n;
     }
   }
+  if (has_village) add_mentor(w);
   // The wild monsters around the player.
   update_population(w);
+}
+
+void add_mentor(World& w) {
+  if (w.village.lake.radius_x <= 0 || npc_index(w, npc::kMentor) >= 0) return;
+  // On the village square, a few steps from its middle, away from the lake.
+  const Vec2 c = w.village.center;
+  const float away = w.village.lake.center.x > c.x ? -1.0f : 1.0f;
+  Creature m;
+  m.species = Species::Villager;
+  m.npc = npc::kMentor;
+  m.home = c;
+  m.body.facing_x = 0;
+  m.body.facing_z = 1;  // towards the south, where the player comes from
+  const BodyShape& shape = species_info(Species::Villager).shape;
+  for (int k = 0; k < 24; ++k) {
+    const SinCos sc = sincos16(static_cast<Angle16>(k * 2731));
+    const float r = 4.0f + 0.25f * static_cast<float>(k);
+    const float x = c.x + away * std::fabs(sc.cos) * r, z = c.z + sc.sin * r;
+    m.body.pos = {x, w.ground.height(x, z), z};
+    if (!inside_any_object(w, m.body, shape) && !in_lake(w.village.lake, x, z, 1.5f)) break;
+  }
+  m.home = {m.body.pos.x, m.body.pos.z};
+  add_creature(w, m);
 }
 
 namespace {
@@ -1620,6 +1661,8 @@ const MonsterStats& monster_stats(Species species) {
       {0, 0, 0, 0, 0, Element::Light, false},     // Villager: not a monster
       {24, 8, 5, 12, 9, Element::Shadow, true, Element::Air},  // Crow
       {28, 6, 6, 8, 7, Element::Water, true},     // Fish
+      {26, 8, 5, 12, 9, Element::Electric, true}, // Spark: Zapou
+      {36, 6, 8, 7, 8, Element::Water, true},     // Axolotl: Ploufi
   };
   static_assert(std::size(kStats) == static_cast<size_t>(Species::Count));
   const auto i = static_cast<size_t>(species);
@@ -1770,6 +1813,56 @@ World new_game(uint64_t seed) {
   capture(w, 0);  // the companion is the player's own
   w.team = {starting_companion(w.creatures[0].genes)};
   give_traits(w.team[0], roll_traits(w.seed, w.creatures[0].id, Species::Companion, w.team[0].genes), 0);
+  return w;
+}
+
+bool valid_look(const WizardLook& l) {
+  return l.skin < look::kSkins && l.hair < look::kHairStyles && l.hair_color < look::kHairColors &&
+         l.eyes < look::kEyeColors && l.staff <= look::kWand && l.robe < look::kRobeColors &&
+         l.headwear <= look::kBareHead;
+}
+
+uint32_t look_code(const WizardLook& l) {
+  return (l.woman ? 1u : 0u) | (uint32_t{l.skin} & 7u) << 1 | (uint32_t{l.hair} & 3u) << 4 |
+         (uint32_t{l.hair_color} & 7u) << 6 | (uint32_t{l.eyes} & 7u) << 9 | (uint32_t{l.staff} & 1u) << 12 |
+         (uint32_t{l.robe} & 7u) << 13 | (uint32_t{l.headwear} & 3u) << 16;
+}
+
+WizardLook look_from_code(uint32_t c) {
+  WizardLook l;
+  l.woman = (c & 1u) != 0;
+  l.skin = static_cast<uint8_t>((c >> 1) & 7u);
+  l.hair = static_cast<uint8_t>((c >> 4) & 3u);
+  l.hair_color = static_cast<uint8_t>((c >> 6) & 7u);
+  l.eyes = static_cast<uint8_t>((c >> 9) & 7u);
+  l.staff = static_cast<uint8_t>((c >> 12) & 1u);
+  l.robe = static_cast<uint8_t>((c >> 13) & 7u);
+  l.headwear = static_cast<uint8_t>((c >> 16) & 3u);
+  return l;
+}
+
+bool valid_starter(Species species) {
+  return std::find(std::begin(kStarters), std::end(kStarters), species) != std::end(kStarters);
+}
+
+World new_game(uint64_t seed, const NewGame& choices) {
+  World w = new_game(seed);
+  w.wizard.name = choices.name;
+  if (valid_look(choices.look)) w.wizard.look = choices.look;
+  const Species starter = valid_starter(choices.starter) ? choices.starter : Species::Companion;
+  // The first monster: of the magician's sex, the most common of its kind.
+  Genes genes;
+  genes.allele[0] = w.wizard.look.woman ? 1 : 0;
+  Creature& c = w.creatures[0];
+  c.species = starter;
+  c.genes = genes;
+  w.dex[static_cast<size_t>(Species::Companion)] = {};
+  capture(w, 0);
+  Monster m = starting_companion(genes);
+  m.species = starter;
+  m.hp = monster_fight_stats(m).hp;
+  give_traits(m, roll_traits(w.seed, c.id, starter, genes), 0);
+  w.team = {m};
   return w;
 }
 
@@ -1932,7 +2025,6 @@ void step(World& w, const Input& in) {
       continue;
     }
     switch (c.species) {
-      case Species::Companion: step_companion(w, s, c); break;
       case Species::Villager:
         // Far from the player, the village stands still.
         if (near_player(w, c.body.pos.x, c.body.pos.z, rules::kSimulationRadius)) {

@@ -27,7 +27,7 @@ struct RigPart {
   uint8_t tint = 0;     // 0: own colors; n: multiplied by the character's n-th color
   Quat rest{};          // rotation at rest, relative to the parent (before the pose)
 };
-inline constexpr size_t kMaxRigParts = 16;
+inline constexpr size_t kMaxRigParts = 24;
 
 // How a part is moved this frame, relative to its rest position.
 struct PartPose {
@@ -41,6 +41,23 @@ struct PartPose {
 // depends on the variant (villager_look).
 std::span<const RigPart> player_rig();
 std::span<const RigPart> creature_rig(Species species);
+
+// The magician as the player chose it (WizardLook): its rig (robe and face
+// of a man or a woman, hair, hat, hood or nothing, staff or wand) and the
+// colors of its tint slots (1 the crystal, 2 the robe, 3 the skin, 4 the
+// hair, 5 the eyes). `bare_head`: without its hat or hood (to choose the
+// hair); `beard`: Isidore's.
+struct WizardExtras {
+  bool bare_head = false;
+  bool beard = false;
+};
+struct WizardRig {
+  std::array<RigPart, 20> parts{};
+  std::array<Color, 5> tints{};
+};
+WizardRig wizard_rig(const WizardLook& look, const WizardExtras& extras = {});
+// Isidore, the old magician of the village: long white hair, a violet robe.
+WizardLook mentor_look();
 
 // How one monster looks, from its genes (variants.hpp): its rig, with parts
 // resized, moved, added (horns, a second tail...) or removed, and the colors
@@ -125,6 +142,8 @@ struct PortraitSubject {
   Species species = Species::Companion;
   uint8_t variant = 0;  // villagers
   Genes genes{};        // monsters
+  WizardLook look{};        // the magician's
+  bool bare_head = false;   // without its hat or hood
 };
 
 // One figure alone, standing at the origin, turned three-quarters towards

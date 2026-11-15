@@ -5,10 +5,11 @@ Petit jeu en C++ compilé en WebAssembly avec Emscripten, rendu WebGL2
 
 Le joueur est un apprenti magicien (robe étoilée, chapeau pointu, bâton à
 cristal lumineux) qui parcourt un monde magique de 280 m de côté avec son
-compagnon Pompon, un renard des braises tout rond qui le suit et saute derrière
+premier monstre, choisi en début de partie (Pompon le renard des braises,
+Zapou le hérisson-éclair ou Ploufi l'axolotl), qui le suit et saute derrière
 lui. Dans les prairies vallonnées vivent des monstres sauvages : Gloubi la
-gelée sauteuse, Champi le champignon qui se dandine et Piou l'oiseau qui
-s'enfuit quand on approche.
+gelée sauteuse, Champi le champignon qui se dandine, Piou l'oiseau qui
+s'enfuit quand on approche, et plus rarement Zapou, Ploufi et Pompon.
 
 Au nord, le sentier mène au village : chaumières, maisons à cheminée qui fume,
 huttes rondes, puits, barrières, panneaux, tonneaux et lanternes, des
@@ -33,6 +34,10 @@ s'éloigne du départ, plus les monstres sont forts.
 Partout : herbes qui ondulent au vent, fleurs, arbres, sapins, rochers,
 troncs, souches et buissons ; forêt au-delà des bords, montagnes enneigées,
 ciel et soleil, et une météo qui change d'un endroit à l'autre (voir Météo).
+
+Une partie commence par la **création du personnage** (voir Nouvelle
+partie), puis une courte cinématique d'arrivée ; Isidore, le vieux magicien
+du village, accueille le joueur et lui confie la quête principale.
 
 Contrôles :
 - joystick en bas à gauche, ou ZQSD / flèches : se déplacer (par rapport à la caméra) ;
@@ -292,12 +297,57 @@ est reconstruit quand le joueur a avancé de 16 m ; l'herbe et les petits
 objets rétrécissent jusqu'à disparaître avant le bord (dans le shader), si
 bien que rien n'apparaît d'un coup.
 
+## Nouvelle partie
+
+`web/create.js` : au tout premier lancement (aucune sauvegarde, et aucun
+`?new` ni `?seed` dans l'adresse), la création passe avant tout et ne peut
+pas être annulée ; plus tard, « Nouvelle partie » dans un emplacement vide
+des sauvegardes l'ouvre aussi. Le monde de la page n'est pas dessiné pendant
+ce temps. À gauche, le magicien (dessiné par le moteur, `build_preview` dans
+`src/render/scene.cpp`) : on le fait tourner en glissant, on zoome (molette,
+deux doigts, boutons) et on le déplace (deux doigts, clic droit ou Maj), avec
+« Visage » et « En pied ». À droite, cinq étapes :
+
+- **Nom** (obligatoire, ne change plus ensuite) ;
+- **Apparence** : homme ou femme (la silhouette change : épaules, robe,
+  cils), 6 couleurs de peau, cheveux courts, longs, en chignon ou rasés et
+  8 couleurs, 6 couleurs d'yeux ; le chapeau est retiré de l'aperçu pendant
+  cette étape ;
+- **Équipement** : bâton ou baguette, 8 couleurs de robe, chapeau pointu,
+  capuche ou rien ;
+- **Compagnon** : Pompon (feu), Zapou (électricité) ou Ploufi (eau), du même
+  sexe que le magicien et sous leur forme la plus commune ;
+- **Monde** : la graine, tirée au hasard par défaut, à changer à la main ou
+  avec le dé.
+
+Côté jeu : `WizardLook` et `NewGame` (`src/core/world.hpp`, l'apparence est
+dans la sauvegarde depuis la version 19), `wizard_rig`
+(`src/render/characters.cpp` : les pièces blanches du magicien sont teintes
+de la couleur choisie ; sous le chapeau ou la capuche, des cheveux ajustés
+qui ne les traversent pas ; le bâton tenu devant la manche et penché vers
+l'extérieur, la baguette pointée vers l'avant). Après la création, la caméra
+part de très haut au-dessus du magicien et descend vers lui en tournant un
+peu, pendant 7 s, jusqu'à la caméra du jeu (`src/render/intro.cpp`) ; tout
+le reste de l'écran est caché et « Passer » l'interrompt. Une note signale ensuite qu'Isidore attend sur la
+place du village.
+
 ## Quêtes, villageois et téléporteurs
 
 Règles dans `src/core/quests.hpp` / `quests.cpp`, dialogues dans
 `web/dialogue.js`, textes dans `web/lore.js` (`npcs`, `rumors`, `quests`).
 Les huit villageois ont un nom (`Creature::npc`) : Mirabelle, Gaspard, Lison,
-Bastien, Odette, Félix, Rosalie et Anatole. Les autres parlent de la vie du
+Bastien, Odette, Félix, Rosalie et Anatole ; Isidore, le vieux magicien à la
+barbe blanche et à la robe violette, se tient sur la place.
+
+La quête principale, « L'apprenti du village » (Isidore) : sa première
+partie consiste à aider les villageois, qui apprennent chacun quelque chose
+au joueur : capturer (le Piou de Mirabelle), voyager (les cercles de pierres
+de Gaspard), combattre (l'initiation de Bastien : gagner un combat contre
+lui, puis lui en reparler, 30 XP / 20) et soigner (l'initiation d'Odette :
+lancer le sort de Soin sur un de ses monstres blessé, puis le lui dire,
+25 XP / 15). Revenir ensuite voir Isidore : 100 XP au magicien, 60 au
+compagnon ; la suite viendra plus tard. Les initiations peuvent se faire
+dans n'importe quel ordre, avant même de parler à Isidore. Les autres parlent de la vie du
 pays, et des quêtes en cours ou finies (« Mirabelle a perdu son Piou… »,
 « Gaspard ne quitte plus le cercle de pierres… », puis des remerciements).
 
@@ -377,6 +427,19 @@ Les portraits du grimoire sont dessinés par le moteur lui-même, hors écran
 Les caractéristiques des monstres et du magicien sont des règles du jeu
 (`monster_stats`, `wizard_stats` dans `src/core/world.cpp`) ; les noms et
 descriptions, eux, sont dans `web/lore.js`.
+
+## Espèces
+
+Monstres : Pompon (renard des braises, feu), Gloubi (gelée, eau), Champi
+(champignon, nature), Piou (oiseau, air), Croa (corbeau, ombre et air), Bloup
+(poisson, eau), Zapou (hérisson aux piquants lumineux, électricité : collines, ruines, grotte,
+château) et Ploufi (axolotl, eau : bords de l'eau, côte, forêt). Pompon,
+Zapou et Ploufi sont les trois compagnons qu'on peut choisir en début de
+partie ; Pompon se rencontre aussi, rarement, dans les prairies. Les
+caractéristiques, attaques et façons de combattre de chaque espèce sont dans
+`src/core/world.cpp` (`kStats`) et `src/core/battle.cpp` (`kMoves`,
+`kTempers`), ses gènes dans `src/core/variants.cpp`, ses textes dans
+`web/lore.js`.
 
 ## Variantes
 
@@ -727,17 +790,16 @@ niveau, la taille du fichier, la date et l'heure de la sauvegarde, et
 - **Exporter** : une copie dans un fichier `monstres.sav` ;
 - **Supprimer** (après confirmation) : jamais la partie en cours, il faut
   d'abord en jouer une autre ;
-- dans un emplacement vide, **Nouvelle partie** (le nom du magicien et la
-  graine du monde, facultative : un nombre, ou un texte quelconque dont on
-  tire un nombre ; ni l'un ni l'autre ne changent ensuite) ou **Importer**
-  un fichier (il est vérifié en entier, puis rangé là sans être joué).
+- dans un emplacement vide, **Nouvelle partie** (la création du personnage,
+  voir Nouvelle partie) ou **Importer** un fichier (il est vérifié en entier,
+  puis rangé là sans être joué).
 
 Rien n'écrit jamais par-dessus une sauvegarde existante. Le résumé d'une
 sauvegarde est lu sans construire son monde (`peek_save`,
 `src/core/save.cpp`). Côté jeu : `monstres_saves_json`, `monstres_play_slot`,
 `monstres_delete_slot`, `monstres_new_game`, `monstres_import_save`
 (`src/platform/web/main.cpp`) ; dans la console : `monstres.saves()`,
-`monstres.playSave(n)`, `monstres.newGame(n, nom, graine)`.
+`monstres.playSave(n)`, `monstres.newGame(n, nom, graine, apparence, compagnon)`.
 
 ## Sécurité
 

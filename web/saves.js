@@ -1,8 +1,7 @@
 // The saves (settings menu, top right): three slots, each one a game. For
 // each: the magician's name and level, the file's size, when it was saved;
 // play it, export it to a file, remove it. In an empty slot: a new game (the
-// magician's name and the world's seed, chosen once and for all) or a file
-// brought in. Time stands still while the window is open. The rules are in
+// character creation, create.js) or a file brought in. Time stands still while the window is open. The rules are in
 // the game (src/platform/web/main.cpp): the save played is never removed
 // nor written over.
 (() => {
@@ -12,12 +11,9 @@
   let game = null;
   const dialog = $('saves');
   const list = $('saves-list');
-  const form = $('new-game');
-  const nameInput = $('new-game-name');
-  const seedInput = $('new-game-seed');
   const note = $('saves-note');
   const fileInput = $('import-file');
-  let slotFor = -1;     // the empty slot a new game or a file goes to
+  let slotFor = -1;     // the empty slot a file goes to
   let confirming = -1;  // the slot whose removal is being confirmed
 
   const sizeText = (bytes) => (bytes >= 1024 * 1024
@@ -33,16 +29,6 @@
 
   const isOpen = () => !dialog.hidden;
 
-  function showForm(slot) {
-    slotFor = slot;
-    form.hidden = slot < 0;
-    if (slot < 0) return;
-    $('new-game-title').textContent = `Nouvelle partie · emplacement ${slot + 1}`;
-    nameInput.value = '';
-    seedInput.value = '';
-    nameInput.focus();
-  }
-
   // Another world is played: the window closes on it.
   function played(ok) {
     if (ok) close();
@@ -56,7 +42,10 @@
         title,
         el('p', { className: 'save-name', textContent: 'Vide' }),
         el('div', { className: 'save-actions' }, [
-          button('Nouvelle partie', 'primary save-new', () => showForm(s.slot)),
+          button('Nouvelle partie', 'primary save-new', () => {
+            close();
+            window.monstresCreate.open(s.slot);  // the character creation
+          }),
           button('Importer', 'save-import', () => {
             slotFor = s.slot;
             fileInput.click();
@@ -102,7 +91,6 @@
     game.setPaused(true);  // the game played is saved: what is shown is up to date
     confirming = -1;
     say('');
-    showForm(-1);
     dialog.hidden = false;
     render();
   }
@@ -123,24 +111,9 @@
   window.addEventListener('keydown', (event) => {
     if (!isOpen()) return;
     event.stopPropagation();  // typing a name does not walk
-    if (event.key === 'Escape') {
-      if (!form.hidden) showForm(-1);
-      else close();
-    }
+    if (event.key === 'Escape') close();
   }, true);
   window.addEventListener('keyup', (event) => { if (isOpen()) event.stopPropagation(); }, true);
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const name = nameInput.value.trim();
-    if (!name) {
-      say('Choisis un nom pour ton magicien.');
-      nameInput.focus();
-      return;
-    }
-    played(await game.newGame(slotFor, name, seedInput.value.trim()));
-  });
-  $('new-game-cancel').addEventListener('click', () => showForm(-1));
 
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0];

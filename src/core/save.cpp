@@ -118,6 +118,7 @@ const char* load_error_name(LoadError e) {
 namespace {
 
 constexpr uint32_t kMaxCreaturesInSave = 4096;
+constexpr size_t kSpeciesCountV18 = 7;  // before Zapou and Ploufi
 
 // Chromatic (1), elemental (2), the build (bits 2-3).
 uint8_t forms_byte(const Genes& g) {
@@ -200,6 +201,11 @@ std::vector<uint8_t> serialize(const World& w) {
   out.u16(w.wizard.level);
   out.u32(w.wizard.xp);
   out.u16(w.wizard.mana);
+  const WizardLook& look = w.wizard.look;
+  for (uint8_t v : {static_cast<uint8_t>(look.woman ? 1 : 0), look.skin, look.hair, look.hair_color, look.eyes,
+                    look.staff, look.robe, look.headwear}) {
+    out.u8(v);
+  }
   out.u8(static_cast<uint8_t>(kSpeciesCount));
   out.u8(static_cast<uint8_t>(kMaxVariants));
   for (const auto& species : w.dex) {
@@ -276,6 +282,9 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_rival = version >= 16;   // Bastien, the trainer: battles won against him
   const bool with_spells = version >= 17;  // the magician's spells
   const bool with_builds = version >= 18;  // builds, mana, traits of the team, counts of the bestiary
+  const bool with_looks = version >= 19;   // the magician's look, Zapou and Ploufi, the main quest
+  // Species in the bestiary and the counts: two more from version 19.
+  const size_t species_saved = with_looks ? kSpeciesCount : kSpeciesCountV18;
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -316,7 +325,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
                       in.f32(c.target.x) && in.f32(c.target.z) && (before_village || in.f32(c.target_y)) &&
                       in.f32(c.home.x) && in.f32(c.home.z) && in.u8(c.variant);
       const auto place = [](float v) { return v >= -kMaxPlaceInSave && v <= kMaxPlaceInSave; };
-      if (!ok || species >= static_cast<uint8_t>(Species::Count) || mind > static_cast<uint8_t>(Mind::KnockedOut) ||
+      if (!ok || species >= species_saved || mind > static_cast<uint8_t>(Mind::KnockedOut) ||
           !place(c.target.x) || !place(c.target.z) || !place(c.target_y) || !place(c.home.x) || !place(c.home.z)) {
         return fail(error, LoadError::Corrupt);
       }
@@ -357,14 +366,23 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     if (with_builds && (!in.u16(w.wizard.mana) || w.wizard.mana > wizard_stats(w.wizard).mana)) {
       return fail(error, LoadError::Corrupt);
     }
+    if (with_looks) {
+      uint8_t v[8] = {};
+      for (uint8_t& b : v) {
+        if (!in.u8(b)) return fail(error, LoadError::Corrupt);
+      }
+      WizardLook& l = w.wizard.look;
+      l = {v[0] == 1, v[1], v[2], v[3], v[4], v[5], v[6], v[7]};
+      if (v[0] > 1 || !valid_look(l)) return fail(error, LoadError::Corrupt);
+    }
   }
   if (!with_builds) w.wizard.mana = wizard_stats(w.wizard).mana;
   if (with_genes) {
     uint8_t species_count = 0, variants = 0;
-    if (!in.u8(species_count) || !in.u8(variants) || species_count != kSpeciesCount || variants != kMaxVariants) {
+    if (!in.u8(species_count) || !in.u8(variants) || species_count != species_saved || variants != kMaxVariants) {
       return fail(error, LoadError::Corrupt);
     }
-    for (size_t s = 0; s < kSpeciesCount; ++s) {
+    for (size_t s = 0; s < species_saved; ++s) {
       auto& species = w.dex[s];
       // Version 9: the variants of the sex were not listed yet, the others come after them now.
       const size_t shift = without_sex ? genetics(static_cast<Species>(s)).genes[0].count : 0;
@@ -397,7 +415,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
         m.born_day = static_cast<int32_t>(born);
       }
       // Before version 18, forms was 0, 1 (chromatic) or 2 (elemental).
-      if (!ok || species >= static_cast<uint8_t>(Species::Count) || (!with_builds && forms > 2) ||
+      if (!ok || species >= species_saved || (!with_builds && forms > 2) ||
           !read_forms(forms, with_builds, m.genes) || m.level == 0) {
         return fail(error, LoadError::Corrupt);
       }
@@ -443,9 +461,10 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   }
   if (with_quests) {
     uint8_t quests = 0;
-    // Before version 18 there were two quests (the giant Champi's came then).
+    // Before version 18 there were two quests (the giant Champi's came then),
+    // before 19 three (fighting, healing and the main quest came then).
     if (!in.u8(w.teleporters) || w.teleporters >= (1u << kTeleporterCount) || !in.u8(quests) ||
-        quests != (with_builds ? kQuestCount : 2)) {
+        quests != (with_looks ? kQuestCount : with_builds ? 3 : 2)) {
       return fail(error, LoadError::Corrupt);
     }
     for (size_t k = 0; k < quests; ++k) {
@@ -475,10 +494,10 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   }
   if (with_builds) {
     uint8_t species = 0;
-    if (!in.u16(w.detect_ticks) || w.detect_ticks > rules::kDetectTicks || !in.u8(species) || species != kSpeciesCount) {
+    if (!in.u16(w.detect_ticks) || w.detect_ticks > rules::kDetectTicks || !in.u8(species) || species != species_saved) {
       return fail(error, LoadError::Corrupt);
     }
-    for (size_t s = 0; s < kSpeciesCount; ++s) {
+    for (size_t s = 0; s < species_saved; ++s) {
       if (!in.u16(w.captured_count[s]) || !in.u16(w.beaten_count[s]) || !in.u16(w.released_count[s])) {
         return fail(error, LoadError::Corrupt);
       }
@@ -552,6 +571,9 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   // the valley's edge rose into hills: it changed, the objects there settle again.
   if (grown && !with_builds) settle_objects(w);
   generate_wilds(w);
+  // Before version 19: Isidore comes to the village (and Bastien's lesson is
+  // learned if he was beaten already: told to him, it is done).
+  if (!with_looks) add_mentor(w);
   if (!with_builds) {
     // Before version 18: the team members get their traits (as if they
     // joined today), the captures are counted from the team.

@@ -3,6 +3,26 @@
 const { test, expect } = require('@playwright/test');
 const { openGame, state, walk, center } = require('./helpers');
 
+// The character creation (create.js), from its first step: a name, then
+// through the steps; the world's seed; the arrival's flight skipped.
+async function createCharacter(page, { name, seed, starter = 0, woman = false } = {}) {
+  await expect(page.locator('#create')).toBeVisible();
+  await page.locator('#create-name').fill(name);
+  await page.locator('#create-next').click();
+  if (woman) await page.locator('#create-sex .choice').nth(1).click();
+  await page.locator('#create-next').click();
+  await page.locator('#create-next').click();
+  await page.locator('#create-starters .starter').nth(starter).click();
+  await page.locator('#create-next').click();
+  if (seed !== undefined) await page.locator('#create-seed').fill(seed);
+  await expect(page.locator('#create-next')).toHaveText('Commencer l’aventure');
+  await page.locator('#create-next').click();
+  await expect(page.locator('#create')).toBeHidden();
+  await expect(page.locator('#skip-intro')).toBeVisible();
+  await page.locator('#skip-intro').click();
+  await expect(page.locator('#skip-intro')).toBeHidden();
+}
+
 test('the game starts in a 3D world', async ({ page }) => {
   await openGame(page, '?seed=42&new&frozen');
   const s = await state(page);
@@ -13,7 +33,8 @@ test('the game starts in a 3D world', async ({ page }) => {
   expect(s.creatures[0].species).toBe('companion');
   const bySpecies = {};
   for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
-  expect(bySpecies).toMatchObject({ companion: 1, villager: 8 });
+  expect(bySpecies.villager).toBe(9);  // with Isidore, the old magician
+  expect(bySpecies.companion).toBeGreaterThanOrEqual(1);  // the companion (and now and then a wild Pompon)
   expect(bySpecies.crow).toBeGreaterThan(0);
   expect(bySpecies.fish).toBeGreaterThan(0);
   // Wild monsters only around the player (the rest of the world is empty until it goes there).
@@ -222,6 +243,7 @@ test.describe('saves', () => {
   });
 
   test('three slots: a new game with a name and a seed, played, left and removed', async ({ page }) => {
+    test.setTimeout(150000);  // two characters created, and a reload
     await openGame(page, '?seed=42&new');
     await page.locator('#settings-button').click();
     await page.locator('#saves-open').click();
@@ -241,17 +263,18 @@ test.describe('saves', () => {
     await page.waitForTimeout(300);
     expect((await state(page)).tick).toBe(tick);
 
-    // A new game in the second slot: a name is needed; the seed makes the world.
+    // A new game in the second slot (the character creation): a name is needed; the seed makes the world.
     await slots.nth(1).locator('.save-new').click();
-    await page.locator('#new-game-seed').fill('1234');
-    await page.locator('#new-game-name').fill('Zoé');
-    const before = (await state(page)).player;
-    await page.locator('#new-game-name').press('d');  // typing letters does not walk
-    await page.locator('#new-game-create').click();
     await expect(page.locator('#saves')).toBeHidden();
+    await page.locator('#create-next').click();
+    await expect(page.locator('#create-note')).toContainText('Choisis un nom');
+    const before = (await state(page)).player;
+    await page.locator('#create-name').fill('Zoé');
+    await page.locator('#create-name').press('d');  // typing letters does not walk
+    expect((await state(page)).player).toEqual(before);
+    await createCharacter(page, { name: 'Zoéd', seed: '1234' });
     expect(await page.evaluate(() => window.monstres.wizard().name)).toBe('Zoéd');
     expect((await state(page)).player).toMatchObject({ x: 0, z: 0 });
-    expect(before).toBeTruthy();
     const world = await page.evaluate(() => window.monstres.map().path.slice(0, 6));
 
     // The same seed in the third slot: the same world.
@@ -260,10 +283,7 @@ test.describe('saves', () => {
     await expect(slots.nth(1)).toContainText('Zoéd');
     await expect(slots.nth(1)).toContainText('en cours');
     await slots.nth(2).locator('.save-new').click();
-    await page.locator('#new-game-name').fill('Léo');
-    await page.locator('#new-game-seed').fill('1234');
-    await page.locator('#new-game-create').click();
-    await expect(page.locator('#saves')).toBeHidden();
+    await createCharacter(page, { name: 'Léo', seed: '1234' });
     expect(await page.evaluate(() => window.monstres.map().path.slice(0, 6))).toEqual(world);
 
     // The name is shown on the character sheet, and cannot be changed there.
@@ -296,6 +316,75 @@ test.describe('saves', () => {
     expect(await page.evaluate(() => window.monstres.wizard().name)).toBe('');
     expect(await page.evaluate(() => window.monstres.saves().map((x) => !!x.empty))).toEqual([false, true, false]);
   });
+});
+
+test('the first visit begins with the character creation, then the arrival', async ({ page }) => {
+  test.setTimeout(120000);
+  await page.goto('/');  // no save yet
+  await page.evaluate(() => window.monstres.ready);
+  expect(await page.evaluate(() => window.monstres.needsCreation())).toBe(true);
+  await expect(page.locator('#create')).toBeVisible();
+  await expect(page.locator('#create-cancel')).toBeHidden();  // it must be done
+  await expect(page.locator('#settings-button')).toBeHidden();
+  // The look: a woman, long blond hair, blue eyes, a wand, a red robe, a hood.
+  await page.locator('#create-name').fill('Zoé');
+  await page.locator('#create-next').click();
+  await page.locator('#create-sex .choice').nth(1).click();
+  await page.locator('#create-hair .choice').nth(1).click();
+  await page.locator('#create-hair-color .swatch').nth(4).click();
+  await page.locator('#create-eyes .swatch').nth(3).click();
+  await page.locator('#create-skin .swatch').nth(2).click();
+  await page.locator('#create-next').click();
+  await page.locator('#create-staff .choice').nth(1).click();
+  await page.locator('#create-robe .swatch').nth(1).click();
+  await page.locator('#create-headwear .choice').nth(1).click();
+  // Turning and zooming the magician does not choose anything.
+  const view = page.locator('#create-view');
+  const box = await view.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await page.locator('#create-zoom-in').click();
+  // The three monsters to start with: Zapou.
+  await page.locator('#create-next').click();
+  await expect(page.locator('#create-starters .starter strong')).toHaveText(['Pompon', 'Zapou', 'Ploufi']);
+  await page.locator('#create-starters .starter').nth(1).click();
+  await expect(page.locator('#create-starter-text')).toContainText('Zapou, une femelle');
+  // The world: a seed drawn at random, or drawn again with the die.
+  await page.locator('#create-next').click();
+  const drawn = await page.locator('#create-seed').inputValue();
+  expect(drawn).toMatch(/^\d+$/);
+  await page.locator('#create-dice').click();
+  await page.locator('#create-seed').fill('77');
+  await page.locator('#create-next').click();
+  // The arrival's flight: nothing but the world, and a button to skip it.
+  await expect(page.locator('#create')).toBeHidden();
+  await expect(page.locator('#skip-intro')).toBeVisible();
+  await expect(page.locator('#settings-button')).toBeHidden();
+  expect((await state(page)).intro).toBe(true);
+  await page.locator('#skip-intro').click();
+  await expect(page.locator('#skip-intro')).toBeHidden();
+  await expect(page.locator('#settings-button')).toBeVisible();
+  // Isidore waits in the village.
+  await expect(page.locator('#toast')).toContainText('Isidore');
+  const game = await page.evaluate(() => ({
+    wizard: window.monstres.wizard(), team: window.monstres.team(), saves: window.monstres.saves(),
+    placeholder: window.monstres.state().placeholder, seed: window.monstres.saves()[0].seed,
+  }));
+  expect(game.placeholder).toBe(false);
+  expect(game.wizard.name).toBe('Zoé');
+  expect(game.wizard.look).toEqual({ woman: true, skin: 2, hair: 1, hairColor: 4, eyes: 3, staff: 1, robe: 1, headwear: 1 });
+  expect(game.team.map((m) => m.species)).toEqual(['spark']);
+  expect(game.team[0].variants).toContain('sex.female');
+  expect(game.seed).toBe('77');
+  expect(game.saves[0].name).toBe('Zoé');
+  // Kept: the next visit loads it, without the creation.
+  await page.evaluate(() => window.monstres.saveNow());
+  await page.reload();
+  await page.evaluate(() => window.monstres.ready);
+  await expect(page.locator('#create')).toBeHidden();
+  expect(await page.evaluate(() => window.monstres.wizard().look.robe)).toBe(1);
 });
 
 test('the game still starts offline once installed', async ({ page, context, browserName }) => {
@@ -471,8 +560,8 @@ test.describe('grimoire', () => {
     await page.locator('#menu-button').click();
     await page.getByRole('tab', { name: 'Bestiaire' }).click();
     const entries = page.locator('.bestiary-entry');
-    await expect(entries).toHaveCount(6);  // villagers are not monsters
-    await expect(entries.locator('strong')).toHaveText(['Pompon', 'Gloubi', 'Champi', 'Piou', 'Croa', 'Bloup']);
+    await expect(entries).toHaveCount(8);  // villagers are not monsters
+    await expect(entries.locator('strong')).toHaveText(['Pompon', 'Gloubi', 'Champi', 'Piou', 'Croa', 'Bloup', 'Zapou', 'Ploufi']);
     await page.locator('.bestiary-entry[data-species="mushroom"]').click();
     const detail = page.locator('#bestiary-detail');
     await expect(detail.locator('h2')).toHaveText('Champi');
@@ -842,6 +931,10 @@ test.describe('the bigger world', () => {
     expect(i).toBeGreaterThan(0);
     await page.evaluate((i) => { window.monstres.select(i); window.monstresDialogue.open(window.monstres.selected()); }, i);
     await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Bastien');
+    // First, his lesson: a battle against him.
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('initiation');
+    await page.locator('#accept-quest').click();
+    await expect.poll(() => page.evaluate(() => window.monstres.quests().find((q) => q.id === 'combat').stage)).toBe('active');
     await page.locator('#challenge').click();
     await page.evaluate(() => window.monstres.step(1));
     // The rules, while both sides take their places; his team: Champi, and a "?".
@@ -903,6 +996,11 @@ test.describe('the bigger world', () => {
     expect(i).toBeGreaterThan(0);
     await page.evaluate((i) => { window.monstres.select(i); window.monstresDialogue.open(window.monstres.selected()); }, i);
     await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Odette');
+    // Her lesson first (the Heal spell was cast already, on a hurt monster: done at once).
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('sort de Soin');
+    await page.locator('#accept-quest').click();
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('lance le sort de Soin');
+    await page.evaluate((i) => { window.monstres.select(i); window.monstresDialogue.open(window.monstres.selected()); }, i);
     await expect(page.locator('#dialogue .dialogue-text')).toContainText('pleine forme');
   });
 

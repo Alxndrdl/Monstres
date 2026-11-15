@@ -144,7 +144,7 @@ TEST_CASE("crows start on roofs and fly to another perch when the player comes")
 
 TEST_CASE("villagers stay around the village and greet the player") {
   World w = cached_game(8);
-  REQUIRE(count(w, Species::Villager) == rules::kVillagers);
+  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1);  // and Isidore, the magician
   run(w, move(0, 0), 30 * rules::kTicksPerSecond);
   for (const Creature& c : w.creatures) {
     if (c.species != Species::Villager) continue;

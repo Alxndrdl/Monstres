@@ -26,6 +26,16 @@ namespace monstres {
 // (Command::QuestComplete). Let go, it lives in the wild; once it is gone
 // (the player went far away), the quest can be taken again to catch it
 // anew: then neither the quest nor its capture give experience.
+//
+// Fighting (QuestId::Combat): Bastien teaches battles: win one against him
+// (World::rival_wins), and tell him.
+//
+// Healing (QuestId::Healing): Odette teaches the Heal spell: cast it on a
+// hurt monster of the team, and tell her.
+//
+// The main quest (QuestId::Main): Isidore, the old magician of the square,
+// welcomes the player. Its first part: help the village (the lost Piou, the
+// teleporters, fighting, healing), then come back to him.
 
 namespace rules {
 inline constexpr uint8_t kLostPiouPlumage = 3;  // the bird's plumage allele: emerald
@@ -35,7 +45,13 @@ inline constexpr uint32_t kLostPiouWizardXp = 60, kLostPiouMonsterXp = 40;
 inline constexpr uint32_t kTeleportersWizardXp = 40, kTeleportersMonsterXp = 25;
 inline constexpr uint32_t kGiantWizardXp = 80, kGiantMonsterXp = 50;
 inline constexpr uint8_t kGiantLevel = 8, kGiantAlphaLevel = 5, kGiantEscortLevel = 4;
+inline constexpr uint32_t kCombatWizardXp = 30, kCombatMonsterXp = 20;
+inline constexpr uint32_t kHealingWizardXp = 25, kHealingMonsterXp = 15;
+inline constexpr uint32_t kMainPart1WizardXp = 100, kMainPart1MonsterXp = 60;
 }  // namespace rules
+
+// The quests of the main quest's first part.
+inline constexpr QuestId kMainPart1[] = {QuestId::LostPiou, QuestId::Teleporters, QuestId::Combat, QuestId::Healing};
 
 // QuestState::progress of the teleporters' quest.
 inline constexpr uint8_t kWentToCastle = 1;  // from the village to the castle, by teleporter
@@ -43,6 +59,13 @@ inline constexpr uint8_t kCameBack = 2;      // then back to the village
 // And of the giant Champi's.
 inline constexpr uint8_t kGiantCaught = 1;    // captured once: it never comes back by itself
 inline constexpr uint8_t kGiantRewarded = 2;  // the quest's experience was given
+// Odette's: the Heal spell was cast on a hurt monster.
+inline constexpr uint8_t kHealedMonster = 1;
+// The main quest's: the parts done.
+inline constexpr uint8_t kMainPart1Done = 1;
+
+// While Odette's quest is on: a Heal spell was cast on a hurt monster (battle.cpp).
+void healed_monster(World& world);
 
 // Index of the villager `npc` in World::creatures, or -1.
 int npc_index(const World& world, uint8_t npc);

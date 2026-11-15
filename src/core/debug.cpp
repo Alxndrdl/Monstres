@@ -17,7 +17,8 @@ std::string carried_variants_json(Species species, const Genes& genes);
 
 namespace {
 const char* species_name(Species s) {
-  static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish"};
+  static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish", "spark", "axolotl"};
+  static_assert(std::size(kNames) == kSpeciesCount);
   const auto i = static_cast<size_t>(s);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
@@ -246,7 +247,12 @@ std::string wizard_json(const World& w) {
   s += ",\"hp\":" + std::to_string(st.hp) + ",\"mana\":" + std::to_string(st.mana);
   s += ",\"manaNow\":" + std::to_string(w.wizard.mana);
   s += ",\"power\":" + std::to_string(st.power) + ",\"wisdom\":" + std::to_string(st.wisdom);
-  s += ",\"agility\":" + std::to_string(st.agility) + ",\"endurance\":" + std::to_string(st.endurance) + "}";
+  s += ",\"agility\":" + std::to_string(st.agility) + ",\"endurance\":" + std::to_string(st.endurance);
+  const WizardLook& l = w.wizard.look;
+  s += std::string(",\"look\":{\"woman\":") + (l.woman ? "true" : "false") + ",\"skin\":" + std::to_string(l.skin) +
+       ",\"hair\":" + std::to_string(l.hair) + ",\"hairColor\":" + std::to_string(l.hair_color) +
+       ",\"eyes\":" + std::to_string(l.eyes) + ",\"staff\":" + std::to_string(l.staff) +
+       ",\"robe\":" + std::to_string(l.robe) + ",\"headwear\":" + std::to_string(l.headwear) + "}}";
   return s;
 }
 
@@ -368,7 +374,7 @@ const char* teleporter_name(TeleporterId id) {
 }
 
 const char* quest_name(QuestId id) {
-  static const char* kNames[] = {"lostPiou", "teleporters", "giantChampi"};
+  static const char* kNames[] = {"lostPiou", "teleporters", "giantChampi", "combat", "healing", "main"};
   static_assert(std::size(kNames) == kQuestCount);
   return kNames[static_cast<size_t>(id)];
 }
@@ -412,6 +418,18 @@ std::string quests_json(const World& w) {
       s += std::string(",\"near\":") + (near_npc(w, npc::kLison) ? "true" : "false");
       s += std::string(",\"again\":") + ((q.progress & kGiantCaught) ? "true" : "false");
       s += std::string(",\"rewarded\":") + ((q.progress & kGiantRewarded) ? "true" : "false");
+    } else if (id == QuestId::Combat) {
+      s += std::string("\"win\":") + (done || ready ? "true" : "false");
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
+    } else if (id == QuestId::Healing) {
+      s += std::string("\"heal\":") + (done || ready ? "true" : "false");
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
+    } else if (id == QuestId::Main) {
+      for (const QuestId part : kMainPart1) {
+        s += std::string("\"") + quest_name(part) + "\":" +
+             (w.quests[static_cast<size_t>(part)].stage == QuestStage::Done ? "true" : "false") + ",";
+      }
+      s += std::string("\"tell\":") + ((q.progress & kMainPart1Done) ? "true" : "false");
     } else {
       s += std::string("\"discover\":") + (teleporter_known(w, TeleporterId::Castle) ? "true" : "false");
       s += std::string(",\"go\":") + ((q.progress & kWentToCastle) || done ? "true" : "false");

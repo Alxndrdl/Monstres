@@ -59,6 +59,13 @@ function monstresWorldChanged() {
   window.dispatchEvent(new Event('monstres-world'));
 }
 
+// A magician's look as the game's number (look_code in src/core/world.cpp).
+function monstresLookCode(l = {}) {
+  const b = (v, bits, shift) => ((Number(v) || 0) & ((1 << bits) - 1)) << shift;
+  return b(l.woman ? 1 : 0, 1, 0) | b(l.skin, 3, 1) | b(l.hair, 2, 4) | b(l.hairColor, 3, 6) | b(l.eyes, 3, 9) |
+    b(l.staff, 1, 12) | b(l.robe, 3, 13) | b(l.headwear, 2, 16);
+}
+
 const monstresSaves = () => JSON.parse(UTF8ToString(_monstres_saves_json()));
 const monstresCurrentSlot = () => (monstresSaves().find((s) => s.current) || { slot: 0 }).slot;
 
@@ -278,13 +285,31 @@ window.monstres = {
     await monstresSync();
     return true;
   },
-  newGame: async (slot, name, seed = '') => {
-    const ok = monstresWithStrings([String(name), String(seed)], (n, s) => _monstres_new_game(slot, n, s));
+  // look: { woman, skin, hair, hairColor, eyes, staff, robe, headwear } (indices);
+  // starter: the species' index (Species), one of the three starters.
+  newGame: async (slot, name, seed = '', look = {}, starter = 0) => {
+    const code = monstresLookCode(look);
+    const ok = monstresWithStrings([String(name), String(seed)], (n, s) => _monstres_new_game(slot, n, s, code, starter));
     if (!ok) return false;
     monstresWorldChanged();
     await monstresSync();
     return true;
   },
+  // The character creation: needed first (the very first visit, no save);
+  // the magician as it would look (look as for newGame; bareHead: without
+  // its hat or hood), seen from cam { yaw, pitch, zoom, panX, panY }, as
+  // ImageData of width x height; the arrival's flight after a new game.
+  needsCreation: () => !!_monstres_needs_creation(),
+  wizardPreview: (look, bareHead, cam = {}, time = 0, width = 256, height = 256) => {
+    width = Math.max(1, Math.min(1024, Math.floor(width) || 1));
+    height = Math.max(1, Math.min(1024, Math.floor(height) || 1));
+    const ptr = _monstres_wizard_preview(monstresLookCode(look), bareHead ? 1 : 0, cam.yaw || 0, cam.pitch || 0,
+      cam.zoom || 1, cam.panX || 0, cam.panY || 0, time, width, height);
+    return new ImageData(new Uint8ClampedArray(HEAPU8.slice(ptr, ptr + width * height * 4)), width, height);
+  },
+  setCovered: (covered) => _monstres_set_covered(covered ? 1 : 0),
+  introOn: () => !!_monstres_intro_on(),
+  skipIntro: () => _monstres_skip_intro(),
   exportSave: monstresExportSave,
   importSave: monstresImportSave,
 };

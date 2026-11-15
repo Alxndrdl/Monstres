@@ -32,10 +32,17 @@ enum class MeshId : size_t {
   // Character parts (see src/render/characters.cpp).
   Eye,
   PlayerLeg, PlayerTorso, PlayerArm, PlayerHead, PlayerStaff, PlayerCrystal,
+  // The magician's look (characters.cpp, wizard_look): white parts are tinted.
+  PlayerTorsoWoman, PlayerTrims, PlayerTrimsWoman, PlayerNeck, PlayerCuff, PlayerHeadWoman,
+  PlayerHairShort, PlayerHairLong, PlayerHairBun,
+  PlayerHairShortHat, PlayerHairLongHat, PlayerHairBunHat, PlayerHairShortHood, PlayerHairLongHood,  // fitting under them
+  PlayerBeard, PlayerHat, PlayerHatBand, PlayerHood, PlayerWand,
   CompanionBody, CompanionLeg, CompanionHead, CompanionEar, CompanionTail,
   SlimeBody,
   MushroomStem, MushroomCap, MushroomLeg,
   BirdBody, BirdWing, BirdLeg,
+  SparkBody, SparkQuills, SparkQuillsLong, SparkHead, SparkEar, SparkTail, SparkLeg,
+  AxolotlBody, AxolotlHead, AxolotlGills, AxolotlTail, AxolotlLeg,
   // Village.
   HouseCottage, HouseChimney, HouseHut, Fence, Sign, Well, Barrel, Lamp,
   VillagerTorso, VillagerLeg, VillagerArm, VillagerHand, VillagerHead,
@@ -89,7 +96,7 @@ inline MeshGroup mesh_group(MeshId id) {
     default: break;
   }
   const auto i = static_cast<size_t>(id);
-  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::BirdLeg)) return MeshGroup::Characters;
+  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::AxolotlLeg)) return MeshGroup::Characters;
   if (i >= static_cast<size_t>(MeshId::VillagerTorso) && i <= static_cast<size_t>(MeshId::Bulb)) return MeshGroup::Characters;
   return MeshGroup::Scenery;
 }

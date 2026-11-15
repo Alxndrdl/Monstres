@@ -20,20 +20,39 @@ constexpr Color kWhite{1, 1, 1, 1};
 
 // ---- Rigs (characters face -Z, origin between the feet) ------------------------
 
-// The magician: robe, pointed hat, a staff in the right hand with a glowing crystal (tint 1).
-enum PlayerPart { kTorso, kHead, kPlayerEyeL, kPlayerEyeR, kArmL, kArmR, kLegL, kLegR, kStaff, kCrystal };
+// The magician: robe, pointed hat (or hood, or nothing), a staff (or a wand)
+// in the right hand with a glowing crystal. As the player chose it
+// (WizardLook, wizard_rig): tint slots 1 the crystal (glowing), 2 the robe,
+// 3 the skin, 4 the hair, 5 the eyes. The parts after kCrystal are not posed:
+// they follow their parent.
+enum PlayerPart {
+  kTorso, kHead, kPlayerEyeL, kPlayerEyeR, kArmL, kArmR, kLegL, kLegR, kStaff, kCrystal,
+  kTrims, kNeck, kHair, kHeadwear, kHatBand, kBeard, kHandL, kHandR, kCuffL, kCuffR
+};
 constexpr RigPart kPlayerRig[] = {
-    {MeshId::PlayerTorso, -1, {0, 0.37f, 0}},
-    {MeshId::PlayerHead, kTorso, {0, 0.37f, 0}},
-    {MeshId::Eye, kHead, {-0.075f, 0.2f, -0.185f}, {0.03f, 0.038f, 0.03f}},
-    {MeshId::Eye, kHead, {0.075f, 0.2f, -0.185f}, {0.03f, 0.038f, 0.03f}},
-    {MeshId::PlayerArm, kTorso, {-0.205f, 0.31f, 0}},
-    {MeshId::PlayerArm, kTorso, {0.205f, 0.31f, 0}},
+    {MeshId::PlayerTorso, -1, {0, 0.37f, 0}, {1, 1, 1}, 2},
+    {MeshId::PlayerHead, kTorso, {0, 0.37f, 0}, {1, 1, 1}, 3},
+    {MeshId::EyeIris, kHead, {-0.075f, 0.2f, -0.185f}, {0.03f, 0.038f, 0.03f}, 5},
+    {MeshId::EyeIris, kHead, {0.075f, 0.2f, -0.185f}, {0.03f, 0.038f, 0.03f}, 5},
+    {MeshId::PlayerArm, kTorso, {-0.205f, 0.31f, 0}, {1, 1, 1}, 2},
+    {MeshId::PlayerArm, kTorso, {0.205f, 0.31f, 0}, {1, 1, 1}, 2},
     {MeshId::PlayerLeg, -1, {-0.095f, 0.38f, 0}},
     {MeshId::PlayerLeg, -1, {0.095f, 0.38f, 0}},
-    {MeshId::PlayerStaff, kArmR, {0, -0.29f, -0.02f}},
+    // The staff in front of the sleeve (not through it), leaning out (clear of the hat's brim).
+    {MeshId::PlayerStaff, kArmR, {0.09f, -0.29f, -0.095f}, {1, 1, 1}, 0, Quat{0, 0, -0.10453f, 0.99452f}},  // quat_z(-0.21)
     {MeshId::PlayerCrystal, kStaff, {0, 0.9f, 0}, {1, 1, 1}, 1},
+    {MeshId::PlayerTrims, kTorso, {0, 0, 0}},
+    {MeshId::PlayerNeck, kTorso, {0, 0, 0}, {1, 1, 1}, 3},
+    {MeshId::PlayerHairShort, kHead, {0, 0, 0}, {1, 1, 1}, 4},
+    {MeshId::PlayerHat, kHead, {0, 0, 0}, {1, 1, 1}, 2},
+    {MeshId::PlayerHatBand, kHead, {0, 0, 0}},
+    {MeshId::Count, kHead, {0, 0, 0}, {1, 1, 1}, 4},  // a beard (Isidore's)
+    {MeshId::VillagerHand, kArmL, {0, -0.27f, 0}, {0.96f, 0.96f, 0.96f}, 3},
+    {MeshId::VillagerHand, kArmR, {0, -0.27f, 0}, {0.96f, 0.96f, 0.96f}, 3},
+    {MeshId::PlayerCuff, kArmL, {0, 0, 0}},
+    {MeshId::PlayerCuff, kArmR, {0, 0, 0}},
 };
+static_assert(std::size(kPlayerRig) <= kMaxRigParts);
 constexpr Color kCrystalGlow{1.7f, 1.8f, 1.9f, 1};
 
 enum CompanionPart { kCBody, kCHead, kCEyeL, kCEyeR, kEarL, kEarR, kTail, kLegFL, kLegFR, kLegBL, kLegBR };
@@ -117,6 +136,39 @@ constexpr RigPart kFishRig[] = {
     {MeshId::Eye, kFBody, {0.12f, 0.08f, -0.21f}, {0.04f, 0.05f, 0.04f}},
 };
 
+// Zapou and Ploufi walk on four paws like Pompon: the same parts, in the same
+// order (CompanionPart), so they move alike. Ploufi's "ears" are its gills.
+// Zapou, a hedgehog: its quills (last) glow with their color (tint slot 4).
+constexpr RigPart kSparkRig[] = {
+    {MeshId::SparkBody, -1, {0, 0.2f, 0}, {1, 1, 1}, 1},
+    {MeshId::SparkHead, kCBody, {0, 0.02f, -0.17f}, {1, 1, 1}, 1},
+    {MeshId::Eye, kCHead, {-0.055f, 0.1f, -0.1f}, {0.024f, 0.03f, 0.024f}},
+    {MeshId::Eye, kCHead, {0.055f, 0.1f, -0.1f}, {0.024f, 0.03f, 0.024f}},
+    {MeshId::SparkEar, kCHead, {-0.085f, 0.15f, -0.01f}, {1, 1, 1}, 1},
+    {MeshId::SparkEar, kCHead, {0.085f, 0.15f, -0.01f}, {1, 1, 1}, 1},
+    {MeshId::SparkTail, kCBody, {0, 0.02f, 0.19f}, {1, 1, 1}, 1},
+    {MeshId::SparkLeg, -1, {-0.08f, 0.12f, -0.09f}, {1, 1, 1}, 1},
+    {MeshId::SparkLeg, -1, {0.08f, 0.12f, -0.09f}, {1, 1, 1}, 1},
+    {MeshId::SparkLeg, -1, {-0.08f, 0.12f, 0.1f}, {1, 1, 1}, 1},
+    {MeshId::SparkLeg, -1, {0.08f, 0.12f, 0.1f}, {1, 1, 1}, 1},
+    {MeshId::SparkQuills, kCBody, {0, 0, 0}, {1, 1, 1}, 4},
+};
+constexpr int kQuills = 11;
+constexpr RigPart kAxolotlRig[] = {
+    {MeshId::AxolotlBody, -1, {0, 0.15f, 0}, {1, 1, 1}, 1},
+    {MeshId::AxolotlHead, kCBody, {0, 0.03f, -0.27f}, {1, 1, 1}, 1},
+    {MeshId::Eye, kCHead, {-0.12f, 0.1f, -0.08f}, {0.026f, 0.03f, 0.026f}},
+    {MeshId::Eye, kCHead, {0.12f, 0.1f, -0.08f}, {0.026f, 0.03f, 0.026f}},
+    // The gills fan out sideways and sweep back (the model fans out along +X).
+    {MeshId::AxolotlGills, kCHead, {-0.15f, 0.07f, 0.03f}, {1, 1, 1}, 2, Quat{0, 0.97479f, 0, -0.22311f}},  // yaw of half a turn + 0.45,
+    {MeshId::AxolotlGills, kCHead, {0.15f, 0.07f, 0.03f}, {1, 1, 1}, 2, Quat{0, -0.22311f, 0, 0.97479f}},  // yaw of -0.45
+    {MeshId::AxolotlTail, kCBody, {0, 0.0f, 0.22f}, {1, 1, 1}, 1},
+    {MeshId::AxolotlLeg, -1, {-0.13f, 0.09f, -0.14f}, {1, 1, 1}, 1},
+    {MeshId::AxolotlLeg, -1, {0.13f, 0.09f, -0.14f}, {1, 1, 1}, 1},
+    {MeshId::AxolotlLeg, -1, {-0.13f, 0.09f, 0.14f}, {1, 1, 1}, 1},
+    {MeshId::AxolotlLeg, -1, {0.13f, 0.09f, 0.14f}, {1, 1, 1}, 1},
+};
+
 // Drawn size of each species' rig (the models are made at a "unit" size).
 float rig_scale(Species species) {
   switch (species) {
@@ -126,6 +178,8 @@ float rig_scale(Species species) {
     case Species::Bird: return 1.4f;
     case Species::Crow: return 1.6f;
     case Species::Fish: return 1.3f;
+    case Species::Spark: return 1.2f;
+    case Species::Axolotl: return 1.25f;
     default: return 1.0f;
   }
 }
@@ -178,6 +232,7 @@ constexpr float kFemaleSize = 0.86f;  // relative to males
 constexpr Color kSlimeColor{0.36f, 0.82f, 0.70f, 1};
 constexpr Color kFeatherColor{0.99f, 0.82f, 0.26f, 1};
 constexpr Color kFishColor{0.30f, 0.62f, 0.86f, 1};
+constexpr Color kGillColor{0.92f, 0.36f, 0.50f, 1};
 
 // Animated glints around elemental monsters.
 void add_aura(DrawList& list, const Body& b, float radius, float height, Color color, float time, float seed) {
@@ -237,6 +292,67 @@ void add_body_shadow(const World& w, const Body& b, const BodyShape& shape, floa
 
 std::span<const RigPart> player_rig() { return kPlayerRig; }
 
+WizardRig wizard_rig(const WizardLook& look, const WizardExtras& extras) {
+  static constexpr Color kSkins[look::kSkins] = {{0.96f, 0.78f, 0.62f, 1}, {0.99f, 0.85f, 0.73f, 1},
+                                                 {0.86f, 0.64f, 0.47f, 1}, {0.70f, 0.50f, 0.35f, 1},
+                                                 {0.52f, 0.36f, 0.25f, 1}, {0.36f, 0.24f, 0.17f, 1}};
+  static constexpr Color kHairs[look::kHairColors] = {{0.36f, 0.22f, 0.12f, 1}, {0.10f, 0.09f, 0.10f, 1},
+                                                      {0.22f, 0.14f, 0.09f, 1}, {0.62f, 0.26f, 0.12f, 1},
+                                                      {0.88f, 0.72f, 0.40f, 1}, {0.86f, 0.86f, 0.88f, 1},
+                                                      {0.30f, 0.42f, 0.82f, 1}, {0.76f, 0.40f, 0.70f, 1}};
+  static constexpr Color kEyes[look::kEyeColors] = {{0.22f, 0.15f, 0.10f, 1}, {0.45f, 0.27f, 0.12f, 1},
+                                                    {0.30f, 0.56f, 0.26f, 1}, {0.26f, 0.52f, 0.88f, 1},
+                                                    {0.58f, 0.62f, 0.68f, 1}, {0.58f, 0.32f, 0.78f, 1}};
+  static constexpr Color kRobes[look::kRobeColors] = {{0.24f, 0.30f, 0.68f, 1}, {0.68f, 0.18f, 0.20f, 1},
+                                                      {0.20f, 0.50f, 0.30f, 1}, {0.45f, 0.25f, 0.62f, 1},
+                                                      {0.16f, 0.16f, 0.21f, 1}, {0.88f, 0.88f, 0.90f, 1},
+                                                      {0.48f, 0.32f, 0.20f, 1}, {0.18f, 0.52f, 0.56f, 1}};
+  // Each style bare, under the hat, under the hood (a bun does not fit under it).
+  static constexpr MeshId kHairMeshes[3][look::kHairStyles] = {
+      {MeshId::PlayerHairShort, MeshId::PlayerHairLong, MeshId::PlayerHairBun, MeshId::Count},
+      {MeshId::PlayerHairShortHat, MeshId::PlayerHairLongHat, MeshId::PlayerHairBunHat, MeshId::Count},
+      {MeshId::PlayerHairShortHood, MeshId::PlayerHairLongHood, MeshId::PlayerHairShortHood, MeshId::Count}};
+  const auto pick = [](std::span<const Color> colors, uint8_t i) { return colors[i < colors.size() ? i : 0]; };
+  WizardRig r;
+  std::copy(std::begin(kPlayerRig), std::end(kPlayerRig), r.parts.begin());
+  const auto part = [&](int i) -> RigPart& { return r.parts[static_cast<size_t>(i)]; };
+  if (look.woman) {  // narrower shoulders, a wider skirt, lashes
+    part(kTorso).mesh = MeshId::PlayerTorsoWoman;
+    part(kTrims).mesh = MeshId::PlayerTrimsWoman;
+    part(kHead).mesh = MeshId::PlayerHeadWoman;
+    part(kArmL).pivot.x = -0.19f;
+    part(kArmR).pivot.x = 0.19f;
+    part(kArmL).scale = part(kArmR).scale = {0.93f, 0.96f, 0.93f};
+  }
+  const uint8_t headwear = extras.bare_head ? look::kBareHead : look.headwear;
+  const size_t covered = headwear == look::kHat ? 1 : headwear == look::kHood ? 2 : 0;
+  part(kHair).mesh = kHairMeshes[covered][look.hair < look::kHairStyles ? look.hair : 0];
+  part(kHeadwear).mesh = headwear == look::kHat ? MeshId::PlayerHat : headwear == look::kHood ? MeshId::PlayerHood
+                                                                                              : MeshId::Count;
+  part(kHatBand).mesh = headwear == look::kHat ? MeshId::PlayerHatBand : MeshId::Count;
+  if (extras.beard) part(kBeard).mesh = MeshId::PlayerBeard;
+  if (look.staff == look::kWand) {  // a short wand, its crystal smaller, at its tip, pointing ahead
+    part(kStaff).mesh = MeshId::PlayerWand;
+    part(kStaff).pivot = {0, -0.3f, -0.045f};
+    part(kStaff).rest = quat_x(-1.15f);
+    part(kCrystal).pivot = {0, 0.32f, 0};
+    part(kCrystal).scale = {0.5f, 0.5f, 0.5f};
+  }
+  r.tints = {kCrystalGlow, pick(kRobes, look.robe), pick(kSkins, look.skin), pick(kHairs, look.hair_color),
+             pick(kEyes, look.eyes)};
+  return r;
+}
+
+WizardLook mentor_look() {
+  WizardLook l;
+  l.skin = 1;
+  l.hair = look::kLongHair;
+  l.hair_color = 5;  // white
+  l.eyes = 4;
+  l.robe = 3;        // violet
+  return l;
+}
+
 std::span<const RigPart> creature_rig(Species species) {
   switch (species) {
     case Species::Companion: return kCompanionRig;
@@ -245,6 +361,8 @@ std::span<const RigPart> creature_rig(Species species) {
     case Species::Bird: return kBirdRig;
     case Species::Crow: return kCrowRig;
     case Species::Fish: return kFishRig;
+    case Species::Spark: return kSparkRig;
+    case Species::Axolotl: return kAxolotlRig;
     case Species::Villager: return kVillagerRig;
     default: return {};
   }
@@ -378,6 +496,29 @@ CreatureLook creature_look(Species species, const Genes& g) {
       }
       break;
     }
+    case Species::Spark: {
+      // Its quills glow blue, yellow or violet; chromatic: a white hedgehog with
+      // white sparks; elemental (shadow): dark, with violet ones.
+      static constexpr Color kQuillGlow[] = {{0.55f, 1.35f, 2.2f, 1}, {2.0f, 1.75f, 0.45f, 1}, {1.5f, 0.65f, 2.1f, 1}};
+      look.tints[3] = g.elemental ? Color{1.1f, 0.45f, 1.7f, 1} : g.chromatic ? Color{1.9f, 1.9f, 2.0f, 1}
+                                                                           : kQuillGlow[g.allele[1] < 3 ? g.allele[1] : 0];
+      if (g.chromatic) look.tints[0] = {2.1f, 2.15f, 1.95f, 1};
+      if (g.elemental) look.tints[0] = {0.55f, 0.42f, 0.75f, 1};
+      if (g.allele[2] == 1) at(kQuills).mesh = MeshId::SparkQuillsLong;               // long quills
+      if (g.allele[3] == 1) at(kEarL).scale = at(kEarR).scale = {0.8f, 1.9f, 0.8f};   // tufted ears
+      break;
+    }
+    case Species::Axolotl: {
+      // Pink, blue, gold; chromatic: white; elemental (nature): green.
+      static constexpr Color kSkin[] = {{1, 1, 1, 1}, {0.55f, 1.05f, 1.4f, 1}, {1.0f, 1.2f, 0.45f, 1}};
+      look.tints[0] = body_tint(g, kSkin, {1.02f, 1.48f, 1.34f, 1}, {0.55f, 1.4f, 0.72f, 1});
+      look.tints[1] = times(kGillColor, look.tints[0], 1.05f);
+      if (g.allele[2] == 1) {  // large gills
+        at(kEarL).scale = at(kEarR).scale = {1.6f, 1.6f, 1.6f};
+      }
+      if (g.allele[3] == 1) at(kTail).scale = {1.0f, 1.25f, 1.7f};  // a long tail
+      break;
+    }
     default:
       break;
   }
@@ -460,8 +601,11 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
   poses.assign(rig.size(), PartPose{});
 
   switch (c.species) {
-    case Species::Companion: {
-      const float phase = t * kTau * (2.0f + 1.5f * walk);
+    case Species::Companion:
+    case Species::Spark:
+    case Species::Axolotl: {
+      const bool axolotl = c.species == Species::Axolotl;
+      const float phase = t * kTau * (axolotl ? 1.6f + 1.2f * walk : 2.0f + 1.5f * walk);
       const float swing = std::sin(phase) * 0.7f * clamp01(walk * 1.3f);
       if (b.on_ground) {
         poses[kLegFL].rotation = poses[kLegBR].rotation = quat_x(swing);
@@ -471,14 +615,24 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
         poses[kLegFL].rotation = poses[kLegFR].rotation = quat_x(0.7f);
         poses[kLegBL].rotation = poses[kLegBR].rotation = quat_x(-0.7f);
       }
-      // Tail wags (faster when happy to run), head tilts when idle, ears twitch.
-      const Quat wag = quat_yaw(std::sin(t * (5.0f + 9.0f * walk)) * 0.5f) * quat_x(-0.2f);
+      // Tail wags (faster when happy to run; an axolotl's sweeps slowly), head tilts when idle, ears twitch.
+      const Quat wag = axolotl ? quat_yaw(std::sin(phase * 0.5f) * 0.35f)
+                               : quat_yaw(std::sin(t * (5.0f + 9.0f * walk)) * 0.5f) * quat_x(-0.2f);
       for (size_t i = 0; i < rig.size(); ++i) {
-        if (rig[i].mesh == MeshId::CompanionTail) poses[i].rotation = wag;
+        if (rig[i].mesh == rig[kTail].mesh) poses[i].rotation = wag;
+      }
+      if (axolotl) {  // the body sways side to side as it walks, the gills ripple
+        poses[kCBody].rotation = quat_yaw(std::sin(phase) * 0.12f * walk);
+        const float ripple = 0.15f * std::sin(t * 3.0f);
+        poses[kEarL].rotation = quat_z(-ripple);
+        poses[kEarR].rotation = quat_z(ripple);
+        poses[kCHead].rotation = quat_yaw(std::sin(t * 0.6f) * 0.15f * (1 - walk));
+        break;
       }
       poses[kCHead].rotation = quat_z(std::sin(t * 0.8f) * 0.18f * (1 - walk)) * quat_x(0.08f * std::sin(phase) * walk);
       const float twitch = std::sin(t * 1.3f) > 0.97f ? 0.35f : 0.0f;
-      const float spread = c.genes.allele[2] == 2 ? 1.3f : 0.35f;  // floppy ears hang on the sides
+      // Pompon's floppy ears hang on the sides; Zapou's stand up.
+      const float spread = c.species == Species::Spark ? 0.25f : c.genes.allele[2] == 2 ? 1.3f : 0.35f;
       poses[kEarL].rotation = quat_z(spread) * quat_x(-twitch - (b.on_ground ? 0 : 0.5f));
       poses[kEarR].rotation = quat_z(-spread) * quat_x(-twitch - (b.on_ground ? 0 : 0.5f));
       break;
@@ -616,8 +770,9 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   std::vector<PartPose> poses;
   if (subject.wizard) {
     pose_player(body, time, poses);
-    add_rig(list, player_rig(), poses, body, kCrystalGlow, 1, kPlayerGlowSlot);
-    return 1.55f;  // with the hat
+    const WizardRig r = wizard_rig(subject.look, {.bare_head = subject.bare_head});
+    add_rig(list, r.parts, poses, body, r.tints, 1, kPlayerGlowSlot);
+    return subject.look.headwear == look::kHat && !subject.bare_head ? 1.55f : 1.25f;
   }
   Creature c;
   c.species = subject.species;
@@ -643,6 +798,8 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   float height = species_info(c.species).shape.height * 1.1f;
   if (c.species == Species::Fish) height = 0.8f;
   if (c.species == Species::Crow) height = 0.7f;
+  if (c.species == Species::Axolotl) height = 0.72f;  // low, but long: framed whole
+  if (c.species == Species::Spark) height = 0.78f;    // with its big ears
   height += look.extra_height * scale;
   if (look.aura) {
     const BodyShape& shape = species_info(c.species).shape;
@@ -743,7 +900,8 @@ void add_characters(const World& w, float time, DrawList& list, const Frustum* v
     const Quat arm = poses[kArmR].rotation;
     poses[kStaff].rotation = Quat{-arm.x, -arm.y, -arm.z, arm.w} * quat_x(0.35f);
   }
-  add_rig(list, player_rig(), poses, w.player, kCrystalGlow, 1, kPlayerGlowSlot);
+  const WizardRig me = wizard_rig(w.wizard.look);
+  add_rig(list, me.parts, poses, w.player, me.tints, 1, kPlayerGlowSlot);
   add_body_shadow(w, w.player, kPlayerShape, 0.5f, list);
 
   std::array<RigPart, std::size(kVillagerRig) + 2> villager_rig;
@@ -756,7 +914,13 @@ void add_characters(const World& w, float time, DrawList& list, const Frustum* v
     }
     pose_creature(c, time, static_cast<float>(i) * 0.731f, poses);
     float shadow_size = 1;
-    if (c.species == Species::Villager) {
+    if (c.species == Species::Villager && c.npc == npc::kMentor) {
+      // Isidore, the old magician: drawn as one, with his beard; he waves too.
+      pose_player(c.body, time + static_cast<float>(i), poses);
+      if (c.mind == Mind::Greet) poses[kArmL].rotation = quat_z(-2.5f - 0.35f * std::sin(time * 9.0f));
+      const WizardRig him = wizard_rig(mentor_look(), {.beard = true});
+      add_rig(list, him.parts, poses, c.body, him.tints, 1, kPlayerGlowSlot);
+    } else if (c.species == Species::Villager) {
       const VillagerLook look = villager_look(c.variant);
       std::copy(std::begin(kVillagerRig), std::end(kVillagerRig), villager_rig.begin());
       villager_rig[kVHair].mesh = look.hair_mesh;

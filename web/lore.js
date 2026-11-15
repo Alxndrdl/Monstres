@@ -119,9 +119,48 @@ window.MonstresLore = {
         elemental: { name: 'Bloup électrique', description: 'Il crépite quand il saute hors de l’eau. Mieux vaut ne pas se baigner à côté.' },
       },
     },
+    spark: {
+      name: 'Zapou', kind: 'Hérisson-éclair',
+      description: 'Un petit hérisson gris dont les piquants crépitent et s’illuminent quand il est content… ' +
+        'ou fâché. Les nuits d’orage, on voit ses piquants briller dans les collines. ' +
+        'Certains apprentis magiciens le choisissent pour compagnon.',
+      habitat: 'Collines, vieilles pierres',
+      genes: { quills: 'Piquants', spines: 'Longueur', ears: 'Oreilles' },
+      variants: {
+        'quills.blue': { name: 'Étincelles bleues', description: 'Ses piquants brillent d’un bleu d’éclair.' },
+        'quills.yellow': { name: 'Étincelles dorées', description: 'Des piquants qui luisent comme des braises dorées.' },
+        'quills.violet': { name: 'Étincelles violettes', description: 'Une lueur violette, comme les éclairs des grands orages.' },
+        'spines.short': { name: 'Piquants courts', description: 'Une petite boule de piquants bien serrés.' },
+        'spines.long': { name: 'Piquants longs', description: 'De longs piquants qui crépitent au moindre souffle de vent.' },
+        'ears.round': { name: 'Oreilles rondes', description: 'Deux petites oreilles rondes et douces.' },
+        'ears.tufted': { name: 'Oreilles en plumet', description: 'Des oreilles hautes, terminées par une touffe de poils.' },
+        chromatic: { name: 'Zapou des neiges', description: 'Tout blanc, ses étincelles sont blanches comme la neige.' },
+        elemental: { name: 'Zapou d’ombre', description: 'Un pelage sombre et des étincelles violettes, presque noires.' },
+      },
+    },
+    axolotl: {
+      name: 'Ploufi', kind: 'Axolotl des berges',
+      description: 'Il marche lentement au bord de l’eau en souriant à tout le monde. Ses branchies ' +
+        'en plumeau frémissent quand il est content. Certains apprentis magiciens le choisissent pour compagnon.',
+      habitat: 'Bords de l’eau, sous-bois humides',
+      genes: { skin: 'Peau', gills: 'Branchies', tail: 'Queue' },
+      variants: {
+        'skin.pink': { name: 'Peau rose', description: 'Rose tendre, comme une dragée.' },
+        'skin.blue': { name: 'Peau bleue', description: 'Un bleu pâle de lac au petit matin.' },
+        'skin.gold': { name: 'Peau dorée', description: 'Doré comme du miel : il brille au soleil.' },
+        'gills.small': { name: 'Petites branchies', description: 'Trois petits plumeaux de chaque côté de la tête.' },
+        'gills.large': { name: 'Grandes branchies', description: 'De grands plumeaux qui ondulent comme des algues.' },
+        'tail.short': { name: 'Queue courte', description: 'Une petite queue plate, bien pratique pour nager.' },
+        'tail.long': { name: 'Longue queue', description: 'Une longue queue qui ondule derrière lui.' },
+        chromatic: { name: 'Ploufi de lune', description: 'Tout blanc, presque transparent : on le croirait fait de lumière de lune.' },
+        elemental: { name: 'Ploufi des mousses', description: 'Vert comme la mousse des berges : des feuilles poussent sur sa queue.' },
+      },
+    },
   },
+  // The three monsters to start a game with (kStarters), and their element.
+  starterElements: { companion: 'fire', spark: 'electric', axolotl: 'water' },
   // Order of the species in the game (Species in src/core/world.hpp).
-  speciesOrder: ['companion', 'slime', 'mushroom', 'bird', 'villager', 'crow', 'fish'],
+  speciesOrder: ['companion', 'slime', 'mushroom', 'bird', 'villager', 'crow', 'fish', 'spark', 'axolotl'],
 
   elements: {
     fire: { name: 'Feu', color: '#ff9a5a' },
@@ -200,6 +239,24 @@ window.MonstresLore = {
     tail_slap: { name: 'Coup de queue', description: 'Une gifle avec sa queue mouillée.' },
     bubble: { name: 'Bulle', description: 'Une grosse bulle qui éclate au visage.' },
     wave: { name: 'Vague', description: 'Il fait jaillir une vague autour de lui.' },
+    zap: { name: 'Petit choc', description: 'Il fonce piquants en avant : ça pique, et ça grésille !' },
+    thunderbolt: {
+      name: 'Éclair', byElement: { shadow: 'Éclair noir' },
+      description: 'Ses piquants crépitent, puis un éclair file droit sur l’ennemi.',
+    },
+    discharge: {
+      name: 'Décharge', byElement: { shadow: 'Décharge d’ombre' },
+      description: 'Il se roule en boule, ses piquants s’illuminent : l’électricité frappe tout autour de lui.',
+    },
+    nip: { name: 'Mordillement', description: 'Une petite morsure, sans dents mais pas sans conviction.' },
+    water_jet: {
+      name: 'Jet d’eau', byElement: { nature: 'Jet de sève' },
+      description: 'Il crache un jet d’eau puissant sur l’ennemi.',
+    },
+    geyser: {
+      name: 'Geyser', byElement: { nature: 'Racines jaillissantes' },
+      description: 'L’eau jaillit du sol tout autour de lui.',
+    },
   },
   moveShapes: { melee: 'Corps à corps', projectile: 'À distance', burst: 'Tout autour' },
 
@@ -251,6 +308,9 @@ window.MonstresLore = {
       'Il paraît qu’il existe des monstres aux couleurs jamais vues : on les dit chromatiques.'] },
     8: { name: 'Anatole', chatter: ['De mon temps, le château de Corbeval avait un seigneur. Maintenant, il n’y a plus que des monstres.',
       'Le sentier traverse tout le pays, du nord au sud. Suis-le, tu ne te perdras pas.'] },
+    9: { name: 'Isidore', mentor: true, chatter: ['Un bon magicien écoute ses monstres autant qu’ils l’écoutent.',
+      'La tour en ruine, au sud… J’y ai appris la magie, il y a bien longtemps.',
+      'Les orages font sortir les Zapou de leurs terriers. On les voit courir sur les collines.'] },
   },
   // What the other villagers say about the quests (any of them, see web/dialogue.js).
   rumors: {
@@ -299,6 +359,32 @@ window.MonstresLore = {
       steps: { catch: 'Capturer le Champi géant, au cœur de la forêt', show: 'Le montrer à Lison' },
       done: 'Le Champi géant fait partie de ton équipe. Lison n’en revient pas.',
       again: 'Tu l’avais relâché : cette fois, ni la quête ni sa capture ne rapportent d’expérience.',
+    },
+    combat: {
+      title: 'Initiation au combat', giver: 4, xp: 30,
+      summary: 'Bastien, le dresseur à l’entrée du village, veut t’apprendre à combattre : attaques, esquives, parades. ' +
+        'Rien de tel qu’un vrai combat de dresseurs contre lui.',
+      steps: { win: 'Gagner un combat contre Bastien', tell: 'En reparler avec lui' },
+      done: 'Bastien est fier de toi : « Tu as tout compris. Reviens quand tu veux pour une revanche ! »',
+    },
+    healing: {
+      title: 'Initiation aux soins', giver: 5, xp: 25,
+      summary: 'Odette, la guérisseuse, veut t’apprendre à soigner tes monstres toi-même : ton bâton connaît le sort de Soin.',
+      steps: { heal: 'Lancer le sort de Soin sur un de tes monstres blessé', tell: 'Le dire à Odette' },
+      done: 'Odette est rassurée : tu sais soigner tes monstres, même loin du village.',
+    },
+    main: {
+      title: 'L’apprenti du village', giver: 9, xp: 100,
+      summary: 'Isidore, le vieux magicien du village, t’a accueilli. Avant de t’enseigner davantage, il veut que tu aides ' +
+        'les villageois : chacun t’apprendra quelque chose dont un magicien a besoin.',
+      steps: {
+        lostPiou: 'Capturer : retrouver le Piou de Mirabelle',
+        teleporters: 'Voyager : percer le secret des cercles de pierres avec Gaspard',
+        combat: 'Combattre : l’initiation de Bastien',
+        healing: 'Soigner : l’initiation d’Odette',
+        tell: 'Revenir voir Isidore',
+      },
+      done: 'Isidore est content de toi. La suite de ton apprentissage viendra bientôt…',
     },
   },
 
