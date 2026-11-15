@@ -60,6 +60,10 @@ TEST_CASE("every past save still loads to the same state") {
     // "rejected <error>" for saves that must be refused cleanly.
     LoadError error = LoadError::None;
     const auto world = deserialize(read_bytes(entry.path()), &error);
+    // The list of saves shows what loads, and only that (peek_save).
+    const auto peek = peek_save(read_bytes(entry.path()));
+    CHECK(peek.has_value() == world.has_value());
+    if (peek && world) CHECK(peek->seed == world->seed);
     const std::string actual =
         world ? summary(*world) : std::string("rejected ") + load_error_name(error) + "\n";
     if (update_golden()) {  // the .sav files themselves are never rewritten

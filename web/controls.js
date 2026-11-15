@@ -9,6 +9,7 @@
 (() => {
   'use strict';
 
+  const { whenReady } = window.MonstresUtil;
   const LOOK_SPEED = { mouse: 0.006, pen: 0.006, touch: 0.009 };  // radians per CSS pixel
   const DEAD_ZONE = 0.12;
   const TAP_MAX_MOVE = 10;   // CSS pixels: more is a drag (looking around)
@@ -42,8 +43,7 @@
     game = window.monstres;
     sendMove();
   }
-  if (window.monstres && window.monstres.isReady) onReady();
-  else window.addEventListener('monstres-ready', onReady, { once: true });
+  whenReady(onReady);
 
   // ---- Joystick ----
   const base = document.getElementById('joystick');

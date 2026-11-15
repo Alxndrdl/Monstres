@@ -90,6 +90,16 @@ enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };
 std::vector<uint8_t> serialize(const World& world);
 std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* error = nullptr);
 
+// What the list of saves shows of one, read without building its world
+// (everything is checked as deserialize does).
+struct SaveSummary {
+  std::string name;  // the magician's
+  uint16_t level = 1;
+  uint64_t seed = 0;
+  uint64_t tick = 0;
+};
+std::optional<SaveSummary> peek_save(std::span<const uint8_t> bytes, LoadError* error = nullptr);
+
 const char* load_error_name(LoadError error);
 
 // FNV-1a 64 of the serialized world: a fingerprint used by replay tests.

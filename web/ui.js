@@ -3,13 +3,10 @@
 (() => {
   'use strict';
 
+  const { whenReady, prefs } = window.MonstresUtil;
   let game = null;
-  const whenReady = (f) => {
-    if (window.monstres && window.monstres.isReady) f();
-    else window.addEventListener('monstres-ready', f, { once: true });
-  };
-  whenReady(() => {
-    game = window.monstres;
+  whenReady((g) => {
+    game = g;
     // index.js older than this page (stale cache): say so instead of failing silently.
     if (typeof game.pick !== 'function') {
       console.error('Monstres : le jeu (index.js) est plus ancien que la page. Rechargez la page.');
@@ -18,26 +15,6 @@
       box.hidden = false;
     }
   });
-
-  // Preferences of this browser only. Storage may be unavailable (private
-  // mode, blocked site data): the game works the same, it just forgets.
-  const prefs = {
-    get(key, fallback) {
-      try {
-        const v = localStorage.getItem(`monstres.${key}`);
-        return v === null ? fallback : JSON.parse(v);
-      } catch {
-        return fallback;
-      }
-    },
-    set(key, value) {
-      try {
-        localStorage.setItem(`monstres.${key}`, JSON.stringify(value));
-      } catch {
-        // not saved, never mind
-      }
-    },
-  };
 
   // ---- Settings menu ----
   const button = document.getElementById('settings-button');
@@ -59,19 +36,13 @@
     else if (!panel.hidden) select(-1);
   });
 
-  // Saves.
-  document.getElementById('export').addEventListener('click', () => game && game.exportSave());
-  const fileInput = document.getElementById('import-file');
-  document.getElementById('import').addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files[0];
-    fileInput.value = '';
-    if (file && game && !(await game.importSave(file))) {
-      alert("Ce fichier n'est pas une sauvegarde Monstres valide.");
-    } else if (file) {
-      setMenu(false);
-      select(-1);
-    }
+  // The saves have their own window (saves.js): the menu gives way to it.
+  document.getElementById('saves-open').addEventListener('click', () => setMenu(false));
+  // Another world is played: nothing of the one before stays selected.
+  window.addEventListener('monstres-world', () => {
+    setMenu(false);
+    select(-1);
+    showSign(-1);
   });
 
   // ---- Debug: time of day ----
@@ -329,12 +300,10 @@
   const signPanel = document.getElementById('sign');
   const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
   const COMPASS = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest'];
-  let signShown = -1;
   let signWatch = 0;
 
   function showSign(index) {
     clearInterval(signWatch);
-    signShown = index;
     signPanel.hidden = index < 0;
     if (index < 0) return;
     const sign = game.object(index);

@@ -19,6 +19,7 @@
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <cmath>
@@ -26,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -34,12 +36,18 @@ using namespace monstres;
 namespace {
 
 constexpr const char* kModelsDir = "/models";  // preloaded from assets/models
-constexpr const char* kSavePath = "/save/game.sav";
+// The saves: kSaveSlots games, each in its file (the first one's name is
+// from when there was one only); kCurrentPath tells which one is played.
+constexpr int kSaveSlots = 3;
+constexpr const char* kSavePaths[kSaveSlots] = {"/save/game.sav", "/save/game2.sav", "/save/game3.sav"};
 constexpr const char* kSaveTmpPath = "/save/game.sav.tmp";
+constexpr const char* kCurrentPath = "/save/current";
 constexpr double kTickMs = 1000.0 / rules::kTicksPerSecond;
 constexpr uint64_t kAutosaveEveryTicks = 5 * rules::kTicksPerSecond;
 constexpr int kJumpBufferTicks = 6;  // a jump pressed just before landing still counts
 constexpr int kMaxTicksPerFrame = 10;
+constexpr int kMaxPortraitSize = 1024;        // pixels a side (the page asks for 96 to 256)
+constexpr int kMaxSaveBytes = 8 * 1024 * 1024;  // an imported file bigger than this is not a save (post.js)
 
 // Where the time of a frame goes (settings menu, "détail du temps de calcul"):
 // sums and worst values over half a second.
@@ -74,6 +82,7 @@ struct App {
   bool adaptive = true;          // settings menu: lower it when frames are slow
   double slow_since = 0, fast_since = 0;  // when frames started being too slow / fast enough
   double interval_avg = 16.7;    // smoothed time between frames (ms)
+  double scale_ceiling = 2, scale_ceiling_time = 0;  // the last resolution found too slow, and when
   DrawList far_landscape;  // its ground and waters (far pass)
   DrawList far_dynamic;    // the volcano's smoke (far pass)
   double continent_ms = 0; // how long building it took (profile)
@@ -101,6 +110,7 @@ struct App {
   double last_time = 0;
   double accumulator = 0;
   uint64_t last_saved_tick = 0;
+  int slot = 0;                  // the save played (kSavePaths)
   std::vector<uint8_t> export_buffer;
   std::string json;
 };
@@ -115,6 +125,10 @@ uint64_t random_seed() {
   return static_cast<uint64_t>(emscripten_get_now() * 1000.0) ^
          (static_cast<uint64_t>(emscripten_random() * 4294967296.0) << 20);
 }
+
+// What JavaScript sends is not trusted to be a number (NaN would spread to
+// the camera and the player's place).
+float finite_or_zero(float v) { return std::isfinite(v) ? v : 0.0f; }
 
 int8_t to_axis(float v) {
   return static_cast<int8_t>(std::lround(std::clamp(v, -1.0f, 1.0f) * 127.0f));
@@ -241,26 +255,55 @@ void world_changed(App& app) {
   }
 }
 
-void write_save(App& app) {
-  const std::vector<uint8_t> bytes = serialize(app.world);
+bool valid_slot(int slot) { return slot >= 0 && slot < kSaveSlots; }
+
+// Written beside, then renamed: a write cut short never damages the file.
+bool write_file(const char* path, std::span<const uint8_t> bytes) {
   FILE* f = std::fopen(kSaveTmpPath, "wb");
-  if (!f) return;
+  if (!f) return false;
   const bool ok = std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
   std::fclose(f);
-  if (ok && std::rename(kSaveTmpPath, kSavePath) == 0) {
-    app.last_saved_tick = app.world.tick;
-    js_sync_save();
-  }
+  if (ok && std::rename(kSaveTmpPath, path) == 0) return true;
+  std::remove(kSaveTmpPath);
+  return false;
 }
 
-bool read_save(World& out) {
-  FILE* f = std::fopen(kSavePath, "rb");
+bool read_file(const char* path, std::vector<uint8_t>& bytes) {
+  bytes.clear();
+  FILE* f = std::fopen(path, "rb");
   if (!f) return false;
-  std::vector<uint8_t> bytes;
   uint8_t buf[4096];
   size_t n;
-  while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) bytes.insert(bytes.end(), buf, buf + n);
+  while ((n = std::fread(buf, 1, sizeof buf, f)) > 0 && bytes.size() <= static_cast<size_t>(kMaxSaveBytes)) {
+    bytes.insert(bytes.end(), buf, buf + n);
+  }
   std::fclose(f);
+  return true;
+}
+
+void write_save(App& app) {
+  // Even when it fails (storage full or refused): the next try is the next
+  // autosave, not every frame.
+  app.last_saved_tick = app.world.tick;
+  if (write_file(kSavePaths[app.slot], serialize(app.world))) js_sync_save();
+}
+
+// Which save is played, kept for the next visit.
+void write_current_slot(const App& app) {
+  const uint8_t digit = static_cast<uint8_t>('1' + app.slot);
+  if (write_file(kCurrentPath, {&digit, 1})) js_sync_save();
+}
+
+int read_current_slot() {
+  std::vector<uint8_t> bytes;
+  if (!read_file(kCurrentPath, bytes) || bytes.size() != 1) return 0;
+  const int slot = bytes[0] - '1';
+  return valid_slot(slot) ? slot : 0;
+}
+
+bool read_save(World& out, int slot) {
+  std::vector<uint8_t> bytes;
+  if (!read_file(kSavePaths[slot], bytes)) return false;
   LoadError error = LoadError::None;
   auto world = deserialize(bytes, &error);
   if (!world) {
@@ -340,7 +383,6 @@ double pixel_scale(const App& app, double css_w, double css_h) {
 // resolution found too slow less than half a minute ago. Not when frozen
 // (tests, pictures) nor paused.
 void adapt_resolution(App& app, double dt, double now) {
-  static double ceiling = 2, ceiling_time = 0;
   if (!app.adaptive) {
     app.render_scale = 1;
     return;
@@ -357,14 +399,14 @@ void adapt_resolution(App& app, double dt, double now) {
     app.slow_since = app.fast_since = 0;
   }
   if (app.slow_since > 0 && now - app.slow_since > 1000 && app.render_scale > kMinScale) {
-    ceiling = app.render_scale;
-    ceiling_time = now;
+    app.scale_ceiling = app.render_scale;
+    app.scale_ceiling_time = now;
     app.render_scale = std::max(kMinScale, app.render_scale * kScaleStep);
     app.slow_since = now;
     app.interval_avg = 19;  // measure again at the new resolution
   } else if (app.fast_since > 0 && now - app.fast_since > 4000 && app.render_scale < 1) {
     const double up = std::min(1.0, app.render_scale / kScaleStep);
-    if (up < ceiling - 1e-6 || now - ceiling_time > 30000) {
+    if (up < app.scale_ceiling - 1e-6 || now - app.scale_ceiling_time > 30000) {
       app.render_scale = up;
       app.interval_avg = 17;
     }
@@ -461,22 +503,66 @@ void frame(void* user) {
   }
 }
 
+// Another world is played, in the save `slot`: nothing pending from the one before.
+void enter_world(App& app, World world, int slot) {
+  app.world = std::move(world);
+  app.slot = slot;
+  app.command = Command::None;
+  app.jump_buffer = app.attack_buffer = app.parry_buffer = 0;
+  app.accumulator = 0;
+  app.last_saved_tick = app.world.tick;
+  write_current_slot(app);
+  world_changed(app);
+}
+
+// A name as the game keeps it: at most kMaxNameBytes of UTF-8, cut on a
+// character's boundary, without control characters.
+std::string clean_name(std::string n) {
+  std::erase_if(n, [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7f; });
+  if (n.size() > kMaxNameBytes) {
+    size_t cut = kMaxNameBytes;
+    while (cut > 0 && (static_cast<unsigned char>(n[cut]) & 0xC0) == 0x80) --cut;  // not inside a character
+    n.resize(cut);
+  }
+  return n;
+}
+
+// The seed typed for a new world: a number as it is, any other text by its
+// letters (FNV-1a), nothing: at random.
+uint64_t seed_from_text(const std::string& text) {
+  if (text.empty()) return random_seed();
+  const bool digits = text.size() <= 19 && std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; });
+  if (digits) return std::strtoull(text.c_str(), nullptr, 10);
+  uint64_t h = 0xcbf29ce484222325ULL;
+  for (const char c : text) h = (h ^ static_cast<unsigned char>(c)) * 0x100000001b3ULL;
+  return h;
+}
+
 }  // namespace
 
 // ---- C API used by JavaScript ----------------------------------------------
+
+// A function returning JSON for the page: the text is valid until the next one.
+#define JSON_EXPORT(name, expression)              \
+  EMSCRIPTEN_KEEPALIVE const char* name() {        \
+    g_app->json = (expression);                    \
+    return g_app->json.c_str();                    \
+  }
 
 extern "C" {
 
 // Joystick or keyboard direction: x right, y forward, each in -1..1.
 EMSCRIPTEN_KEEPALIVE void monstres_set_move(float x, float y) {
-  g_app->move_x = x;
-  g_app->move_y = y;
+  g_app->move_x = finite_or_zero(x);
+  g_app->move_y = finite_or_zero(y);
 }
 
 // Rotates the camera by an angle in radians (screen drag or tests).
 EMSCRIPTEN_KEEPALIVE void monstres_look(float delta_yaw, float delta_pitch) {
   Camera& c = g_app->camera;
   g_app->redraw = true;
+  delta_yaw = finite_or_zero(delta_yaw);
+  delta_pitch = finite_or_zero(delta_pitch);
   const BattlePhase phase = g_app->world.battle.phase;
   float fx, fz;
   if (phase == BattlePhase::Prepare || battle_forward(g_app->world, fx, fz)) delta_yaw = 0;  // locked on the target
@@ -485,8 +571,9 @@ EMSCRIPTEN_KEEPALIVE void monstres_look(float delta_yaw, float delta_pitch) {
 }
 
 EMSCRIPTEN_KEEPALIVE void monstres_set_camera(float yaw, float pitch) {
+  if (!std::isfinite(yaw) || !std::isfinite(pitch)) return;
   g_app->redraw = true;
-  g_app->camera.yaw = yaw;
+  g_app->camera.yaw = std::remainder(yaw, static_cast<float>(2 * kPi));
   g_app->camera.pitch = std::clamp(pitch, kMinPitch, kMaxPitch);
 }
 
@@ -503,16 +590,13 @@ EMSCRIPTEN_KEEPALIVE void monstres_attack(int slot) {
 
 EMSCRIPTEN_KEEPALIVE void monstres_parry() { g_app->parry_buffer = kJumpBufferTicks; }
 
-// Context menu: 1 engage creatures[target], 2 flee (or stop training),
-// 3 capture, 6 train; team bar: 4 summon (or recall) team[target]; team
-// sheet: 5 release team[target]; map: 7 teleport to teleporter target;
-// dialogues: 8 accept quest target, 9 give team[target], 10 report quest
-// target, 12 challenge the trainer target (Npc); battle: 11 aim at
-// foes[target] (65535: at no one), 13 ready; spells: 14 cast spell slot
-// target, 15 equip (slot * 16 + spell); the healer: 16 heal the team (Command).
-// Applied with the next tick (right away when frozen or paused).
+// A command (Command, by its number: the page reads the names once, see
+// monstres_command_names_json and post.js) and its target (what it means is
+// with each Command). Applied with the next tick (right away when frozen or paused).
+JSON_EXPORT(monstres_command_names_json, command_names_json())
+
 EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
-  if (command < 1 || command > 16 || target < 0 || target > 65535) return;
+  if (command < 1 || command >= static_cast<int>(kCommandCount) || target < 0 || target > 65535) return;
   g_app->command = static_cast<Command>(command);
   g_app->command_target = static_cast<uint16_t>(target);
   // Frozen (tests), or a menu open (time stands still: choosing spells,
@@ -526,6 +610,7 @@ EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
 // Debug options (settings menu): the time of day, in hours (0..24), and
 // whether it stands still.
 EMSCRIPTEN_KEEPALIVE void monstres_set_hour(float hour) {
+  if (!std::isfinite(hour)) return;
   const float h = std::fmod(std::fmod(hour, 24.0f) + 24.0f, 24.0f);
   g_app->world.clock = std::min(static_cast<uint32_t>(h * rules::kTicksPerHour), rules::kTicksPerDay - 1);
   g_app->held_clock = g_app->world.clock;
@@ -537,15 +622,9 @@ EMSCRIPTEN_KEEPALIVE void monstres_hold_hour(int hold) {
   g_app->held_clock = g_app->world.clock;
 }
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_team_json() {
-  g_app->json = team_json(g_app->world);
-  return g_app->json.c_str();
-}
+JSON_EXPORT(monstres_team_json, team_json(g_app->world))
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_battle_json() {
-  g_app->json = battle_json(g_app->world);
-  return g_app->json.c_str();
-}
+JSON_EXPORT(monstres_battle_json, battle_json(g_app->world))
 
 EMSCRIPTEN_KEEPALIVE const char* monstres_state_json() {
   const Camera& c = g_app->camera;
@@ -570,6 +649,7 @@ EMSCRIPTEN_KEEPALIVE void monstres_save_now() { write_save(*g_app); }
 // Debug (tests, screenshots): puts the player at (x, z) on the ground, its
 // companion beside it; the squares around fill with monsters.
 EMSCRIPTEN_KEEPALIVE void monstres_debug_teleport(float x, float z) {
+  if (!std::isfinite(x) || !std::isfinite(z)) return;
   World& w = g_app->world;
   const float limit = rules::kWorldHalfSize - 1;
   x = std::clamp(x, -limit, limit);
@@ -602,20 +682,11 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_object_json(int index) {
   return g_app->json.c_str();
 }
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_teleporters_json() {
-  g_app->json = teleporters_json(g_app->world);
-  return g_app->json.c_str();
-}
+JSON_EXPORT(monstres_teleporters_json, teleporters_json(g_app->world))
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_spells_json() {
-  g_app->json = spells_json(g_app->world);
-  return g_app->json.c_str();
-}
+JSON_EXPORT(monstres_spells_json, spells_json(g_app->world))
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_quests_json() {
-  g_app->json = quests_json(g_app->world);
-  return g_app->json.c_str();
-}
+JSON_EXPORT(monstres_quests_json, quests_json(g_app->world))
 
 // Frame profiler (settings menu): on or off, and the last half second as JSON ("null" before).
 EMSCRIPTEN_KEEPALIVE void monstres_set_profiling(int on) {
@@ -641,37 +712,76 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_paused(int paused) {
   if (g_app->paused) write_save(*g_app);
 }
 
-// Renames the magician (UTF-8, cut to kMaxNameBytes on a character boundary).
-EMSCRIPTEN_KEEPALIVE void monstres_set_name(const char* name) {
-  std::string n = name ? name : "";
-  if (n.size() > kMaxNameBytes) {
-    size_t cut = kMaxNameBytes;
-    while (cut > 0 && (static_cast<unsigned char>(n[cut]) & 0xC0) == 0x80) --cut;  // not inside a character
-    n.resize(cut);
+// ---- The saves (settings menu): kSaveSlots games, one of them played ----
+
+// [{"slot", "empty"} or {"slot", "current", "valid", "name", "level", "bytes",
+// "time" (when it was written, milliseconds since 1970), "seed" (a text: 64 bits)}].
+EMSCRIPTEN_KEEPALIVE const char* monstres_saves_json() {
+  std::string s = "[";
+  std::vector<uint8_t> bytes;
+  for (int slot = 0; slot < kSaveSlots; ++slot) {
+    s += std::string(slot ? "," : "") + "{\"slot\":" + std::to_string(slot);
+    struct stat st {};
+    if (!read_file(kSavePaths[slot], bytes) || stat(kSavePaths[slot], &st) != 0) {
+      s += ",\"empty\":true}";
+      continue;
+    }
+    const auto summary = peek_save(bytes);
+    s += std::string(",\"current\":") + (slot == g_app->slot ? "true" : "false");
+    s += std::string(",\"valid\":") + (summary ? "true" : "false");
+    s += ",\"bytes\":" + std::to_string(bytes.size());
+    s += ",\"time\":" + std::to_string(static_cast<long long>(st.st_mtime) * 1000);
+    if (summary) {
+      s += ",\"name\":" + json_string(summary->name) + ",\"level\":" + std::to_string(summary->level);
+      s += ",\"seed\":\"" + std::to_string(summary->seed) + "\"";
+    }
+    s += "}";
   }
-  g_app->world.wizard.name = n;
-  write_save(*g_app);
-}
-
-EMSCRIPTEN_KEEPALIVE const char* monstres_wizard_json() {
-  g_app->json = wizard_json(g_app->world);
+  g_app->json = s + "]";
   return g_app->json.c_str();
 }
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_bestiary_json() {
-  g_app->json = bestiary_json(g_app->world);
-  return g_app->json.c_str();
+// Plays the save of another slot (the one played is saved first). 1 when done.
+EMSCRIPTEN_KEEPALIVE int monstres_play_slot(int slot) {
+  App& app = *g_app;
+  if (!valid_slot(slot)) return 0;
+  if (slot == app.slot) return 1;
+  World world;
+  if (!read_save(world, slot)) return 0;
+  write_save(app);
+  enter_world(app, std::move(world), slot);
+  return 1;
 }
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_map_json() {
-  g_app->json = map_json(g_app->world);
-  return g_app->json.c_str();
+// Removes a save: not the one played (another one is played first).
+EMSCRIPTEN_KEEPALIVE int monstres_delete_slot(int slot) {
+  if (!valid_slot(slot) || slot == g_app->slot || std::remove(kSavePaths[slot]) != 0) return 0;
+  js_sync_save();
+  return 1;
 }
 
-EMSCRIPTEN_KEEPALIVE const char* monstres_continent_json() {
-  g_app->json = continent_json(g_app->continent);
-  return g_app->json.c_str();
+// A new game in an empty slot, played right away: the magician's name
+// (UTF-8, cut to kMaxNameBytes) and the world's seed (a number; any other
+// text gives a number too; empty: drawn at random). Neither changes afterwards.
+EMSCRIPTEN_KEEPALIVE int monstres_new_game(int slot, const char* name, const char* seed) {
+  App& app = *g_app;
+  std::vector<uint8_t> bytes;
+  if (!valid_slot(slot) || slot == app.slot || read_file(kSavePaths[slot], bytes)) return 0;
+  write_save(app);
+  World world = new_game(seed_from_text(seed ? seed : ""));
+  world.wizard.name = clean_name(name ? name : "");
+  enter_world(app, std::move(world), slot);
+  write_save(app);
+  return 1;
 }
+
+JSON_EXPORT(monstres_wizard_json, wizard_json(g_app->world))
+
+JSON_EXPORT(monstres_bestiary_json, bestiary_json(g_app->world))
+
+JSON_EXPORT(monstres_map_json, map_json(g_app->world))
+
+JSON_EXPORT(monstres_continent_json, continent_json(g_app->continent))
 
 // Heights of the continent, Continent::kPointsX * kPointsZ floats (see continent_json).
 EMSCRIPTEN_KEEPALIVE const float* monstres_continent_heights() { return g_app->continent.heights.data(); }
@@ -683,6 +793,7 @@ EMSCRIPTEN_KEEPALIVE const float* monstres_heights() { return g_app->world.groun
 // magician; `look` is the genes of a monster (genes_code, as in the JSON).
 // Returns the RGBA pixels (rows from the top), valid until the next call.
 EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_portrait(int species, int look, int size) {
+  size = std::clamp(size, 1, kMaxPortraitSize);  // post.js reads size * size pixels
   PortraitSubject subject;
   subject.wizard = species < 0;
   subject.species = static_cast<Species>(std::clamp(species, 0, static_cast<int>(Species::Count) - 1));
@@ -698,10 +809,7 @@ EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_portrait(int species, int look, int
 EMSCRIPTEN_KEEPALIVE void monstres_select(int index) { select(*g_app, index); }
 
 // The selected creature as JSON (see creature_json), or "null".
-EMSCRIPTEN_KEEPALIVE const char* monstres_selected_json() {
-  g_app->json = creature_json(g_app->world, g_app->selected);
-  return g_app->json.c_str();
-}
+JSON_EXPORT(monstres_selected_json, creature_json(g_app->world, g_app->selected))
 
 // Where creatures[index] is drawn, as JSON {"x", "y"} in normalized device
 // coordinates, or "null" (tests click on it).
@@ -717,20 +825,29 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_creature_screen_json(int index) {
   return g_app->json.c_str();
 }
 
-EMSCRIPTEN_KEEPALIVE int monstres_export_prepare() {
-  g_app->export_buffer = serialize(g_app->world);
-  return static_cast<int>(g_app->export_buffer.size());
+// The save of a slot, ready to be copied out (monstres_export_data): its size, 0 if there is none.
+EMSCRIPTEN_KEEPALIVE int monstres_export_prepare(int slot) {
+  App& app = *g_app;
+  if (!valid_slot(slot)) return 0;
+  if (slot == app.slot) {
+    app.export_buffer = serialize(app.world);
+  } else if (!read_file(kSavePaths[slot], app.export_buffer)) {
+    app.export_buffer.clear();
+  }
+  return static_cast<int>(app.export_buffer.size());
 }
 
 EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_export_data() { return g_app->export_buffer.data(); }
 
-EMSCRIPTEN_KEEPALIVE int monstres_import_save(const uint8_t* data, int size) {
-  if (!data || size <= 0) return 0;
-  auto world = deserialize({data, static_cast<size_t>(size)});
-  if (!world) return 0;
-  g_app->world = std::move(*world);
-  world_changed(*g_app);
-  write_save(*g_app);
+// A save file brought in, into an empty slot (it is not played yet). The
+// file is checked whole; kept as it is, whatever its version.
+EMSCRIPTEN_KEEPALIVE int monstres_import_save(const uint8_t* data, int size, int slot) {
+  if (!data || size <= 0 || size > kMaxSaveBytes || !valid_slot(slot) || slot == g_app->slot) return 0;
+  std::vector<uint8_t> there;
+  if (read_file(kSavePaths[slot], there)) return 0;  // never over a save
+  const std::span<const uint8_t> bytes{data, static_cast<size_t>(size)};
+  if (!peek_save(bytes) || !write_file(kSavePaths[slot], bytes)) return 0;
+  js_sync_save();
   return 1;
 }
 
@@ -784,7 +901,8 @@ int main(int argc, char** argv) {
   }
 
   // The save folder was loaded from IndexedDB in pre.js before main() ran.
-  if (force_new || !read_save(app.world)) {
+  app.slot = read_current_slot();
+  if (force_new || !read_save(app.world, app.slot)) {
     app.world = new_game(has_seed ? seed : random_seed());
     write_save(app);
   }

@@ -8,12 +8,7 @@
   'use strict';
 
   const LORE = window.MonstresLore;
-  const $ = (id) => document.getElementById(id);
-  const el = (tag, props = {}, children = []) => {
-    const node = Object.assign(document.createElement(tag), props);
-    for (const child of children) node.append(child);
-    return node;
-  };
+  const { $, el, whenReady, setText } = window.MonstresUtil;
   const speciesName = (id) => (LORE.species[id] || { name: id }).name;
   const npcName = (n) => (LORE.npcs[n] || { name: 'Dresseur' }).name;
 
@@ -23,8 +18,12 @@
   window.addEventListener('monstres-selection', (event) => {
     selected = event.detail.index;
     if (selected >= 0) object = -1;
+    quiet = false;
   });
-  window.addEventListener('monstres-object', (event) => { object = event.detail.index; });
+  window.addEventListener('monstres-object', (event) => {
+    object = event.detail.index;
+    quiet = false;
+  });
 
   // ---- Buttons ----
   const root = document.documentElement;
@@ -233,15 +232,24 @@
   const captureMark = el('span', { className: 'capture-mark' });
   sides.enemy.querySelector('.hp-bar').append(captureMark);
 
-  function showSide(box, name, level, hp, maxHp) {
-    box.querySelector('strong').textContent = name;
-    box.querySelector('.level').textContent = `niv. ${level}`;
+  // The parts of a fighter's box, looked up once.
+  const partsOf = (box) => ({
+    name: box.querySelector('strong'), level: box.querySelector('.level'), bar: box.querySelector('.hp-bar'),
+    text: box.querySelector('.hp-text'), tags: box.querySelector('.tags'),
+  });
+  const parts = { enemy: partsOf(sides.enemy), ally: partsOf(sides.ally) };
+  // Every frame: the page is touched only when something changed (setText).
+  const setWidth = (node, width) => { if (node.style.width !== width) node.style.width = width; };
+
+  function showSide(side, name, level, hp, maxHp) {
+    const p = parts[side];
+    setText(p.name, name);
+    setText(p.level, `niv. ${level}`);
     const ratio = maxHp ? hp / maxHp : 0;
-    const bar = box.querySelector('.hp-bar');
-    bar.firstElementChild.style.width = `${100 * ratio}%`;
-    bar.classList.toggle('mid', ratio <= 0.5 && ratio > 0.25);
-    bar.classList.toggle('low', ratio <= 0.25);
-    box.querySelector('.hp-text').textContent = `PV ${hp} / ${maxHp}`;
+    setWidth(p.bar.firstElementChild, `${100 * ratio}%`);
+    p.bar.classList.toggle('mid', ratio <= 0.5 && ratio > 0.25);
+    p.bar.classList.toggle('low', ratio <= 0.25);
+    setText(p.text, `PV ${hp} / ${maxHp}`);
   }
 
   let tagsFor = '';
@@ -262,38 +270,37 @@
       }
       sides.enemy.classList.add('free');
       sides.enemy.classList.remove('windup');
-      sides.enemy.querySelector('strong').textContent = trainer.name;
-      sides.enemy.querySelector('.level').textContent = `niv. ${trainer.level}`;
-      sides.enemy.querySelector('.hp-text').textContent = 'Entraînement : son bouclier encaisse tes attaques.';
-      sides.enemy.querySelector('.tags').replaceChildren();
+      setText(parts.enemy.name, trainer.name);
+      setText(parts.enemy.level, `niv. ${trainer.level}`);
+      setText(parts.enemy.text, 'Entraînement : son bouclier encaisse tes attaques.');
+      if (tagsFor !== '') parts.enemy.tags.replaceChildren();
       tagsFor = '';
       captureMark.hidden = true;
       sides.ally.hidden = !b.ally;
-      if (b.ally) showSide(sides.ally, speciesName(b.ally.species), b.ally.level, b.ally.hp, b.ally.maxHp);
+      if (b.ally) showSide('ally', speciesName(b.ally.species), b.ally.level, b.ally.hp, b.ally.maxHp);
       return;
     }
     trainer = null;
     const aimed = b.target >= 0 && b.enemy;
     sides.enemy.classList.toggle('free', !aimed);
     if (aimed) {
-      showSide(sides.enemy, speciesName(b.enemy.species), b.enemy.level, b.enemy.hp, b.enemy.maxHp);
+      showSide('enemy', speciesName(b.enemy.species), b.enemy.level, b.enemy.hp, b.enemy.maxHp);
     } else {
-      sides.enemy.querySelector('strong').textContent = b.rival && !(b.foes || []).length
-        ? `${npcName(b.rival.npc)} envoie son prochain monstre…` : 'Mode libre';
-      sides.enemy.querySelector('.level').textContent = '';
-      sides.enemy.querySelector('.hp-text').textContent = (b.foes || []).length
-        ? 'Touche un adversaire, ou son icône, pour le viser.' : '';
-      sides.enemy.querySelector('.hp-bar').firstElementChild.style.width = '0';
+      setText(parts.enemy.name, b.rival && !(b.foes || []).length
+        ? `${npcName(b.rival.npc)} envoie son prochain monstre…` : 'Mode libre');
+      setText(parts.enemy.level, '');
+      setText(parts.enemy.text, (b.foes || []).length ? 'Touche un adversaire, ou son icône, pour le viser.' : '');
+      setWidth(parts.enemy.bar.firstElementChild, '0px');
     }
     sides.ally.hidden = !b.ally;
-    if (b.ally) showSide(sides.ally, speciesName(b.ally.species), b.ally.level, b.ally.hp, b.ally.maxHp);
-    captureMark.style.left = `${b.captureHpPercent}%`;
+    if (b.ally) showSide('ally', speciesName(b.ally.species), b.ally.level, b.ally.hp, b.ally.maxHp);
+    if (captureMark.style.left !== `${b.captureHpPercent}%`) captureMark.style.left = `${b.captureHpPercent}%`;
     captureMark.hidden = !!b.rival || !aimed;
     sides.enemy.classList.toggle('windup', (b.foes || []).some((f) => f.fighter.state === 'windup'));
     const tags = aimed ? `${b.enemy.index}` : '';
     if (tagsFor !== tags) {
       tagsFor = tags;
-      sides.enemy.querySelector('.tags').replaceChildren(...(aimed ? b.enemy.elements : []).map((id) => {
+      parts.enemy.tags.replaceChildren(...(aimed ? b.enemy.elements : []).map((id) => {
         const e = LORE.elements[id] || { name: id, color: '#ccc' };
         return el('span', { className: 'badge', textContent: e.name, style: `background:${e.color}` });
       }));
@@ -385,9 +392,9 @@
     away.hidden = !show;
     if (!show) return;
     const left = Math.ceil(b.away);
-    away.textContent = b.phase === 'training'
+    setText(away, b.phase === 'training'
       ? `Trop loin ! Reviens vers ton magicien : fin de l’entraînement dans ${left} s`
-      : `Trop loin ! Reviens à portée : fin du combat dans ${left} s`;
+      : `Trop loin ! Reviens à portée : fin du combat dans ${left} s`);
   }
 
   // ---- Before a trainer's battle: the rules, and "ready" ----
@@ -457,6 +464,14 @@
   const layer = $('damage-layer');
   const seen = { allyHit: 0, allyParried: 0, shield: 0, outcome: -1, mercy: -1 };
   const seenFoes = new Map();  // creature index -> { hit, parried }
+  // Another world is played (saves.js): what was seen in the one before is forgotten.
+  window.addEventListener('monstres-world', () => {
+    Object.assign(seen, { allyHit: 0, allyParried: 0, shield: 0, outcome: -1, mercy: -1 });
+    seenFoes.clear();
+    selected = -1;
+    object = -1;
+    quiet = false;
+  });
 
   function floatText(index, text, className) {
     const at = game.creatureOnScreen(index);
@@ -562,11 +577,11 @@
     seen.outcome = o.tick;
     const foe = speciesName(o.species);
     const companion = speciesName((game.team().find((m) => m.active) || {}).species || 'companion');
-    const trainer = o.rival ? npcName(o.rival) : '';
+    const rival = o.rival ? npcName(o.rival) : '';
     const texts = o.rival ? {
-      victory: ['Victoire !', `Tu as battu ${trainer} !`],
-      defeat: [`${trainer} a gagné`, 'Tes monstres sont épuisés.'],
-      forfeit: ['Tu as déclaré forfait', `${trainer} remporte le combat.`],
+      victory: ['Victoire !', `Tu as battu ${rival} !`],
+      defeat: [`${rival} a gagné`, 'Tes monstres sont épuisés.'],
+      forfeit: ['Tu as déclaré forfait', `${rival} remporte le combat.`],
     }[o.result] : {
       victory: ['Victoire !', o.count > 1 ? `${o.count} monstres sont K.O.` : `${foe} est K.O.`],
       captured: [`${foe} capturé !`, 'Il rejoint ton équipe'],
@@ -599,10 +614,16 @@
 
   // ---- Every frame ----
   let fighting = false;
+  let quiet = false;  // no battle, nothing selected: the game is asked less often
+  let skipped = 0;
+  const QUIET_FRAMES = 6;  // about ten times a second
   function frame() {
     requestAnimationFrame(frame);
     if (!game || typeof game.battle !== 'function') return;
+    if (quiet && ++skipped < QUIET_FRAMES) return;
+    skipped = 0;
     const b = game.battle();
+    quiet = b.phase === 'none' && selected < 0 && object < 0;
     fighting = b.phase === 'fight' || b.phase === 'training';
     root.classList.toggle('battle', fighting);
     root.classList.toggle('training', b.phase === 'training');
@@ -619,6 +640,5 @@
     game = window.monstres;
     requestAnimationFrame(frame);
   };
-  if (window.monstres && window.monstres.isReady) start();
-  else window.addEventListener('monstres-ready', start, { once: true });
+  whenReady(start);
 })();

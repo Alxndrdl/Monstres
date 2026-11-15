@@ -393,14 +393,25 @@ public:
       glDepthMask(transparent ? GL_FALSE : GL_TRUE);
       if (transparent) glEnable(GL_BLEND); else glDisable(GL_BLEND);
       glUniform1i(u_opaque_pass_, transparent ? 0 : 1);  // fading edges are not lit windows
+      // The state is set for the meshes drawn only (most of them are not, in
+      // one pass: each call costs, in a browser), and when it changes.
+      int culling = -1;  // not known yet
       for (size_t i = 0; i < meshes_.size(); ++i) {
         const GpuMesh& m = meshes_[i];
         if (m.vertex_count == 0 || m.transparent != transparent) continue;
-        if (m.double_sided) glDisable(GL_CULL_FACE); else glEnable(GL_CULL_FACE);
-        glBindVertexArray(m.vao);
+        bool bound = false;
         for (const DrawList* list : lists) {
           if (list->far != far || i >= list->batches.size() || list->batches[i].empty()) continue;
           const auto& instances = list->batches[i];
+          if (!bound) {
+            bound = true;
+            const int cull = m.double_sided ? 0 : 1;
+            if (cull != culling) {
+              culling = cull;
+              if (cull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+            }
+            glBindVertexArray(m.vao);
+          }
           if (list->cached) {
             glBindBuffer(GL_ARRAY_BUFFER, cache_[list].buffers[i]);
           } else {

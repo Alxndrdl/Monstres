@@ -6,33 +6,9 @@
 
   const LORE = window.MonstresLore;
   let game = null;
-  if (window.monstres && window.monstres.isReady) game = window.monstres;
-  else window.addEventListener('monstres-ready', () => { game = window.monstres; }, { once: true });
 
-  const prefs = {
-    get(key, fallback) {
-      try {
-        const v = localStorage.getItem(`monstres.${key}`);
-        return v === null ? fallback : JSON.parse(v);
-      } catch {
-        return fallback;
-      }
-    },
-    set(key, value) {
-      try {
-        localStorage.setItem(`monstres.${key}`, JSON.stringify(value));
-      } catch {
-        // not remembered, never mind
-      }
-    },
-  };
-
-  const $ = (id) => document.getElementById(id);
-  const el = (tag, props = {}, children = []) => {
-    const node = Object.assign(document.createElement(tag), props);
-    for (const child of children) node.append(child);
-    return node;
-  };
+  const { $, el, prefs, whenReady } = window.MonstresUtil;
+  whenReady((g) => { game = g; });
 
   // ---- Portraits drawn by the game, kept as images ----
   const portraits = new Map();
@@ -138,7 +114,6 @@
     ['hp', 'Points de vie', 60], ['mana', 'Mana', 60], ['power', 'Puissance magique', 30],
     ['wisdom', 'Sagesse', 30], ['agility', 'Agilité', 30], ['endurance', 'Endurance', 30],
   ];
-  const nameInput = $('wizard-name');
 
   // [label, value, max for the bar, text shown (else the value)].
   function statList(target, entries) {
@@ -153,7 +128,7 @@
     const w = game.wizard();
     $('wizard-portrait').src = portraitUrl(-1);
     $('companion-portrait').src = portraitUrl(speciesIndex('companion'), 128);
-    if (document.activeElement !== nameInput) nameInput.value = w.name;
+    $('wizard-name').textContent = w.name || 'Magicien sans nom';  // chosen with the game (saves.js)
     $('wizard-rank').textContent = `Apprenti magicien · niveau ${w.level}`;
     $('wizard-xp-fill').style.width = `${Math.min(100, (100 * w.xp) / w.xpToNext)}%`;
     $('wizard-xp-text').textContent = `Expérience : ${w.xp} / ${w.xpToNext}`;
@@ -163,21 +138,6 @@
     const zone = game.state().player.zone;
     $('wizard-where').textContent = `Tu te trouves : ${LORE.zones[zone] || zone}.`;
   }
-
-  // The name is saved as it is typed (and when leaving the field).
-  let nameTimer = 0;
-  const saveName = () => {
-    clearTimeout(nameTimer);
-    if (game) game.setName(nameInput.value.trim());
-  };
-  nameInput.addEventListener('input', () => {
-    clearTimeout(nameTimer);
-    nameTimer = setTimeout(saveName, 400);
-  });
-  nameInput.addEventListener('change', saveName);
-  nameInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') nameInput.blur();
-  });
 
   // ---- Team: the monsters of the player, the companion first ----
   let chosenMember = prefs.get('teamSlot', 0);
@@ -262,9 +222,9 @@
       box.append(el('p', { className: 'facts', textContent: 'Pas pendant un combat ou un entraînement.' }));
       return box;
     }
-    const button = el('button', { type: 'button', className: 'button danger', id: 'release', textContent: `Relâcher ${name}…` });
-    button.addEventListener('click', () => askRelease(m));
-    box.append(button, el('p', { className: 'facts', textContent: 'Il sort du cristal et retourne vivre dans la nature.' }));
+    const release = el('button', { type: 'button', className: 'button danger', id: 'release', textContent: `Relâcher ${name}…` });
+    release.addEventListener('click', () => askRelease(m));
+    box.append(release, el('p', { className: 'facts', textContent: 'Il sort du cristal et retourne vivre dans la nature.' }));
     return box;
   }
 
@@ -901,9 +861,9 @@
         if (ruins && Math.max(Math.abs(x - ruins.x), Math.abs(z - ruins.z)) < 8.5) { r = 150; g = 146; b = 136; }
         if (castle && Math.max(Math.abs(x - castle.x), Math.abs(z - castle.z)) < castle.r) { r = 156; g = 150; b = 140; }
         // The sea where it comes in, and its beaches (not the hollows of the hills).
-        const land = Math.abs(x) > 150 || Math.abs(z) > 150 ? landAt(continent, x, z) : 0;
-        if (h < data.seaLevel + 2.5 && land < data.seaLevel + 1) { r = 214; g = 196; b = 140; }
-        if (h < data.seaLevel && land < data.seaLevel) { const k = Math.min(1, (data.seaLevel - h) / 12); r = 70 - 40 * k; g = 150 - 60 * k; b = 190 - 40 * k; }
+        const around = Math.abs(x) > 150 || Math.abs(z) > 150 ? landAt(continent, x, z) : 0;
+        if (h < data.seaLevel + 2.5 && around < data.seaLevel + 1) { r = 214; g = 196; b = 140; }
+        if (h < data.seaLevel && around < data.seaLevel) { const k = Math.min(1, (data.seaLevel - h) / 12); r = 70 - 40 * k; g = 150 - 60 * k; b = 190 - 40 * k; }
         if (lake) {
           const dx = (x - lake.x) / lake.rx, dz = (z - lake.z) / lake.rz;
           const d = dx * dx + dz * dz;
@@ -1099,5 +1059,11 @@
   }
 
   // For tests and other scripts.
+  // Another world is played (saves.js): its own map, read again.
+  window.addEventListener('monstres-world', () => {
+    close();
+    mapData = null;
+    base = null;
+  });
   window.monstresMenu = { open, close, isOpen, show };
 })();

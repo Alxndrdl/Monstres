@@ -7,6 +7,13 @@
 
 namespace monstres {
 
+// The commands' names, in the order of Command, as a JSON array: the page
+// sends a command by its name (post.js), the numbers are written here only.
+std::string command_names_json();
+
+// A text as a JSON string (quotes, backslashes and control characters escaped).
+std::string json_string(const std::string& text);
+
 // JSON view of the world, read by the browser tests (window.monstres.state()).
 std::string to_json(const World& world);
 

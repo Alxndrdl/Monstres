@@ -86,6 +86,7 @@ enum class Command : uint8_t {
   EquipSpell, // out of battles: spell slot Input::target / 16 (0, 1: combat; 2, 3: adventure) gets SpellId target % 16
   HealTeam,   // the healer (Npc Input::target) heals the whole team, and wakes the knocked out
 };
+inline constexpr size_t kCommandCount = static_cast<size_t>(Command::HealTeam) + 1;  // the last one
 
 // The magician's spells (see battle.hpp: what each does, where it can be cast).
 enum class SpellId : uint8_t { None, Heal, Shield, Mercy, Detect, Count };

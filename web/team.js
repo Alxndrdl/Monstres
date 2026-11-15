@@ -6,6 +6,7 @@
   'use strict';
 
   const LORE = window.MonstresLore;
+  const { whenReady } = window.MonstresUtil;
   const bar = document.getElementById('team-bar');
   const root = document.documentElement;
   let game = null;
@@ -89,6 +90,5 @@
     refresh();
     setInterval(refresh, 200);
   };
-  if (window.monstres && window.monstres.isReady) start();
-  else window.addEventListener('monstres-ready', start, { once: true });
+  whenReady(start);
 })();

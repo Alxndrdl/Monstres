@@ -7,7 +7,7 @@
   'use strict';
 
   const LORE = window.MonstresLore;
-  const $ = (id) => document.getElementById(id);
+  const { $, el, whenReady, setText } = window.MonstresUtil;
   let game = null;
 
   const ICONS = {
@@ -63,9 +63,13 @@
 
   // The magician's mana, above the spells.
   const mana = $('mana');
+  let manaShown = '';
   function renderMana(s) {
+    const key = `${s.manaNow}/${s.manaMax}`;
+    if (key === manaShown) return;
+    manaShown = key;
     mana.querySelector('.mana-fill').style.width = `${s.manaMax ? (100 * s.manaNow) / s.manaMax : 0}%`;
-    mana.querySelector('.mana-text').textContent = `${s.manaNow}/${s.manaMax}`;
+    setText(mana.querySelector('.mana-text'), key);
     mana.classList.toggle('low', s.manaNow < 6);
     mana.title = `Mana : ${s.manaNow} / ${s.manaMax}`;
     mana.setAttribute('aria-label', mana.title);
@@ -101,11 +105,6 @@
   // ---- The grimoire's tab: the four slots on the left; on the right, the
   // chosen slot's spell, and a button to change it (the spells it can hold;
   // one already in the other slot is greyed: choosing it swaps them).
-  const el = (tag, props = {}, children = []) => {
-    const node = Object.assign(document.createElement(tag), props);
-    for (const child of children) node.append(child);
-    return node;
-  };
   const SLOTS = [  // the order on screen: adventure first (the most used)
     { slot: 2, kind: 'adventure', key: 'R' }, { slot: 3, kind: 'adventure', key: 'G' },
     { slot: 0, kind: 'combat', key: 'R' }, { slot: 1, kind: 'combat', key: 'G' },
@@ -230,7 +229,6 @@
     setInterval(render, 100);
     render();
   };
-  if (window.monstres && window.monstres.isReady) start();
-  else window.addEventListener('monstres-ready', start, { once: true });
+  whenReady(start);
   window.MonstresSpells = { renderTab };
 })();

@@ -7,12 +7,7 @@
   'use strict';
 
   const LORE = window.MonstresLore;
-  const $ = (id) => document.getElementById(id);
-  const el = (tag, props = {}, children = []) => {
-    const node = Object.assign(document.createElement(tag), props);
-    for (const child of children) node.append(child);
-    return node;
-  };
+  const { $, el, whenReady } = window.MonstresUtil;
   const QUEST_INDEX = { lostPiou: 0, teleporters: 1, giantChampi: 2 };  // QuestId
   const MIRABELLE = 1;
   const GASPARD = 2;
@@ -282,6 +277,12 @@
   }
   let known = null;
   let before = null;  // the quests as they were
+  // Another world is played (saves.js): its teleporters and quests are not news.
+  window.addEventListener('monstres-world', () => {
+    known = null;
+    before = null;
+    close();
+  });
   function watchWorld() {
     if (!game || typeof game.quests !== 'function') return;
     const t = game.teleporters().list.filter((x) => x.known).map((x) => x.place);
@@ -308,7 +309,6 @@
     watchWorld();
     setInterval(watchWorld, 300);
   };
-  if (window.monstres && window.monstres.isReady) start();
-  else window.addEventListener('monstres-ready', start, { once: true });
+  whenReady(start);
   window.monstresDialogue = { open, close, isOpen: () => !box.hidden };
 })();

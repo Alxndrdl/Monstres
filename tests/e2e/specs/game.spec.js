@@ -174,7 +174,7 @@ test.describe('saves', () => {
     expect(resumed.tick).toBe(saved.tick);
   });
 
-  test('a save can be exported to a file and imported back', async ({ page }) => {
+  test('a save can be exported to a file and imported back into another slot', async ({ page }) => {
     await openGame(page, '?seed=7&new&frozen');
     await walk(page, -1, 0, 30);
     const exported = (await state(page)).player;
@@ -187,7 +187,20 @@ test.describe('saves', () => {
 
     await openGame(page, '?seed=99&new&frozen');
     expect((await state(page)).player).not.toEqual(exported);
-    await page.locator('#import-file').setInputFiles(file);
+    await page.locator('#settings-button').click();
+    await page.locator('#saves-open').click();
+    const slots = page.locator('#saves-list .save-slot');
+    await expect(slots).toHaveCount(3);
+    // The file goes into the second slot (empty); the game played does not change.
+    const chooser = page.waitForEvent('filechooser');
+    await slots.nth(1).locator('.save-import').click();
+    await (await chooser).setFiles(file);
+    await expect(page.locator('#saves-note')).toContainText('importée dans l’emplacement 2');
+    await expect(slots.nth(1)).toContainText('Niveau 1');
+    expect((await state(page)).player).not.toEqual(exported);
+    // Played: the world is the exported one.
+    await slots.nth(1).locator('.save-play').click();
+    await expect(page.locator('#saves')).toBeHidden();
     await expect.poll(async () => (await state(page)).player).toEqual(exported);
   });
 
@@ -195,12 +208,93 @@ test.describe('saves', () => {
     await openGame(page, '?seed=7&new&frozen');
     await walk(page, 1, 0, 10);
     const before = await state(page);
-    page.once('dialog', (dialog) => dialog.accept());
-    await page.locator('#import-file').setInputFiles({
+    await page.locator('#settings-button').click();
+    await page.locator('#saves-open').click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('#saves-list .save-slot').nth(2).locator('.save-import').click();
+    await (await chooser).setFiles({
       name: 'bad.sav', mimeType: 'application/octet-stream', buffer: Buffer.from('not a save'),
     });
-    await page.waitForTimeout(200);
+    await expect(page.locator('#saves-note')).toContainText('pas une sauvegarde Monstres valide');
+    await expect(page.locator('#saves-list .save-slot.empty')).toHaveCount(2);
+    await page.locator('#saves-close').click();
     expect(await state(page)).toEqual(before);
+  });
+
+  test('three slots: a new game with a name and a seed, played, left and removed', async ({ page }) => {
+    await openGame(page, '?seed=42&new');
+    await page.locator('#settings-button').click();
+    await page.locator('#saves-open').click();
+    await expect(page.locator('#settings')).toBeHidden();  // the window takes its place
+    const slots = page.locator('#saves-list .save-slot');
+    // The game played: its level, size and date; it can be neither played again nor removed.
+    await expect(slots.nth(0)).toContainText('en cours');
+    await expect(slots.nth(0)).toContainText('Magicien sans nom');
+    await expect(slots.nth(0)).toContainText('Niveau 1');
+    await expect(slots.nth(0).locator('.save-facts')).toContainText(/\d+ Ko/);
+    await expect(slots.nth(0).locator('.save-facts')).toContainText(new RegExp(`${new Date().getFullYear()}`));
+    await expect(slots.nth(0).locator('.save-play')).toBeDisabled();
+    await expect(slots.nth(0).locator('.save-delete')).toBeDisabled();
+    await expect(slots.nth(1)).toContainText('Vide');
+    // Time stands still while the window is open.
+    const tick = (await state(page)).tick;
+    await page.waitForTimeout(300);
+    expect((await state(page)).tick).toBe(tick);
+
+    // A new game in the second slot: a name is needed; the seed makes the world.
+    await slots.nth(1).locator('.save-new').click();
+    await page.locator('#new-game-seed').fill('1234');
+    await page.locator('#new-game-name').fill('Zoé');
+    const before = (await state(page)).player;
+    await page.locator('#new-game-name').press('d');  // typing letters does not walk
+    await page.locator('#new-game-create').click();
+    await expect(page.locator('#saves')).toBeHidden();
+    expect(await page.evaluate(() => window.monstres.wizard().name)).toBe('Zoéd');
+    expect((await state(page)).player).toMatchObject({ x: 0, z: 0 });
+    expect(before).toBeTruthy();
+    const world = await page.evaluate(() => window.monstres.map().path.slice(0, 6));
+
+    // The same seed in the third slot: the same world.
+    await page.locator('#settings-button').click();
+    await page.locator('#saves-open').click();
+    await expect(slots.nth(1)).toContainText('Zoéd');
+    await expect(slots.nth(1)).toContainText('en cours');
+    await slots.nth(2).locator('.save-new').click();
+    await page.locator('#new-game-name').fill('Léo');
+    await page.locator('#new-game-seed').fill('1234');
+    await page.locator('#new-game-create').click();
+    await expect(page.locator('#saves')).toBeHidden();
+    expect(await page.evaluate(() => window.monstres.map().path.slice(0, 6))).toEqual(world);
+
+    // The name is shown on the character sheet, and cannot be changed there.
+    await page.locator('#menu-button').click();
+    await page.getByRole('tab', { name: 'Personnage' }).click();
+    await expect(page.locator('#wizard-name')).toHaveText('Léo');
+    await expect(page.locator('#tab-character input')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // After a reload, the game played is still the third one.
+    await page.evaluate(() => window.monstres.saveNow());
+    await openGame(page, '');
+    expect(await page.evaluate(() => window.monstres.wizard().name)).toBe('Léo');
+    const list = await page.evaluate(() => window.monstres.saves());
+    expect(list.map((x) => !!x.current)).toEqual([false, false, true]);
+    expect(list.map((x) => x.name)).toEqual(['', 'Zoéd', 'Léo']);
+    expect(list[1].seed).toBe('1234');
+
+    // The second one is removed, after a confirmation.
+    await page.locator('#settings-button').click();
+    await page.locator('#saves-open').click();
+    await slots.nth(1).locator('.save-delete').click();
+    await expect(page.locator('#saves-note')).toContainText('définitive');
+    await expect(slots.nth(1)).toContainText('Zoéd');  // not yet
+    await slots.nth(1).locator('.save-delete').click();
+    await expect(slots.nth(1)).toContainText('Vide');
+    // Back to the first one.
+    await slots.nth(0).locator('.save-play').click();
+    await expect(page.locator('#saves')).toBeHidden();
+    expect(await page.evaluate(() => window.monstres.wizard().name)).toBe('');
+    expect(await page.evaluate(() => window.monstres.saves().map((x) => !!x.empty))).toEqual([false, true, false]);
   });
 });
 
@@ -218,15 +312,14 @@ test('the game still starts offline once installed', async ({ page, context, bro
 });
 
 test.describe('settings menu', () => {
-  test('the gear opens the menu with the save buttons, Escape closes it', async ({ page }) => {
+  test('the gear opens the menu with the saves button, Escape closes it', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     const menu = page.locator('#settings');
     await expect(menu).toBeHidden();
-    await expect(page.locator('#export')).toBeHidden();  // only in the menu
+    await expect(page.locator('#saves-open')).toBeHidden();  // only in the menu
     await page.locator('#settings-button').click();
     await expect(menu).toBeVisible();
-    await expect(page.locator('#export')).toBeVisible();
-    await expect(page.locator('#import')).toBeVisible();
+    await expect(page.locator('#saves-open')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
     // Clicking on the game view closes it too.
@@ -330,7 +423,7 @@ test.describe('grimoire', () => {
     await expect.poll(async () => (await state(page)).tick).toBeGreaterThan(tick);  // time goes on
   });
 
-  test('the character sheet shows the magician, the name is kept', async ({ page }) => {
+  test('the character sheet shows the magician', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     await page.locator('#menu-button').click();
     await page.getByRole('tab', { name: 'Personnage' }).click();
@@ -338,19 +431,7 @@ test.describe('grimoire', () => {
     await expect(page.locator('#wizard-stats')).toContainText('Points de vie');
     await expect(page.locator('#wizard-where')).toContainText('Prairie');
     await expect(page.locator('#wizard-portrait')).toHaveAttribute('src', /^data:image\/png/);
-    const before = (await state(page)).player;
-    const name = page.locator('#wizard-name');
-    await name.fill('Zoé');
-    await name.press('d');  // typing letters does not walk
-    await name.press('Enter');
-    expect((await state(page)).player).toEqual(before);
-    await expect.poll(() => page.evaluate(() => window.monstres.wizard().name)).toBe('Zoéd');
-    await page.evaluate(() => window.monstres.saveNow());
-
-    await openGame(page, '?frozen');  // the same game, loaded again
-    await page.locator('#menu-button').click();
-    await page.getByRole('tab', { name: 'Personnage' }).click();
-    await expect(page.locator('#wizard-name')).toHaveValue('Zoéd');
+    await expect(page.locator('#wizard-name')).toHaveText('Magicien sans nom');  // chosen with a new game (saves)
   });
 
   test('the bestiary lists the monsters, each with its card', async ({ page }) => {
@@ -1031,4 +1112,31 @@ test.describe('the bigger world', () => {
     expect(p.triangles).toBeGreaterThan(1000);
     expect(p.drawCalls).toBeGreaterThan(10);
   });
+});
+
+test('what the page sends to the game is bounded, and nothing breaks the security policy', async ({ page }) => {
+  const problems = [];
+  page.on('console', (m) => { if (/Content.Security|Refused to/i.test(m.text())) problems.push(m.text()); });
+  page.on('pageerror', (e) => problems.push(String(e)));
+  await openGame(page, '?seed=42&new&frozen');
+  const before = await state(page);
+  // A file far too big for a save is not even read.
+  const big = await page.evaluate(() => window.monstres.importSave(new File([new Uint8Array(9 * 1024 * 1024)], 'x.sav'), 1));
+  expect(big).toBe(false);
+  // A portrait has a reasonable size, whatever is asked.
+  expect(await page.evaluate(() => window.monstres.portrait(0, 99999, 0).width)).toBe(1024);
+  // Not numbers: ignored (the player and the camera stay where they are).
+  await page.evaluate(() => {
+    window.monstres.input.move(NaN, NaN);
+    window.monstres.input.look(NaN, Infinity);
+    window.monstres.setCamera(NaN, 0);
+    window.monstres.teleport(NaN, 5);
+    window.monstres.step(5);
+  });
+  const after = await state(page);
+  expect(after.player.x).toBe(before.player.x);
+  expect(after.player.z).toBe(before.player.z);
+  expect(Number.isFinite(after.camera.yaw)).toBe(true);
+  expect(Number.isFinite(after.camera.pitch)).toBe(true);
+  expect(problems).toEqual([]);
 });

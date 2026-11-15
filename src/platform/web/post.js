@@ -37,9 +37,36 @@ Module.monstresFatal = (message) => {
   console.error(message);
 };
 
-// ---- Export / import of a save file ----
+// ---- The saves: three slots, one of them played (settings menu, web/saves.js) ----
+
+// Calls f with the texts copied into the game's memory (freed afterwards).
+function monstresWithStrings(texts, f) {
+  const pointers = texts.map((text) => {
+    const bytes = lengthBytesUTF8(text) + 1;
+    const ptr = _malloc(bytes);
+    if (ptr) stringToUTF8(text, ptr, bytes);
+    return ptr;
+  });
+  try {
+    return pointers.every((p) => p) ? f(...pointers) : 0;
+  } finally {
+    pointers.forEach((p) => p && _free(p));
+  }
+}
+
+// After another world came (another save played, a new game): the page forgets the one before.
+function monstresWorldChanged() {
+  window.dispatchEvent(new Event('monstres-world'));
+}
+
+const monstresSaves = () => JSON.parse(UTF8ToString(_monstres_saves_json()));
+const monstresCurrentSlot = () => (monstresSaves().find((s) => s.current) || { slot: 0 }).slot;
+
+// options.slot: which save (the one played by default).
 async function monstresExportSave(options = {}) {
-  const len = _monstres_export_prepare();
+  const slot = options.slot === undefined ? monstresCurrentSlot() : options.slot;
+  const len = _monstres_export_prepare(slot);
+  if (!len) return 'none';
   const ptr = _monstres_export_data();
   const blob = new Blob([HEAPU8.slice(ptr, ptr + len)], { type: 'application/octet-stream' });
   const name = 'monstres.sav';
@@ -72,14 +99,33 @@ async function monstresExportSave(options = {}) {
   return 'download';
 }
 
-async function monstresImportSave(file) {
+// A save is a few megabytes at most: a bigger file is not one (and is not
+// read into memory at all).
+const MONSTRES_MAX_SAVE_BYTES = 8 * 1024 * 1024;
+
+// Into the empty slot `slot` (not played yet). False if the file is not a
+// save, or the slot is taken.
+async function monstresImportSave(file, slot) {
+  if (!file || file.size === 0 || file.size > MONSTRES_MAX_SAVE_BYTES) return false;
   const bytes = new Uint8Array(await file.arrayBuffer());
   const ptr = _malloc(bytes.length);
+  if (!ptr) return false;
   HEAPU8.set(bytes, ptr);  // read HEAPU8 after _malloc: memory may have grown
-  const ok = _monstres_import_save(ptr, bytes.length);
+  const ok = _monstres_import_save(ptr, bytes.length, slot);
   _free(ptr);
   if (ok) await monstresSync();
   return !!ok;
+}
+
+// ---- Commands: sent by name, the numbers are the game's (Command) ----
+let monstresCommands = null;
+function monstresCommand(name, target = 0) {
+  if (!monstresCommands) {
+    monstresCommands = new Map(JSON.parse(UTF8ToString(_monstres_command_names_json())).map((n, i) => [n, i]));
+  }
+  const id = monstresCommands.get(name);
+  if (id === undefined) throw new Error(`Commande inconnue : ${name}`);
+  _monstres_command(id, target);
 }
 
 // ---- Public API (web/controls.js, buttons in index.html, Playwright tests) ----
@@ -102,31 +148,31 @@ window.monstres = {
   },
   // Context menu (web/battle.js): start a battle against creature `index`,
   // flee, capture. Applied with the next tick.
-  engage: (index) => _monstres_command(1, index),
-  flee: () => _monstres_command(2, 0),
-  capture: () => _monstres_command(3, 0),
+  engage: (index) => monstresCommand('engage', index),
+  flee: () => monstresCommand('flee', 0),
+  capture: () => monstresCommand('capture', 0),
   // Team bar (web/team.js): team member `slot` out of the crystal, where the
   // companion is (it goes back in); the one already out goes back in.
-  summon: (slot) => _monstres_command(4, slot),
+  summon: (slot) => monstresCommand('summon', slot),
   // Team sheet (web/menu.js): let team[slot] go back to the wild.
-  release: (slot) => _monstres_command(5, slot),
+  release: (slot) => monstresCommand('release', slot),
   // Context menu on the companion: train against the magician (stopTraining ends it).
-  train: () => _monstres_command(6, 0),
-  stopTraining: () => _monstres_command(2, 0),
+  train: () => monstresCommand('train', 0),
+  stopTraining: () => monstresCommand('flee', 0),
   // Battle: aim at foes[slot] (-1: at no one, the companion moves freely).
-  target: (slot) => _monstres_command(11, slot < 0 ? 65535 : slot),
+  target: (slot) => monstresCommand('target', slot < 0 ? 65535 : slot),
   // Trainers: challenge (npc), readyToFight once the rules are read, forfeit.
-  challenge: (npc) => _monstres_command(12, npc),
-  readyToFight: () => _monstres_command(13, 0),
-  forfeit: () => _monstres_command(2, 0),
+  challenge: (npc) => monstresCommand('challenge', npc),
+  readyToFight: () => monstresCommand('ready', 0),
+  forfeit: () => monstresCommand('flee', 0),
   // Spells (web/spells.js): cast slot 0 or 1 (combat spells in a battle, else
   // adventure ones); equip a spell (its value, 0: none) in slot 0..3 (0, 1:
   // combat; 2, 3: adventure), out of battles; what they are.
-  cast: (slot) => _monstres_command(14, slot),
-  equipSpell: (slot, spell) => _monstres_command(15, slot * 16 + spell),
+  cast: (slot) => monstresCommand('cast', slot),
+  equipSpell: (slot, spell) => monstresCommand('equipSpell', slot * 16 + spell),
   spells: () => JSON.parse(UTF8ToString(_monstres_spells_json())),
   // The healer (Odette): heals the team.
-  healTeam: (npc) => _monstres_command(16, npc),
+  healTeam: (npc) => monstresCommand('healTeam', npc),
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),
   holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),
@@ -155,10 +201,10 @@ window.monstres = {
   // Teleporters (known, reachable) and quests; what the player does with them.
   teleporters: () => JSON.parse(UTF8ToString(_monstres_teleporters_json())),
   quests: () => JSON.parse(UTF8ToString(_monstres_quests_json())),
-  teleportTo: (id) => _monstres_command(7, id),
-  acceptQuest: (quest) => _monstres_command(8, quest),
-  giveMonster: (slot) => _monstres_command(9, slot),
-  completeQuest: (quest) => _monstres_command(10, quest),
+  teleportTo: (id) => monstresCommand('teleport', id),
+  acceptQuest: (quest) => monstresCommand('questAccept', quest),
+  giveMonster: (slot) => monstresCommand('questGive', slot),
+  completeQuest: (quest) => monstresCommand('questComplete', quest),
   // Frame profiler (settings menu): where the time of the frames goes, every half second.
   setProfiling: (on) => _monstres_set_profiling(on ? 1 : 0),
   profile: () => JSON.parse(UTF8ToString(_monstres_profile_json())),
@@ -168,14 +214,6 @@ window.monstres = {
   // Game menus (web/menu.js).
   setPaused: (paused) => _monstres_set_paused(paused ? 1 : 0),
   wizard: () => JSON.parse(UTF8ToString(_monstres_wizard_json())),
-  setName: (name) => {
-    const bytes = lengthBytesUTF8(name) + 1;
-    const ptr = _malloc(bytes);
-    stringToUTF8(name, ptr, bytes);
-    _monstres_set_name(ptr);
-    _free(ptr);
-    return monstresSync();
-  },
   bestiary: () => JSON.parse(UTF8ToString(_monstres_bestiary_json())),
   // Map data, plus the heights of the ground as a Float32Array (a copy).
   map: () => {
@@ -199,6 +237,7 @@ window.monstres = {
   // genes of a monster ("look" in the bestiary and creature JSON), 0 = the
   // most common one.
   portrait: (species, size = 256, look = 0) => {
+    size = Math.max(1, Math.min(1024, Math.floor(size) || 1));  // as the game clamps it
     const ptr = _monstres_portrait(species, look, size);
     return new ImageData(new Uint8ClampedArray(HEAPU8.slice(ptr, ptr + size * size * 4)), size, size);
   },
@@ -219,6 +258,28 @@ window.monstres = {
   saveNow: () => {
     _monstres_save_now();
     return monstresSync();
+  },
+  // The saves (web/saves.js): the three slots; play another one; remove one
+  // (not the one played); a new game in an empty slot, with the magician's
+  // name and the world's seed (a text, '' for a world at random).
+  saves: monstresSaves,
+  playSave: async (slot) => {
+    if (!_monstres_play_slot(slot)) return false;
+    monstresWorldChanged();
+    await monstresSync();
+    return true;
+  },
+  deleteSave: async (slot) => {
+    if (!_monstres_delete_slot(slot)) return false;
+    await monstresSync();
+    return true;
+  },
+  newGame: async (slot, name, seed = '') => {
+    const ok = monstresWithStrings([String(name), String(seed)], (n, s) => _monstres_new_game(slot, n, s));
+    if (!ok) return false;
+    monstresWorldChanged();
+    await monstresSync();
+    return true;
   },
   exportSave: monstresExportSave,
   importSave: monstresImportSave,

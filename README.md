@@ -54,8 +54,8 @@ Contrôles :
   on se tient au milieu, puis choisir sa destination sur la carte ;
 - livre en haut à gauche (ou touches C, E, B, M) : le grimoire, qui met le jeu en
   pause, avec quatre onglets :
-  - Personnage : portrait du magicien, nom (modifiable, enregistré dans la
-    sauvegarde), niveau, expérience, caractéristiques, où l'on se trouve ;
+  - Personnage : portrait du magicien, nom (choisi à la création de la
+    partie), niveau, expérience, caractéristiques, où l'on se trouve ;
   - Équipe : les monstres de l'équipe (le compagnon d'abord, 6 au plus) ;
     toucher l'un d'eux affiche sa fiche complète : niveau, expérience, points
     de vie, caractéristiques à son niveau, famille, éléments, variantes,
@@ -80,8 +80,8 @@ Contrôles :
     ne montre que le terrain et les lieux (pas de créatures) : de près les
     lieux de la zone jouable, de loin les régions du continent ;
   Échap le ferme ;
-- engrenage en haut à droite : paramètres (exporter / importer la sauvegarde,
-  afficher les FPS et le détail du temps de calcul, voir Performances ; ces
+- engrenage en haut à droite : paramètres (gérer les sauvegardes, voir
+  Sauvegardes ; afficher les FPS et le détail du temps de calcul, voir Performances ; ces
   choix sont retenus par le navigateur) et options de debug : un curseur pour
   choisir l'heure de la journée, et « Figer l'heure ».
 
@@ -101,9 +101,10 @@ src/render/      monstres_render    monde -> instances à dessiner, caméra, mod
                                     personnages animés par parties (characters.cpp)
   gles3/         monstres_render_gles3   backend OpenGL ES 3.0 / WebGL2
 src/platform/web/                   main(), boucle, caméra, IndexedDB, API JS (pre.js, post.js)
-web/                                index.html (gabarit Emscripten), controls.js (joystick,
+web/                                index.html (gabarit Emscripten), util.js (chargé en
+                                    premier : aides communes aux scripts), controls.js (joystick,
                                     saut, regard, clavier), ui.js (paramètres, FPS, fiche
-                                    des monstres), menu.js (grimoire : personnage,
+                                    des monstres), saves.js (les sauvegardes), menu.js (grimoire : personnage,
                                     bestiaire, cartes), lore.js (noms et textes du monde),
                                     sw.js, manifeste, icônes
 assets/models/                      modèles 3D .glb chargés par le jeu (générés par
@@ -344,6 +345,26 @@ géométrie. Ils sont générés par un script Python sans dépendance :
 python3 tools/make_models.py           # régénère assets/models/
 python3 tools/make_models.py --check   # vérifie qu'ils sont à jour (aussi lancé par ctest)
 ```
+
+Le script construit chaque modèle à partir de quelques outils (`Mesh`) :
+boîtes, boules cabossées (`blob`), troncs de cône (`frustum`) et surfaces de
+révolution d'une seule pièce (`lathe` : un profil qui tourne autour d'un axe,
+pour un chapeau, une robe, une manche). Chaque triangle dit comment il est
+éclairé, et `Mesh.finish` calcule les normales :
+
+- **à facettes** (`FLAT`) : le décor garde son allure anguleuse (arbres,
+  rochers, nuages, planches) ;
+- **lisse** (`ROUND`) : ce qui est rond en vrai (côté d'un cylindre de 7 pans
+  ou plus, chapeau, robe, tours) ; les normales des faces voisines sont
+  moyennées, sauf de part et d'autre d'une arête de plus de 62° qui reste
+  franche (le bord d'un chapeau) ;
+- **boule** (`LUMP`) : lisse sur les personnages et leurs parties (magicien,
+  villageois, monstres), à facettes ailleurs.
+
+Les bouts d'un `frustum` sont fermés (pas de trou par où voir à travers),
+sauf `open_ends` pour les troncs d'arbres, dessinés par milliers et dont
+les bouts sont dans le sol et le feuillage. Le magicien, vu de près, a une
+tête de 320 faces et un chapeau, une robe et des manches d'une seule pièce.
 
 Les conventions (origine, taille, couleurs par sommet, transparence) sont
 décrites en tête du script. Un modèle peut être remplacé par un export Blender
@@ -649,6 +670,47 @@ Puis ouvrir http://localhost:8080. Paramètres d'URL utiles : `?seed=42`,
 `?new` (ignore la sauvegarde), `?frozen` (le temps ne s'écoule pas, pour les
 tests). Dans la console : `monstres.state()`, `monstres.input.move(0, 1)`,
 `monstres.step(60)`, `monstres.setCamera(yaw, pitch)`, `monstres.teleport(x, z)`.
+
+## Sauvegardes
+
+La partie est sauvegardée automatiquement (toutes les 5 secondes, et à
+l'ouverture d'un menu) dans IndexedDB. Il y a **trois emplacements**
+(`/save/game.sav`, `game2.sav`, `game3.sav` ; `/save/current` dit lequel est
+joué). « Gérer les sauvegardes », dans les paramètres, ouvre leur fenêtre
+(`web/saves.js`, le temps s'arrête) ; pour chacun : le nom du magicien, son
+niveau, la taille du fichier, la date et l'heure de la sauvegarde, et
+
+- **Jouer** : la partie en cours est sauvegardée, l'autre est chargée ;
+- **Exporter** : une copie dans un fichier `monstres.sav` ;
+- **Supprimer** (après confirmation) : jamais la partie en cours, il faut
+  d'abord en jouer une autre ;
+- dans un emplacement vide, **Nouvelle partie** (le nom du magicien et la
+  graine du monde, facultative : un nombre, ou un texte quelconque dont on
+  tire un nombre ; ni l'un ni l'autre ne changent ensuite) ou **Importer**
+  un fichier (il est vérifié en entier, puis rangé là sans être joué).
+
+Rien n'écrit jamais par-dessus une sauvegarde existante. Le résumé d'une
+sauvegarde est lu sans construire son monde (`peek_save`,
+`src/core/save.cpp`). Côté jeu : `monstres_saves_json`, `monstres_play_slot`,
+`monstres_delete_slot`, `monstres_new_game`, `monstres_import_save`
+(`src/platform/web/main.cpp`) ; dans la console : `monstres.saves()`,
+`monstres.playSave(n)`, `monstres.newGame(n, nom, graine)`.
+
+## Sécurité
+
+Le jeu ne parle à aucun serveur ; ce qui vient de l'extérieur est le fichier
+de sauvegarde importé, les paramètres d'URL et ce que la page envoie au jeu.
+
+- **Sauvegarde importée** : tout y est vérifié à la lecture (`src/core/save.cpp` :
+  tailles, espèces, gènes, positions dans le monde, vitesses et cibles
+  plausibles, téléporteurs connus...) ; un fichier de plus de 8 Mo n'est pas
+  lu. `test_save.cpp` abîme une sauvegarde au hasard : elle est refusée, ou
+  donne un monde qui se joue, s'affiche et se sauvegarde (avec les sanitizers).
+- **Page** : une `Content-Security-Policy` n'autorise que les fichiers du site
+  (aucun script écrit dans la page, rien d'ailleurs) ; les textes venus du
+  jeu sont posés avec `textContent`, jamais interprétés comme du HTML.
+- **API du jeu** (`main.cpp`) : les nombres reçus de JavaScript sont bornés
+  (taille des portraits, commandes, valeurs qui ne sont pas des nombres).
 
 ## Tests
 

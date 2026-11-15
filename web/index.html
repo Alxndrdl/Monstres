@@ -2,6 +2,8 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
+  <!-- Only this site's own files: no script written in the page, nothing from elsewhere. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#9ec7eb">
   <title>Monstres</title>
@@ -160,6 +162,53 @@
     .release-actions { display: flex; gap: 10px; justify-content: center; }
     .release-actions .button { flex: 1; padding: 9px 12px; font-size: 14px; }
     .button.danger:hover { background: rgba(255, 110, 90, 0.4); }
+    .button:disabled { opacity: 0.45; cursor: default; }
+
+    /* The saves: three slots side by side (saves.js). */
+    #saves {
+      position: fixed; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center;
+      background: rgba(10, 12, 26, 0.6); padding: 12px;
+    }
+    #saves[hidden] { display: none; }
+    .saves-window { width: min(760px, 100%); max-height: 100%; overflow: auto; padding: 12px 16px; background: #1c2033; }
+    .saves-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .saves-head h2 { margin: 0; font-size: 17px; }
+    .saves-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .save-slot {
+      display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 8px; min-width: 0;
+      background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+    .save-slot.current { border-color: rgba(242, 201, 76, 0.8); }
+    .save-slot.empty { border-style: dashed; }
+    .save-slot h3 {
+      margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.65); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .save-current { background: #f2c94c; color: #1c2033; text-transform: none; letter-spacing: 0; }
+    .save-name { margin: 0; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+    .save-slot.empty .save-name { font-weight: 400; color: rgba(255, 255, 255, 0.6); }
+    .save-facts { margin: 0; padding: 0; list-style: none; font-size: 13px; color: rgba(255, 255, 255, 0.8); flex: 1; }
+    .save-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .save-actions .button { flex: 1 1 auto; padding: 6px 8px; }
+    .new-game {
+      margin-top: 10px; padding: 10px; border-radius: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
+      background: rgba(242, 201, 76, 0.08); border: 1px solid rgba(242, 201, 76, 0.5);
+    }
+    .new-game[hidden] { display: none; }
+    .new-game h3, .new-game .note, .new-game .row { grid-column: 1 / -1; margin: 0; }
+    .new-game h3 { font-size: 14px; }
+    .new-game .note { font-size: 12px; color: rgba(255, 255, 255, 0.7); }
+    .new-game .row { display: flex; gap: 8px; }
+    .new-game label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: rgba(255, 255, 255, 0.75); min-width: 0; }
+    .new-game input {
+      font: inherit; font-size: 16px; color: #fff; padding: 6px 8px; min-width: 0;
+      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
+    }
+    .new-game input:focus { outline: 2px solid rgba(242, 201, 76, 0.7); outline-offset: 1px; }
+    .saves-note { margin: 8px 0 0; min-height: 1.3em; font-size: 13px; color: #f2c94c; }
+    @media (max-width: 520px) {
+      .saves-list, .new-game { grid-template-columns: 1fr; }
+    }
 
     /* Info about the creature that was clicked, top left (the creature is
        usually in the middle of the view), below the frame counter if shown. */
@@ -225,12 +274,7 @@
     /* Character sheet. */
     .sheet { display: grid; grid-template-columns: auto 1fr; gap: 16px 20px; align-items: start; }
     .sheet > .portrait { width: 170px; height: 170px; }
-    .name-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: rgba(255, 255, 255, 0.7); }
-    .name-field input {
-      font: 600 20px/1.2 inherit; font-family: inherit; color: #fff; padding: 5px 8px; max-width: 320px;
-      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 6px;
-    }
-    .name-field input:focus { outline: 2px solid rgba(242, 201, 76, 0.7); outline-offset: 1px; }
+    .wizard-name { margin: 0; font-size: 22px; font-weight: 700; overflow-wrap: anywhere; }
     .rank { margin: 8px 0 4px; color: #f2c94c; font-weight: 600; }
     .xp { display: flex; align-items: center; gap: 10px; font-size: 12px; color: rgba(255, 255, 255, 0.75); }
     .xp .bar { flex: 0 1 220px; }
@@ -775,11 +819,9 @@
     <h2>Paramètres</h2>
     <h3>Sauvegarde</h3>
     <div class="row">
-      <button id="export" class="button" type="button">Exporter</button>
-      <button id="import" class="button" type="button">Importer</button>
+      <button id="saves-open" class="button" type="button">Gérer les sauvegardes</button>
     </div>
-    <input id="import-file" type="file" accept=".sav,application/octet-stream" hidden>
-    <p class="note">La partie est sauvegardée automatiquement. Exporter en garde une copie dans un fichier.</p>
+    <p class="note">La partie est sauvegardée automatiquement. Trois emplacements : nouvelle partie, export, import, suppression.</p>
     <h3>Affichage</h3>
     <label><input id="show-fps" type="checkbox"> Afficher les FPS</label>
     <label><input id="show-profile" type="checkbox"> Détail du temps de calcul</label>
@@ -813,9 +855,7 @@
         <div class="sheet">
           <img id="wizard-portrait" class="portrait" alt="Ton magicien">
           <div>
-            <label class="name-field">Nom
-              <input id="wizard-name" type="text" maxlength="24" placeholder="Choisis ton nom" autocomplete="off" spellcheck="false">
-            </label>
+            <p class="wizard-name" id="wizard-name"></p>
             <p class="rank" id="wizard-rank"></p>
             <div class="xp"><div class="bar"><span id="wizard-xp-fill"></span></div><span id="wizard-xp-text"></span></div>
             <dl class="stats" id="wizard-stats"></dl>
@@ -920,6 +960,32 @@
     <div class="hp-bar mana-bar"><span class="mana-fill"></span></div>
     <span class="hp-text mana-text"></span>
   </div>
+  <!-- The saves: three slots (saves.js), opened from the settings menu. -->
+  <div id="saves" role="dialog" aria-modal="true" aria-labelledby="saves-title" hidden>
+    <div class="panel saves-window">
+      <div class="saves-head">
+        <h2 id="saves-title">Sauvegardes</h2>
+        <button id="saves-close" class="button" type="button">Fermer</button>
+      </div>
+      <div id="saves-list" class="saves-list"></div>
+      <form id="new-game" class="new-game" autocomplete="off" hidden>
+        <h3 id="new-game-title">Nouvelle partie</h3>
+        <label>Nom du magicien
+          <input id="new-game-name" type="text" maxlength="24" required spellcheck="false">
+        </label>
+        <label><span>Graine du monde <small>(facultatif)</small></span>
+          <input id="new-game-seed" type="text" maxlength="32" spellcheck="false" placeholder="au hasard">
+        </label>
+        <p class="note">Le nom et la graine ne pourront plus être changés. La même graine donne le même monde.</p>
+        <div class="row">
+          <button type="submit" class="button primary" id="new-game-create">Créer la partie</button>
+          <button type="button" class="button" id="new-game-cancel">Annuler</button>
+        </div>
+      </form>
+      <p class="saves-note" id="saves-note" role="status"></p>
+      <input id="import-file" type="file" accept=".sav,application/octet-stream" hidden>
+    </div>
+  </div>
   <!-- Letting a monster go: asked in the middle of the screen (menu.js). -->
   <div id="release-dialog" role="alertdialog" aria-modal="true" aria-labelledby="release-title" hidden>
     <div class="panel release-window">
@@ -1000,16 +1066,11 @@
     <div class="hint" id="jump-hint"><kbd>Espace</kbd> pour sauter</div>
   </div>
 
-  <script>
-    var Module = { canvas: document.getElementById('canvas') };
-
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service Worker :', e));
-    }
-  </script>
+  <script src="util.js"></script>
   <script src="lore.js"></script>
   <script src="controls.js"></script>
   <script src="ui.js"></script>
+  <script src="saves.js"></script>
   <script src="menu.js"></script>
   <script src="battle.js"></script>
   <script src="team.js"></script>

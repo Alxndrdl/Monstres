@@ -1,4 +1,5 @@
 #include "monstres/core/battle.hpp"
+#include "monstres/core/debug.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/variants.hpp"
 #include "test_helpers.hpp"
@@ -158,4 +159,94 @@ TEST_CASE("a version 4 save (before creatures) loads and gets its creatures") {
   for (const Object& o : loaded->objects) {
     if (o.kind <= ObjectKind::Crate) CHECK_FALSE(in_village(loaded->village, o.pos.x, o.pos.z));
   }
+}
+
+TEST_CASE("a save with a teleporter that is none of the world's is rejected") {
+  World w = some_game();
+  bool found = false;
+  for (Object& o : w.objects) {
+    if (o.kind != ObjectKind::Teleporter) continue;
+    o.variant = 200;  // would be a bit of World::teleporters far beyond its eight
+    found = true;
+    break;
+  }
+  REQUIRE(found);
+  LoadError error = LoadError::None;
+  CHECK_FALSE(deserialize(serialize(w), &error));
+  CHECK(error == LoadError::Corrupt);
+}
+
+TEST_CASE("a save with absurd speeds or targets is rejected") {
+  LoadError error = LoadError::None;
+  SUBCASE("the player's speed") {
+    World w = some_game();
+    w.player.speed = 3e38f;
+    CHECK_FALSE(deserialize(serialize(w), &error));
+  }
+  SUBCASE("a fall faster than anything falls") {
+    World w = some_game();
+    w.player.velocity_y = -1e30f;
+    CHECK_FALSE(deserialize(serialize(w), &error));
+  }
+  SUBCASE("a creature going nowhere near the world") {
+    World w = some_game();
+    REQUIRE(w.creatures.size() > 1);
+    w.creatures[1].target.x = 3e38f;
+    CHECK_FALSE(deserialize(serialize(w), &error));
+  }
+  CHECK(error == LoadError::Corrupt);
+}
+
+// An imported file may be anything: whatever is read is either refused, or
+// a world that can be played, shown and saved again (run with the
+// sanitizers, this finds what a damaged file could break).
+TEST_CASE("damaged saves are refused or load into a world that works") {
+  const World game = some_game();
+  const std::vector<uint8_t> good = serialize(game);
+  // Most of a save is its objects: two times out of three, the damage is
+  // after them (creatures, team, bestiary, quests...), where more is checked.
+  const size_t after_objects = kFirstObject + (game.objects.size() - game.wild_objects) * kObjectSize;
+  REQUIRE(after_objects < good.size());
+  Rng rng(7);
+  int loaded = 0;
+  for (int k = 0; k < 36; ++k) {  // a load builds the wilds again: not too many
+    std::vector<uint8_t> bytes = good;
+    const size_t from = k % 3 == 0 ? 8 : after_objects;  // never the magic and the version
+    const uint32_t changes = 1 + rng.below(3);
+    for (uint32_t c = 0; c < changes; ++c) {
+      const size_t at = from + rng.below(static_cast<uint32_t>(bytes.size() - from));
+      bytes[at] = static_cast<uint8_t>(rng.below(256));
+    }
+    if (k % 9 == 8) bytes.resize(from + rng.below(static_cast<uint32_t>(bytes.size() - from)));  // cut short
+    auto w = deserialize(bytes);
+    if (!w) continue;
+    ++loaded;
+    for (int i = 0; i < 30; ++i) step(*w, move(60, 127, static_cast<Angle16>(i * 500), i % 10 == 0));
+    CHECK(to_json(*w).size() > 2);
+    CHECK(team_json(*w).size() > 2);
+    CHECK(battle_json(*w).size() > 2);
+    CHECK(wizard_json(*w).size() > 2);
+    CHECK(serialize(*w).size() > after_objects / 2);
+  }
+  CHECK(loaded > 0);
+}
+
+TEST_CASE("a save can be looked at without building its world") {
+  World w = some_game();
+  w.wizard.name = "Zoé";
+  w.wizard.level = 7;
+  w.wizard.mana = std::min(w.wizard.mana, wizard_stats(w.wizard).mana);
+  std::vector<uint8_t> bytes = serialize(w);
+  const auto summary = peek_save(bytes);
+  REQUIRE(summary.has_value());
+  CHECK(summary->name == "Zoé");
+  CHECK(summary->level == 7);
+  CHECK(summary->seed == w.seed);
+  CHECK(summary->tick == w.tick);
+  // Checked as a load is: what would not load is not shown as a save.
+  LoadError error = LoadError::None;
+  bytes.pop_back();
+  CHECK_FALSE(peek_save(bytes, &error));
+  CHECK(error == LoadError::Corrupt);
+  CHECK_FALSE(peek_save({}, &error));
 }

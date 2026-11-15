@@ -113,15 +113,27 @@ SNOW = (0.95, 0.96, 0.99, 1)
 
 # ---------------------------------------------------------------- mesh builder
 
+# How a triangle is shaded (Mesh.finish):
+#   FLAT   its own normal: boxes, planks, rocks, leaves (the low-poly look);
+#   ROUND  smooth with its neighbours: what is round in truth (a cylinder's
+#          side, a hat, a robe); edges sharper than CREASE stay sharp;
+#   LUMP   a blob's faces: smooth on the soft models (the characters), flat
+#          on the others (rocks, foliage, clouds);
+#   FIXED  the normal given with the triangle (grass).
+FLAT, ROUND, LUMP, FIXED = 0, 1, 2, 3
+CREASE = math.radians(62)  # between two faces: beyond, the edge is a real one
+
+
 class Mesh:
-    """Flat-shaded triangles (no shared vertices)."""
+    """Triangles without shared vertices; their normals are set by finish()."""
 
     def __init__(self, transparent=False, double_sided=False):
         self.positions, self.normals, self.colors = [], [], []
+        self.kinds = []  # one per triangle
         self.transparent = transparent
         self.double_sided = double_sided
 
-    def tri(self, a, b, c, color, colors=None, normal=None):
+    def tri(self, a, b, c, color, colors=None, normal=None, kind=FLAT):
         n = cross(sub(b, a), sub(c, a))
         if length(n) < 1e-9:
             return  # degenerate, e.g. the tip of a cone
@@ -130,17 +142,45 @@ class Mesh:
             self.positions.append(p)
             self.normals.append(n)
             self.colors.append(colors[i] if colors else color)
+        self.kinds.append(FIXED if normal else kind)
 
-    def quad(self, a, b, c, d, color):
+    def finish(self, soft=False):
+        """Smooth normals where the surface is round (see FLAT, ROUND, LUMP):
+        at each corner, the faces around it (same place, same kind of surface)
+        that turn by less than CREASE are averaged, weighted by their corner's angle."""
+        smooth = [k == ROUND or (soft and k == LUMP) for k in self.kinds]
+        faces = []  # per triangle: its unit normal
+        around = {}  # place -> [(triangle, corner angle)]
+        for t in range(len(self.kinds)):
+            a, b, c = self.positions[3 * t:3 * t + 3]
+            faces.append(normalize(cross(sub(b, a), sub(c, a))))
+            if not smooth[t]:
+                continue
+            for p, q, r in ((a, b, c), (b, c, a), (c, a, b)):
+                u, v = normalize(sub(q, p)), normalize(sub(r, p))
+                angle = math.acos(max(-1.0, min(1.0, dot(u, v))))
+                around.setdefault(tuple(round(x, 5) for x in p), []).append((t, angle))
+        limit = math.cos(CREASE)
+        for t in range(len(self.kinds)):
+            if not smooth[t]:
+                continue
+            for i in range(3):
+                total = (0.0, 0.0, 0.0)
+                for other, angle in around[tuple(round(x, 5) for x in self.positions[3 * t + i])]:
+                    if dot(faces[other], faces[t]) >= limit:
+                        total = add(total, mul(faces[other], angle))
+                self.normals[3 * t + i] = normalize(total) if length(total) > 1e-9 else faces[t]
+
+    def quad(self, a, b, c, d, color, kind=FLAT):
         """Counter-clockwise when seen from the front."""
-        self.tri(a, b, c, color)
-        self.tri(a, c, d, color)
+        self.tri(a, b, c, color, kind=kind)
+        self.tri(a, c, d, color, kind=kind)
 
-    def quad_facing(self, a, b, c, d, color, outward):
+    def quad_facing(self, a, b, c, d, color, outward, kind=FLAT):
         """A quad whose front faces the `outward` direction, whatever the vertex order."""
         if dot(cross(sub(b, a), sub(c, a)), outward) < 0:
             a, b, c, d = a, d, c, b
-        self.quad(a, b, c, d, color)
+        self.quad(a, b, c, d, color, kind)
 
     def recompute_normals(self):
         for i in range(0, len(self.positions), 3):
@@ -157,27 +197,70 @@ class Mesh:
         self.recompute_normals()
 
 
-def frustum(m, transform, r0, r1, height, segments, side, bottom_cap=None, top_cap=None, phase=0.0):
-    """Truncated cone along +Y from y = 0 to `height` (a cone when r1 = 0)."""
+def frustum(m, transform, r0, r1, height, segments, side, bottom_cap=None, top_cap=None, phase=0.0,
+            open_ends=False, flat=False):
+    """Truncated cone along +Y from y = 0 to `height` (a cone when r1 = 0).
+    Its side is round (smooth) from 7 segments on; its ends are closed, in
+    the side's color unless a cap's color is given (no hole left to see
+    through), but with open_ends (ends that nothing can ever show, on models
+    drawn by thousands: a trunk's foot in the ground). `flat`: faceted
+    whatever its segments (the trees and what lies among them)."""
     t = transform
+    kind = ROUND if segments >= 7 and not flat else FLAT
+    if not open_ends:
+        bottom_cap = bottom_cap or side
+        top_cap = top_cap or side
     for i in range(segments):
         a0 = phase + TAU * i / segments
         a1 = phase + TAU * (i + 1) / segments
         b0, b1 = (r0 * math.cos(a0), 0, r0 * math.sin(a0)), (r0 * math.cos(a1), 0, r0 * math.sin(a1))
         t0, t1 = (r1 * math.cos(a0), height, r1 * math.sin(a0)), (r1 * math.cos(a1), height, r1 * math.sin(a1))
-        m.quad(t(b0), t(t0), t(t1), t(b1), side)
+        m.quad(t(b0), t(t0), t(t1), t(b1), side, kind)
         if top_cap and r1 > 0:
             m.tri(t((0, height, 0)), t(t1), t(t0), top_cap)
-        if bottom_cap:
+        if bottom_cap and r0 > 0:
             m.tri(t((0, 0, 0)), t(b0), t(b1), bottom_cap)
+
+
+def lathe(m, profile, segments, transform=None, phase=0.0):
+    """A surface of revolution around +Y, in one piece: `profile` is a list of
+    (radius, y, color) going along the surface, the outside on the left when
+    going up (so: from the bottom to the top for a vase). Each band between
+    two points has the color of its first point. Round (smooth): a sharp turn
+    of the profile (more than CREASE) stays a sharp edge. A profile that
+    starts and ends on the axis (radius 0) is closed."""
+    t = transform or identity
+    rings = [[t((r * math.cos(phase + TAU * i / segments), y, r * math.sin(phase + TAU * i / segments)))
+              for i in range(segments)] for r, y, _ in profile]
+    for k in range(len(profile) - 1):
+        color = profile[k][2]
+        for i in range(segments):
+            j = (i + 1) % segments
+            a, b, c, d = rings[k][i], rings[k + 1][i], rings[k + 1][j], rings[k][j]
+            m.tri(a, b, c, color, kind=ROUND)  # (degenerate ones, on the axis, are dropped)
+            m.tri(a, c, d, color, kind=ROUND)
+
+
+def arc(r0, y0, r1, y1, bulge, steps, color):
+    """Points of a profile from (r0, y0) to (r1, y1), bulging to the right
+    of the way (outwards when going up) by `bulge` at its middle; without its last point."""
+    dx, dy = r1 - r0, y1 - y0
+    d = math.hypot(dx, dy) or 1.0
+    nx, ny = dy / d, -dx / d
+    out = []
+    for k in range(steps):
+        s = k / steps
+        b = bulge * 4 * s * (1 - s)
+        out.append((r0 + dx * s + nx * b, y0 + dy * s + ny * b, color))
+    return out
 
 
 def identity(p):
     return p
 
 
-def icosphere():
-    """Unit icosphere with one subdivision (80 faces): vertices, faces."""
+def icosphere(detail=1):
+    """Unit icosphere subdivided `detail` times (80 faces, 320...): vertices, faces."""
     t = (1 + math.sqrt(5)) / 2
     verts = [(-1, t, 0), (1, t, 0), (-1, -t, 0), (1, -t, 0), (0, -1, t), (0, 1, t),
              (0, -1, -t), (0, 1, -t), (t, 0, -1), (t, 0, 1), (-t, 0, -1), (-t, 0, 1)]
@@ -193,16 +276,21 @@ def icosphere():
             cache[key] = len(verts) - 1
         return cache[key]
 
-    faces = []
-    for a, b, c in base:
-        ab, bc, ca = midpoint(a, b), midpoint(b, c), midpoint(c, a)
-        faces += [(a, ab, ca), (b, bc, ab), (c, ca, bc), (ab, bc, ca)]
+    faces = base
+    for _ in range(detail):
+        verts[:] = [normalize(v) for v in verts]
+        split = []
+        for a, b, c in faces:
+            ab, bc, ca = midpoint(a, b), midpoint(b, c), midpoint(c, a)
+            split += [(a, ab, ca), (b, bc, ab), (c, ca, bc), (ab, bc, ca)]
+        faces = split
     return [normalize(v) for v in verts], faces
 
 
-def blob(m, center, radii, noise, seed, face_color, reshape=None):
-    """A lumpy ball: icosphere with each vertex pushed in or out by up to `noise`."""
-    verts, faces = icosphere()
+def blob(m, center, radii, noise, seed, face_color, reshape=None, detail=1):
+    """A lumpy ball: icosphere with each vertex pushed in or out by up to `noise`
+    (detail 2: 320 faces instead of 80, for what is seen up close)."""
+    verts, faces = icosphere(detail)
     placed = []
     for i, v in enumerate(verts):
         k = 1 + noise * (2 * hash01(seed, i) - 1)
@@ -217,7 +305,7 @@ def blob(m, center, radii, noise, seed, face_color, reshape=None):
         if dot(n, sub(centroid, center)) < 0:  # keep every face pointing outwards
             b, c = c, b
             n = mul(n, -1)
-        m.tri(a, b, c, face_color(normalize(n), f))
+        m.tri(a, b, c, face_color(normalize(n), f), kind=LUMP)
 
 
 def jitter(base, seed, amount=0.08):
@@ -255,7 +343,7 @@ def crate():
 
 def tree():
     m = Mesh()
-    frustum(m, identity, 0.2, 0.13, 2.3, 6, BARK)
+    frustum(m, identity, 0.2, 0.13, 2.3, 6, BARK, open_ends=True)
     crowns = [((0, 2.75, 0), (1.3, 1.05, 1.3)), ((0.6, 2.45, 0.35), (0.85, 0.75, 0.85)),
               ((-0.55, 2.5, -0.3), (0.9, 0.8, 0.9)), ((0.1, 3.55, -0.1), (0.8, 0.7, 0.8))]
     for k, (center, radii) in enumerate(crowns):
@@ -266,12 +354,12 @@ def tree():
 
 def pine():
     m = Mesh()
-    frustum(m, identity, 0.18, 0.12, 1.3, 6, BARK)
+    frustum(m, identity, 0.18, 0.12, 1.3, 6, BARK, open_ends=True)
     under = shade(NEEDLES, 0.7)
     tiers = [(0.8, 1.35, 1.9, NEEDLES), (1.8, 1.05, 1.7, shade(NEEDLES, 1.07)), (2.8, 0.7, 1.6, shade(NEEDLES, 1.14))]
     for k, (y, radius, height, color) in enumerate(tiers):
         frustum(m, lambda p, y=y: (p[0], p[1] + y, p[2]), radius, 0, height, 8, color,
-                bottom_cap=under, phase=0.4 * k)
+                bottom_cap=under, phase=0.4 * k, flat=True)
     return m
 
 
@@ -292,13 +380,13 @@ def rock(variant):
 def log():
     m = Mesh()
     # Built along Y (0..2, radius 1), then laid down along X, bottom on the ground.
-    frustum(m, lambda p: (p[1] - 1, 1 - p[0], p[2]), 1, 1, 2, 8, BARK, bottom_cap=WOOD, top_cap=WOOD)
+    frustum(m, lambda p: (p[1] - 1, 1 - p[0], p[2]), 1, 1, 2, 8, BARK, bottom_cap=WOOD, top_cap=WOOD, flat=True)
     return m
 
 
 def stump():
     m = Mesh()
-    frustum(m, identity, 1, 0.88, 1, 8, BARK, top_cap=WOOD)
+    frustum(m, identity, 1, 0.88, 1, 8, BARK, top_cap=WOOD, flat=True)
     return m
 
 
@@ -538,63 +626,92 @@ def star(m, center, radius, facing, color, points=5):
         m.tri(c, a, b, color)
 
 
+def shoe(m, color, half=(0.072, 0.05, 0.108)):
+    """A rounded shoe under a leg hanging from its hip (the sole at y = -0.38), its tip forwards."""
+    blob(m, (0, -0.335, -0.028), half, 0.0, 905, solid(color), lambda p: (p[0], max(p[1], -0.045), p[2]))
+
+
 def player_leg():
     """Trousers and boots, under the robe."""
     m = Mesh()
-    frustum(m, translate(0, -0.30, 0), 0.058, 0.066, 0.30, 7, PANTS)
-    box(m, (0, -0.335, -0.025), (0.07, 0.045, 0.105), BOOT)
+    frustum(m, translate(0, -0.30, 0), 0.058, 0.066, 0.30, 8, PANTS)
+    shoe(m, BOOT, (0.07, 0.05, 0.105))
     return m
 
 
 def player_torso():
-    """The robe: upper body, golden belt, and a skirt flaring down to the ankles."""
+    """The robe, in one piece: the skirt flaring down to the ankles with its
+    golden hem, the belt, the chest and round shoulders, the collar and the neck."""
     m = Mesh()
-    frustum(m, identity, 0.17, 0.145, 0.34, 8, ROBE, bottom_cap=ROBE, top_cap=ROBE)
-    frustum(m, identity, 0.178, 0.176, 0.05, 8, GOLD)
-    frustum(m, translate(0, -0.29, 0), 0.25, 0.172, 0.29, 10, ROBE, bottom_cap=ROBE_DARK)
-    frustum(m, translate(0, -0.29, 0), 0.253, 0.24, 0.04, 10, GOLD)  # hem
-    frustum(m, translate(0, 0.33, 0), 0.055, 0.05, 0.07, 6, SKIN)  # neck
-    frustum(m, translate(0, 0.29, 0), 0.165, 0.1, 0.06, 8, ROBE_DARK)  # collar
+    profile = [(0.0, -0.29, ROBE_DARK), (0.243, -0.29, GOLD), (0.256, -0.285, GOLD), (0.247, -0.25, ROBE),
+               (0.176, -0.012, GOLD), (0.184, -0.004, GOLD), (0.184, 0.044, GOLD), (0.172, 0.054, ROBE)]
+    profile += arc(0.172, 0.054, 0.15, 0.26, 0.012, 3, ROBE)
+    profile += arc(0.15, 0.26, 0.085, 0.335, 0.018, 4, ROBE)       # the shoulders
+    profile += [(0.085, 0.335, ROBE_DARK), (0.1, 0.35, ROBE_DARK), (0.062, 0.352, SKIN),  # the collar, the neck
+                (0.052, 0.41, SKIN), (0.0, 0.41, SKIN)]
+    lathe(m, profile, 16)
     for a, y in ((2.0, -0.17), (2.6, -0.08), (3.4, -0.2), (3.9, -0.1), (4.5, -0.18), (1.2, -0.2)):
-        r = 0.175 - y * 0.269  # on the skirt's surface (radius 0.172 at y = 0, 0.25 at y = -0.29)
+        r = 0.178 - y * 0.29  # on the skirt's surface (radius 0.176 at y = -0.012, 0.247 at y = -0.25)
         star(m, (r * math.cos(a), y, r * math.sin(a)), 0.03, (math.cos(a), 0.25, math.sin(a)), STAR)
     return m
 
 
 def player_arm():
-    """A wide sleeve with a golden cuff, and the hand."""
+    """A wide sleeve with a golden cuff, round at the shoulder, and the hand."""
     m = Mesh()
-    frustum(m, translate(0, -0.23, 0), 0.08, 0.052, 0.23, 8, ROBE, bottom_cap=ROBE_DARK)
-    frustum(m, translate(0, -0.235, 0), 0.083, 0.081, 0.03, 8, GOLD)
+    profile = [(0.0, -0.215, ROBE_DARK), (0.074, -0.225, GOLD), (0.085, -0.232, GOLD), (0.084, -0.2, ROBE)]
+    profile += arc(0.084, -0.2, 0.054, -0.03, 0.006, 3, ROBE)
+    profile += arc(0.054, -0.03, 0.0, 0.018, 0.016, 4, ROBE)
+    profile += [(0.0, 0.018, ROBE)]
+    lathe(m, profile, 12)
     blob(m, (0, -0.29, 0), (0.048, 0.055, 0.048), 0.05, 910, solid(SKIN))
     return m
 
 
+def profile_radius(profile, y):
+    """Radius of a profile going up, at height y."""
+    for (r0, y0, _), (r1, y1, _) in zip(profile, profile[1:]):
+        if y0 <= y <= y1 and y1 > y0:
+            return r0 + (r1 - r0) * (y - y0) / (y1 - y0)
+    return 0.0
+
+
 def player_head():
-    """Face, hair and the pointed hat with a wide brim and a bent tip."""
+    """Face, hair and the pointed hat: one smooth piece, from its wide
+    drooping brim up its crown to the tip, bent backwards."""
     m = Mesh()
-    blob(m, (0, 0.2, 0), (0.21, 0.2, 0.2), 0.03, 920, solid(SKIN))
-    blob(m, (0, 0.27, 0.06), (0.22, 0.16, 0.2), 0.06, 921, jitter(HAIR, 921, 0.06))
+    blob(m, (0, 0.2, 0), (0.21, 0.2, 0.2), 0.02, 920, solid(SKIN), detail=2)
+    blob(m, (0, 0.27, 0.06), (0.22, 0.16, 0.2), 0.05, 921, jitter(HAIR, 921, 0.05), detail=2)
     blob(m, (0, 0.165, -0.2), (0.03, 0.028, 0.03), 0.0, 922, solid(shade(SKIN, 0.92)))  # nose
     for side in (-1, 1):
         blob(m, (side * 0.12, 0.135, -0.155), (0.04, 0.025, 0.02), 0.0, 923, solid(CHEEK))
-    frustum(m, translate(0, 0.32, 0.02), 0.36, 0.33, 0.025, 14, ROBE, bottom_cap=ROBE_DARK, top_cap=ROBE)  # brim
-    frustum(m, translate(0, 0.34, 0.02), 0.19, 0.11, 0.26, 12, ROBE)
-    frustum(m, translate(0, 0.345, 0.02), 0.192, 0.18, 0.05, 12, GOLD)  # band
-    # The tip, bent backwards.
-    tilt = 0.55
-    bend = lambda p: (p[0], 0.6 + p[1] * math.cos(tilt) - p[2] * math.sin(tilt),
-                      0.02 + p[1] * math.sin(tilt) + p[2] * math.cos(tilt))  # rotation around X
-    frustum(m, bend, 0.11, 0.0, 0.24, 12, ROBE)
-    star(m, (0, 0.47, -0.135), 0.045, (0, 0.3, -1), STAR)
+    # The hat, around its own axis (x = 0, z = 0.02). Under the brim it is
+    # closed, inside the hair.
+    under = [(0.0, 0.31, ROBE_DARK), (0.16, 0.31, ROBE_DARK)]
+    under += arc(0.16, 0.31, 0.37, 0.298, -0.006, 4, ROBE_DARK)
+    brim = [(0.37, 0.298, ROBE), (0.376, 0.306, ROBE)] + arc(0.376, 0.306, 0.215, 0.345, -0.012, 5, ROBE)
+    crown = [(0.215, 0.345, GOLD), (0.198, 0.352, GOLD), (0.18, 0.395, ROBE)]
+    crown += arc(0.18, 0.395, 0.0, 0.86, -0.028, 11, ROBE) + [(0.0, 0.86, ROBE)]
+    bend_from, bend_to, tilt = 0.5, 0.86, 1.0
+
+    def bend(p):  # the tip leans backwards (+Z), more and more as it goes up
+        x, y, z = p
+        if y > bend_from:
+            h = y - bend_from
+            a = tilt * (h / (bend_to - bend_from)) ** 1.3
+            y, z = bend_from + h * math.cos(a) - z * math.sin(a), h * math.sin(a) + z * math.cos(a)
+        return (x, y, z + 0.02)
+    lathe(m, under + brim + crown, 18, bend)
+    y = 0.47
+    star(m, (0, y, 0.02 - profile_radius(crown, y) - 0.002), 0.045, (0, 0.38, -1), STAR)
     return m
 
 
 def player_staff():
     """Held in the right hand (origin at the grip), a crystal sits on top (player_crystal)."""
     m = Mesh()
-    frustum(m, translate(0, -0.3, 0), 0.022, 0.026, 1.05, 6, STAFF_WOOD, bottom_cap=STAFF_WOOD)
-    frustum(m, translate(0, 0.72, 0), 0.03, 0.05, 0.06, 6, GOLD)
+    frustum(m, translate(0, -0.3, 0), 0.022, 0.026, 1.05, 8, STAFF_WOOD, bottom_cap=STAFF_WOOD)
+    frustum(m, translate(0, 0.72, 0), 0.03, 0.05, 0.06, 8, GOLD)
     for i in range(3):  # claws holding the crystal
         a = TAU * i / 3
         box(m, (0.045 * math.cos(a), 0.83, 0.045 * math.sin(a)), (0.012, 0.06, 0.012), GOLD)
@@ -615,21 +732,21 @@ def player_crystal():
 
 def companion_body():
     m = Mesh()
-    blob(m, (0, 0, 0), (0.17, 0.15, 0.24), 0.04, 930,
-         lambda n, face: CREAM if n[1] < -0.35 else shade(FUR, 0.96 + 0.08 * hash01(930, face)))
+    blob(m, (0, 0, 0), (0.17, 0.15, 0.24), 0.03, 930,
+         lambda n, face: CREAM if n[1] < -0.35 else shade(FUR, 0.97 + 0.06 * hash01(930, face)), detail=2)
     return m
 
 
 def companion_leg():
     m = Mesh()
-    frustum(m, translate(0, -0.17, 0), 0.04, 0.05, 0.17, 6, FUR)
+    frustum(m, translate(0, -0.17, 0), 0.04, 0.05, 0.17, 8, FUR)
     blob(m, (0, -0.18, -0.01), (0.05, 0.035, 0.06), 0.0, 931, solid(PAW))
     return m
 
 
 def companion_head():
     m = Mesh()
-    blob(m, (0, 0.08, 0), (0.16, 0.14, 0.15), 0.03, 932, lambda n, face: shade(FUR, 0.97 + 0.06 * hash01(932, face)))
+    blob(m, (0, 0.08, 0), (0.16, 0.14, 0.15), 0.02, 932, lambda n, face: shade(FUR, 0.98 + 0.04 * hash01(932, face)), detail=2)
     blob(m, (0, 0.04, -0.125), (0.075, 0.06, 0.075), 0.03, 933, solid(CREAM))
     blob(m, (0, 0.065, -0.195), (0.026, 0.022, 0.02), 0.0, 934, solid(NOSE))
     for side in (-1, 1):
@@ -639,8 +756,8 @@ def companion_head():
 
 def companion_ear():
     m = Mesh()
-    frustum(m, identity, 0.06, 0.0, 0.15, 5, FUR, bottom_cap=FUR)
-    frustum(m, translate(0, 0.1, 0), 0.021, 0.0, 0.05, 5, PAW)
+    frustum(m, identity, 0.06, 0.0, 0.15, 8, FUR, bottom_cap=FUR)
+    frustum(m, translate(0, 0.1, 0), 0.021, 0.0, 0.05, 8, PAW)
     return m
 
 
@@ -687,7 +804,7 @@ def mushroom_cap():
 
 def mushroom_leg():
     m = Mesh()
-    frustum(m, translate(0, -0.11, 0), 0.03, 0.035, 0.11, 6, STEM)
+    frustum(m, translate(0, -0.11, 0), 0.03, 0.035, 0.11, 8, STEM)
     blob(m, (0, -0.12, -0.015), (0.045, 0.025, 0.06), 0.0, 952, solid(FEET))
     return m
 
@@ -697,7 +814,7 @@ def bird_body():
     blob(m, (0, 0, 0), (0.2, 0.19, 0.21), 0.03, 960,
          lambda n, face: BELLY if (n[2] < -0.35 and n[1] < 0.3) else shade(FEATHER, 0.96 + 0.08 * hash01(960, face)))
     # Beak pointing forward (-Z): a cone built along +Y, turned to -Z.
-    frustum(m, lambda p: (p[0], p[2] + 0.02, -p[1] - 0.18), 0.055, 0.0, 0.1, 5, BEAK, bottom_cap=BEAK)
+    frustum(m, lambda p: (p[0], p[2] + 0.02, -p[1] - 0.18), 0.055, 0.0, 0.1, 8, BEAK, bottom_cap=BEAK)
     # Tail feathers, backwards and up.
     frustum(m, lambda p: (p[0], 0.06 + p[1] * 0.5, 0.17 + p[1] * 0.85), 0.07, 0.0, 0.14, 4, shade(FEATHER, 0.85),
             bottom_cap=shade(FEATHER, 0.85))
@@ -712,7 +829,7 @@ def bird_wing():
 
 def bird_leg():
     m = Mesh()
-    frustum(m, translate(0, -0.11, 0), 0.016, 0.018, 0.11, 5, BEAK)
+    frustum(m, translate(0, -0.11, 0), 0.016, 0.018, 0.11, 7, BEAK)
     box(m, (0, -0.113, -0.03), (0.035, 0.008, 0.045), BEAK)
     return m
 
@@ -933,14 +1050,19 @@ RUNE_VIOLET = (0.80, 0.58, 1.0, 1)
 
 
 def stone_ring(m, y0, height, r0, r1, segments, seed, color, phase=0.0):
-    """A ring of stone blocks, each with its own shade."""
-    for i in range(segments):
-        a0, a1 = phase + TAU * i / segments, phase + TAU * (i + 1) / segments
-        c = shade(color, 0.88 + 0.2 * hash01(seed, i))
+    """A ring of stone blocks, each with its own shade, on a round wall. With
+    a phase, the blocks are half a block further (as bricks are laid): the
+    wall itself is the same from a ring to the next, with twice as many
+    sides as blocks, so that the rings meet without a gap."""
+    shift = 1 if phase else 0
+    sides = 2 * segments
+    for i in range(sides):
+        a0, a1 = TAU * i / sides, TAU * (i + 1) / sides
+        c = shade(color, 0.88 + 0.2 * hash01(seed, ((i + shift) // 2) % segments))
         b0, b1 = (r0 * math.cos(a0), y0, r0 * math.sin(a0)), (r0 * math.cos(a1), y0, r0 * math.sin(a1))
         t0 = (r1 * math.cos(a0), y0 + height, r1 * math.sin(a0))
         t1 = (r1 * math.cos(a1), y0 + height, r1 * math.sin(a1))
-        m.quad(b0, t0, t1, b1, c)
+        m.quad(b0, t0, t1, b1, c, ROUND)
 
 
 def tower():
@@ -1017,16 +1139,19 @@ def ruin_wall(high):
 
 
 def pillar():
-    """A broken column: plinth and fluted shaft, unit height (scaled by the
+    """A broken column: plinth and round shaft, unit height (scaled by the
     game to its height), radius 0.34. Collision: half 0.4 x height / 2."""
     m = Mesh()
     box(m, (0, 0.06, 0), (0.42, 0.06, 0.42), RUIN_DARK)
-    frustum(m, translate(0, 0.12, 0), 0.34, 0.31, 0.88, 10, RUIN_STONE)
-    for i in range(10):  # jagged break at the top
-        a0, a1 = TAU * i / 10, TAU * (i + 1) / 10
-        y = 1.0 - 0.08 * hash01(1400, i)
-        m.tri((0, 0.97, 0), (0.31 * math.cos(a1), y, 0.31 * math.sin(a1)), (0.31 * math.cos(a0), y, 0.31 * math.sin(a0)),
-              shade(RUIN_STONE, 1.08))
+    sides = 12
+    foot = [(0.34 * math.cos(TAU * i / sides), 0.12, 0.34 * math.sin(TAU * i / sides)) for i in range(sides)]
+    # The break at the top is jagged: the shaft goes up to it, all around.
+    top = [(0.31 * math.cos(TAU * i / sides), 1.0 - 0.08 * hash01(1400, i), 0.31 * math.sin(TAU * i / sides))
+           for i in range(sides)]
+    for i in range(sides):
+        j = (i + 1) % sides
+        m.quad(foot[i], top[i], top[j], foot[j], RUIN_STONE, ROUND)
+        m.tri((0, 0.95, 0), top[j], top[i], shade(RUIN_STONE, 1.08))
     return m
 
 
@@ -1331,7 +1456,7 @@ def lowpoly_blob(m, center, radii, seed, base):
 def tree_far():
     """The tree seen from afar: same size, a few triangles."""
     m = Mesh()
-    frustum(m, identity, 0.2, 0.13, 2.3, 4, BARK)
+    frustum(m, identity, 0.2, 0.13, 2.3, 4, BARK, open_ends=True)
     lowpoly_blob(m, (0, 2.95, 0), (1.75, 1.45, 1.75), 2600, LEAVES)
     return m
 
@@ -1339,7 +1464,7 @@ def tree_far():
 def tree_mid():
     """The tree at a middle distance: its four crowns, each a 20-faced ball."""
     m = Mesh()
-    frustum(m, identity, 0.2, 0.13, 2.3, 6, BARK)
+    frustum(m, identity, 0.2, 0.13, 2.3, 6, BARK, open_ends=True)
     crowns = [((0, 2.75, 0), (1.3, 1.05, 1.3)), ((0.6, 2.45, 0.35), (0.85, 0.75, 0.85)),
               ((-0.55, 2.5, -0.3), (0.9, 0.8, 0.9)), ((0.1, 3.55, -0.1), (0.8, 0.7, 0.8))]
     for k, (center, radii) in enumerate(crowns):
@@ -1359,7 +1484,7 @@ def bush_far():
 def pine_far():
     """The pine seen from afar: one cone."""
     m = Mesh()
-    frustum(m, identity, 0.18, 0.12, 1.0, 4, BARK)
+    frustum(m, identity, 0.18, 0.12, 1.0, 4, BARK, open_ends=True)
     frustum(m, translate(0, 0.8, 0), 1.35, 0, 3.6, 6, shade(NEEDLES, 1.05), bottom_cap=shade(NEEDLES, 0.7))
     return m
 
@@ -1446,23 +1571,31 @@ def rune_circle():
 # ---------------------------------------------------------------- village people & animals
 
 def villager_torso():
-    """White clothes, tinted by the game (shirt color)."""
+    """White clothes, tinted by the game (shirt color): one piece, from the
+    belt to the round shoulders."""
     m = Mesh()
-    frustum(m, identity, 0.17, 0.145, 0.34, 8, WHITE, bottom_cap=WHITE, top_cap=WHITE)
-    frustum(m, identity, 0.176, 0.174, 0.05, 8, (0.35, 0.35, 0.35, 1))  # belt
+    belt = (0.35, 0.35, 0.35, 1)
+    profile = [(0.0, 0.0, WHITE), (0.168, 0.0, belt), (0.178, 0.004, belt), (0.178, 0.046, belt), (0.168, 0.054, WHITE)]
+    profile += arc(0.168, 0.054, 0.148, 0.26, 0.012, 3, WHITE)
+    profile += arc(0.148, 0.26, 0.06, 0.34, 0.02, 4, WHITE) + [(0.06, 0.34, WHITE), (0.0, 0.342, WHITE)]
+    lathe(m, profile, 14)
     return m
 
 
 def villager_leg():
     m = Mesh()
-    frustum(m, translate(0, -0.30, 0), 0.062, 0.072, 0.30, 7, WHITE)
-    box(m, (0, -0.335, -0.025), (0.072, 0.045, 0.105), (0.3, 0.3, 0.3, 1))  # shoes, tinted darker
+    frustum(m, translate(0, -0.30, 0), 0.062, 0.072, 0.30, 8, WHITE)
+    shoe(m, (0.3, 0.3, 0.3, 1))  # tinted darker
     return m
 
 
 def villager_arm():
+    """A sleeve, round at the shoulder."""
     m = Mesh()
-    frustum(m, translate(0, -0.28, 0), 0.045, 0.056, 0.28, 7, WHITE, bottom_cap=WHITE)
+    profile = [(0.0, -0.28, WHITE), (0.045, -0.28, WHITE)]
+    profile += arc(0.045, -0.28, 0.056, -0.03, 0.003, 3, WHITE)
+    profile += arc(0.056, -0.03, 0.0, 0.016, 0.016, 4, WHITE) + [(0.0, 0.016, WHITE)]
+    lathe(m, profile, 10)
     return m
 
 
@@ -1475,8 +1608,8 @@ def villager_hand():
 def villager_head():
     """Skin-colored by the game: everything here is white."""
     m = Mesh()
-    frustum(m, translate(0, -0.04, 0), 0.055, 0.05, 0.1, 6, WHITE)  # neck
-    blob(m, (0, 0.2, 0), (0.21, 0.2, 0.2), 0.03, 981, solid(WHITE))
+    frustum(m, translate(0, -0.04, 0), 0.055, 0.05, 0.1, 8, WHITE)  # neck
+    blob(m, (0, 0.2, 0), (0.21, 0.2, 0.2), 0.02, 981, solid(WHITE), detail=2)
     blob(m, (0, 0.165, -0.2), (0.03, 0.028, 0.03), 0.0, 982, solid(shade(WHITE, 0.93)))
     for side in (-1, 1):
         blob(m, (side * 0.12, 0.135, -0.155), (0.04, 0.025, 0.02), 0.0, 983, solid((1.0, 0.8, 0.78, 1)))
@@ -1506,15 +1639,19 @@ def hair_bun():
 def hat_cap():
     m = Mesh()
     blob(m, (0, 0.33, 0.02), (0.215, 0.11, 0.21), 0.0, 989, solid(WHITE), lambda p: (p[0], max(p[1], -0.02), p[2]))
-    box(m, (0, 0.33, -0.25), (0.15, 0.012, 0.09), shade(WHITE, 0.85))  # visor
+    blob(m, (0, 0.322, -0.2), (0.15, 0.014, 0.13), 0.0, 992, solid(shade(WHITE, 0.85)))  # visor
     return m
 
 
 def hat_straw():
+    """A straw hat in one piece: the brim, the round crown and its ribbon."""
     m = Mesh()
-    frustum(m, translate(0, 0.33, 0.02), 0.34, 0.32, 0.02, 12, WHITE, bottom_cap=shade(WHITE, 0.8), top_cap=WHITE)
-    frustum(m, translate(0, 0.35, 0.02), 0.17, 0.12, 0.12, 10, WHITE, top_cap=WHITE)
-    frustum(m, translate(0, 0.355, 0.02), 0.172, 0.165, 0.03, 10, shade(WHITE, 0.6))
+    dark, ribbon = shade(WHITE, 0.8), shade(WHITE, 0.6)
+    profile = [(0.0, 0.325, dark), (0.34, 0.325, WHITE), (0.345, 0.335, WHITE)]
+    profile += arc(0.345, 0.335, 0.178, 0.352, -0.006, 3, WHITE)
+    profile += [(0.178, 0.352, ribbon), (0.168, 0.385, WHITE)]
+    profile += arc(0.168, 0.385, 0.0, 0.48, 0.05, 6, WHITE) + [(0.0, 0.48, WHITE)]
+    lathe(m, profile, 16, translate(0, 0, 0.02))
     return m
 
 
@@ -1610,13 +1747,16 @@ def horn():
             j = (i + 1) % seg
             m.quad_facing(pts[k][i], pts[k + 1][i], pts[k + 1][j], pts[k][j],
                           shade(WHITE, 0.9 + 0.1 * k / rings),
-                          sub(pts[k][i], (0, pts[k][i][1], 0.3 * (k / rings) ** 2)))
+                          sub(pts[k][i], (0, pts[k][i][1], 0.3 * (k / rings) ** 2)), ROUND)
     tip = (0, 1.04, 0.32)
     for i in range(seg):
         a, b = pts[rings][i], pts[rings][(i + 1) % seg]
         if dot(cross(sub(b, a), sub(tip, a)), sub(add(a, b), (0, 2.0, 0.6))) < 0:
             a, b = b, a
-        m.tri(a, b, tip, WHITE)
+        m.tri(a, b, tip, WHITE, kind=ROUND)
+    base = (0, 0, 0)
+    for i in range(seg):  # closed underneath
+        m.tri(base, pts[0][i], pts[0][(i + 1) % seg], shade(WHITE, 0.9))
     return m
 
 
@@ -1719,6 +1859,11 @@ def all_models():
         models[f"cloud{v}"] = cloud(v)
     for v in range(2):
         models[f"mountain{v}"] = mountain(v)
+    # The characters' parts are soft (their lumps are smooth); the rest keeps its facets.
+    soft = ("player_", "companion_", "slime_", "mushroom_", "bird_", "villager_", "hair_", "hat_", "crow_", "fish_",
+            "eye", "horn", "bulb")
+    for name, mesh in models.items():
+        mesh.finish(soft=name.startswith(soft))
     return models
 
 

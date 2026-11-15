@@ -8,16 +8,18 @@
 // keep an old index.js / index.wasm next to a new index.html and ui.js, which
 // do not work together.
 
-const CACHE = 'monstres-v23';
+const CACHE = 'monstres-v25';
 const CORE_FILES = [
   './',
   'index.html',
   'index.js',
   'index.wasm',
   'index.data',
+  'util.js',
   'lore.js',
   'controls.js',
   'ui.js',
+  'saves.js',
   'menu.js',
   'battle.js',
   'team.js',
@@ -50,8 +52,12 @@ self.addEventListener('fetch', (event) => {
     fetch(request, { cache: 'no-cache' })
       .then((response) => {
         if (response.ok) {
+          // Kept without the page's parameters (?seed=..., read with ignoreSearch
+          // below): one copy per file, not one per address ever opened.
+          const key = new URL(request.url);
+          key.search = '';
           const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(request, copy));
+          event.waitUntil(caches.open(CACHE).then((cache) => cache.put(key.href, copy)));
         }
         return response;
       })

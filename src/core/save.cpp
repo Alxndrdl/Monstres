@@ -16,6 +16,11 @@ constexpr uint8_t kMagic[4] = {'M', 'N', 'S', 'T'};
 constexpr uint32_t kMaxObjectsInSave = 100000;
 constexpr size_t kObjectBytes = 1 + 3 * 4 + 3 * 4 + 2 + 1;
 constexpr float kMaxObjectSize = 20.0f;
+// Speeds, directions and places read from a file: finite is not enough (a
+// huge value becomes infinite, then not a number, a few sums later).
+constexpr float kMaxSpeedInSave = 1000.0f;
+constexpr float kMaxFacingInSave = 2.0f;
+constexpr float kMaxPlaceInSave = 100.0f * rules::kWorldHalfSize;
 
 class Writer {
 public:
@@ -142,7 +147,9 @@ bool read_body(Reader& in, Body& b, bool with_speed) {
   const bool ok = in.vec3(b.pos) && in.f32(b.velocity_y) && in.u8(on_ground) && in.f32(b.facing_x) &&
                   in.f32(b.facing_z) && (!with_speed || in.f32(b.speed));
   b.on_ground = on_ground == 1;
-  return ok && on_ground <= 1 && inside_world(b.pos);
+  const auto within = [](float v, float limit) { return v >= -limit && v <= limit; };
+  return ok && on_ground <= 1 && inside_world(b.pos) && within(b.velocity_y, kMaxSpeedInSave) &&
+         within(b.speed, kMaxSpeedInSave) && within(b.facing_x, kMaxFacingInSave) && within(b.facing_z, kMaxFacingInSave);
 }
 
 }  // namespace
@@ -240,7 +247,12 @@ std::vector<uint8_t> serialize(const World& w) {
   return out.take();
 }
 
-std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* error) {
+namespace {
+
+// Reads and checks a save. `whole`: the world is built around what was read
+// (its ground, the wilds, what older versions lacked), ready to play; else
+// only what the file holds (peek_save).
+std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error, bool whole) {
   if (error) *error = LoadError::None;
   if (bytes.size() < sizeof kMagic + 4) return fail(error, LoadError::TooShort);
   for (size_t i = 0; i < sizeof kMagic; ++i) {
@@ -277,7 +289,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     return fail(error, LoadError::Corrupt);
   }
   w.rng = Rng::from_raw(rng_state, rng_inc);
-  build_layouts(w);
+  if (whole) build_layouts(w);
 
   w.objects.resize(count);
   const auto valid_size = [](float v) { return v >= 0 && v <= kMaxObjectSize; };
@@ -289,6 +301,8 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       return fail(error, LoadError::Corrupt);
     }
     o.kind = static_cast<ObjectKind>(kind);
+    // A teleporter's variant is its TeleporterId (a bit of World::teleporters).
+    if (o.kind == ObjectKind::Teleporter && o.variant >= kTeleporterCount) return fail(error, LoadError::Corrupt);
   }
 
   if (v4 && in.remaining() != 0) return fail(error, LoadError::Corrupt);
@@ -301,7 +315,9 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
       const bool ok = in.u8(species) && read_body(in, c.body, true) && in.u8(mind) && in.u16(c.timer) &&
                       in.f32(c.target.x) && in.f32(c.target.z) && (before_village || in.f32(c.target_y)) &&
                       in.f32(c.home.x) && in.f32(c.home.z) && in.u8(c.variant);
-      if (!ok || species >= static_cast<uint8_t>(Species::Count) || mind > static_cast<uint8_t>(Mind::KnockedOut)) {
+      const auto place = [](float v) { return v >= -kMaxPlaceInSave && v <= kMaxPlaceInSave; };
+      if (!ok || species >= static_cast<uint8_t>(Species::Count) || mind > static_cast<uint8_t>(Mind::KnockedOut) ||
+          !place(c.target.x) || !place(c.target.z) || !place(c.target_y) || !place(c.home.x) || !place(c.home.z)) {
         return fail(error, LoadError::Corrupt);
       }
       c.species = static_cast<Species>(species);
@@ -469,6 +485,7 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     }
   }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
+  if (!whole) return w;
 
   if (!grown) {
     // Saves from the smaller worlds: the world is built anew from the seed
@@ -546,6 +563,18 @@ std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* erro
     }
   }
   return w;
+}
+
+}  // namespace
+
+std::optional<World> deserialize(std::span<const uint8_t> bytes, LoadError* error) {
+  return read_world(bytes, error, true);
+}
+
+std::optional<SaveSummary> peek_save(std::span<const uint8_t> bytes, LoadError* error) {
+  const auto w = read_world(bytes, error, false);
+  if (!w) return std::nullopt;
+  return SaveSummary{w->wizard.name, w->wizard.level, w->seed, w->tick};
 }
 
 uint64_t state_hash(const World& w) {

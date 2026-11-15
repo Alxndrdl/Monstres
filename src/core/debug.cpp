@@ -75,6 +75,18 @@ std::string num(float v) {
 }
 }  // namespace
 
+std::string command_names_json() {
+  static const char* kNames[] = {"none",        "engage",    "flee",          "capture", "summon",    "release",
+                                 "train",       "teleport",  "questAccept",   "questGive", "questComplete", "target",
+                                 "challenge",   "ready",     "cast",          "equipSpell", "healTeam"};
+  static_assert(std::size(kNames) == kCommandCount);
+  static_assert(static_cast<size_t>(Command::Engage) == 1 && static_cast<size_t>(Command::Train) == 6 &&
+                static_cast<size_t>(Command::Target) == 11 && static_cast<size_t>(Command::HealTeam) == 16);
+  std::string s = "[";
+  for (size_t i = 0; i < kCommandCount; ++i) s += std::string(i ? "," : "") + "\"" + kNames[i] + "\"";
+  return s + "]";
+}
+
 std::string to_json(const World& w) {
   const Player& p = w.player;
   std::string s;
@@ -207,8 +219,6 @@ const char* object_kind_name(ObjectKind kind) {
   return i < std::size(kNames) ? kNames[i] : "?";
 }
 
-namespace {
-
 std::string json_string(const std::string& text) {
   std::string out = "\"";
   for (const char ch : text) {
@@ -227,7 +237,6 @@ std::string json_string(const std::string& text) {
   return out + "\"";
 }
 
-}  // namespace
 
 std::string wizard_json(const World& w) {
   const WizardStats st = wizard_stats(w.wizard);
