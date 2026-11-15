@@ -25,7 +25,10 @@ inline float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
 // Magic glows: these meshes give their own light.
 inline float material_for(MeshId id, float material) {
-  return id == MeshId::Sparkle || id == MeshId::RuneCircle || id == MeshId::Crystal ? kGlowing : material;
+  return id == MeshId::Sparkle || id == MeshId::RuneCircle || id == MeshId::Crystal || id == MeshId::Bolt ||
+                 id == MeshId::Rain || id == MeshId::Snow || id == MeshId::RainShaft
+             ? kGlowing
+             : material;
 }
 
 inline void add(DrawList& list, MeshId id, const Instance& in) {

@@ -18,7 +18,9 @@ Unit sizes (the game scales each copy, see src/render/scene.cpp):
   cube, crate            fit [-1, 1]^3
   grass_short/tall       one tuft, about 0.35 m / 0.9 m high
   flower                 about 0.35 m high, white petals (tinted by the game)
-  cloud0..2              fit [-1, 1] x [0, 1] x [-1, 1]
+  cloud0..2              fit [-1, 1] x [0, 1] x [-1, 1] (cloud_low0..2: the same, simpler)
+  rain, snow             drops / flakes in a box, tiled around the camera (see rain())
+  rain_shaft, bolt       rain seen from afar (radius 1, height 1), lightning (height 1, downwards)
   mountain0..1           fit [-1, 1] x [0, 1] x [-1, 1]
   shadow                 soft black disc of radius 1 on y = 0
   house_*, fence, sign,  real size (see each function), door / front at -Z;
@@ -260,7 +262,7 @@ def identity(p):
 
 
 def icosphere(detail=1):
-    """Unit icosphere subdivided `detail` times (80 faces, 320...): vertices, faces."""
+    """Unit icosphere subdivided `detail` times (20 faces, 80, 320...): vertices, faces."""
     t = (1 + math.sqrt(5)) / 2
     verts = [(-1, t, 0), (1, t, 0), (-1, -t, 0), (1, -t, 0), (0, -1, t), (0, 1, t),
              (0, -1, -t), (0, 1, -t), (t, 0, -1), (t, 0, 1), (-t, 0, -1), (-t, 0, 1)]
@@ -477,7 +479,8 @@ def flower():
     return m
 
 
-def cloud(variant):
+def cloud(variant, detail=1):
+    """detail 0: the same cloud, simpler (from afar)."""
     m = Mesh()
     count = 5 + variant
     for k in range(count):
@@ -488,8 +491,102 @@ def cloud(variant):
         # White on top, slightly grey-blue underneath.
         blob(m, (x, r * 0.55, z), (r, r * 0.65, r * 0.8), 0.1, seed,
              lambda n, face: mix(CLOUD_UNDER, CLOUD, min(1.0, max(0.0, n[1] * 0.8 + 0.6))),
-             lambda p: (p[0], max(p[1], -0.2), p[2]))
+             lambda p: (p[0], max(p[1], -0.2), p[2]), detail=detail)
     m.fit((-1, 0, -1), (1, 1, 1))
+    return m
+
+
+# ---------------------------------------------------------------- weather (src/render/weather_view.cpp)
+
+RAIN_TILE, RAIN_HEIGHT = 8.0, 12.0   # must match kRainTile, kRainHeight
+SNOW_TILE, SNOW_HEIGHT = 6.0, 8.0    # must match kSnowTile, kSnowHeight
+
+
+def crossed(m, bottom, top, half_width, colors):
+    """A thin streak from `bottom` to `top`: two crossed ribbons (seen from anywhere)."""
+    for u in ((half_width, 0, 0), (0, 0, half_width)):
+        a, b = sub(bottom, u), add(bottom, u)
+        c, d = add(top, u), sub(top, u)
+        m.tri(a, b, c, None, colors=[colors[0], colors[0], colors[1]], normal=(0, 1, 0))
+        m.tri(a, c, d, None, colors=[colors[0], colors[1], colors[1]], normal=(0, 1, 0))
+
+
+def rain():
+    """Raindrops falling in a box of RAIN_TILE x RAIN_HEIGHT x RAIN_TILE
+    meters (origin at the middle of its bottom): the game tiles these boxes
+    around the camera and moves them down, wrapping around. Transparent,
+    glowing (tinted by the game with the light of the sky)."""
+    m = Mesh(transparent=True, double_sided=True)
+    side = 9  # drops on a jittered grid: even everywhere, and the boxes tile
+    for i in range(side):
+        for j in range(side):
+            k = i * side + j
+            x = -RAIN_TILE / 2 + RAIN_TILE * (i + hash01(1500, k)) / side
+            z = -RAIN_TILE / 2 + RAIN_TILE * (j + hash01(1501, k)) / side
+            y = RAIN_HEIGHT * hash01(1502, k)
+            drop = 0.45 + 0.3 * hash01(1503, k)
+            crossed(m, (x, y, z), (x, y + drop, z), 0.007, [(0.85, 0.9, 1.0, 0.55), (0.85, 0.9, 1.0, 0.05)])
+    return m
+
+
+def snow():
+    """Snowflakes in a box of SNOW_TILE x SNOW_HEIGHT x SNOW_TILE meters, as rain()."""
+    m = Mesh(transparent=True, double_sided=True)
+    side = 8
+    for i in range(side):
+        for j in range(side):
+            k = i * side + j
+            x = -SNOW_TILE / 2 + SNOW_TILE * (i + hash01(1510, k)) / side
+            z = -SNOW_TILE / 2 + SNOW_TILE * (j + hash01(1511, k)) / side
+            y = SNOW_HEIGHT * hash01(1512, k)
+            r = 0.022 + 0.018 * hash01(1513, k)
+            white = (1, 1, 1, 0.95)
+            crossed(m, (x, y - r, z), (x, y + r, z), r, [white, white])
+    return m
+
+
+def rain_shaft():
+    """Rain (or snow) seen from afar, falling under a cloud: an open
+    cylinder of radius 1 from y = 0 (the ground) to 1 (the cloud's base),
+    streaky, fading at its top into the cloud. Transparent, double-sided,
+    glowing (tinted by the game)."""
+    m = Mesh(transparent=True, double_sided=True)
+    segments = 14
+    rings = [(0.0, 0.28), (0.8, 0.5), (1.0, 0.0)]  # (height, alpha)
+    for i in range(segments):
+        a0, a1 = TAU * i / segments, TAU * (i + 1) / segments
+        k = 0.7 + 0.3 * hash01(1520, i)  # streaks
+        for (y0, al0), (y1, al1) in zip(rings, rings[1:]):
+            r0, r1 = 1 - 0.12 * y0, 1 - 0.12 * y1  # a little narrower near the cloud
+            p = [(r0 * math.cos(a0), y0, r0 * math.sin(a0)), (r0 * math.cos(a1), y0, r0 * math.sin(a1)),
+                 (r1 * math.cos(a1), y1, r1 * math.sin(a1)), (r1 * math.cos(a0), y1, r1 * math.sin(a0))]
+            c0, c1 = (1, 1, 1, al0 * k), (1, 1, 1, al1 * k)
+            m.tri(p[0], p[1], p[2], None, colors=[c0, c0, c1], normal=(0, 1, 0))
+            m.tri(p[0], p[2], p[3], None, colors=[c0, c1, c1], normal=(0, 1, 0))
+    return m
+
+
+def bolt():
+    """A lightning bolt from the cloud (y = 0) down to the ground (y = -1),
+    zigzagging, with two branches: a bright core and a faint glow around.
+    Scaled by the game (its height); transparent, glowing."""
+    m = Mesh(transparent=True, double_sided=True)
+
+    def channel(start, steps, length, spread, seed, width):
+        pts = [start]
+        x, y, z = start
+        for k in range(steps):
+            y -= length / steps
+            x += spread * (2 * hash01(seed, 2 * k) - 1)
+            z += spread * (2 * hash01(seed, 2 * k + 1) - 1)
+            pts.append((x, y, z))
+        for a, b in zip(pts, pts[1:]):
+            crossed(m, b, a, width * 5, [(0.6, 0.7, 1.0, 0.2), (0.6, 0.7, 1.0, 0.2)])  # glow (seen from afar)
+            crossed(m, b, a, width, [(1, 1, 1, 1), (1, 1, 1, 1)])
+        return pts
+    main = channel((0, 0, 0), 12, 1.0, 0.05, 1530, 0.01)
+    channel(main[3], 5, 0.3, 0.05, 1531, 0.006)
+    channel(main[6], 4, 0.22, 0.05, 1532, 0.005)
     return m
 
 
@@ -1857,6 +1954,11 @@ def all_models():
         models[f"rock{v}"] = rock(v)
     for v in range(3):
         models[f"cloud{v}"] = cloud(v)
+        models[f"cloud_low{v}"] = cloud(v, detail=0)
+    models["rain"] = rain()
+    models["snow"] = snow()
+    models["rain_shaft"] = rain_shaft()
+    models["bolt"] = bolt()
     for v in range(2):
         models[f"mountain{v}"] = mountain(v)
     # The characters' parts are soft (their lumps are smooth); the rest keeps its facets.

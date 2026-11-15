@@ -81,7 +81,13 @@ TEST_CASE("models have the sizes the collision boxes and the scene expect") {
   check(MeshId::Cube, -1, -1, -1, 1, 1, 1);
   check(MeshId::Crate, -1, -1, -1, 1, 1, 1);
   for (size_t i = 0; i < kRockVariants; ++i) check(mesh_offset(MeshId::Rock0, i), -1, 0, -1, 1, 1, 1);
-  for (size_t i = 0; i < kCloudVariants; ++i) check(mesh_offset(MeshId::Cloud0, i), -1, 0, -1, 1, 1, 1);
+  for (size_t i = 0; i < kCloudVariants; ++i) {
+    check(mesh_offset(MeshId::Cloud0, i), -1, 0, -1, 1, 1, 1);
+    check(mesh_offset(MeshId::CloudLow0, i), -1, 0, -1, 1, 1, 1);
+    CHECK(models()[static_cast<size_t>(MeshId::CloudLow0) + i].vertex_count() * 3 <
+          models()[static_cast<size_t>(MeshId::Cloud0) + i].vertex_count());  // much simpler
+  }
+  check(MeshId::RainShaft, -1, 0, -1, 1, 1, 1);
   for (size_t i = 0; i < kMountainVariants; ++i) check(mesh_offset(MeshId::Mountain0, i), -1, 0, -1, 1, 1, 1);
   check(MeshId::Log, -1, 0, -1, 1, 2, 1);
   check(MeshId::Stump, -1, 0, -1, 1, 1, 1);
@@ -111,13 +117,14 @@ TEST_CASE("grass and flowers are small, double-sided and stand on the ground") {
   CHECK(bounds(model(MeshId::GrassTall)).max[1] > bounds(model(MeshId::GrassShort)).max[1]);
 }
 
-TEST_CASE("only the shadow, smoke, ripples, sparks and the rune circle are transparent") {
+TEST_CASE("only the shadow, smoke, ripples, sparks, the rune circle and the weather are transparent") {
   for (size_t id = 0; id < kMeshCount; ++id) {
     const auto mesh = static_cast<MeshId>(id);
     if (!model_name(mesh)) continue;
     CAPTURE(model_name(mesh));
     const bool expected = mesh == MeshId::Shadow || mesh == MeshId::Smoke || mesh == MeshId::Ripple ||
-                          mesh == MeshId::Sparkle || mesh == MeshId::RuneCircle;
+                          mesh == MeshId::Sparkle || mesh == MeshId::RuneCircle || mesh == MeshId::RainShaft ||
+                          mesh == MeshId::Bolt || mesh == MeshId::Rain || mesh == MeshId::Snow;
     CHECK(models()[id].transparent == expected);
     if (expected) CHECK(mesh > MeshId::Ground);  // drawn after the opaque meshes
   }

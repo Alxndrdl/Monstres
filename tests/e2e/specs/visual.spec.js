@@ -27,6 +27,17 @@ test('the village', async ({ page }) => {
   await expect(page).toHaveScreenshot('village-seed42.png');
 });
 
+test('a storm seen from afar, at dusk', async ({ page }) => {
+  await openGame(page, '?seed=42&new&frozen');
+  await page.evaluate(() => {
+    window.monstres.setCamera(0.4, 0.12);
+    window.monstres.setHour(19.2);
+    window.monstres.setWeather(7);  // fine here, a storm ahead
+    window.monstres.step(1);
+  });
+  await expect(page).toHaveScreenshot('storm-afar-seed42.png');
+});
+
 test('the ruins of the tower', async ({ page }) => {
   await openGame(page, '?seed=42&new&frozen');
   await page.evaluate(() => window.monstres.setCamera(Math.PI, 0.25));  // facing south

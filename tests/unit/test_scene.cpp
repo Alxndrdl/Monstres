@@ -202,25 +202,11 @@ TEST_CASE("the player's shadow shrinks while jumping and falls on what is below"
   CHECK(jumping.tint.a < on_crate.tint.a);
 }
 
-TEST_CASE("clouds drift with time and stay in the sky") {
+TEST_CASE("the characters' list has no clouds anymore (the weather has them)") {
   const World& w = cached_game(1);
-  DrawList at0, at10;
-  build_dynamic(w, 0, at0);
-  build_dynamic(w, 10, at10);
-  size_t clouds = 0;
-  for (size_t v = 0; v < kCloudVariants; ++v) {
-    const auto& a = batch(at0, mesh_offset(MeshId::Cloud0, v));
-    const auto& b = batch(at10, mesh_offset(MeshId::Cloud0, v));
-    REQUIRE(a.size() == b.size());
-    for (size_t i = 0; i < a.size(); ++i) {
-      CHECK(a[i].y > 30.0f);
-      CHECK(a[i].x != b[i].x);
-      CHECK(a[i].z == b[i].z);
-      CHECK(std::fabs(b[i].x) <= 220.0f);
-      ++clouds;
-    }
-  }
-  CHECK(clouds == 16);
+  DrawList list;
+  build_dynamic(w, 0, list);
+  for (size_t v = 0; v < kCloudVariants; ++v) CHECK(batch(list, mesh_offset(MeshId::Cloud0, v)).empty());
 }
 
 TEST_CASE("the camera looks at the player from behind") {

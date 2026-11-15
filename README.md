@@ -32,7 +32,7 @@ s'éloigne du départ, plus les monstres sont forts.
 
 Partout : herbes qui ondulent au vent, fleurs, arbres, sapins, rochers,
 troncs, souches et buissons ; forêt au-delà des bords, montagnes enneigées,
-nuages, ciel et soleil.
+ciel et soleil, et une météo qui change d'un endroit à l'autre (voir Météo).
 
 Contrôles :
 - joystick en bas à gauche, ou ZQSD / flèches : se déplacer (par rapport à la caméra) ;
@@ -83,7 +83,7 @@ Contrôles :
 - engrenage en haut à droite : paramètres (gérer les sauvegardes, voir
   Sauvegardes ; afficher les FPS et le détail du temps de calcul, voir Performances ; ces
   choix sont retenus par le navigateur) et options de debug : un curseur pour
-  choisir l'heure de la journée, et « Figer l'heure ».
+  choisir l'heure de la journée, « Figer l'heure », et un curseur de météo.
 
 Sur ordinateur, les touches sont rappelées sous le joystick et le bouton ;
 elles s'adaptent à la disposition du clavier quand le navigateur le permet.
@@ -473,6 +473,49 @@ aussi, de même que les monstres lumineux (formes élémentaires, antennes des
 Gloubi, lanterne des Bloup) et les projectiles des combats : jusqu'à 12
 lumières, les plus proches. Les étincelles et les parties lumineuses des
 personnages gardent leur éclat la nuit (`kGlowing`).
+
+## Météo
+
+Sept temps : ensoleillé, quelques nuages, couvert (on ne voit plus le ciel),
+pluie, tempête avec orage, brouillard, neige (sur l'herbe verte : pas de
+saisons pour l'instant). Ils ne changent rien au jeu pour l'instant, ni aux
+combats ni aux monstres.
+
+**Le temps qu'il fait** (`src/core/weather.cpp`) est un champ sur tout le
+pays et le continent : des cellules de 800 m, chacune avec son temps pendant
+6 minutes (le changement prend une minute), qui dérivent avec le vent
+(3 m/s, sa direction dépend de la graine) et se fondent l'une dans l'autre à
+leurs bords. Il pleut donc là-bas pendant qu'il fait beau ici, et l'orage
+qu'on voit au loin peut arriver. Tout est tiré de la graine et du temps du
+jeu : rien à sauvegarder, le même temps sur tous les appareils. Les
+premières minutes d'une partie sont toujours au beau. Chaque temps est un
+mélange de quelques valeurs (nuages, nuages sombres, pluie, neige,
+brouillard, orage, vent : `Weather`), qui se mélangent d'un temps à l'autre.
+
+**À l'écran** (`src/render/weather_view.cpp`) :
+
+- le ciel dessine lui-même une couche de nuages au-dessus de la tête (bruit
+  qui dérive avec le vent), autant que le temps en met ; couvert, il devient
+  gris, le soleil, la lune et les étoiles disparaissent ;
+- vers l'horizon et au loin, des nuages en modèles, partout jusqu'à 3,4 km,
+  autant qu'il en faut là où chacun se trouve (plus simples au-delà de
+  700 m) ; ceux d'orage sont sombres et montent haut ; sous les nuages de
+  pluie ou de neige, un rideau de pluie qu'on voit de loin ;
+- autour de la caméra, la pluie ou la neige tombe (des boîtes de gouttes ou
+  de flocons répétées autour d'elle), penchée par le vent ;
+- les nuages cachent le soleil : la lumière baisse et devient grise ; pluie,
+  neige et brouillard épaississent la brume (le brouillard cache tout à
+  une centaine de mètres) ; le vent agite plus l'herbe ;
+- l'orage lance des éclairs (environ un toutes les trois secondes, là où il
+  y a de l'orage) : un éclair proche illumine le paysage un instant.
+
+Le curseur « Météo » des paramètres (debug) choisit le temps autour du
+joueur (jusqu'à 2,6 km ; plus loin, le temps naturel) ; « Orage au loin »
+met le beau temps ici et un orage à 1,1 km devant la caméra. Dans la console :
+`monstres.setWeather(k)` (-1 naturel, 0 à 6, 7 orage au loin) et
+`monstres.state().weather`. Coût mesuré (Chromium, logiciel) : environ
+30 000 triangles de plus quand le ciel est couvert, 40 000 sous la pluie,
+moins d'un demi-milliseconde de calcul par image.
 
 ## Combats
 

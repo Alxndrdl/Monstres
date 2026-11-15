@@ -10,12 +10,14 @@
 #include "monstres/core/debug.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/weather.hpp"
 #include "monstres/core/world.hpp"
 #include "monstres/render/cull.hpp"
 #include "monstres/render/models.hpp"
 #include "monstres/render/terrain_mesh.hpp"
 #include "monstres/render/far_terrain.hpp"
 #include "monstres/render/scene.hpp"
+#include "monstres/render/weather_view.hpp"
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -103,6 +105,13 @@ struct App {
   uint32_t selected_id = 0;      // its Creature::id: creatures come and go, indices move
   Vec2 landscape_center{1e9f, 1e9f};  // where the detailed landscape was built around
   uint64_t camera_tick = 0;      // the camera moved on until this tick
+  // The weather (debug menu): -1 natural, a WeatherKind chosen around the
+  // player, or kWeatherAfar (fine here, a storm ahead). What is chosen is
+  // reached in a moment (forced_now), at once when frozen.
+  int weather_choice = -1;
+  Weather forced_now;
+  float forced_amount = 0;
+  Vec2 afar_at;
   Profile profile;
   bool paused = false;           // a game menu is open: time stands still
   std::vector<uint8_t> portrait; // last portrait drawn for the page (RGBA)
@@ -192,6 +201,35 @@ void follow_battle(App& app, double dt_ms) {
   c.yaw = std::remainder(c.yaw + std::remainder(target - c.yaw, static_cast<float>(2 * kPi)) * k,
                          static_cast<float>(2 * kPi));
   app.redraw = true;
+}
+
+constexpr int kWeatherAfar = kWeatherKinds;  // debug: the sun here, a storm ahead
+
+// The weather now: the world's, with what the debug menu chose.
+WeatherField weather_field(const App& app) {
+  WeatherField f;
+  f.seed = app.world.seed;
+  f.tick = app.world.tick;
+  f.center = {app.world.player.pos.x, app.world.player.pos.z};
+  f.forced = app.forced_now;
+  f.forced_amount = app.forced_amount;
+  f.afar = app.weather_choice == kWeatherAfar;
+  f.afar_at = app.afar_at;
+  return f;
+}
+
+// The weather chosen in the debug menu comes in a second and a half (at once when frozen).
+void follow_weather_choice(App& app, double dt_ms) {
+  const int choice = app.weather_choice;
+  const float target = choice >= 0 ? 1.0f : 0.0f;
+  const Weather goal = choice == kWeatherAfar ? weather_of(WeatherKind::Clear)
+                       : choice >= 0         ? weather_of(static_cast<WeatherKind>(choice))
+                                             : app.forced_now;
+  const float k = app.frozen ? 1.0f : static_cast<float>(std::min(1.0, dt_ms / 1500.0 * 3));
+  if (app.forced_amount == 0 && target > 0) app.forced_now = goal;  // from the natural weather: no blend of kinds
+  app.forced_now = mix(app.forced_now, goal, k);
+  app.forced_amount += (target - app.forced_amount) * k;
+  if (app.forced_amount < 0.002f && target == 0) app.forced_amount = 0;
 }
 
 constexpr double kBackgroundMs = 2.0;  // each frame, at most this long building ahead (tiles, chunks)
@@ -477,7 +515,10 @@ void frame(void* user) {
   // Time follows the simulation, so ?frozen screenshots are reproducible.
   const float time = static_cast<float>(app.world.tick) / rules::kTicksPerSecond;
   mark = emscripten_get_now();
-  const View view = current_view(app, time);
+  View view = current_view(app, time);
+  follow_weather_choice(app, dt);
+  const WeatherField weather = weather_field(app);
+  const float flash = apply_weather(view, weather);
   // Only what the camera can see (cull.hpp).
   const Frustum in_front = frustum_of(view.view_projection);
   cull_list(app.terrain, in_front);
@@ -486,6 +527,7 @@ void frame(void* user) {
   measure(kView);
   build_dynamic(app.world, time, app.dynamic, app.selected, &in_front);
   build_far_dynamic(app.world, time, app.far_dynamic);
+  build_weather(weather, view, flash, time, app.far_dynamic, app.dynamic);
   measure(kScene);
   const DrawList* lists[] = {&app.far_landscape, &app.far_dynamic, &app.terrain, &app.landscape, &app.dynamic};
   app.renderer->begin_frame({pw, ph});
@@ -617,6 +659,21 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_hour(float hour) {
   g_app->redraw = true;
 }
 
+// Debug option (settings menu): the weather around the player. -1: the
+// world's own; 0..6: a WeatherKind; 7: fine weather here and a storm about
+// a kilometer ahead (where the camera looks now), to see one from afar.
+EMSCRIPTEN_KEEPALIVE void monstres_set_weather(int choice) {
+  App& app = *g_app;
+  if (choice < -1 || choice > kWeatherAfar) return;
+  app.weather_choice = choice;
+  if (choice == kWeatherAfar) {
+    const float fx = -std::sin(app.camera.yaw), fz = -std::cos(app.camera.yaw);
+    app.afar_at = {app.world.player.pos.x + fx * weather::kAfarDistance, app.world.player.pos.z + fz * weather::kAfarDistance};
+  }
+  if (app.frozen) follow_weather_choice(app, 0);  // at once (tests, pictures)
+  app.redraw = true;
+}
+
 EMSCRIPTEN_KEEPALIVE void monstres_hold_hour(int hold) {
   g_app->hold_clock = hold != 0;
   g_app->held_clock = g_app->world.clock;
@@ -631,9 +688,21 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_state_json() {
   std::string json = to_json(g_app->world);
   json.pop_back();  // add the camera, which lives here and not in the world
   char camera[128];
-  std::snprintf(camera, sizeof camera, ",\"camera\":{\"yaw\":%.4f,\"pitch\":%.4f},\"active\":%d}",
+  std::snprintf(camera, sizeof camera, ",\"camera\":{\"yaw\":%.4f,\"pitch\":%.4f},\"active\":%d,",
                 static_cast<double>(c.yaw), static_cast<double>(c.pitch), g_app->world.active);
-  g_app->json = json + camera;
+  // The weather where the player is (and the debug menu's choice).
+  const WeatherField field = weather_field(*g_app);
+  const Weather w = field.at(g_app->world.player.pos.x, g_app->world.player.pos.z);
+  const Lightning bolt = lightning_at(field, g_app->world.player.pos.x, g_app->world.player.pos.z);
+  char weather[384];
+  std::snprintf(weather, sizeof weather,
+                "\"weather\":{\"kind\":\"%s\",\"choice\":%d,\"cover\":%.3f,\"dark\":%.3f,\"rain\":%.3f,"
+                "\"snow\":%.3f,\"fog\":%.3f,\"storm\":%.3f,\"wind\":%.3f,\"bolt\":%s}}",
+                weather_name(kind_of(w)), g_app->weather_choice, static_cast<double>(w.cover),
+                static_cast<double>(w.dark), static_cast<double>(w.rain), static_cast<double>(w.snow),
+                static_cast<double>(w.fog), static_cast<double>(w.storm), static_cast<double>(w.wind),
+                bolt.on ? "true" : "false");
+  g_app->json = json + camera + weather;
   return g_app->json.c_str();
 }
 

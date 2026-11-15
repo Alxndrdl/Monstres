@@ -27,6 +27,7 @@ enum class MeshId : size_t {
   GrassTall,
   Flower,
   Cloud0, Cloud1, Cloud2,
+  CloudLow0, CloudLow1, CloudLow2,  // the same, from afar
   Mountain0, Mountain1,
   // Character parts (see src/render/characters.cpp).
   Eye,
@@ -60,6 +61,8 @@ enum class MeshId : size_t {
   Smoke,
   Sparkle,
   RuneCircle,  // the capture seal
+  RainShaft, Bolt,  // the weather (far pass)
+  Rain, Snow,       // around the camera
   Count
 };
 inline constexpr size_t kMeshCount = static_cast<size_t>(MeshId::Count);
@@ -78,8 +81,10 @@ inline MeshGroup mesh_group(MeshId id) {
     case MeshId::GrassShortFar: case MeshId::GrassTallFar: case MeshId::FlowerFar:
       return MeshGroup::Vegetation;
     case MeshId::Cloud0: case MeshId::Cloud1: case MeshId::Cloud2: case MeshId::Mountain0: case MeshId::Mountain1:
+    case MeshId::CloudLow0: case MeshId::CloudLow1: case MeshId::CloudLow2: case MeshId::RainShaft: case MeshId::Bolt:
       return MeshGroup::Sky;
     case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::RuneCircle:
+    case MeshId::Rain: case MeshId::Snow:
       return MeshGroup::Effects;
     default: break;
   }

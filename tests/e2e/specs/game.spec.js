@@ -350,6 +350,38 @@ test.describe('settings menu', () => {
     expect((await state(page)).hour).toBeCloseTo(23.666, 2);
   });
 
+  test('debug: the weather slider tries every weather, then the natural one again', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const start = (await state(page)).weather;
+    expect(start.choice).toBe(-1);
+    expect(['clear', 'fewClouds']).toContain(start.kind);  // a new game starts in the sun
+    await page.locator('#settings-button').click();
+    const slider = page.locator('#weather');
+    const expected = [
+      ['clear', 'Ensoleillé'], ['fewClouds', 'Quelques nuages'], ['overcast', 'Couvert'], ['rain', 'Pluie'],
+      ['storm', 'Tempête, orage'], ['fog', 'Brouillard'], ['snow', 'Neige'],
+    ];
+    for (let k = 0; k < expected.length; ++k) {
+      await slider.fill(String(k + 1));
+      await expect(page.locator('#weather-value')).toHaveText(expected[k][1]);
+      const w = (await state(page)).weather;
+      expect(w.kind).toBe(expected[k][0]);
+      expect(w.choice).toBe(k);
+    }
+    const rain = await page.evaluate(() => { window.monstres.setWeather(3); return window.monstres.state().weather; });
+    expect(rain.rain).toBeGreaterThan(0.5);
+    expect(rain.cover).toBe(1);
+    // A storm afar: fine weather here.
+    await slider.fill('8');
+    await expect(page.locator('#weather-value')).toHaveText('Orage au loin');
+    expect((await state(page)).weather.kind).toBe('clear');
+    await slider.fill('0');
+    await expect(page.locator('#weather-value')).toHaveText(/^Naturelle/);
+    const back = (await state(page)).weather;
+    expect(back.choice).toBe(-1);
+    expect(back.kind).toBe(start.kind);
+  });
+
   test('the FPS counter can be shown, and stays shown after a reload', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     const fps = page.locator('#fps');

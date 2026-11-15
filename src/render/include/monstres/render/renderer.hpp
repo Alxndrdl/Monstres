@@ -226,6 +226,13 @@ struct View {
   float fade_far_start = 1e6f, fade_far_end = 2e6f;
   float fade_tree_start = 1e6f, fade_tree_end = 2e6f;
   float time = 0;  // seconds, drives the wind
+  float wind = 0;  // 0..1: how hard the wind blows (grass sways more)
+  // The clouds drawn by the sky itself, overhead (weather_view.hpp): how
+  // much of the sky they cover (0..1), their lit and shaded colors, and how
+  // far they drifted with the wind (meters).
+  float cloud_cover = 0;
+  Color cloud_light{1, 1, 1, 1}, cloud_shade{0.7f, 0.72f, 0.78f, 1};
+  float cloud_shift_x = 0, cloud_shift_z = 0;
   bool sky = true;  // false: no sky, the background stays transparent (portraits)
 };
 

@@ -67,6 +67,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_continent.cpp
   unit/test_wilds.cpp
   unit/test_culling.cpp
+  unit/test_weather.cpp
 )
 
 monstres_add_tests(monstres_functional_tests functional

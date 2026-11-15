@@ -5,6 +5,7 @@
 #include <GLES3/gl3.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -27,12 +28,15 @@ layout(location = 5) in vec4 iScale;
 layout(location = 6) in vec4 iTint;
 uniform mat4 uViewProjection;
 uniform float uTime;
+uniform float uWind;     // 1: a breeze, more in a storm
+uniform vec3 uEye;       // the camera
 uniform vec2 uFadeCenter;
 uniform vec2 uFadeNear;  // grass, flowers: shrink away between these distances
 uniform vec2 uFadeFar;   // small things
 uniform vec2 uFadeTree;  // trees and rocks far away
 out vec3 vNormal;
 out vec3 vWorld;
+out vec3 vToCamera;  // computed here: in the fragment shader, mediump may be 16 bits (phones)
 out vec4 vColor;
 out float vMaterial;
 vec3 rotate(vec4 q, vec3 v) {
@@ -54,9 +58,10 @@ void main() {
   if (iPosWind.w > 0.0) {
     float phase = uTime * 1.7 + iPosWind.x * 0.35 + iPosWind.z * 0.25;
     float sway = sin(phase) * 0.7 + sin(phase * 2.3 + 1.3) * 0.3;
-    world.xz += vec2(1.0, 0.45) * sway * iPosWind.w * 0.12 * max(local.y, 0.0);
+    world.xz += vec2(1.0, 0.45) * sway * iPosWind.w * 0.12 * uWind * max(local.y, 0.0);
   }
   vWorld = world;
+  vToCamera = uEye - world;
   vColor = aColor * iTint;
   vMaterial = material;
   gl_Position = uViewProjection * vec4(world, 1.0);
@@ -68,9 +73,9 @@ precision mediump float;
 #define MAX_LIGHTS 12
 in vec3 vNormal;
 in vec3 vWorld;
+in vec3 vToCamera;
 in vec4 vColor;
 in float vMaterial;
-uniform vec3 uCamera;
 uniform vec3 uLight;
 uniform vec3 uLightColor;
 uniform vec3 uAmbientSky;
@@ -85,6 +90,13 @@ uniform vec4 uLightPos[MAX_LIGHTS];    // xyz, radius
 uniform vec3 uLightColors[MAX_LIGHTS];
 out vec4 outColor;
 void main() {
+  // The distance to the camera and the way to it, without squaring big
+  // numbers (in 16 bits, anything beyond 256 m would overflow).
+  vec3 a = abs(vToCamera);
+  float big = max(max(a.x, a.y), max(a.z, 1e-3));
+  vec3 toCamera = vToCamera / big;
+  float d = big * length(toCamera);
+  vec3 view = toCamera / length(toCamera);
   vec3 n = normalize(vNormal);
   if (!gl_FrontFacing) n = -n;  // double-sided meshes
   float diffuse = max(dot(n, uLight), 0.0);
@@ -111,14 +123,12 @@ void main() {
     vec3 wave = normalize(vec3(sin(vWorld.x * 1.7 + uTimeFs * 1.3) * 0.06 + sin(vWorld.z * 2.3 - uTimeFs) * 0.04,
                                1.0,
                                cos(vWorld.z * 1.5 + uTimeFs * 1.1) * 0.06 + cos(vWorld.x * 2.1 + uTimeFs * 0.7) * 0.04));
-    vec3 view = normalize(uCamera - vWorld);
     float fresnel = pow(1.0 - max(dot(view, wave), 0.0), 3.0);
     color = mix(color, uFog * 1.05, fresnel * 0.7);
     float glint = pow(max(dot(reflect(-uLight, wave), view), 0.0), 80.0);
     color += uLightColor * (1.0 / 0.62) * glint * 0.8;  // the sun at noon: (1, 0.95, 0.85)
     alpha = max(alpha, fresnel * 0.9 * step(0.01, vColor.a));
   }
-  float d = distance(vWorld, uCamera);
   float fog = max(1.0 - exp2(-max(d - uFogRange.x, 0.0) / uFogRange.y), smoothstep(uFogRange.z * 0.75, uFogRange.z, d));
   outColor = vec4(mix(color, uFog, fog), alpha);
 }
@@ -145,26 +155,61 @@ uniform vec3 uMoon;
 uniform vec3 uZenith;
 uniform vec3 uHorizon;
 uniform float uNight;
+uniform float uCover;       // clouds overhead: 0..1 of the sky
+uniform vec3 uCloudLight;   // their lit color...
+uniform vec3 uCloudShade;   // ...and where they are thick
+uniform vec2 uCloudShift;   // meters drifted with the wind
 out vec4 outColor;
 float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0)), f.x), f.y);
+}
+float clouds(vec2 p) {
+  float s = 0.0, a = 0.5;
+  for (int k = 0; k < 4; ++k) {
+    s += a * noise(p);
+    p = p * 2.03 + vec2(17.1, 9.3);
+    a *= 0.5;
+  }
+  return s;
+}
 void main() {
   vec4 far = uInverseViewProjection * vec4(vNdc, 1.0, 1.0);
   vec3 dir = normalize(far.xyz / far.w - uCamera);
   float up = max(dir.y, 0.0);
   vec3 sky = mix(uHorizon, uZenith, pow(up, 0.55));
+  // Clouds overhead: a layer high above (1.5 km), cells of 400 m, as much
+  // of it as the weather says; towards the horizon they give way to the
+  // clouds drawn as models (and the sky's own grey when it is overcast).
+  float veil = 0.0, thick = 0.0;
+  if (uCover > 0.01 && dir.y > 0.0) {
+    vec2 p = dir.xz / (dir.y + 0.06) * 3.75 + uCloudShift / 400.0;
+    float n = clouds(p);
+    float edge = mix(0.78, 0.12, uCover);
+    veil = smoothstep(edge - 0.04, edge + 0.12, n) * smoothstep(0.0, 0.14, dir.y);
+    thick = smoothstep(edge, edge + 0.35, n);
+  }
+  float clear = (1.0 - veil) * (1.0 - smoothstep(0.55, 1.0, uCover));  // how much of the sky is seen
   // Stars, at night, fading towards the horizon.
   vec3 cell = floor(dir * 180.0);
   float star = step(0.9965, hash(cell)) * hash(cell + 7.0);
-  sky += vec3(0.9, 0.92, 1.0) * star * uNight * smoothstep(0.02, 0.25, dir.y);
+  sky += vec3(0.9, 0.92, 1.0) * star * uNight * smoothstep(0.02, 0.25, dir.y) * clear;
   float sun = max(dot(dir, uSun), 0.0);
   float day = 1.0 - uNight;
-  sky += vec3(1.0, 0.85, 0.6) * (pow(sun, 8.0) * 0.25 + pow(sun, 64.0) * 0.35) * day;  // glow
-  sky = mix(sky, vec3(1.0, 0.98, 0.9), smoothstep(0.9993, 0.9996, sun) * step(-0.02, uSun.y));  // disc
+  float glow = 1.0 - 0.8 * smoothstep(0.3, 1.0, uCover);
+  sky += vec3(1.0, 0.85, 0.6) * (pow(sun, 8.0) * 0.25 + pow(sun, 64.0) * 0.35) * day * glow;  // glow
+  sky = mix(sky, vec3(1.0, 0.98, 0.9), smoothstep(0.9993, 0.9996, sun) * step(-0.02, uSun.y) * clear);  // disc
   // The moon: a pale disc with a soft halo.
   float moon = max(dot(dir, uMoon), 0.0);
-  sky += vec3(0.55, 0.62, 0.8) * pow(moon, 200.0) * 0.5 * uNight;
+  sky += vec3(0.55, 0.62, 0.8) * pow(moon, 200.0) * 0.5 * uNight * clear;
   vec3 moonColor = mix(vec3(0.85, 0.87, 0.95), vec3(0.62, 0.64, 0.72), hash(floor(dir * 900.0)) * 0.6);
-  sky = mix(sky, moonColor, smoothstep(0.99955, 0.99975, moon) * step(-0.02, uMoon.y) * max(uNight, 0.25));
+  sky = mix(sky, moonColor, smoothstep(0.99955, 0.99975, moon) * step(-0.02, uMoon.y) * max(uNight, 0.25) * clear);
+  // The clouds over all that, lit by the sun where it shines through.
+  vec3 cloud = mix(uCloudLight, uCloudShade, thick * 0.75) + vec3(1.0, 0.9, 0.75) * pow(sun, 12.0) * 0.25 * day * (1.0 - thick);
+  sky = mix(sky, cloud, veil);
   outColor = vec4(sky, 1.0);
 }
 )";
@@ -226,8 +271,9 @@ public:
     if (!mesh_program_ || !sky_program_) return false;
     u_view_projection_ = glGetUniformLocation(mesh_program_, "uViewProjection");
     u_time_ = glGetUniformLocation(mesh_program_, "uTime");
+    u_wind_ = glGetUniformLocation(mesh_program_, "uWind");
+    u_eye_ = glGetUniformLocation(mesh_program_, "uEye");
     u_time_fs_ = glGetUniformLocation(mesh_program_, "uTimeFs");
-    u_camera_ = glGetUniformLocation(mesh_program_, "uCamera");
     u_light_ = glGetUniformLocation(mesh_program_, "uLight");
     u_light_color_ = glGetUniformLocation(mesh_program_, "uLightColor");
     u_ambient_sky_ = glGetUniformLocation(mesh_program_, "uAmbientSky");
@@ -250,6 +296,10 @@ public:
     u_sky_sun_ = glGetUniformLocation(sky_program_, "uSun");
     u_sky_zenith_ = glGetUniformLocation(sky_program_, "uZenith");
     u_sky_horizon_ = glGetUniformLocation(sky_program_, "uHorizon");
+    u_sky_cover_ = glGetUniformLocation(sky_program_, "uCover");
+    u_sky_cloud_light_ = glGetUniformLocation(sky_program_, "uCloudLight");
+    u_sky_cloud_shade_ = glGetUniformLocation(sky_program_, "uCloudShade");
+    u_sky_cloud_shift_ = glGetUniformLocation(sky_program_, "uCloudShift");
     glGenVertexArrays(1, &sky_vao_);
 
     glGenBuffers(1, &instance_vbo_);
@@ -339,8 +389,9 @@ public:
     glUseProgram(mesh_program_);
     glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.view_projection.m);
     glUniform1f(u_time_, view.time);
+    glUniform1f(u_wind_, 1.0f + 2.2f * view.wind);
+    glUniform3f(u_eye_, view.camera_x, view.camera_y, view.camera_z);
     glUniform1f(u_time_fs_, view.time);
-    glUniform3f(u_camera_, view.camera_x, view.camera_y, view.camera_z);
     glUniform3f(u_light_, view.light_x, view.light_y, view.light_z);
     glUniform3f(u_light_color_, view.light_color.r, view.light_color.g, view.light_color.b);
     glUniform3f(u_ambient_sky_, view.ambient_sky.r, view.ambient_sky.g, view.ambient_sky.b);
@@ -543,6 +594,12 @@ private:
     glUniform1f(u_sky_night_, view.night);
     glUniform3f(u_sky_zenith_, view.sky_zenith.r, view.sky_zenith.g, view.sky_zenith.b);
     glUniform3f(u_sky_horizon_, view.sky_horizon.r, view.sky_horizon.g, view.sky_horizon.b);
+    glUniform1f(u_sky_cover_, view.cloud_cover);
+    glUniform3f(u_sky_cloud_light_, view.cloud_light.r, view.cloud_light.g, view.cloud_light.b);
+    glUniform3f(u_sky_cloud_shade_, view.cloud_shade.r, view.cloud_shade.g, view.cloud_shade.b);
+    // Only the drift within a long stretch (the noise does not repeat, but
+    // big numbers lose their precision on phones): it jumps every 400 km.
+    glUniform2f(u_sky_cloud_shift_, std::fmod(view.cloud_shift_x, 400000.0f), std::fmod(view.cloud_shift_z, 400000.0f));
     glBindVertexArray(sky_vao_);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
@@ -616,9 +673,10 @@ private:
 
   GLuint mesh_program_ = 0, sky_program_ = 0;
   GLint u_time_fs_ = -1;
-  GLint u_view_projection_ = -1, u_time_ = -1, u_camera_ = -1, u_light_ = -1, u_fog_ = -1, u_fog_range_ = -1;
+  GLint u_view_projection_ = -1, u_time_ = -1, u_light_ = -1, u_fog_ = -1, u_fog_range_ = -1;
   GLint u_sky_inverse_ = -1, u_sky_camera_ = -1, u_sky_sun_ = -1, u_sky_zenith_ = -1, u_sky_horizon_ = -1;
-  GLint u_opaque_pass_ = -1;
+  GLint u_opaque_pass_ = -1, u_wind_ = -1, u_eye_ = -1;
+  GLint u_sky_cover_ = -1, u_sky_cloud_light_ = -1, u_sky_cloud_shade_ = -1, u_sky_cloud_shift_ = -1;
   GLint u_light_color_ = -1, u_ambient_sky_ = -1, u_ambient_ground_ = -1, u_night_ = -1;
   GLint u_light_count_ = -1, u_light_pos_ = -1, u_light_colors_ = -1, u_sky_moon_ = -1, u_sky_night_ = -1;
   GLint u_fade_center_ = -1, u_fade_near_ = -1, u_fade_far_ = -1, u_fade_tree_ = -1;

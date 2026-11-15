@@ -77,7 +77,8 @@ inline constexpr float kFarFar = 9500.0f;  // ...to the horizon
 inline constexpr float kFogStart = 30.0f, kFogHalf = 1800.0f, kFogEnd = 9000.0f;
 }  // namespace view_range
 
-// What moves: the player, its shadow, the clouds. `time` in seconds.
+// What moves: the characters, their shadows, the effects (the clouds:
+// weather_view.hpp). `time` in seconds.
 // `selected`: index of a creature to mark with a ring at its feet (-1: none).
 // With a view: the creatures out of it are left out (cull.hpp).
 void build_dynamic(const World& world, float time, DrawList& list, int selected = -1, const Frustum* view = nullptr);

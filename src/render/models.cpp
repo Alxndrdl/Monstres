@@ -12,7 +12,8 @@ namespace {
 
 constexpr const char* kNames[kMeshCount] = {
     "cube", "crate", "tree", "pine", "rock0", "rock1", "rock2", "rock3", "log", "stump", "bush",
-    "grass_short", "grass_tall", "flower", "cloud0", "cloud1", "cloud2", "mountain0", "mountain1",
+    "grass_short", "grass_tall", "flower", "cloud0", "cloud1", "cloud2", "cloud_low0", "cloud_low1", "cloud_low2",
+    "mountain0", "mountain1",
     "eye", "player_leg", "player_torso", "player_arm", "player_head", "player_staff", "player_crystal",
     "companion_body", "companion_leg", "companion_head", "companion_ear", "companion_tail",
     "slime_body", "mushroom_stem", "mushroom_cap", "mushroom_leg", "bird_body", "bird_wing", "bird_leg",
@@ -24,6 +25,7 @@ constexpr const char* kNames[kMeshCount] = {
     "castle_wall", "castle_tower", "castle_gate", "castle_keep", "cave_mouth", "crystal", "teleporter", "tree_far", "pine_far", "tree_mid", "bush_far",
     "grass_short_far", "grass_tall_far", "flower_far",
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "shadow", "ripple", "smoke", "sparkle", "rune_circle",
+    "rain_shaft", "bolt", "rain", "snow",
 };
 
 struct DataDeleter {

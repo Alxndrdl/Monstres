@@ -834,7 +834,12 @@
       <input id="hour" type="range" min="0" max="24" step="0.25" value="8">
     </div>
     <label><input id="hold-hour" type="checkbox"> Figer l’heure</label>
-    <p class="note">Une heure de jeu dure une minute : une journée, 24 minutes.</p>
+    <div class="slider-field">
+      <label for="weather">Météo</label>
+      <output id="weather-value" for="weather">Naturelle</output>
+      <input id="weather" type="range" min="0" max="8" step="1" value="0">
+    </div>
+    <p class="note">Une heure de jeu dure une minute : une journée, 24 minutes. La météo choisie vaut autour de toi ; « orage au loin » en met un droit devant.</p>
   </div>
 
   <div id="fps" hidden></div>

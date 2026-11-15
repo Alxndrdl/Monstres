@@ -176,6 +176,10 @@ window.monstres = {
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),
   holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),
+  // Debug: the weather around the player: -1 the world's own, 0..6 clear,
+  // fewClouds, overcast, rain, storm, fog, snow; 7 fine here and a storm
+  // ahead. What it is now: state().weather.
+  setWeather: (choice) => _monstres_set_weather(choice),
   team: () => JSON.parse(UTF8ToString(_monstres_team_json())),
   battle: () => JSON.parse(UTF8ToString(_monstres_battle_json())),
   setCamera: (yaw, pitch) => _monstres_set_camera(yaw, pitch),

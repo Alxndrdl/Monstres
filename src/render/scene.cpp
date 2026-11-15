@@ -606,25 +606,6 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected, con
       add(list, MeshId::Sparkle, halo);
     }
   }
-
-  // Clouds drifting with the wind, wrapping around.
-  constexpr int kClouds = 16;
-  constexpr float kSpan = 440.0f;
-  for (int i = 0; i < kClouds; ++i) {
-    const auto u = static_cast<uint64_t>(i);
-    Instance c;
-    const float x0 = kSpan * rand01(w.seed, 20000 + u) - kSpan / 2;
-    c.x = std::fmod(x0 + time * 1.5f + kSpan * 10, kSpan) - kSpan / 2;
-    c.z = kSpan * rand01(w.seed, 20100 + u) - kSpan / 2;
-    c.y = lerp(32.0f, 50.0f, rand01(w.seed, 20200 + u));
-    c.rotation = quat_yaw(0.6f * (rand01(w.seed, 20300 + u) - 0.5f));
-    c.sx = lerp(14.0f, 28.0f, rand01(w.seed, 20400 + u));
-    c.sy = lerp(4.0f, 7.0f, rand01(w.seed, 20500 + u));
-    c.sz = lerp(8.0f, 15.0f, rand01(w.seed, 20600 + u));
-    // Clouds glow by day (brighter than the lighting alone), turn grey-blue at night.
-    c.tint = {lerp(1.45f, 0.16f, dark), lerp(1.45f, 0.18f, dark), lerp(1.45f, 0.26f, dark), 1};
-    add(list, mesh_offset(MeshId::Cloud0, u % kCloudVariants), c);
-  }
 }
 
 float camera_distance(const World& w, float tx, float ty, float tz, float dx, float dy, float dz, float wanted) {

@@ -64,10 +64,31 @@
   // While the menu is open, the slider follows the time going by.
   setInterval(() => {
     if (menu.hidden || dragging || !game || typeof game.state !== 'function') return;
-    const hour = game.state().hour;
-    hourInput.value = String(hour);
-    hourValue.textContent = clockText(hour);
+    const s = game.state();
+    hourInput.value = String(s.hour);
+    hourValue.textContent = clockText(s.hour);
+    if (s.weather) weatherValue.textContent = weatherText(s.weather.choice + 1, s.weather.kind);
   }, 500);
+
+  // ---- Debug: the weather ----
+  // The slider: 0 the world's own weather, then each kind, then a storm afar
+  // (setWeather: -1, 0..6, 7).
+  const WEATHER = ['clear', 'fewClouds', 'overcast', 'rain', 'storm', 'fog', 'snow'];
+  const WEATHER_NAMES = {
+    clear: 'Ensoleillé', fewClouds: 'Quelques nuages', overcast: 'Couvert', rain: 'Pluie',
+    storm: 'Tempête, orage', fog: 'Brouillard', snow: 'Neige',
+  };
+  const weatherInput = document.getElementById('weather');
+  const weatherValue = document.getElementById('weather-value');
+  const weatherText = (position, now) => {
+    const k = Number(position);
+    if (k === 0) return `Naturelle${now ? ` · ${(WEATHER_NAMES[now] || now).toLowerCase()}` : ''}`;
+    return k <= WEATHER.length ? WEATHER_NAMES[WEATHER[k - 1]] : 'Orage au loin';
+  };
+  weatherInput.addEventListener('input', () => {
+    weatherValue.textContent = weatherText(weatherInput.value);
+    if (game) game.setWeather(Number(weatherInput.value) - 1);
+  });
 
   // ---- Frames per second, and where their time goes ----
   const fpsBox = document.getElementById('fps');
