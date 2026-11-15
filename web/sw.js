@@ -1,7 +1,9 @@
 // Service Worker: makes the game work offline.
 //
 // Strategy: network first, cache as fallback. Online, players always get the
-// latest build (no stale .wasm after a deploy); offline, the last copy is used.
+// latest build (no stale .wasm after a deploy); offline, or when the server
+// answers with an error (404 for a site taken down, 5xx), the last copy is
+// used. Only a file never downloaded gets the server's error.
 //
 // Every request bypasses the browser's HTTP cache (or revalidates with the
 // server): a simple server sends no caching headers, and the browser may then
@@ -59,8 +61,9 @@ self.addEventListener('fetch', (event) => {
           key.search = '';
           const copy = response.clone();
           event.waitUntil(caches.open(CACHE).then((cache) => cache.put(key.href, copy)));
+          return response;
         }
-        return response;
+        return caches.match(request, { ignoreSearch: true }).then((cached) => cached || response);
       })
       .catch(() => caches.match(request, { ignoreSearch: true })),
   );

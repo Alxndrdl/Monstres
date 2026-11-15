@@ -1,5 +1,8 @@
 // @ts-check
 // Functional tests in real browsers: the game as a player uses it.
+const fs = require('node:fs');
+const http = require('node:http');
+const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { openGame, state, walk, center } = require('./helpers');
 
@@ -398,6 +401,42 @@ test('the game still starts offline once installed', async ({ page, context, bro
   await openGame(page, '?frozen');
   expect((await state(page)).objects).toBeGreaterThan(150);
   await expect(page.locator('#joystick')).toBeVisible();  // controls.js came from the cache too
+});
+
+test('the game still starts from the cache when the server answers 404', async ({ page, browserName }) => {
+  test.skip(browserName === 'webkit', 'service worker offline mode is unreliable in Playwright WebKit');
+  // A server of its own, which can take the site down: then every file,
+  // sw.js too, answers 404 (a route() would not reach the worker's requests).
+  const site = process.env.MONSTRES_SITE || path.resolve(__dirname, '../../../build/web-release/site');
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm',
+    '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
+  let up = true;
+  const server = http.createServer((req, res) => {
+    const name = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\/$/, '/index.html');
+    const file = path.join(site, path.normalize(name));
+    if (!up || !file.startsWith(site) || !fs.existsSync(file)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not Found');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream' });
+    fs.createReadStream(file).pipe(res);
+  });
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  const base = `http://127.0.0.1:${server.address().port}/`;
+  try {
+    await openGame(page, `${base}?seed=42&new&frozen`);
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.reload();  // this load goes through the service worker and fills the cache
+    await page.evaluate(() => window.monstres.ready);
+
+    up = false;
+    await openGame(page, `${base}?frozen`);
+    expect((await state(page)).objects).toBeGreaterThan(150);
+    await expect(page.locator('#joystick')).toBeVisible();
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
 });
 
 test.describe('settings menu', () => {

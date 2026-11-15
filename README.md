@@ -102,6 +102,14 @@ elles s'adaptent à la disposition du clavier quand le navigateur le permet.
 
 Sur téléphone et tablette, on joue en mode paysage : l'application installée
 s'ouvre en paysage, et en portrait un message demande de tourner l'appareil.
+Une fois ouvert, le jeu est gardé sur l'appareil (`sw.js`) : sans connexion,
+ou si le serveur répond par une erreur (404 d'un site retiré, 5xx), il se lance
+avec la dernière version téléchargée, dans le navigateur comme installé.
+Le jeu passe en plein écran, sans barre d'état ni boutons système : installé
+sur Android, il s'ouvre ainsi ; dans un onglet, le premier toucher le demande
+(et bloque le paysage), sauf si le joueur en est sorti. Sur iPhone, une page
+web n'a pas de plein écran : installée, elle s'ouvre sans les barres de Safari,
+et en paysage iOS cache de lui-même la barre d'état.
 
 ## Organisation
 

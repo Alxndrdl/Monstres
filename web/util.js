@@ -53,5 +53,29 @@ if ('serviceWorker' in navigator) {
     if (node.textContent !== t) node.textContent = t;
   };
 
+  // Full screen on phones and tablets: the status bar and the system buttons
+  // hide. Installed on Android, the manifest already opens the game that way;
+  // in a browser tab, the first touch asks for it (a browser grants it only
+  // right after a gesture), then the screen is held in landscape. Once the
+  // player leaves full screen, it is not asked again. Not on iPhones, which
+  // have no full screen for a page, nor under automated tests.
+  const root = document.documentElement;
+  if (root.requestFullscreen && !navigator.webdriver) {
+    let wanted = true;
+    const onTouch = (e) => {
+      if (!wanted || e.pointerType === 'mouse' || document.fullscreenElement) return;
+      if (matchMedia('(display-mode: fullscreen)').matches) return;  // already
+      root.requestFullscreen({ navigationUI: 'hide' })
+        .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
+        .catch(() => {});  // refused or no lock: the game works the same
+    };
+    window.addEventListener('pointerup', onTouch, { capture: true, passive: true });
+    let wasFull = false;
+    document.addEventListener('fullscreenchange', () => {
+      if (wasFull && !document.fullscreenElement && !document.hidden) wanted = false;
+      wasFull = !!document.fullscreenElement;
+    });
+  }
+
   window.MonstresUtil = { $, el, whenReady, prefs, setText };
 })();
