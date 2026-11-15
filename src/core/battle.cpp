@@ -1442,6 +1442,7 @@ void battle_resolve(World& w) {
       if (xp == 0) b.no_xp = NoXp::Trainer;
       if (w.rival_wins < 255) ++w.rival_wins;
     }
+    ++w.battles_won;
     end_battle(w, BattleOutcome::Victory, xp);
     return;
   }

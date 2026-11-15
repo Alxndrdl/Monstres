@@ -212,6 +212,8 @@ window.monstres = {
   // Teleporters (known, reachable) and quests; what the player does with them.
   teleporters: () => JSON.parse(UTF8ToString(_monstres_teleporters_json())),
   quests: () => JSON.parse(UTF8ToString(_monstres_quests_json())),
+  // The villagers with a quest to take or going on, healing, battles (the map's icons).
+  marks: () => JSON.parse(UTF8ToString(_monstres_marks_json())),
   teleportTo: (id) => monstresCommand('teleport', id),
   acceptQuest: (quest) => monstresCommand('questAccept', quest),
   giveMonster: (slot) => monstresCommand('questGive', slot),

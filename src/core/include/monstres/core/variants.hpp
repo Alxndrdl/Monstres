@@ -151,6 +151,13 @@ uint8_t gift_value(Species species, const Genes& genes, size_t gift, uint8_t bas
 Gifts monster_gifts(const Monster& monster);
 inline constexpr uint8_t kGiftBaseMin = 5, kGiftBaseMax = 15, kGiftMax = 20;
 
+// The average size (mm) and weight (g) of a species, males and females
+// together, of a normal build (the bestiary).
+struct TypicalMeasures {
+  float size_mm = 0, weight_g = 0;
+};
+TypicalMeasures typical_measures(Species species);
+
 // Who a monster is, beyond its genes: its gifts (their drawn base, 5 to
 // 15), size, weight and age, drawn from the world's seed and its creature id
 // (the same for a monster each time it is asked). Size: its species', by

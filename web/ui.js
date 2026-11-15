@@ -162,7 +162,7 @@
       let extra = '';
       if (key === 'sim') extra = ` · ${(p.ticks / p.frames).toFixed(1)} pas/image`;
       if (key === 'landscape' && p.landscapeBuilds) extra = ` · ${p.landscapeBuilds}×`;
-      rows.push(row(label, ms(p.avg[key]), frame ? p.avg[key] / frame : 0, title, `pire ${ms(p.worst[key])}${extra}`));
+      rows.push(row(label, ms(p.avg[key]), frame ? p.avg[key] / frame : 0, title, extra.replace(/^ · /, '')));
     }
     const gpu = p.gpuMs;
     rows.push(section(gpu === null ? 'Carte graphique : temps non mesurable sur ce navigateur' : `Carte graphique : ${ms(gpu)}`));
@@ -292,12 +292,27 @@
       });
       fields.tags.replaceChildren(...(c.family ? [badge(LORE.families[c.family] || c.family, 'rgba(255,255,255,0.85)')] : []),
         ...(c.elements || []).map((id) => badge((LORE.elements[id] || { name: id }).name, (LORE.elements[id] || {}).color || '#ccc')));
-      // Its variants: the rare forms first, then its colors and shapes.
+      // Its variants: its sex as a sign (blue, pink), the rare forms, then its
+      // colors and shapes, each in the color of its rarity.
       const texts = info.variants || {};
+      const entry = (c.variants || []).length ? (game.bestiary().find((e) => e.species === c.species) || { variants: [] })
+        : { variants: [] };
       const ids = [...(c.variants || [])].sort((a, b) => (b.includes('.') ? 0 : 1) - (a.includes('.') ? 0 : 1));
       const build = (id) => LORE.builds[id] && `${LORE.builds[id].sign} ${LORE.builds[id].name}`;
-      const names = ids.map((id) => (id.includes('.') ? '' : '✦ ') + ((texts[id] || {}).name || build(id) || id));
-      fields.variants.textContent = names.length ? `Variantes : ${names.join(' · ')}` : '';
+      fields.variants.replaceChildren(...ids.map((id) => {
+        if (id === 'sex.male' || id === 'sex.female') {
+          const female = id === 'sex.female';
+          return Object.assign(document.createElement('span'), {
+            className: `sex ${female ? 'female' : 'male'}`, textContent: female ? '♀' : '♂', title: female ? 'Femelle' : 'Mâle',
+          });
+        }
+        const v = entry.variants.find((x) => x.id === id) || {};
+        const span = document.createElement('span');
+        span.textContent = (id.includes('.') ? '' : '✦ ') + ((texts[id] || {}).name || build(id) || id);
+        span.title = (LORE.rarities[v.rarity] || { name: '' }).name;
+        span.style.setProperty('--rarity', (LORE.rarities[v.rarity] || { color: '#c9c4d8' }).color);
+        return span;
+      }));
     }
     const meters = Math.round(c.distance);
     const level = c.level && c.species !== 'villager' ? `Niveau ${c.level} · ` : '';

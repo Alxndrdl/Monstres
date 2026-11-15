@@ -219,6 +219,19 @@ uint8_t quest_giver(QuestId q) {
   }
 }
 
+uint8_t npc_marks(const World& w, uint8_t n) {
+  uint8_t marks = 0;
+  for (size_t k = 0; k < kQuestCount; ++k) {
+    const auto id = static_cast<QuestId>(k);
+    if (quest_giver(id) != n) continue;
+    if (w.quests[k].stage == QuestStage::Unknown) marks |= kMarkNewQuest;
+    if (w.quests[k].stage == QuestStage::Active) marks |= kMarkQuest;
+  }
+  if (n == npc::kOdette) marks |= kMarkHeal;
+  if (n == npc::kBastien) marks |= kMarkFight;
+  return marks;
+}
+
 void healed_monster(World& w) {
   QuestState& q = quest(w, QuestId::Healing);
   if (q.stage == QuestStage::Active) q.progress |= kHealedMonster;

@@ -496,6 +496,62 @@ def cloud(variant, detail=1):
     return m
 
 
+# ---------------------------------------------------------------- what a villager has for the player
+
+def tube(m, points, radius, color, segments=8):
+    """A tube through points (in the XY plane), each piece a cylinder, the joints rounded."""
+    for a, b in zip(points, points[1:]):
+        d = sub(b, a)
+        h = length(d)
+        u = normalize(d)
+        axis = normalize(cross((0.0, 1.0, 0.0), u)) if abs(u[1]) < 0.999 else (1.0, 0.0, 0.0)
+        angle = math.acos(max(-1.0, min(1.0, u[1])))
+
+        def turn(p, axis=axis, angle=angle, a=a):
+            c, s_ = math.cos(angle), math.sin(angle)
+            q = add(add(mul(p, c), mul(cross(axis, p), s_)), mul(axis, dot(axis, p) * (1 - c)))
+            return add(a, q)
+        frustum(m, turn, radius, radius, h, segments, color, open_ends=True)
+    for p in points:
+        blob(m, p, (radius, radius, radius), 0.0, 1700, solid(color), detail=0)
+
+
+def icon_question():
+    """A "?" (a quest to take), about 0.34 m high, centered: tinted and glowing."""
+    m = Mesh()
+    hook = [(0.085 * math.cos(a), 0.2 + 0.085 * math.sin(a), 0.0)
+            for a in (math.pi * (1.0 - k / 7 * 1.4) for k in range(8))]
+    tube(m, hook + [(0.0, 0.07, 0.0), (0.0, 0.035, 0.0)], 0.03, WHITE)
+    blob(m, (0, -0.06, 0), (0.038, 0.038, 0.038), 0.0, 1701, solid(WHITE), detail=1)
+    return m
+
+
+def icon_exclaim():
+    """A "!" (a quest going on)."""
+    m = Mesh()
+    frustum(m, translate(0, -0.005, 0), 0.026, 0.042, 0.27, 10, WHITE)
+    blob(m, (0, 0.265, 0), (0.042, 0.02, 0.042), 0.0, 1702, solid(WHITE), detail=1)
+    blob(m, (0, -0.075, 0), (0.04, 0.04, 0.04), 0.0, 1703, solid(WHITE), detail=1)
+    return m
+
+
+def icon_plus():
+    """A "+" (healing)."""
+    m = Mesh()
+    box(m, (0, 0.1, 0), (0.13, 0.04, 0.04), WHITE)
+    box(m, (0, 0.1, 0), (0.04, 0.13, 0.04), WHITE)
+    return m
+
+
+def icon_cross():
+    """An "x" (battles)."""
+    m = Mesh()
+    r = 0.13
+    for sx in (-1, 1):
+        tube(m, [(-r * sx, 0.1 - r, 0.0), (r * sx, 0.1 + r, 0.0)], 0.035, WHITE)
+    return m
+
+
 # ---------------------------------------------------------------- weather (src/render/weather_view.cpp)
 
 RAIN_TILE, RAIN_HEIGHT = 8.0, 12.0   # must match kRainTile, kRainHeight
@@ -2281,6 +2337,10 @@ def all_models():
     for v in range(3):
         models[f"cloud{v}"] = cloud(v)
         models[f"cloud_low{v}"] = cloud(v, detail=0)
+    models["icon_question"] = icon_question()
+    models["icon_exclaim"] = icon_exclaim()
+    models["icon_plus"] = icon_plus()
+    models["icon_cross"] = icon_cross()
     models["rain"] = rain()
     models["snow"] = snow()
     models["rain_shaft"] = rain_shaft()

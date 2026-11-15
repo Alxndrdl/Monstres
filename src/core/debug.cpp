@@ -252,7 +252,12 @@ std::string wizard_json(const World& w) {
   s += std::string(",\"look\":{\"woman\":") + (l.woman ? "true" : "false") + ",\"skin\":" + std::to_string(l.skin) +
        ",\"hair\":" + std::to_string(l.hair) + ",\"hairColor\":" + std::to_string(l.hair_color) +
        ",\"eyes\":" + std::to_string(l.eyes) + ",\"staff\":" + std::to_string(l.staff) +
-       ",\"robe\":" + std::to_string(l.robe) + ",\"headwear\":" + std::to_string(l.headwear) + "}}";
+       ",\"robe\":" + std::to_string(l.robe) + ",\"headwear\":" + std::to_string(l.headwear) + "}";
+  uint32_t captured = 0, beaten = 0;
+  for (const uint16_t n : w.captured_count) captured += n;
+  for (const uint16_t n : w.beaten_count) beaten += n;
+  s += ",\"record\":{\"captured\":" + std::to_string(captured) + ",\"beaten\":" + std::to_string(beaten) +
+       ",\"battlesWon\":" + std::to_string(w.battles_won) + "}}";
   return s;
 }
 
@@ -354,6 +359,22 @@ std::string bestiary_json(const World& w) {
       s += std::string(",\"status\":\"") + kStatus[static_cast<size_t>(known[v])] + "\"}";
     }
     s += "]";
+    s += ",\"habitat\":[";
+    const uint16_t habitat = species_habitat(species);
+    for (size_t z = 0, n = 0; z < static_cast<size_t>(Zone::Count); ++z) {
+      if (!((habitat >> z) & 1u)) continue;
+      s += std::string(n++ ? "," : "") + "\"" + zone_name(static_cast<Zone>(z)) + "\"";
+    }
+    s += "],\"chances\":{";  // out of 100 monsters of each zone of its habitat
+    for (size_t z = 0, n = 0; z < static_cast<size_t>(Zone::Count); ++z) {
+      if (!((habitat >> z) & 1u)) continue;
+      s += std::string(n++ ? "," : "") + "\"" + zone_name(static_cast<Zone>(z)) + "\":" +
+           std::to_string(species_chance(species, static_cast<Zone>(z)));
+    }
+    s += "}";
+    const TypicalMeasures typical = typical_measures(species);
+    s += ",\"sizeMm\":" + num(typical.size_mm) + ",\"weightG\":" + num(typical.weight_g);
+    s += ",\"speed\":" + num((info.walk_speed + info.run_speed) / 2);
     s += ",\"height\":" + num(info.shape.height) + ",\"walkSpeed\":" + num(info.walk_speed);
     s += ",\"runSpeed\":" + num(info.run_speed) + ",\"count\":" + std::to_string(count);
     s += ",\"captured\":" + std::to_string(w.captured_count[i]) + ",\"beaten\":" + std::to_string(w.beaten_count[i]);
@@ -380,6 +401,25 @@ const char* quest_name(QuestId id) {
 }
 
 }  // namespace
+
+std::string marks_json(const World& w) {
+  std::string s = "[";
+  bool first = true;
+  for (const Creature& c : w.creatures) {
+    if (c.species != Species::Villager || c.npc == 0) continue;
+    const uint8_t m = npc_marks(w, c.npc);
+    if (!m) continue;
+    s += std::string(first ? "" : ",") + "{\"npc\":" + std::to_string(c.npc) + ",\"x\":" + num(c.body.pos.x) +
+         ",\"z\":" + num(c.body.pos.z) + ",\"marks\":[";
+    first = false;
+    const char* names[] = {"newQuest", "quest", "heal", "fight"};
+    for (int k = 0, n = 0; k < 4; ++k) {
+      if (m & (1 << k)) s += std::string(n++ ? "," : "") + "\"" + names[k] + "\"";
+    }
+    s += "]}";
+  }
+  return s + "]";
+}
 
 std::string teleporters_json(const World& w) {
   std::string s = "{\"here\":" + std::to_string(teleporter_here(w)) + ",\"list\":[";
@@ -549,6 +589,21 @@ std::string map_json(const World& w) {
   s += ",\"castle\":" + (k.radius > 0 ? "{\"x\":" + num(k.center.x) + ",\"z\":" + num(k.center.z) +
                                           ",\"r\":" + num(rules::kCastleHalf) + "}"
                                     : std::string("null"));
+  // The zones, every kZoneStep meters across the playable area (one letter
+  // each: 'a' + Zone), rows along +Z then columns along +X.
+  constexpr float kZoneStep = 8.0f;
+  const int zones = static_cast<int>(2 * rules::kWorldHalfSize / kZoneStep) + 1;
+  s += ",\"zoneStep\":" + num(kZoneStep) + ",\"zoneCount\":" + std::to_string(zones) + ",\"zones\":\"";
+  if (!w.ground.empty()) {
+    for (int i = 0; i < zones; ++i) {
+      for (int j = 0; j < zones; ++j) {
+        const float x = -rules::kWorldHalfSize + kZoneStep * static_cast<float>(i);
+        const float z = -rules::kWorldHalfSize + kZoneStep * static_cast<float>(j);
+        s += static_cast<char>('a' + static_cast<int>(zone_at(w, x, z)));
+      }
+    }
+  }
+  s += "\"";
   s += ",\"path\":[";
   for (size_t i = 0; i < w.path.points.size(); ++i) {
     if (i) s += ',';

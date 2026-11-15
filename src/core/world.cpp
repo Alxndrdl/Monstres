@@ -817,30 +817,45 @@ uint8_t level_in(Zone zone, Rng& rng, float x = 0, float z = 0) {
   return static_cast<uint8_t>(base + rng.below(3));
 }
 
-// Which monster lives in a zone (crows and fish have their own places).
-// Zapou like the open hills and old stones, Ploufi the water's edge.
+// Which monster lives in a zone, with its chances out of 100 (crows and
+// fish have their own places). Zapou like the open hills and old stones,
+// Ploufi the water's edge; Pompon too, now and then, in the open (a starter
+// that may not have been chosen).
+struct Odds {
+  uint32_t chance;
+  Species species;
+};
+std::span<const Odds> zone_odds(Zone zone) {
+  using enum Species;
+  static constexpr Odds kForest[] = {{45, Mushroom}, {25, Bird}, {15, Slime}, {15, Axolotl}};
+  static constexpr Odds kCave[] = {{50, Slime}, {30, Mushroom}, {20, Spark}};
+  static constexpr Odds kCastle[] = {{40, Bird}, {25, Slime}, {20, Mushroom}, {15, Spark}};
+  static constexpr Odds kCoast[] = {{45, Slime}, {35, Axolotl}, {20, Bird}};  // slimes like the wet sand
+  static constexpr Odds kHills[] = {{40, Bird}, {30, Mushroom}, {20, Spark}, {10, Slime}};
+  static constexpr Odds kRuins[] = {{30, Slime}, {30, Mushroom}, {20, Bird}, {20, Spark}};
+  static constexpr Odds kLake[] = {{40, Axolotl}, {30, Slime}, {30, Bird}};
+  static constexpr Odds kOpen[] = {{27, Slime}, {27, Mushroom}, {27, Bird}, {7, Spark}, {7, Axolotl}, {5, Companion}};
+  switch (zone) {
+    case Zone::Forest: return kForest;
+    case Zone::Cave: return kCave;
+    case Zone::Castle: return kCastle;
+    case Zone::Coast: return kCoast;
+    case Zone::Hills: return kHills;
+    case Zone::Ruins: return kRuins;
+    case Zone::Lake: return kLake;
+    default: return kOpen;
+  }
+}
+
 Species species_in(Zone zone, Rng& rng) {
   const uint32_t r = rng.below(100);
-  const auto pick = [r](std::initializer_list<std::pair<uint32_t, Species>> odds) {
-    uint32_t sum = 0;
-    for (const auto& [chance, species] : odds) {
-      sum += chance;
-      if (r < sum) return species;
-    }
-    return odds.begin()->second;
-  };
-  using enum Species;
-  switch (zone) {
-    case Zone::Forest: return pick({{45, Mushroom}, {25, Bird}, {15, Slime}, {15, Axolotl}});
-    case Zone::Cave: return pick({{50, Slime}, {30, Mushroom}, {20, Spark}});
-    case Zone::Castle: return pick({{40, Bird}, {25, Slime}, {20, Mushroom}, {15, Spark}});
-    case Zone::Coast: return pick({{45, Slime}, {35, Axolotl}, {20, Bird}});  // slimes like the wet sand
-    case Zone::Hills: return pick({{40, Bird}, {30, Mushroom}, {20, Spark}, {10, Slime}});
-    case Zone::Ruins: return pick({{30, Slime}, {30, Mushroom}, {20, Bird}, {20, Spark}});
-    case Zone::Lake: return pick({{40, Axolotl}, {30, Slime}, {30, Bird}});
-    // Pompon too, now and then, in the open (a starter that may not have been chosen).
-    default: return pick({{27, Slime}, {27, Mushroom}, {27, Bird}, {7, Spark}, {7, Axolotl}, {5, Companion}});
+  uint32_t sum = 0;
+  const std::span<const Odds> odds = zone_odds(zone);
+  for (const Odds& o : odds) {
+    sum += o.chance;
+    if (r < sum) return o.species;
   }
+  return odds.front().species;
 }
 
 // Chances (out of 100) that a try puts a monster there.
@@ -853,6 +868,30 @@ uint32_t density_in(Zone zone) {
     default: return 50;
   }
 }
+
+}  // namespace
+
+uint32_t species_chance(Species species, Zone zone) {
+  if (species == Species::Fish) return zone == Zone::Lake ? 100 : 0;  // the lake's fish
+  if (species == Species::Crow) {  // on the roofs, the tower, the castle's towers
+    return zone == Zone::Village || zone == Zone::Ruins || zone == Zone::Castle ? 100 : 0;
+  }
+  if (density_in(zone) == 0 && zone != Zone::Lake) return 0;  // nothing wild lives there
+  for (const Odds& o : zone_odds(zone)) {
+    if (o.species == species) return o.chance;
+  }
+  return 0;
+}
+
+uint16_t species_habitat(Species species) {
+  uint16_t zones = 0;
+  for (size_t z = 0; z < static_cast<size_t>(Zone::Count); ++z) {
+    if (species_chance(species, static_cast<Zone>(z)) > 0) zones = static_cast<uint16_t>(zones | (1u << z));
+  }
+  return zones;
+}
+
+namespace {
 
 Box cell_rect(int index, float& x0, float& z0) {
   const int i = index / rules::kPopulationCells, j = index % rules::kPopulationCells;

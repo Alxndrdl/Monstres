@@ -175,8 +175,7 @@
       el('div', {}, [el('h2', { textContent: id === 'none' ? 'Emplacement vide' : spellName(id) }),
         el('p', { className: 'facts', textContent: `Sort ${x.kind === 'combat' ? 'de combat' : 'd’aventure'} · touche ${x.key}` })]),
       edit]);
-    const body = [head, el('p', { className: 'facts mana-line', textContent: `Ton mana : ${s.manaNow} / ${s.manaMax}. Il ne ` +
-      'revient pas tout seul : Odette, la soigneuse du village, le remplit. Il grandit avec ton niveau.' })];
+    const body = [head];
     if (!editing) {
       body.push(...spellFacts(id));
       if (!s.editable) body.push(el('p', { className: 'facts', textContent: 'Les sorts se changent hors combat.' }));

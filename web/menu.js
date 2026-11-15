@@ -110,10 +110,6 @@
   }, true);
 
   // ---- Character sheet ----
-  const STATS = [
-    ['hp', 'Points de vie', 60], ['mana', 'Mana', 60], ['power', 'Puissance magique', 30],
-    ['wisdom', 'Sagesse', 30], ['agility', 'Agilité', 30], ['endurance', 'Endurance', 30],
-  ];
 
   // [label, value, max for the bar, text shown (else the value)].
   function statList(target, entries) {
@@ -124,24 +120,35 @@
     ])));
   }
 
+  // The player's record: what it caught, won, beat.
+  const recordList = (target, entries) => target.replaceChildren(...entries.map(([label, value]) =>
+    el('div', {}, [el('dt', { textContent: label }), el('dd', { textContent: String(value) })])));
+
   function renderCharacter() {
     const w = game.wizard();
     $('wizard-portrait').src = portraitUrl(-1);
-    $('companion-portrait').src = portraitUrl(speciesIndex('companion'), 128);
     $('wizard-name').textContent = w.name || 'Magicien sans nom';  // chosen with the game (saves.js)
     $('wizard-rank').textContent = `Apprenti magicien · niveau ${w.level}`;
     $('wizard-xp-fill').style.width = `${Math.min(100, (100 * w.xp) / w.xpToNext)}%`;
     $('wizard-xp-text').textContent = `Expérience : ${w.xp} / ${w.xpToNext}`;
-    // The mana: what is left of its most (the bar shows how full it is).
-    statList($('wizard-stats'), STATS.map(([key, label, max]) => (key === 'mana'
-      ? [label, w.manaNow, w.mana, `${w.manaNow} / ${w.mana}`] : [label, w[key], max])));
+    // The mana, as a monster's hit points: what is left of its most.
+    $('wizard-mana-fill').style.width = `${w.mana ? Math.min(100, (100 * w.manaNow) / w.mana) : 0}%`;
+    $('wizard-mana-text').textContent = `Mana : ${w.manaNow} / ${w.mana}`;
+    const r = w.record || {};
+    recordList($('wizard-record'), [
+      ['Monstres capturés', r.captured || 0], ['Combats gagnés', r.battlesWon || 0], ['Monstres battus', r.beaten || 0],
+    ]);
     const zone = game.state().player.zone;
     $('wizard-where').textContent = `Tu te trouves : ${LORE.zones[zone] || zone}.`;
   }
 
   // ---- Team: the monsters of the player, the companion first ----
   let chosenMember = prefs.get('teamSlot', 0);
-  const SEX = { true: '♀ Femelle', false: '♂ Mâle' };
+  // The sex, as its sign only: blue for males, pink for females.
+  const sexSign = (female) => el('span', {
+    className: `sex ${female ? 'female' : 'male'}`, textContent: female ? '♀' : '♂', title: female ? 'Femelle' : 'Mâle',
+  });
+  const rarityColor = (r) => (LORE.rarities[r] || { color: '#c9c4d8' }).color;
 
   function moveName(move) {
     const text = LORE.moves[move.id] || { name: move.id };
@@ -331,8 +338,15 @@
 
   function renderMember(m, teamSize) {
     const info = LORE.species[m.species];
-    const variants = m.variants.filter((id) => !id.startsWith('sex.') && !LORE.builds[id])
-      .map((id) => (id.includes('.') ? '' : '✦ ') + (variantText(m.species, id).name || id));
+    // Its variants, each in the color of its rarity (as the bestiary lists them).
+    const entry = game.bestiary().find((e) => e.species === m.species) || { variants: [] };
+    const variants = m.variants.filter((id) => !id.startsWith('sex.') && !LORE.builds[id]).map((id) => {
+      const v = entry.variants.find((x) => x.id === id) || {};
+      const span = el('span', { textContent: (id.includes('.') ? '' : '✦ ') + (variantText(m.species, id).name || id),
+        title: (LORE.rarities[v.rarity] || { name: '' }).name });
+      span.style.setProperty('--rarity', rarityColor(v.rarity));
+      return span;
+    });
     const build = m.form !== 'normal' ? el('span', { className: `badge build ${m.form}`,
       textContent: `${(LORE.builds[m.form] || {}).sign || ''} ${buildName(m.form)}` }) : '';
     const moves = el('ol', { className: 'moves' }, m.moves.map((move, i) => {
@@ -356,7 +370,7 @@
       el('img', { className: 'portrait', src: portraitUrl(speciesIndex(m.species), 256, m.look), alt: info.name }),
       el('div', {}, [
         el('h2', { textContent: info.name }),
-        el('p', { className: 'kind', textContent: `${info.kind} · ${SEX[m.female]}${m.active ? ' · ton compagnon' : ''}` }),
+        el('p', { className: 'kind' }, [sexSign(m.female), ` ${info.kind}`]),
         el('div', { className: 'badges' }, [familyBadge(m.family), ...elementBadges(m.elements), build]),
         el('p', { className: 'rank', textContent: `Niveau ${m.level}` }),
         el('div', { className: 'xp' }, [
@@ -364,7 +378,7 @@
           el('span', { textContent: `Expérience : ${m.xp} / ${m.xpToNext}` }),
         ]),
         el('div', { className: 'xp hp' }, [hpBar(m.hp, m.maxHp), el('span', { textContent: `PV : ${m.hp} / ${m.maxHp}` })]),
-        variants.length ? el('p', { className: 'facts', textContent: `Variantes : ${variants.join(' · ')}` }) : '',
+        variants.length ? el('p', { className: 'variant-list' }, variants) : '',
         el('p', { className: 'facts measures', textContent: `Taille : ${sizeText(m.sizeMm)} · poids : ` +
           `${weightText(m.weightG)} · âge : ${ageText(m.ageDays)}` }),
       ]),
@@ -431,6 +445,7 @@
   ];
   let chosen = prefs.get('bestiarySpecies', 'companion');
   let dnaOpen = false;      // the variants of the chosen species instead of its sheet
+  let habitatOpen = false;  // or where it lives, on the map
   let chosenVariant = null; // variant shown below the grid
 
   // A strand of DNA: the button to the variants of a species.
@@ -474,7 +489,10 @@
       item.dataset.species = e.species;
       if (e.species === chosen) item.setAttribute('aria-current', 'true');
       item.addEventListener('click', () => {
-        if (chosen !== e.species) chosenVariant = null;
+        if (chosen !== e.species) {
+          chosenVariant = null;
+          habitatOpen = false;
+        }
         chosen = e.species;
         prefs.set('bestiarySpecies', chosen);
         renderBestiary();
@@ -483,7 +501,8 @@
     }));
 
     const e = entries.find((x) => x.species === chosen);
-    if (dnaOpen) renderVariants(e);
+    if (habitatOpen) renderHabitat(e);
+    else if (dnaOpen) renderVariants(e);
     else renderSheet(e);
   }
 
@@ -491,8 +510,17 @@
     const info = LORE.species[e.species];
     const stats = el('dl', { className: 'stats' });
     statList(stats, MONSTER_STATS.map(([key, label, max]) => [label, e[key], max]));
-    const count = e.species === 'companion' ? 'Il n’y en a qu’un : le tien.'
-      : `Autour de toi : ${e.count} ${e.count > 1 ? 'individus' : 'individu'}.`;
+    // Where it lives: on the map.
+    const habitat = el('button', { type: 'button', className: 'dna-button habitat-button', id: 'habitat-button' }, [
+      el('span', { textContent: '⌖' }),
+      el('span', { textContent: 'Habitat' }),
+      el('small', { textContent: e.habitat.length ? 'sur la carte' : 'pas dans la nature' }),
+    ]);
+    habitat.disabled = !e.habitat.length;
+    habitat.addEventListener('click', () => {
+      habitatOpen = true;
+      renderBestiary();
+    });
     const dna = el('button', { type: 'button', className: 'dna-button', id: 'dna-button' }, [
       dnaIcon(),
       el('span', { textContent: 'Variantes' }),
@@ -520,18 +548,53 @@
         el('p', { className: 'kind', textContent: info.kind }),
         el('div', { className: 'badges' }, [familyBadge(e.family), ...elementBadges(e.elements)]),
         el('p', { className: 'description', textContent: info.description, style: 'margin-top:10px' }),
-        el('p', { className: 'facts', textContent: `Habitat : ${info.habitat}` }),
+        // On average (males and females, a normal build).
         el('p', {
-          className: 'facts',
-          textContent: `Taille : ${e.height.toFixed(1).replace('.', ',')} m · ` +
-            `vitesse : ${e.walkSpeed.toFixed(1).replace('.', ',')} à ${e.runSpeed.toFixed(1).replace('.', ',')} m/s`,
+          className: 'facts measures',
+          textContent: `Taille : ${sizeText(Math.round(e.sizeMm))} · poids : ${weightText(Math.round(e.weightG))} · ` +
+            `vitesse : ${decimal(e.speed, 1)} m/s`,
         }),
-        el('p', { className: 'facts', textContent: count }),
-        dna,
+        el('div', { className: 'sheet-buttons' }, [dna, habitat]),
       ]),
       stats,
       el('section', { className: 'record-box' }, [el('h3', { textContent: 'Ton carnet' }), record]),
     );
+  }
+
+  // Where a species lives: the playable area's map, its zones blinking, in place of its card.
+  let habitatLoop = 0;
+  function renderHabitat(e) {
+    const info = LORE.species[e.species];
+    const back = el('button', { type: 'button', className: 'dna-back', textContent: '← Fiche' });
+    back.addEventListener('click', () => {
+      habitatOpen = false;
+      renderBestiary();
+    });
+    const view = el('canvas', { className: 'habitat-map', id: 'habitat-map' });
+    view.setAttribute('aria-label', `Carte : où vit ${info.name}`);
+    const key = (glyph, color, text) => el('div', {}, [el('i', { textContent: glyph, style: `color:${color}` }), text]);
+    $('bestiary-detail').className = 'bestiary-detail habitat';
+    $('bestiary-detail').replaceChildren(
+      el('header', { className: 'dna-header' }, [back, el('h2', { textContent: `Habitat de ${info.name}` })]),
+      el('div', { className: 'habitat-frame' }, [
+        view,
+        el('div', { className: 'map-legend habitat-legend', role: 'note' }, [
+          key('➤', '#f2c94c', 'Toi'), key('●', '#7fe0ff', 'Téléporteur'), key('▦', '#ffd646', 'Habitat'),
+        ]),
+      ]),
+    );
+    // The whole playable area; its zones light up and fade, again and again.
+    cancelAnimationFrame(habitatLoop);
+    const frame = (now) => {
+      if (!view.isConnected || !isOpen()) return;
+      const data = mapBase();
+      const w = view.clientWidth, h = view.clientHeight;
+      const p = game.state().player;
+      const scale = Math.min(w, h) / (2 * data.world) * 1.02;
+      drawMap(view, { cx: 0, cz: 0, scale, player: p }, { habitat: e, habitatAlpha: 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(now / 280)) });
+      habitatLoop = requestAnimationFrame(frame);
+    };
+    habitatLoop = requestAnimationFrame(frame);
   }
 
   const STATUS_TEXT = {
@@ -577,7 +640,7 @@
           title: unknown ? 'Variante inconnue' : `${text.name} · ${STATUS_TEXT[v.status]}`,
         }, unknown ? [el('span', { className: 'unknown', textContent: '?' }), el('small', { textContent: '???' })]
           : [el('img', { src: portraitUrl(speciesIndex(e.species), 96, v.look), alt: '' }),
-             el('small', { textContent: text.name })]);
+             el('small', {}, v.kind === 'sex' ? [sexSign(v.id === 'sex.female'), ` ${text.name}`] : [text.name])]);
         cell.dataset.id = v.id;
         cell.dataset.status = v.status;
         cell.dataset.rarity = v.rarity;
@@ -616,7 +679,7 @@
   function variantEffects(v) {
     const items = (v.mods || []).map((x) => el('li', { className: x.value > 0 ? 'up' : 'down',
       textContent: `${signed(x.value)} ${LORE.stats[x.stat] || x.stat}` }));
-    if (!items.length) return el('p', { className: 'facts variant-effects none', textContent: 'Effets : aucun sur ses aptitudes.' });
+    if (!items.length) return '';  // nothing to say
     return el('div', { className: 'variant-effects' }, [el('span', { className: 'facts', textContent: 'Effets :' }),
       el('ul', {}, items)]);
   }
@@ -633,7 +696,7 @@
     }
     const text = variantText(e.species, v.id);
     const rarity = LORE.rarities[v.rarity] || { name: v.rarity, color: '#ccc' };
-    const where = v.zones.length ? v.zones.map((z) => LORE.zones[z] || z).join(', ') : 'partout';
+    const where = v.zones.map((z) => LORE.zones[z] || z).join(', ');
     const geneName = v.kind === 'chromatic' ? 'Forme chromatique' : v.kind === 'elemental' ? 'Forme élémentaire'
       : v.kind === 'build' ? 'Gabarit' : (info.genes || {})[v.id.split('.')[0]] || '';
     box.replaceChildren(
@@ -641,7 +704,7 @@
         className: `portrait ${v.status}`, src: portraitUrl(speciesIndex(e.species), 160, v.look), alt: text.name,
       }),
       el('div', {}, [
-        el('h3', { textContent: text.name }),
+        el('h3', {}, v.kind === 'sex' ? [sexSign(v.id === 'sex.female'), ` ${text.name}`] : [text.name]),
         el('p', { className: 'kind', textContent: geneName }),
         el('div', { className: 'badges' }, [
           el('span', { className: 'badge', textContent: rarity.name, style: `background:${rarity.color}` }),
@@ -649,8 +712,9 @@
         ]),
         el('p', { className: 'description', textContent: text.description }),
         variantEffects(v),
-        el('p', { className: 'facts', textContent: v.kind === 'build' && v.id === 'omega'
-          ? 'Où la trouver : pas dans la nature, lors d’événements exceptionnels' : `Où la trouver : ${where}` }),
+        v.kind === 'build' && v.id === 'omega'
+          ? el('p', { className: 'facts', textContent: 'Où la trouver : pas dans la nature, lors d’événements exceptionnels' })
+          : where ? el('p', { className: 'facts', textContent: `Où la trouver : ${where}` }) : '',
         el('p', { className: `facts status ${v.status}`, textContent: STATUS_TEXT[v.status] }),
       ]),
     );
@@ -665,6 +729,7 @@
   const LOCAL_SCALE = 5;        // when the map opens
   let base = null;              // the playable area: { key, image, R }
   let land = null;              // the continent: { seed key, image, data }
+  let habitatImage = null;      // a species' zones (the bestiary's habitat): { key, image }
   let scale = prefs.get('mapScale', LOCAL_SCALE);
   let center = null;            // where the map looks (null: on the player)
 
@@ -686,8 +751,17 @@
     prefs.set('mapScale', scale);
     renderMap();
   }
+  // Not too far: the middle of the map stays over the land (the continent, or the playable area).
+  function clampCenter(c) {
+    if (!c) return c;
+    const d = land && land.data;
+    const lo = d ? { x: d.minX, z: d.minZ } : { x: -600, z: -600 };
+    const hi = d ? { x: d.minX + (d.pointsX - 1) * d.cell, z: d.minZ + (d.pointsZ - 1) * d.cell } : { x: 600, z: 600 };
+    return { x: Math.min(hi.x, Math.max(lo.x, c.x)), z: Math.min(hi.z, Math.max(lo.z, c.z)) };
+  }
   function currentView() {
     const p = game.state().player;
+    center = clampCenter(center);
     return { cx: center ? center.x : p.x, cz: center ? center.z : p.z, scale: clampScale(scale), player: p };
   }
 
@@ -935,8 +1009,8 @@
     fitPlayable = teleport;
   }
 
-  function renderMap() {
-    if (!game) return;
+  // The world's map data, read once per opening (big), and the pictures drawn from it.
+  function mapBase() {
     if (!mapData) mapData = game.map();
     const data = mapData;
     const key = `${data.path.length}:${data.path[0]}:${data.path[1]}:${data.objects.length}`;
@@ -944,32 +1018,30 @@
       const c = game.continent();
       land = c.ready ? { data: c, image: buildLand(c) } : null;
       base = { key, ...buildBase(data, land && land.data) };
+      habitatImage = null;
     }
+    return data;
+  }
 
-    const p = game.state().player;
-    $('map-where').textContent = teleportMode ? 'Choisis un téléporteur où aller.'
-      : `Tu te trouves : ${LORE.zones[p.zone] || p.zone}`;
+  // The map in a canvas, around view { cx, cz, scale (CSS px per meter) }.
+  // options: marks (the villagers' icons around the player), teleport (the
+  // reachable teleporters, larger), habitat (a bestiary entry: its zones,
+  // highlighted with that opacity, 0..1).
+  function drawMap(target, view, options = {}) {
+    const data = mapBase();
+    const p = view.player;
     const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
-    if (!cssW || !cssH) return;
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    const ctx = canvas.getContext('2d');
+    const cssW = target.clientWidth, cssH = target.clientHeight;
+    if (!cssW || !cssH) return [];
+    target.width = Math.round(cssW * dpr);
+    target.height = Math.round(cssH * dpr);
+    const ctx = target.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = 'rgb(30, 90, 150)';  // the open sea (as the deep sea of the continent's image)
     ctx.fillRect(0, 0, cssW, cssH);
-
-    if (fitPlayable) {
-      scale = Math.min(cssW, cssH) / 320;
-      fitPlayable = false;
-    }
-    const view = currentView();
-    const k = view.scale;  // CSS px per meter
+    const k = view.scale;
     const X = (x) => cssW / 2 + (x - view.cx) * k;
     const Y = (z) => cssH / 2 + (z - view.cz) * k;
-    $('map-zoom-in').disabled = k >= MAX_SCALE - 1e-3;
-    $('map-zoom-out').disabled = k <= minScale() + 1e-3;
-    $('map-scale').textContent = k >= 1 ? `${Math.round(100 / k)} m` : `${(100 / k / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km`;
     ctx.imageSmoothingEnabled = true;
     if (land) {
       const d = land.data;
@@ -978,12 +1050,31 @@
     }
     ctx.drawImage(base.image, X(-base.R), Y(-base.R), 2 * base.R * k, 2 * base.R * k);
 
-    // The edge of the playable area.
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-    ctx.setLineDash([6, 6]);
-    ctx.lineWidth = 1;
-    ctx.strokeRect(X(-data.world), Y(-data.world), 2 * data.world * k, 2 * data.world * k);
-    ctx.setLineDash([]);
+    // Where a species lives: its zones, all alike (the opacity makes them blink).
+    if (options.habitat && data.zones) {
+      const n = data.zoneCount;
+      const key = `${options.habitat.species}:${base.key}`;
+      if (!habitatImage || habitatImage.key !== key) {
+        const zoneIds = ['meadow', 'village', 'lake', 'ruins', 'forest', 'cave', 'castle', 'coast', 'hills', 'plains'];  // Zone
+        const wanted = new Set(options.habitat.habitat.map((z) => zoneIds.indexOf(z)));
+        const image = document.createElement('canvas');
+        image.width = image.height = n;
+        const g = image.getContext('2d');
+        const px = g.createImageData(n, n);
+        for (let i = 0; i < n; ++i) {
+          for (let j = 0; j < n; ++j) {
+            const zone = data.zones.charCodeAt(i * n + j) - 97;  // 'a' + Zone: column i (x), row j (z)
+            if (wanted.has(zone)) px.data.set([255, 214, 70, 255], (j * n + i) * 4);
+          }
+        }
+        g.putImageData(px, 0, 0);
+        habitatImage = { key, image };
+      }
+      const step = data.zoneStep;
+      ctx.globalAlpha = options.habitatAlpha ?? 0.6;
+      ctx.drawImage(habitatImage.image, X(-data.world - step / 2), Y(-data.world - step / 2), n * step * k, n * step * k);
+      ctx.globalAlpha = 1;
+    }
 
     const label = (text, x, z, size, faint = false) => {
       ctx.font = `600 ${size}px system-ui, sans-serif`;
@@ -1014,10 +1105,10 @@
     }
 
     // The teleporters found (the ones reachable from here, in teleport mode: brighter, larger).
-    teleportTargets = [];
+    const targets = [];
     for (const t of game.teleporters().list) {
       if (!t.known) continue;
-      const reachable = teleportMode && t.reachable;
+      const reachable = options.teleport && t.reachable;
       const r = reachable ? 11 : k > 1 ? 6 : 4;
       ctx.beginPath();
       ctx.arc(X(t.x), Y(t.z), r, 0, Math.PI * 2);
@@ -1026,7 +1117,31 @@
       ctx.lineWidth = 2;
       ctx.strokeStyle = '#1b3d52';
       ctx.stroke();
-      if (reachable) teleportTargets.push({ id: t.id, x: X(t.x), y: Y(t.z) });
+      if (reachable) targets.push({ id: t.id, x: X(t.x), y: Y(t.z) });
+    }
+
+    // Around the player: what the villagers have for it (as over their heads).
+    if (options.marks && k > 0.5) {
+      const ICONS = { newQuest: ['?', '#ffffff'], quest: ['!', '#f2c94c'], heal: ['+', '#6fe07a'], fight: ['×', '#ff6a5c'] };
+      ctx.font = '800 12px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const m of game.marks()) {
+        if (Math.hypot(m.x - p.x, m.z - p.z) > 200) continue;
+        m.marks.forEach((id, i) => {
+          const [glyph, color] = ICONS[id] || ['·', '#fff'];
+          const cx = X(m.x) + (i - (m.marks.length - 1) / 2) * 15, cy = Y(m.z) - 12;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(20, 18, 36, 0.85)';
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = color;
+          ctx.stroke();
+          ctx.fillStyle = color;
+          ctx.fillText(glyph, cx, cy + 0.5);
+        });
+      }
     }
 
     // The player: an arrow pointing where it goes.
@@ -1046,17 +1161,37 @@
     ctx.strokeStyle = '#2a2140';
     ctx.stroke();
     ctx.restore();
-
-    // North.
-    ctx.font = '700 13px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(20, 18, 36, 0.7)';
-    ctx.beginPath();
-    ctx.arc(cssW - 22, 22, 14, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.fillText('N', cssW - 22, 23);
+    return targets;
   }
+
+  function renderMap() {
+    if (!game) return;
+    mapBase();
+    if (!canvas.clientWidth || !canvas.clientHeight) return;
+    if (fitPlayable) {
+      scale = Math.min(canvas.clientWidth, canvas.clientHeight) / 320;
+      fitPlayable = false;
+    }
+    const view = currentView();
+    const k = view.scale;
+    $('map-zoom-in').disabled = k >= MAX_SCALE - 1e-3;
+    $('map-zoom-out').disabled = k <= minScale() + 1e-3;
+    $('map-scale').textContent = k >= 1 ? `${Math.round(100 / k)} m` : `${(100 / k / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km`;
+    $('map-hint').hidden = !teleportMode;
+    teleportTargets = drawMap(canvas, view, { marks: true, teleport: teleportMode });
+  }
+
+  // The legend, shown or hidden (remembered).
+  const legend = $('map-legend');
+  const legendToggle = $('map-legend-toggle');
+  const showLegend = (on) => {
+    legend.hidden = !on;
+    legendToggle.setAttribute('aria-expanded', String(on));
+    prefs.set('mapLegend', on);
+  };
+  showLegend(prefs.get('mapLegend', false));
+  legendToggle.addEventListener('click', () => showLegend(legend.hidden));
+
 
   // For tests and other scripts.
   // Another world is played (saves.js): its own map, read again.

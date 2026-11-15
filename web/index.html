@@ -332,6 +332,25 @@
     .stat dd { margin: 0; font-weight: 700; }
     .stat .bar { grid-column: 1 / -1; }
     .where { margin: 12px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.75); }
+    .bar.mana span { background: linear-gradient(90deg, #4f7dff, #8fb0ff); }
+    .sex.male { color: #6cb6ff; font-weight: 700; }
+    .sex.female { color: #ff8fc8; font-weight: 700; }
+    .variant-list { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0; font-size: 13px; }
+    .variant-list span { color: var(--rarity, #c9c4d8); font-weight: 600; }
+    .variant-list span.sex.male { color: #6cb6ff; }
+    .variant-list span.sex.female { color: #ff8fc8; }
+    .habitat-button { background: rgba(242, 201, 76, 0.14); border: 1px solid rgba(242, 201, 76, 0.55); }
+    .habitat-button:hover { background: rgba(242, 201, 76, 0.26); }
+    .sheet-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+    #map-legend-toggle { position: absolute; top: 8px; right: 8px; z-index: 1; }
+    .map-legend {
+      z-index: 1; padding: 8px 10px; border-radius: 8px; font-size: 12px;
+      background: rgba(20, 18, 36, 0.82); border: 1px solid rgba(255, 255, 255, 0.2); display: grid; gap: 4px;
+    }
+    #map-legend { position: absolute; right: 8px; top: 44px; }
+    #map-legend[hidden] { display: none; }
+    .map-legend div { display: flex; align-items: center; gap: 8px; }
+    .map-legend i { width: 18px; text-align: center; font-style: normal; font-weight: 800; }
     .companion-card {
       grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 8px 10px;
       background: rgba(255, 255, 255, 0.06); border-radius: 10px;
@@ -424,7 +443,19 @@
     /* Maps. */
     #tab-map { display: flex; flex-direction: column; gap: 10px; }
     #tab-map[hidden] { display: none; }
-    .map-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+    .map-tools {
+      position: absolute; top: 8px; left: 8px; z-index: 1; display: flex; align-items: center; gap: 10px; font-size: 13px;
+      padding: 4px 8px 4px 4px; border-radius: 8px; background: rgba(20, 18, 36, 0.72);
+    }
+    #map-hint {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 1; margin: 0; padding: 6px 12px;
+      border-radius: 8px; background: rgba(20, 18, 36, 0.82); font-size: 13px; color: #7fe0ff;
+    }
+    #map-hint[hidden] { display: none; }
+    .habitat-frame { position: relative; flex: 1; min-height: 240px; }
+    .habitat-map { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
+    .bestiary-detail.habitat { display: flex; flex-direction: column; gap: 8px; }
+    .habitat-legend { position: absolute; right: 8px; bottom: 8px; }
     .segmented { display: inline-flex; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 7px; overflow: hidden; }
     .segmented button {
       font: inherit; font-size: 13px; color: #fff; background: transparent; border: none; padding: 5px 14px; cursor: pointer;
@@ -910,13 +941,10 @@
             <p class="wizard-name" id="wizard-name"></p>
             <p class="rank" id="wizard-rank"></p>
             <div class="xp"><div class="bar"><span id="wizard-xp-fill"></span></div><span id="wizard-xp-text"></span></div>
-            <dl class="stats" id="wizard-stats"></dl>
+            <div class="xp mana-line"><div class="bar mana"><span id="wizard-mana-fill"></span></div><span id="wizard-mana-text"></span></div>
             <p class="where" id="wizard-where"></p>
           </div>
-          <div class="companion-card">
-            <img id="companion-portrait" class="portrait" alt="">
-            <div><strong>Pompon</strong><span>Ton compagnon · renard des braises</span></div>
-          </div>
+          <section class="record-box"><h3>Statistiques</h3><dl class="record" id="wizard-record"></dl></section>
         </div>
       </section>
 
@@ -952,16 +980,27 @@
       </section>
 
       <section id="tab-map" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-map" hidden>
-        <div class="map-tools">
-          <div class="segmented" role="group" aria-label="Zoom de la carte">
-            <button type="button" id="map-zoom-out" aria-label="Dézoomer" title="Dézoomer (molette, pincer)">−</button>
-            <button type="button" id="map-zoom-in" aria-label="Zoomer" title="Zoomer (molette, écarter)">+</button>
-            <button type="button" id="map-recenter" aria-label="Recentrer sur toi" title="Recentrer sur toi">⌖</button>
+        <div class="map-frame">
+          <canvas id="map-canvas" aria-label="Carte du monde"></canvas>
+          <div class="map-tools">
+            <div class="segmented" role="group" aria-label="Zoom de la carte">
+              <button type="button" id="map-zoom-out" aria-label="Dézoomer" title="Dézoomer (molette, pincer)">−</button>
+              <button type="button" id="map-zoom-in" aria-label="Zoomer" title="Zoomer (molette, écarter)">+</button>
+              <button type="button" id="map-recenter" aria-label="Recentrer sur toi" title="Recentrer sur toi">⌖</button>
+            </div>
+            <span class="map-scale"><span class="map-scale-bar"></span><span id="map-scale"></span></span>
           </div>
-          <span class="map-scale"><span class="map-scale-bar"></span><span id="map-scale"></span></span>
-          <span id="map-where"></span>
+          <p id="map-hint" hidden>Choisis un téléporteur où aller.</p>
+          <button type="button" id="map-legend-toggle" class="button" aria-expanded="false" aria-controls="map-legend">Légende</button>
+          <div id="map-legend" class="map-legend" role="note" hidden>
+            <div><i style="color:#f2c94c">➤</i>Toi</div>
+            <div><i style="color:#7fe0ff">●</i>Téléporteur</div>
+            <div><i style="color:#fff">?</i>Quête à prendre</div>
+            <div><i style="color:#f2c94c">!</i>Quête en cours</div>
+            <div><i style="color:#6fe07a">+</i>Soins</div>
+            <div><i style="color:#ff6a5c">×</i>Combat</div>
+          </div>
         </div>
-        <div class="map-frame"><canvas id="map-canvas" aria-label="Carte du monde"></canvas></div>
       </section>
     </div>
   </div>
@@ -975,7 +1014,7 @@
     <p class="kind"></p>
     <div class="tags badges"></div>
     <p class="description"></p>
-    <p class="variants"></p>
+    <p class="variants variant-list"></p>
     <p class="facts"></p>
     <button id="creature-close" type="button" aria-label="Fermer">×</button>
   </div>

@@ -411,13 +411,13 @@ Gifts monster_gifts(const Monster& m) {
   return g;
 }
 
-Traits roll_traits(uint64_t seed, uint32_t id, Species species, const Genes& genes) {
-  // Typical size (mm) and weight (g) of a normal male.
-  struct Measures {
-    uint16_t size;
-    uint32_t weight;
-  };
-  static constexpr Measures kMeasures[] = {
+namespace {
+// Typical size (mm) and weight (g) of a normal male.
+struct Measures {
+  uint16_t size;
+  uint32_t weight;
+};
+constexpr Measures kMeasures[] = {
       {450, 6500},  // Companion
       {380, 5200},  // Slime
       {300, 1800},  // Mushroom
@@ -427,8 +427,19 @@ Traits roll_traits(uint64_t seed, uint32_t id, Species species, const Genes& gen
       {350, 2400},  // Fish
       {260, 900},   // Spark
       {300, 1300},  // Axolotl
-  };
-  static_assert(std::size(kMeasures) == kSpeciesCount);
+};
+static_assert(std::size(kMeasures) == kSpeciesCount);
+}  // namespace
+
+TypicalMeasures typical_measures(Species species) {
+  const Measures& m = kMeasures[static_cast<size_t>(species) < kSpeciesCount ? static_cast<size_t>(species) : 0];
+  // As many females as males, drawn 0.92 times smaller (roll_traits).
+  constexpr float kFemale = 0.92f;
+  return {static_cast<float>(m.size) * (1 + kFemale) / 2,
+          static_cast<float>(m.weight) * (1 + kFemale * kFemale * kFemale) / 2};
+}
+
+Traits roll_traits(uint64_t seed, uint32_t id, Species species, const Genes& genes) {
   Rng rng(seed ^ 0x545241495453ULL, id);  // "TRAITS", one stream per creature
   Traits t;
   for (size_t k = 0; k < kGiftCount; ++k) {

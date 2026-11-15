@@ -500,7 +500,7 @@ test.describe('creature info', () => {
     await expect(panel.locator('.name')).toHaveText('Pompon');
     await expect(panel.locator('.facts')).toHaveText(/^Niveau 3 · T’attend · à 1 m$/);  // just behind the player
     await expect(panel.locator('.tags .badge')).toHaveText(['Bête', 'Feu']);
-    await expect(panel.locator('.variants')).toHaveText('Variantes : Mâle · Pelage de braise · Oreilles pointues · Une queue');
+    await expect(panel.locator('.variants span')).toHaveText(['♂', 'Pelage de braise', 'Oreilles pointues', 'Une queue']);
     expect((await page.evaluate(() => window.monstres.selected())).index).toBe(0);
 
     await page.mouse.click(220, 300);  // grass, no creature there
@@ -549,7 +549,10 @@ test.describe('grimoire', () => {
     await page.locator('#menu-button').click();
     await page.getByRole('tab', { name: 'Personnage' }).click();
     await expect(page.locator('#wizard-rank')).toHaveText('Apprenti magicien · niveau 1');
-    await expect(page.locator('#wizard-stats')).toContainText('Points de vie');
+    await expect(page.locator('#wizard-mana-text')).toHaveText('Mana : 20 / 20');  // its only stat shown
+    await expect(page.locator('#wizard-record')).toContainText('Monstres capturés');
+    await expect(page.locator('#wizard-record')).toContainText('Combats gagnés');
+    await expect(page.locator('#wizard-record')).toContainText('Monstres battus');
     await expect(page.locator('#wizard-where')).toContainText('Prairie');
     await expect(page.locator('#wizard-portrait')).toHaveAttribute('src', /^data:image\/png/);
     await expect(page.locator('#wizard-name')).toHaveText('Magicien sans nom');  // chosen with a new game (saves)
@@ -567,8 +570,23 @@ test.describe('grimoire', () => {
     await expect(detail.locator('h2')).toHaveText('Champi');
     await expect(detail.locator('.badge')).toHaveText(['Végétal', 'Nature']);
     await expect(detail).toContainText('Défense');
-    await expect(detail).toContainText(/Autour de toi : \d+ individu/);
+    await expect(detail).toContainText(/Taille : .* · poids : .* · vitesse : .* m\/s/);  // averages
     await expect(detail.locator('img')).toHaveAttribute('src', /^data:image\/png/);
+    // Its habitat: a map in place of its card, where it lives blinking.
+    await page.locator('#habitat-button').click();
+    await expect(page.locator('#tab-bestiary')).toBeVisible();
+    await expect(page.locator('#bestiary-detail h2')).toHaveText('Habitat de Champi');
+    await expect(page.locator('#habitat-map')).toBeVisible();
+    await expect(page.locator('.habitat-legend')).toHaveText(/Toi.*Téléporteur.*Habitat/);
+    await page.locator('#bestiary-detail .dna-back').click();
+    await expect(page.locator('#bestiary-detail h2')).toHaveText('Champi');
+    // The map tab: its tools over it, its legend shown on demand.
+    await page.getByRole('tab', { name: 'Carte' }).click();
+    await expect(page.locator('#map-legend')).toBeHidden();
+    await page.locator('#map-legend-toggle').click();
+    await expect(page.locator('#map-legend')).toBeVisible();
+    await expect(page.locator('#map-legend')).not.toContainText('Habitat');
+    await page.locator('#map-legend-toggle').click();
   });
 
   test('the crow has two elements', async ({ page }) => {
@@ -595,7 +613,7 @@ test.describe('grimoire', () => {
     // The count: variants captured at least once (none yet); the seen ones in its record.
     await expect(entry.locator('.dna-count')).toHaveText(`0/${seenSpecies.variants.length}`);
     await entry.click();
-    await expect(page.locator('.record')).toContainText(`${seen} / ${seenSpecies.variants.length}`);
+    await expect(page.locator('#bestiary-detail .record')).toContainText(`${seen} / ${seenSpecies.variants.length}`);
     await entry.click();
     await page.locator('#dna-button').click();
     const cells = page.locator('.variant-cell');
@@ -617,7 +635,7 @@ test.describe('grimoire', () => {
     await expect(mine).toHaveCount(4);
     await expect(mine.first().locator('img')).toHaveCSS('filter', 'none');
     await mine.first().click();
-    await expect(page.locator('#variant-info h3')).toHaveText('Mâle');  // the sex comes first
+    await expect(page.locator('#variant-info h3')).toHaveText('♂ Mâle');  // the sex comes first
     // The chosen variant is shown beside the grid, not below it.
     const grid = await page.locator('.dna-groups').boundingBox();
     const info = await page.locator('#variant-info').boundingBox();
@@ -632,7 +650,7 @@ test.describe('grimoire', () => {
     await openGame(page, '?seed=42&new&frozen');
     await page.keyboard.press('m');  // shortcut
     await expect(page.getByRole('tab', { name: 'Carte' })).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#map-where')).toHaveText('Tu te trouves : Prairie');
+    await expect(page.locator('#map-tools, .map-tools')).toBeVisible();  // over the map
     const painted = () => page.evaluate(() => {
       const c = document.getElementById('map-canvas');
       const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
@@ -1042,7 +1060,7 @@ test.describe('the bigger world', () => {
     await expect(page.locator('#mana .mana-text')).toHaveText('20/20');
     // The character sheet: the mana left of its most.
     await page.keyboard.press('c');
-    await expect(page.locator('#wizard-stats')).toContainText('20 / 20');
+    await expect(page.locator('#wizard-mana-text')).toContainText('20 / 20');
     // Detection in the second adventure slot, cast: 6 mana.
     await page.keyboard.press('p');
     await page.locator('#spell-slot-3').click();
@@ -1071,7 +1089,7 @@ test.describe('the bigger world', () => {
     // The bestiary: the record of a species, the builds among the variants.
     await page.keyboard.press('b');
     await page.locator('.bestiary-entry[data-species="slime"]').click();
-    await expect(page.locator('.record')).toContainText('Monstres capturés');
+    await expect(page.locator('#bestiary-detail .record')).toContainText('Monstres capturés');
     await page.locator('#dna-button').click();
     await expect(page.locator('.dna-group h3').last()).toHaveText('Gabarits');
     await page.keyboard.press('Escape');
@@ -1187,7 +1205,7 @@ test.describe('the bigger world', () => {
     const here = await page.evaluate(() => window.monstres.teleporters());
     expect(here.list.find((t) => t.place === 'castle').reachable).toBe(true);
     await page.evaluate(() => window.monstresMenu.open('map', { teleport: true }));
-    await expect(page.locator('#map-where')).toContainText('Choisis un téléporteur');
+    await expect(page.locator('#map-hint')).toContainText('Choisis un téléporteur');
     await page.evaluate(() => window.monstresMenu.close());
     await page.evaluate((id) => { window.monstres.teleportTo(id); window.monstres.step(1); }, castle.id);
     expect((await state(page)).player.zone).toBe('castle');

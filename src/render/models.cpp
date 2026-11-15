@@ -31,6 +31,7 @@ constexpr const char* kNames[kMeshCount] = {
     "tower", "ruin_wall_low", "ruin_wall_high", "pillar", "fallen_pillar", "rubble", "rune_stone",
     "castle_wall", "castle_tower", "castle_gate", "castle_keep", "cave_mouth", "crystal", "teleporter", "tree_far", "pine_far", "tree_mid", "bush_far",
     "grass_short_far", "grass_tall_far", "flower_far",
+    "icon_question", "icon_exclaim", "icon_plus", "icon_cross",
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "shadow", "ripple", "smoke", "sparkle", "rune_circle",
     "rain_shaft", "bolt", "rain", "snow",
 };

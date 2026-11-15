@@ -250,6 +250,7 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u16(w.beaten_count[s]);
     out.u16(w.released_count[s]);
   }
+  out.u32(w.battles_won);
   return out.take();
 }
 
@@ -283,6 +284,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_spells = version >= 17;  // the magician's spells
   const bool with_builds = version >= 18;  // builds, mana, traits of the team, counts of the bestiary
   const bool with_looks = version >= 19;   // the magician's look, Zapou and Ploufi, the main quest
+  const bool with_victories = version >= 20;  // the battles won
   // Species in the bestiary and the counts: two more from version 19.
   const size_t species_saved = with_looks ? kSpeciesCount : kSpeciesCountV18;
 
@@ -503,6 +505,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
       }
     }
   }
+  if (with_victories && !in.u32(w.battles_won)) return fail(error, LoadError::Corrupt);
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
   if (!whole) return w;
 
@@ -574,6 +577,11 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   // Before version 19: Isidore comes to the village (and Bastien's lesson is
   // learned if he was beaten already: told to him, it is done).
   if (!with_looks) add_mentor(w);
+  // Before version 20 the victories were not counted: at least the beaten monsters' and Bastien's.
+  if (!with_victories) {
+    for (const uint16_t n : w.beaten_count) w.battles_won += n > 0 ? 1 : 0;
+    w.battles_won += w.rival_wins;
+  }
   if (!with_builds) {
     // Before version 18: the team members get their traits (as if they
     // joined today), the captures are counted from the team.

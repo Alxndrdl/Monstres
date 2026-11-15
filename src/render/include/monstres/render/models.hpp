@@ -57,6 +57,7 @@ enum class MeshId : size_t {
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar,
   GrassShortFar, GrassTallFar, FlowerFar,
+  IconQuestion, IconExclaim, IconPlus, IconCross,  // over villagers (npc_marks)
   Ground,  // built at runtime
   FarGround, Lava,  // the continent (far pass), built at runtime
   // Transparent, drawn last, in this order:

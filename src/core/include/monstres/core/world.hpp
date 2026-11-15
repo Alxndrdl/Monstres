@@ -575,6 +575,7 @@ struct World {
   uint8_t rival_wins = 0;      // battles won against Bastien (only the first one gives experience)
   // How many monsters of each species the player captured, beat (wild ones), let go.
   std::array<uint16_t, kSpeciesCount> captured_count{}, beaten_count{}, released_count{};
+  uint32_t battles_won = 0;    // victories, wild monsters' and trainers'
   uint16_t detect_ticks = 0;   // the Detection spell: ticks left
   std::array<SpellId, kSpellSlots> combat_spells{SpellId::Heal, SpellId::Shield};  // chosen out of battles
   std::array<SpellId, kSpellSlots> adventure_spells{SpellId::Heal, SpellId::None};
@@ -603,6 +604,11 @@ World new_game(uint64_t seed, const NewGame& choices);
 
 // Puts Isidore, the old magician, in the village (once: new games, and saves from before him).
 void add_mentor(World& world);
+
+// Where a species lives in the wild (bits 1 << Zone; 0: nowhere, villagers).
+uint16_t species_habitat(Species species);
+// Out of 100 wild monsters of a zone, how many of a species (100: crows and fish where they live).
+uint32_t species_chance(Species species, Zone zone);
 
 // Rebuilds what derives from the seed alone: the path, the places, the relief.
 void build_layouts(World& world);

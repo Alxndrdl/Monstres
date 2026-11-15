@@ -891,6 +891,42 @@ void lie_knocked_out(DrawList& list, const std::array<size_t, kMeshCount>& befor
   }
 }
 
+// Over a villager's head (`top`: how high it is): what it has for the player,
+// side by side, bobbing and turning slowly so that they are seen from anywhere.
+void add_marks(DrawList& list, const World& w, const Creature& c, float top, float time) {
+  const uint8_t marks = npc_marks(w, c.npc);
+  if (!marks) return;
+  struct Icon {
+    uint8_t mark;
+    MeshId mesh;
+    Color glow;
+  };
+  static constexpr Icon kIcons[] = {{kMarkNewQuest, MeshId::IconQuestion, {1.8f, 1.8f, 1.8f, 1}},
+                                    {kMarkQuest, MeshId::IconExclaim, {2.1f, 1.6f, 0.35f, 1}},
+                                    {kMarkHeal, MeshId::IconPlus, {0.45f, 2.0f, 0.55f, 1}},
+                                    {kMarkFight, MeshId::IconCross, {2.2f, 0.38f, 0.32f, 1}}};
+  int count = 0;
+  for (const Icon& icon : kIcons) count += (marks & icon.mark) ? 1 : 0;
+  constexpr float kSpacing = 0.44f;
+  float offset = -kSpacing * static_cast<float>(count - 1) / 2;
+  // Side by side across the line of sight: along the villager's right... as
+  // it turns, they all turn together around the middle.
+  const float spin = time * 1.4f + static_cast<float>(c.id) * 0.7f;
+  for (const Icon& icon : kIcons) {
+    if (!(marks & icon.mark)) continue;
+    Instance in;
+    in.x = c.body.pos.x + std::cos(spin) * offset;
+    in.z = c.body.pos.z - std::sin(spin) * offset;
+    in.y = c.body.pos.y + top + 0.35f + 0.05f * std::sin(time * 2.2f + static_cast<float>(c.id));
+    in.rotation = quat_yaw(spin);
+    in.sx = in.sy = in.sz = 1.3f;
+    in.tint = icon.glow;
+    in.material = kGlowing;
+    list.batches[static_cast<size_t>(icon.mesh)].push_back(in);
+    offset += kSpacing;
+  }
+}
+
 void add_characters(const World& w, float time, DrawList& list, const Frustum* view) {
   std::vector<PartPose> poses;
   pose_player(w.player, time, poses);
@@ -920,6 +956,7 @@ void add_characters(const World& w, float time, DrawList& list, const Frustum* v
       if (c.mind == Mind::Greet) poses[kArmL].rotation = quat_z(-2.5f - 0.35f * std::sin(time * 9.0f));
       const WizardRig him = wizard_rig(mentor_look(), {.beard = true});
       add_rig(list, him.parts, poses, c.body, him.tints, 1, kPlayerGlowSlot);
+      add_marks(list, w, c, 1.6f, time);
     } else if (c.species == Species::Villager) {
       const VillagerLook look = villager_look(c.variant);
       std::copy(std::begin(kVillagerRig), std::end(kVillagerRig), villager_rig.begin());
@@ -941,6 +978,7 @@ void add_characters(const World& w, float time, DrawList& list, const Frustum* v
       }
       add_rig(list, std::span<const RigPart>(villager_rig.data(), parts), poses, c.body, tints,
               look.child ? 0.75f : 1.0f, 6);
+      if (c.npc) add_marks(list, w, c, (look.hat_mesh != MeshId::Count ? 1.3f : 1.2f) * (look.child ? 0.75f : 1.0f), time);
       if (c.npc == npc::kOdette) {  // two sparks turn around her crystal
         const Vec3 at = crystal_position(c.body);
         for (int k = 0; k < 2; ++k) {

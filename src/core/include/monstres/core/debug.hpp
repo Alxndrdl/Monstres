@@ -11,6 +11,10 @@ namespace monstres {
 // sends a command by its name (post.js), the numbers are written here only.
 std::string command_names_json();
 
+// The villagers with something for the player (npc_marks), and where they
+// are: [{"npc", "x", "z", "marks": ["newQuest", "quest", "heal", "fight"]}].
+std::string marks_json(const World& world);
+
 // A text as a JSON string (quotes, backslashes and control characters escaped).
 std::string json_string(const std::string& text);
 

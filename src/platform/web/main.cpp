@@ -929,6 +929,8 @@ EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_wizard_preview(int look, int flags,
 
 JSON_EXPORT(monstres_wizard_json, wizard_json(g_app->world))
 
+JSON_EXPORT(monstres_marks_json, marks_json(g_app->world))
+
 JSON_EXPORT(monstres_bestiary_json, bestiary_json(g_app->world))
 
 JSON_EXPORT(monstres_map_json, map_json(g_app->world))

@@ -58,32 +58,39 @@ Contrôles :
 - toucher un téléporteur (cercle de pierres à runes) : « Se téléporter » quand
   on se tient au milieu, puis choisir sa destination sur la carte ;
 - livre en haut à gauche (ou touches C, E, B, M) : le grimoire, qui met le jeu en
-  pause, avec quatre onglets :
+  pause, avec six onglets :
   - Personnage : portrait du magicien, nom (choisi à la création de la
-    partie), niveau, expérience, caractéristiques, où l'on se trouve ;
+    partie), niveau, expérience, mana (barre bleue), où l'on se trouve, et
+    ses statistiques : monstres capturés, combats gagnés, monstres battus ;
   - Équipe : les monstres de l'équipe (le compagnon d'abord, 6 au plus) ;
-    toucher l'un d'eux affiche sa fiche complète : niveau, expérience, points
-    de vie, caractéristiques à son niveau, famille, éléments, variantes,
-    gabarit (micro, alpha), taille, poids, âge, ses aptitudes en toile
+    toucher l'un d'eux affiche sa fiche : son sexe (♂ bleu, ♀ rose), famille,
+    éléments, niveau, expérience, points de vie, ses variantes (chacune de la
+    couleur de sa rareté), taille, poids, âge, ses aptitudes en toile
     d'araignée (voir Variantes) et ses trois attaques ; « Relâcher » (confirmé
     une seconde fois) le rend à la nature : il sort du cristal et s'en va ;
+  - Sorts : les quatre emplacements et le sort de chacun (voir Sorts) ;
   - Quêtes (touche J) : le journal, les quêtes en cours puis terminées ;
     chacune avec qui l'a demandée, son histoire, ses étapes (cochées une fois
     faites) et sa récompense ;
   - Bestiaire : tous les monstres, avec pour chacun un portrait, la famille,
-    le ou les éléments, une description, l'habitat, la taille, la vitesse, les
-    caractéristiques, combien vivent autour du joueur, et son carnet
-    (variantes capturées et aperçues, monstres capturés, dans l'équipe, battus,
-    relâchés) ; le compteur ADN de la liste donne les variantes capturées au
-    moins une fois ; le bouton « Variantes » montre toutes ses variantes : « ? »
-    si jamais vue, grisée si aperçue (un monstre qui la porte est passé à moins
-    de 20 m), en clair si capturée ; toucher une variante découverte affiche sa
-    fiche à droite de la grille (rareté, où la trouver, description) ;
+    le ou les éléments, une description, sa taille, son poids et sa vitesse
+    moyens, ses caractéristiques et son carnet (variantes capturées et
+    aperçues, monstres capturés, dans l'équipe, battus, relâchés) ; le
+    compteur ADN de la liste donne les variantes capturées au moins une
+    fois ; le bouton « Habitat » montre à la place de sa fiche la carte de
+    la zone jouable, les zones où il vit clignotant ; le bouton
+    « Variantes » montre toutes ses variantes : « ? » si jamais vue, grisée
+    si aperçue (un monstre qui la porte est passé à moins de 20 m), en clair
+    si capturée ; toucher une variante découverte affiche sa fiche à droite
+    de la grille (rareté, effets sur les aptitudes s'il y en a, où la
+    trouver si elle n'est que dans certaines zones, description) ;
   - Carte : une seule carte, du terrain autour du joueur jusqu'au continent
     entier (molette, pincer, boutons − et + ; la faire glisser au doigt ou à
-    la souris ; ⌖ la recentre sur le joueur, une barre donne l'échelle). Elle
-    ne montre que le terrain et les lieux (pas de créatures) : de près les
-    lieux de la zone jouable, de loin les régions du continent ;
+    la souris, sans pouvoir l'éloigner du continent ; ⌖ la recentre sur le
+    joueur, une barre donne l'échelle ; ces outils sont posés sur la carte).
+    De près les lieux de la zone jouable, de loin les régions du continent ;
+    les téléporteurs connus, et les icônes des villageois proches (« ? »,
+    « ! », « + », « × ») ; le bouton « Légende » affiche ou cache la légende ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (gérer les sauvegardes, voir
   Sauvegardes ; afficher les FPS et le détail du temps de calcul, voir Performances ; ces
@@ -338,6 +345,13 @@ Règles dans `src/core/quests.hpp` / `quests.cpp`, dialogues dans
 Les huit villageois ont un nom (`Creature::npc`) : Mirabelle, Gaspard, Lison,
 Bastien, Odette, Félix, Rosalie et Anatole ; Isidore, le vieux magicien à la
 barbe blanche et à la robe violette, se tient sur la place.
+
+Au-dessus des villageois, des icônes lumineuses qui tournent disent ce
+qu'ils ont pour le joueur (`npc_marks`, `src/core/quests.cpp`) : « ? » blanc,
+une quête à prendre ; « ! » doré, une quête en cours ; « + » vert, des soins
+(Odette) ; « × » rouge, des combats (Bastien). Elles peuvent s'additionner
+(Odette avant son initiation : « ? » et « + »). La carte les montre aussi,
+pour les villageois à moins de 200 m du joueur.
 
 La quête principale, « L'apprenti du village » (Isidore) : sa première
 partie consiste à aider les villageois, qui apprennent chacun quelque chose

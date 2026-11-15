@@ -88,7 +88,9 @@ namespace monstres {
 //      quests (fighting, healing and the main quest); Isidore the magician
 //      among the villagers (npc 9). Before: the default look, Isidore comes
 //      to the village.
-inline constexpr uint32_t kSaveVersion = 19;
+//  20  at the end, the battles won (u32). Before: guessed from the
+//      species beaten and Bastien's battles.
+inline constexpr uint32_t kSaveVersion = 20;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

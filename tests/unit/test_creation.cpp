@@ -263,3 +263,44 @@ TEST_CASE("the arrival comes down from high above to the game's camera, never un
   CHECK(end.eye.y == doctest::Approx(last.eye.y));
   CHECK(intro_shot(w, kIntroSeconds - 0.05f, last).eye.y == doctest::Approx(last.eye.y).epsilon(0.05));
 }
+
+TEST_CASE("villagers show what they have for the player: quests to take or going on, healing, battles") {
+  World w = new_game(42);
+  CHECK(npc_marks(w, npc::kMentor) == kMarkNewQuest);
+  CHECK(npc_marks(w, npc::kOdette) == (kMarkNewQuest | kMarkHeal));
+  CHECK(npc_marks(w, npc::kBastien) == (kMarkNewQuest | kMarkFight));
+  CHECK(npc_marks(w, 6) == 0);  // Félix: nothing
+  w.quests[static_cast<size_t>(QuestId::Main)].stage = QuestStage::Active;
+  CHECK(npc_marks(w, npc::kMentor) == kMarkQuest);
+  w.quests[static_cast<size_t>(QuestId::Main)].stage = QuestStage::Done;
+  CHECK(npc_marks(w, npc::kMentor) == 0);
+  // Drawn over their heads.
+  DrawList list;
+  list.batches.resize(kMeshCount);
+  add_characters(w, 0, list);
+  CHECK(count(list, MeshId::IconPlus) == 1);
+  CHECK(count(list, MeshId::IconCross) == 1);
+  CHECK(count(list, MeshId::IconQuestion) >= 4);  // Mirabelle, Gaspard, Lison, Bastien, Odette
+  CHECK(count(list, MeshId::IconExclaim) == 0);
+}
+
+TEST_CASE("each species' habitat, and how common it is there") {
+  CHECK(species_habitat(Species::Fish) == (1u << static_cast<unsigned>(Zone::Lake)));
+  CHECK(species_habitat(Species::Villager) == 0);
+  CHECK(species_chance(Species::Spark, Zone::Hills) > species_chance(Species::Spark, Zone::Plains));
+  CHECK(species_chance(Species::Spark, Zone::Village) == 0);  // nothing wild in the village
+  CHECK(species_chance(Species::Axolotl, Zone::Coast) > 0);
+  for (const Species s : {Species::Slime, Species::Mushroom, Species::Bird, Species::Spark, Species::Axolotl}) {
+    CHECK(species_habitat(s) != 0);
+  }
+  const TypicalMeasures m = typical_measures(Species::Spark);
+  CHECK(m.size_mm > 200);
+  CHECK(m.size_mm < 260);
+}
+
+TEST_CASE("victories are counted, and kept") {
+  World w = new_game(42);
+  CHECK(w.battles_won == 0);
+  w.battles_won = 7;
+  CHECK(deserialize(serialize(w))->battles_won == 7);
+}

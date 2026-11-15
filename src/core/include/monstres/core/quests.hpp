@@ -92,6 +92,11 @@ bool giant_exists(const World& world);
 bool giant_wanted(const World& world);
 std::array<Creature, 5> make_giant_group(const World& world, uint32_t visit);
 
+// What a villager has for the player, shown over its head and on the map:
+// a quest to take (?), a quest going on (!), healing (+), battles (x).
+enum NpcMark : uint8_t { kMarkNewQuest = 1, kMarkQuest = 2, kMarkHeal = 4, kMarkFight = 8 };
+uint8_t npc_marks(const World& world, uint8_t npc);
+
 // The villager who gives a quest.
 uint8_t quest_giver(QuestId quest);
 // Whether a quest's steps are all done (it can be reported).
