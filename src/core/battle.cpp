@@ -41,8 +41,9 @@ static_assert(std::size(kMoves) == kSpeciesCount);
 
 // Foes show each attack before it comes (Windup); their cooldowns are the
 // companion's, counted from the start of the windup, so both attack as often.
-constexpr uint16_t kFoeWindup[] = {12, 24, 30};
+constexpr uint16_t kFoeWindup[] = {12, 24, rules::kBurstCharge};
 constexpr uint16_t kRecoverTicks = 8;
+constexpr uint64_t kAimHold = 20;  // moving freely: it faces where it attacked this long
 constexpr uint16_t kFoeStartCooldown[] = {40, 120, 240};  // it takes a moment to start
 constexpr float kSwoopLift = 0.15f;  // a flying foe swoops down to bite
 
@@ -446,15 +447,16 @@ void throw_projectile(World& w, const Side& self, float dx, float dz, float ax, 
   w.battle.projectiles.push_back(p);
 }
 
-// The companion's attack `slot`: at its target, or at what is in front of it
-// (moving freely: straight ahead, at a foe if one is right in front).
-void ally_attack(World& w, uint8_t slot) {
+// The companion's attack `slot` (a burst: once it has gathered): at its
+// target, or at what is in front of it (moving freely: where the camera
+// looks, at a foe if one is right there; it turns that way).
+void ally_attack(World& w, uint8_t slot, float look_x, float look_z) {
   Battle& b = w.battle;
   Fighter& f = b.ally;
   const Side self = ally_side(w);
   const Monster& a = ally(w);
   const Move& m = species_moves(a.species)[slot];
-  f.cooldown[slot] = m.cooldown;
+  if (m.shape != Burst) f.cooldown[slot] = m.cooldown;  // a burst's started when it began to gather
   f.attack_tick = w.tick;
   f.attack_move = slot;
   f.state = FighterState::Recover;
@@ -462,6 +464,10 @@ void ally_attack(World& w, uint8_t slot) {
   const FightStats atk = ally_stats(w);
   const size_t n = foe_count(w);
   const size_t aimed = b.target < n ? b.target : SIZE_MAX;
+  if (aimed == SIZE_MAX && m.shape != Burst) {
+    self.body->facing_x = f.aim_x = look_x;
+    self.body->facing_z = f.aim_z = look_z;
+  }
   // What is right in front, the closest first.
   size_t ahead = SIZE_MAX;
   float ahead_d = 0;
@@ -563,6 +569,13 @@ void count_down(Fighter& f) {
 }
 
 bool free_to_act(const Fighter& f) { return f.state == FighterState::Ready || f.state == FighterState::Recover; }
+
+// The camera's way on the ground (forward = (-sin, 0, -cos) of its yaw).
+void camera_forward(const Input& in, float& x, float& z) {
+  const SinCos sc = sincos16(in.yaw);
+  x = -sc.sin;
+  z = -sc.cos;
+}
 
 }  // namespace
 
@@ -688,6 +701,8 @@ FightStats monster_fight_stats(Species species, uint16_t level, const Genes& gen
   return {grow(s.hp, 8, Stat::Hp), grow(s.attack, 10, Stat::Attack), grow(s.defense, 10, Stat::Defense),
           grow(s.speed, 10, Stat::Speed), grow(s.magic, 10, Stat::Magic)};
 }
+
+uint16_t windup_ticks(uint8_t slot) { return slot < std::size(kFoeWindup) ? kFoeWindup[slot] : 0; }
 
 const Temper& species_temper(Species species) {
   const auto i = static_cast<size_t>(species);
@@ -1111,7 +1126,12 @@ void battle_command(World& w, const Input& in) {
 Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {
   Fighter& f = w.battle.ally;
   count_down(f);
-  if (f.state != FighterState::Ready && f.state_ticks > 0 && --f.state_ticks == 0) f.state = FighterState::Ready;
+  float look_x, look_z;
+  camera_forward(in, look_x, look_z);
+  if (f.state != FighterState::Ready && f.state_ticks > 0 && --f.state_ticks == 0) {
+    if (f.state == FighterState::Windup) ally_attack(w, f.move, look_x, look_z);  // the burst has gathered
+    else f.state = FighterState::Ready;
+  }
 
   // A flying companion climbs while the jump is held, and slowly comes down.
   if (companion(w).species == Species::Crow) {
@@ -1135,7 +1155,16 @@ Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {
     f.state_ticks = rules::kParryTicks;
     f.parry_cooldown = rules::kParryTicks + rules::kParryCooldown;
   } else if (in.attack >= 1 && in.attack <= 3 && free_to_act(f) && f.cooldown[in.attack - 1u] == 0) {
-    ally_attack(w, static_cast<uint8_t>(in.attack - 1));
+    const uint8_t slot = static_cast<uint8_t>(in.attack - 1);
+    const Move& m = species_moves(ally(w).species)[slot];
+    if (m.shape == MoveShape::Burst) {  // it gathers first
+      f.state = FighterState::Windup;
+      f.move = slot;
+      f.state_ticks = rules::kBurstCharge;
+      f.cooldown[slot] = m.cooldown;
+    } else {
+      ally_attack(w, slot, look_x, look_z);
+    }
   }
 
   Steer s;
@@ -1163,8 +1192,9 @@ Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {
         s.dir_z -= to_z * towards;
       }
     }
+    const bool slowed = f.state == FighterState::Parry || f.state == FighterState::Windup;
     s.speed = std::max(species_info(companion(w).species).run_speed, rules::kCompanionMinRunSpeed) *
-              (f.state == FighterState::Parry ? 0.3f : 1.0f);
+              rules::kBattlePace * (slowed ? 0.3f : 1.0f);
   }
   return s;
 }
@@ -1287,7 +1317,7 @@ Steer battle_foe(World& w, size_t k) {
   const float pace = std::min(len, 1.0f);
   s.dir_x = mx / len;
   s.dir_z = mz / len;
-  s.speed = std::max(info.walk_speed, info.run_speed * 0.6f) * pace * temper.pace;
+  s.speed = std::max(info.walk_speed, info.run_speed * 0.6f) * pace * temper.pace * rules::kBattlePace;
   if (e.species == Species::Slime) {  // slimes hop: they only move in the air
     s.jump = e.body.on_ground;
     if (e.body.on_ground) s.speed = 0;
@@ -1394,9 +1424,14 @@ void battle_resolve(World& w) {
         gone = gone || (std::find(perches.begin(), perches.end(), k) == perches.end() && overlaps(box, o));
       });
     }
-    if (gone) b.projectiles.erase(b.projectiles.begin() + static_cast<std::ptrdiff_t>(i));
-    else ++i;
+    if (gone) {
+      if (p.ticks > 0) b.impacts.push_back({p.pos, p.element, w.tick});  // stopped by something (not faded)
+      b.projectiles.erase(b.projectiles.begin() + static_cast<std::ptrdiff_t>(i));
+    } else {
+      ++i;
+    }
   }
+  std::erase_if(b.impacts, [&](const Impact& m) { return w.tick - m.tick > rules::kImpactTicks; });
 
   // The companion faces its target (moving freely: where it goes); the foes face the companion.
   if (has_ally) {
@@ -1405,6 +1440,10 @@ void battle_resolve(World& w) {
         flat_distance(ally_c.body, *foe_side(w, b.target).body, dx, dz) > 1e-3f) {
       ally_c.body.facing_x = dx;
       ally_c.body.facing_z = dz;
+    } else if (b.target >= foe_count(w) && b.ally.attack_tick > 0 && w.tick - b.ally.attack_tick < kAimHold &&
+               b.ally.attack_move != 2 && (b.ally.aim_x != 0 || b.ally.aim_z != 0)) {
+      ally_c.body.facing_x = b.ally.aim_x;  // moving freely: it keeps facing where it attacked for a moment
+      ally_c.body.facing_z = b.ally.aim_z;
     }
     for (size_t k = 0; k < foe_count(w); ++k) {
       Body& fb = *foe_side(w, k).body;

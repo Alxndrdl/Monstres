@@ -28,7 +28,6 @@
   // ---- Buttons ----
   const root = document.documentElement;
   const jump = $('jump');
-  const jumpHint = $('jump-hint');
   const attackButtons = [1, 2, 3].map((slot) => $(`attack-${slot}`));
   const parryButton = $('parry');
   const battleButtons = [...attackButtons, parryButton];
@@ -161,7 +160,7 @@
       build = () => {
         contextTitle.replaceChildren(`Entraînement · ${name}`);
         contextActions.replaceChildren(action('stop', 'Arrêter l’entraînement', true, () => game.stopTraining()));
-        contextNote.textContent = 'Ton magicien se protège avec un bouclier : attaque-le pour essayer tes attaques.';
+        contextNote.textContent = '';
       };
     } else if (b.phase === 'flee') {
       key = 'flee';
@@ -435,8 +434,6 @@
       modeShown = fighting;
       for (const button of battleButtons) button.hidden = !fighting;
       jump.setAttribute('aria-label', fighting ? 'Esquiver' : 'Sauter');
-      jumpHint.replaceChildren(el('kbd', { textContent: 'Espace' }), fighting ? ' esquiver · ' : ' pour sauter');
-      if (fighting) jumpHint.append(el('kbd', { textContent: 'F' }), ' parer');
     }
     if (!fighting || !b.ally) return;
     const moves = b.ally.moves;

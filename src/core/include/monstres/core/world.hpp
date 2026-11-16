@@ -351,7 +351,7 @@ enum class BattleOutcome : uint8_t { None, Victory, Defeat, Fled, Captured, Forf
 // What one side of a battle is doing.
 enum class FighterState : uint8_t {
   Ready,
-  Windup,   // about to attack (the enemy shows it: time to dodge or parry)
+  Windup,   // about to attack (shown: time to dodge or parry); the companion's burst gathers
   Recover,  // just attacked
   Dodge,    // dashing, cannot be hit
   Parry,    // guarding: the next hit is blocked
@@ -366,6 +366,7 @@ struct Fighter {
   uint16_t dodge_cooldown = 0;
   uint16_t parry_cooldown = 0;
   float dodge_x = 0, dodge_z = 0;
+  float aim_x = 0, aim_z = 0;  // the companion moving freely: where its last attack went (the camera's way)
   // For the interface and the drawing: when things happened (World::tick, 0: never).
   uint64_t attack_tick = 0;  // last attack (attack_move: which one)
   uint8_t attack_move = 0;
@@ -389,6 +390,15 @@ struct Projectile {
   Element element = Element::Normal;
   uint16_t damage = 0;
   bool operator==(const Projectile&) const = default;
+};
+
+// Where a projectile stopped (on a fighter, the ground, a wall), for the
+// drawing: kept a moment (rules::kImpactTicks).
+struct Impact {
+  Vec3 pos;
+  Element element = Element::Normal;
+  uint64_t tick = 0;
+  bool operator==(const Impact&) const = default;
 };
 
 // Experience one team member earned in the last battle (for the interface).
@@ -443,6 +453,7 @@ struct Battle {
   Fighter ally;
   Fighter shield;         // training: the magician's shield
   std::vector<Projectile> projectiles;
+  std::vector<Impact> impacts;  // the last ones, for the drawing
   uint16_t timer = 0;  // Flee: ticks spent running back; Prepare: ticks spent taking places
   uint16_t away_ticks = 0;  // the companion too far from its foes (or the magician): it gives up after a while
   // Hit points dealt to the foes by each team member: the experience is shared accordingly.

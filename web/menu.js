@@ -360,11 +360,18 @@
         el('p', {
           className: 'facts',
           textContent: `${i === 0 ? 'Attaque rapide' : 'Attaque spéciale'} · ${LORE.moveShapes[move.shape]} · ` +
-            `puissance ${move.power} · recharge ${move.cooldown.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} s`,
+            `puissance ${move.power} · ${move.shape === 'burst' ? 'se charge 1 s · ' : ''}` +
+            `recharge ${move.cooldown.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} s`,
         }),
         el('p', { className: 'move-text', textContent: text.description }),
       ]);
     }));
+    // The fourth: every monster parries (rules::kParryTicks, kParryCooldown in battle.hpp).
+    moves.append(el('li', { className: 'move' }, [
+      el('div', { className: 'move-head' }, [el('strong', { textContent: LORE.parry.name })]),
+      el('p', { className: 'facts', textContent: 'Défense · garde 0,3 s · recharge 1 s' }),
+      el('p', { className: 'move-text', textContent: LORE.parry.description }),
+    ]));
     $('team-detail').className = 'bestiary-detail member';
     $('team-detail').replaceChildren(
       el('img', { className: 'portrait', src: portraitUrl(speciesIndex(m.species), 256, m.look), alt: info.name }),

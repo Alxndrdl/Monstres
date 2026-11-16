@@ -258,6 +258,12 @@ window.MonstresLore = {
       description: 'L’eau jaillit du sol tout autour de lui.',
     },
   },
+  // Every monster's fourth move.
+  parry: {
+    name: 'Parer',
+    description: 'Se met en garde : le prochain coup ne passe pas, et un adversaire dont la morsure est parée reste étourdi un instant.',
+  },
+
   moveShapes: { melee: 'Corps à corps', projectile: 'À distance', burst: 'Tout autour' },
 
   zones: {

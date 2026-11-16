@@ -343,6 +343,56 @@ void add_spark(DrawList& list, float x, float y, float z, float size, Color c, f
 
 Element creature_element(const Creature& c) { return creature_elements(c.species, c.genes).first; }
 
+// A glowing stroke from a to b (`width`: its thickness).
+void add_stroke(DrawList& list, Vec3 a, Vec3 b, float width, Color c, float alpha) {
+  const float dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const float length = std::sqrt(dx * dx + dy * dy + dz * dz);
+  if (length < 1e-3f || alpha <= 0) return;
+  Instance s;
+  s.x = (a.x + b.x) / 2;
+  s.y = (a.y + b.y) / 2;
+  s.z = (a.z + b.z) / 2;
+  // The mesh's up axis along the stroke.
+  const float ax = dz / length, az = -dx / length;
+  const float axis = std::sqrt(ax * ax + az * az);
+  if (axis > 1e-4f) s.rotation = quat_axis(ax / axis, 0, az / axis, std::acos(std::clamp(dy / length, -1.0f, 1.0f)));
+  s.sx = s.sz = width;
+  s.sy = length / 2;
+  s.tint = {c.r, c.g, c.b, alpha};
+  add(list, MeshId::Sparkle, s);
+}
+
+// A lightning bolt from a to b: a jagged line, white at its heart, which
+// changes shape with `seed` (a new one every few ticks: it crackles).
+void add_bolt(DrawList& list, Vec3 a, Vec3 b, Color c, float alpha, uint64_t seed, float jag = 0.18f) {
+  constexpr int kSegments = 6;
+  const float dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const float length = std::sqrt(dx * dx + dy * dy + dz * dz);
+  if (length < 1e-3f) return;
+  Vec3 prev = a;
+  for (int i = 1; i <= kSegments; ++i) {
+    const float u = static_cast<float>(i) / kSegments;
+    Vec3 p{a.x + dx * u, a.y + dy * u, a.z + dz * u};
+    if (i < kSegments) {  // off the straight line, most in the middle
+      const float amount = jag * length * std::sin(u * kTau / 2);
+      p.x += (rand01(seed, 1, static_cast<uint64_t>(i)) - 0.5f) * 2 * amount;
+      p.y += (rand01(seed, 2, static_cast<uint64_t>(i)) - 0.5f) * 2 * amount;
+      p.z += (rand01(seed, 3, static_cast<uint64_t>(i)) - 0.5f) * 2 * amount;
+    }
+    add_stroke(list, prev, p, 0.018f, {2.6f, 2.6f, 2.6f, 1}, alpha);
+    add_stroke(list, prev, p, 0.055f, c, alpha * 0.45f);
+    prev = p;
+  }
+}
+
+constexpr Color kElectricGlow{2.2f, 2.0f, 0.5f, 1};
+
+// A point around `at`, `r` away, picked by a seed.
+Vec3 around(Vec3 at, float r, uint64_t seed, uint64_t k) {
+  const float a = kTau * rand01(seed, 11, k), up = (rand01(seed, 12, k) - 0.3f) * 1.4f;
+  return {at.x + std::cos(a) * r, at.y + up * r * 0.6f, at.z + std::sin(a) * r};
+}
+
 // Training: the magician's shield, a bubble of light that flashes when hit.
 void add_shield(const World& w, float time, DrawList& list) {
   const Body& p = w.player;
@@ -494,7 +544,7 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
     add_ring(list, w, foe, foe_radius * (1 + beat), color);
     if (!windup) continue;
     const Move& m = species_moves(foe.species)[f.fighter.move];
-    const float total = f.fighter.move == 0 ? 12.0f : f.fighter.move == 1 ? 24.0f : 30.0f;
+    const float total = static_cast<float>(windup_ticks(f.fighter.move));
     const float progress = 1 - static_cast<float>(f.fighter.state_ticks) / total;
     if (m.shape == MoveShape::Burst) {  // where the burst will reach
       add_ring(list, w, foe, m.range * (0.25f + 0.75f * progress), {1.5f, 0.3f, 0.2f, 0.5f + 0.4f * progress});
@@ -506,14 +556,52 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
     }
   }
 
-  // Projectiles: a glowing ball and its trail.
-  for (const Projectile& p : b.projectiles) {
+  // Projectiles: a glowing ball and its trail; an electric one crackles,
+  // little bolts leaping off it.
+  for (size_t i = 0; i < b.projectiles.size(); ++i) {
+    const Projectile& p = b.projectiles[i];
     const Color c = element_glow(p.element);
+    if (p.element == Element::Electric) {
+      const uint64_t flick = w.tick / 3 + i * 131;
+      add_spark(list, p.pos.x, p.pos.y, p.pos.z, 0.13f, {2.8f, 2.8f, 2.4f, 1}, 1, time * 13);  // white heart
+      add_spark(list, p.pos.x, p.pos.y, p.pos.z, 0.26f + 0.04f * std::sin(time * 40), kElectricGlow, 0.75f, time * 9);
+      for (uint64_t k = 0; k < 3; ++k) {
+        add_bolt(list, p.pos, around(p.pos, 0.45f, flick, k), kElectricGlow, 0.9f, flick * 7 + k, 0.3f);
+      }
+      for (int k = 1; k <= 5; ++k) {  // sparks left behind, scattered
+        const float back = 0.2f * static_cast<float>(k);
+        const float side = (rand01(flick, 20, static_cast<uint64_t>(k)) - 0.5f) * 0.25f;
+        add_spark(list, p.pos.x - p.dir_x * back - p.dir_z * side, p.pos.y + side * 0.6f,
+                  p.pos.z - p.dir_z * back + p.dir_x * side, 0.07f, kElectricGlow, 0.8f - 0.14f * static_cast<float>(k),
+                  time * 7 + static_cast<float>(k));
+      }
+      continue;
+    }
     add_spark(list, p.pos.x, p.pos.y, p.pos.z, 0.24f, c, 1, time * 9);
     for (int k = 1; k <= 3; ++k) {
       const float back = 0.22f * static_cast<float>(k);
       add_spark(list, p.pos.x - p.dir_x * back, p.pos.y, p.pos.z - p.dir_z * back, 0.2f - 0.04f * static_cast<float>(k),
                 c, 0.7f - 0.18f * static_cast<float>(k), time * 7 + static_cast<float>(k));
+    }
+  }
+  // Where one stopped: sparks of its element; an electric one, a crackling star.
+  for (size_t i = 0; i < b.impacts.size(); ++i) {
+    const Impact& m = b.impacts[i];
+    const float t = static_cast<float>(w.tick - m.tick) / static_cast<float>(rules::kImpactTicks);
+    if (t >= 1) continue;
+    const Color c = element_glow(m.element);
+    for (int k = 0; k < 8; ++k) {
+      const float a = kTau * static_cast<float>(k) / 8 + static_cast<float>(m.tick % 5);
+      const float r = 0.15f + 0.7f * t;
+      add_spark(list, m.pos.x + std::cos(a) * r, m.pos.y + 0.35f * t * (1 - t) * 4 * (k % 2 ? 1.0f : 0.4f),
+                m.pos.z + std::sin(a) * r, 0.08f * (1 - t), c, 1 - t, a);
+    }
+    add_spark(list, m.pos.x, m.pos.y, m.pos.z, 0.2f + 0.35f * t, c, 0.6f * (1 - t), time);
+    if (m.element == Element::Electric && t < 0.6f) {
+      const uint64_t flick = w.tick / 2 + i * 977;
+      for (uint64_t k = 0; k < 5; ++k) {
+        add_bolt(list, m.pos, around(m.pos, 0.5f + 0.5f * t, flick, k), kElectricGlow, 1 - t / 0.6f, flick * 5 + k, 0.3f);
+      }
     }
   }
 
@@ -526,8 +614,49 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
     const Species species = mine ? mine->species : c.species;
     const BodyShape& sh = species_info(c.species).shape;
     const float mid = c.body.pos.y + sh.height * 0.5f;
-    // A burst: a ring of its element spreading around it.
+    const Color element = element_glow(mine ? creature_elements(species, mine->genes).first : creature_element(c));
+    const bool zapou = species == Species::Spark;
+    const Vec3 middle{c.body.pos.x, mid, c.body.pos.z};
+    // A burst gathering: a ring of its element closing in on where it will
+    // reach, sparks drawn in towards it; Zapou crackles, bolts leaping
+    // around it, more and more.
+    if (f.state == FighterState::Windup && f.move == 2) {
+      const float progress = 1 - static_cast<float>(f.state_ticks) / static_cast<float>(windup_ticks(2));
+      const Move& m = species_moves(species)[2];
+      if (side == 0) add_ring(list, w, c, m.range * (1.15f - 0.15f * progress), {element.r, element.g, element.b, 0.35f + 0.5f * progress});
+      for (int k = 0; k < 8; ++k) {
+        const float u = std::fmod(time * 1.6f + static_cast<float>(k) / 8, 1.0f);
+        const float a = kTau * static_cast<float>(k) / 8 + time;
+        const float r = (1 - u) * (0.9f + sh.half_width);
+        add_spark(list, c.body.pos.x + std::cos(a) * r, mid + (1 - u) * 0.5f, c.body.pos.z + std::sin(a) * r,
+                  0.05f + 0.04f * u, element, u * (0.4f + 0.6f * progress), a);
+      }
+      add_spark(list, middle.x, middle.y, middle.z, sh.height * (0.6f + 0.4f * progress), element, 0.12f + 0.25f * progress, time);
+      if (zapou) {
+        const uint64_t flick = w.tick / 3 + side * 31;
+        const int bolts = 1 + static_cast<int>(progress * 4);
+        for (int k = 0; k < bolts; ++k) {
+          const Vec3 from = around(middle, 0.45f + 0.35f * rand01(flick, 30, static_cast<uint64_t>(k)), flick, static_cast<uint64_t>(k));
+          add_bolt(list, from, middle, kElectricGlow, 0.5f + 0.5f * progress, flick * 3 + static_cast<uint64_t>(k), 0.25f);
+        }
+      }
+    }
+    // A burst: a ring of its element spreading around it (Zapou: bolts
+    // lashing out all around).
     const uint64_t since_attack = w.tick - f.attack_tick;
+    if (zapou && f.attack_tick > 0 && f.attack_move == 2 && since_attack < 18) {
+      const float t = static_cast<float>(since_attack) / 18.0f;
+      const Move& m = species_moves(species)[2];
+      const uint64_t flick = w.tick / 2 + side * 17;
+      for (int k = 0; k < 8; ++k) {
+        const float a = kTau * (static_cast<float>(k) + rand01(flick, 40, static_cast<uint64_t>(k))) / 8;
+        const float r = m.range * (0.5f + 0.5f * t);
+        const Vec3 to{c.body.pos.x + std::cos(a) * r, w.ground.height(c.body.pos.x + std::cos(a) * r, c.body.pos.z + std::sin(a) * r) + 0.1f,
+                      c.body.pos.z + std::sin(a) * r};
+        add_bolt(list, middle, to, kElectricGlow, 1 - t, flick * 11 + static_cast<uint64_t>(k), 0.2f);
+      }
+      add_spark(list, middle.x, middle.y, middle.z, sh.height * 1.4f * (0.5f + t), {2.6f, 2.6f, 2.2f, 1}, 0.5f * (1 - t), time);
+    }
     if (f.attack_tick > 0 && f.attack_move == 2 && since_attack < 24) {
       const float t = static_cast<float>(since_attack) / 24.0f;
       const Move& m = species_moves(species)[2];
@@ -566,9 +695,30 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
                   c.body.pos.z + std::sin(a) * 0.3f, 0.07f, {2.0f, 1.9f, 0.6f, 1}, 1, a);
       }
     }
-    // Dodging: a trail of light.
-    if (f.state == FighterState::Dodge) {
+    // Dodging: a white trail behind it, streaks of speed.
+    if (f.state == FighterState::Dodge && (f.dodge_x != 0 || f.dodge_z != 0)) {
+      const Color white{2.2f, 2.2f, 2.3f, 1};
+      for (int k = 0; k < 3; ++k) {
+        const float h = c.body.pos.y + sh.height * (0.3f + 0.25f * static_cast<float>(k));
+        const float side_off = (static_cast<float>(k) - 1) * sh.half_width * 0.8f;
+        const Vec3 from{c.body.pos.x - f.dodge_z * side_off, h, c.body.pos.z + f.dodge_x * side_off};
+        const float len = 1.1f - 0.25f * static_cast<float>(k % 2);
+        add_stroke(list, from, {from.x - f.dodge_x * len, h, from.z - f.dodge_z * len}, 0.03f, white, 0.55f);
+      }
+      add_spark(list, c.body.pos.x - f.dodge_x * 0.4f, mid, c.body.pos.z - f.dodge_z * 0.4f, sh.height * 0.6f, white, 0.25f, time);
+    } else if (f.state == FighterState::Dodge) {
       add_spark(list, c.body.pos.x, mid, c.body.pos.z, 0.18f, {1.6f, 1.7f, 2.0f, 1}, 0.5f, time);
+    }
+    // A bite's leap: a few streaks behind as it springs forward.
+    if (f.attack_tick > 0 && f.attack_move == 0 && since_attack >= 3 && since_attack < 9) {
+      const float a = 0.5f * (1 - static_cast<float>(since_attack - 3) / 6.0f);
+      for (int k = 0; k < 2; ++k) {
+        const float h = c.body.pos.y + sh.height * (0.35f + 0.3f * static_cast<float>(k));
+        const float off = (k ? 1.0f : -1.0f) * sh.half_width * 0.6f;
+        const Vec3 from{c.body.pos.x - c.body.facing_z * off, h, c.body.pos.z + c.body.facing_x * off};
+        add_stroke(list, from, {from.x - c.body.facing_x * 0.8f, h, from.z - c.body.facing_z * 0.8f}, 0.025f,
+                   {2.2f, 2.2f, 2.3f, 1}, a);
+      }
     }
   }
 }

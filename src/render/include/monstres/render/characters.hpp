@@ -120,6 +120,9 @@ inline constexpr uint64_t kRecallTicks = 24;
 inline constexpr uint64_t kRuneTicks = 18;     // before a captured monster goes in
 void add_crystal_effects(const World& world, float time, DrawList& list);
 
+// Battles: a bite's leap forward lasts this long (the drawing and its streaks).
+inline constexpr uint64_t kLungeTicks = 16;
+
 // Tint slot of the glowing parts: the magician's crystal, monsters' bulbs.
 inline constexpr uint8_t kPlayerGlowSlot = 1;
 inline constexpr uint8_t kMonsterGlowSlot = 4;

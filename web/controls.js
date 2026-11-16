@@ -193,7 +193,8 @@
     }
   });
 
-  // Show the real letters of the keyboard layout (ZQSD on AZERTY, WASD on QWERTY).
+  // Show the real letters of the keyboard layout (ZQSD on AZERTY, WASD on QWERTY),
+  // on the joystick's sides: forward, left, back, right.
   const moveHint = document.getElementById('move-hint');
   function setMoveLetters(letters) {
     moveHint.querySelectorAll('kbd').forEach((kbd, i) => {

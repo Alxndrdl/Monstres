@@ -834,21 +834,86 @@ void vanish(CreatureLook& look, Element element, float t) {
   }
 }
 
-// In a battle: a fighter lunges when it bites, and flashes when it is hurt.
-void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body) {
+// In a battle: a fighter springs forward when it bites, curls up when it
+// guards, trembles while a burst gathers, and flashes when it is hurt.
+// Zapou's quills flicker from color to color as its discharge gathers and
+// goes off.
+void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body, std::vector<PartPose>& poses) {
   const Battle& b = w.battle;
   const int slot = index == 0 ? -1 : foe_slot(w, index);
-  if (b.phase != BattlePhase::Fight || (index != 0 && slot < 0)) return;
+  const bool training = b.phase == BattlePhase::Training;
+  if ((b.phase != BattlePhase::Fight && !training) || (index != 0 && slot < 0)) return;
+  if (training && index != 0) return;
   const Fighter& f = index == 0 ? b.ally : b.foes[static_cast<size_t>(slot)].fighter;
+  const Species species = w.creatures[index].species;
+  const bool curls = species == Species::Spark || species == Species::Companion;  // rigs with a head, ears, legs
   const uint64_t since_attack = w.tick - f.attack_tick;
-  if (f.attack_tick > 0 && f.attack_move == 0 && since_attack < 12) {
-    const float k = 0.35f * std::sin((kTau / 2) * static_cast<float>(since_attack) / 12.0f);
+
+  // The bite: it draws back a little, springs forward, comes back.
+  if (f.attack_tick > 0 && f.attack_move == 0 && since_attack < kLungeTicks) {
+    const float t = static_cast<float>(since_attack) / static_cast<float>(kLungeTicks);
+    const float k = t < 0.2f ? -0.12f * t / 0.2f
+                  : t < 0.45f ? -0.12f + 0.82f * (t - 0.2f) / 0.25f
+                              : 0.7f * (1 - (t - 0.45f) / 0.55f) * (1 - (t - 0.45f) / 0.55f);
     body.pos.x += body.facing_x * k;
     body.pos.z += body.facing_z * k;
+    body.pos.y += 0.06f * std::sin(std::clamp((t - 0.2f) / 0.5f, 0.0f, 1.0f) * kTau / 2);  // a little hop
+    if (curls && poses.size() > kLegBR) {  // stretched out in the leap
+      const float reach = std::clamp(k / 0.7f, 0.0f, 1.0f);
+      poses[kLegFL].rotation = poses[kLegFR].rotation = quat_x(0.9f * reach);
+      poses[kLegBL].rotation = poses[kLegBR].rotation = quat_x(-0.9f * reach);
+    }
   }
-  if (f.state == FighterState::Windup) {  // it gathers itself: drawn a little lower and wider
+
+  // Guarding: curled up into a ball, quills out.
+  if (f.state == FighterState::Parry) {
+    const float left = static_cast<float>(f.state_ticks);
+    const float curl = std::min({1.0f, (static_cast<float>(rules::kParryTicks) - left + 1) / 4.0f, left / 4.0f + 0.2f});
+    body.pos.y -= 0.05f * curl;
+    if (curls && poses.size() > kLegBR) {
+      poses[kCBody].scale = {1 + 0.1f * curl, 1 - 0.12f * curl, 1 - 0.1f * curl};
+      poses[kCBody].offset.y -= 0.05f * curl;
+      poses[kCHead].rotation = quat_x(-0.55f * curl) * poses[kCHead].rotation;  // the nose tucked in
+      poses[kCHead].offset.z += 0.05f * curl;
+      poses[kCHead].offset.y -= 0.03f * curl;
+      for (int ear : {kEarL, kEarR}) poses[static_cast<size_t>(ear)].rotation = quat_x(0.8f * curl) * poses[static_cast<size_t>(ear)].rotation;
+      for (int leg : {kLegFL, kLegFR, kLegBL, kLegBR}) {
+        poses[static_cast<size_t>(leg)].rotation = Quat{};
+        poses[static_cast<size_t>(leg)].scale.y = 1 - 0.55f * curl;
+        poses[static_cast<size_t>(leg)].offset.y += 0.03f * curl;
+      }
+      poses[kTail].scale = {1 - 0.3f * curl, 1 - 0.3f * curl, 1 - 0.3f * curl};
+      if (species == Species::Spark && poses.size() > kQuills) {
+        poses[kQuills].scale = {1 + 0.12f * curl, 1 + 0.12f * curl, 1 + 0.12f * curl};
+      }
+    } else {
+      look.size *= 1 - 0.1f * curl;
+    }
+  }
+
+  // A burst gathering: crouched, trembling more and more.
+  const bool gathering = f.state == FighterState::Windup && f.move == 2;
+  if (gathering) {
+    const float total = static_cast<float>(windup_ticks(2));
+    const float progress = 1 - static_cast<float>(f.state_ticks) / total;
+    const float shake = 0.012f + 0.03f * progress;
+    body.pos.x += shake * std::sin(static_cast<float>(w.tick) * 2.3f);
+    body.pos.z += shake * std::cos(static_cast<float>(w.tick) * 3.1f);
+    body.pos.y -= 0.04f;
+    if (curls && poses.size() > kLegBR) poses[kCBody].scale = {1 + 0.06f * progress, 1 - 0.06f * progress, 1};
+  } else if (f.state == FighterState::Windup) {  // it gathers itself: drawn a little lower
     body.pos.y -= 0.03f;
   }
+
+  // Zapou's quills: flickering colors while it gathers, and as it discharges.
+  const bool discharging = f.attack_tick > 0 && f.attack_move == 2 && since_attack < 30;
+  if (species == Species::Spark && (gathering || discharging)) {
+    static constexpr Color kFlicker[] = {{2.4f, 2.2f, 0.6f, 1}, {2.6f, 2.6f, 2.6f, 1}, {0.6f, 1.8f, 2.6f, 1},
+                                         {1.9f, 0.8f, 2.6f, 1}};
+    const uint64_t rate = discharging ? 2 : (f.state_ticks < 20 ? 3 : 6);
+    look.tints[3] = kFlicker[(w.tick / rate + index) % std::size(kFlicker)];
+  }
+
   if (f.hit_tick > 0 && w.tick - f.hit_tick < 8) {
     for (Color& t : look.tints) t = {t.r * 2.4f + 0.4f, t.g * 1.3f + 0.2f, t.b * 1.3f + 0.2f, t.a};
   }
@@ -997,7 +1062,7 @@ void add_characters(const World& w, float time, DrawList& list, const Frustum* v
     } else {
       CreatureLook look = creature_look(c.species, c.genes);
       Body body = c.body;
-      battle_pose(w, i, look, body);
+      battle_pose(w, i, look, body, poses);
       const bool released = i > 0 && c.id == w.released_id && w.released_tick > 0;
       const uint64_t came_out = i == 0 ? w.came_out_tick : released ? w.released_tick : 0;
       if (came_out > 0 && w.tick - came_out < kSummonTicks) {

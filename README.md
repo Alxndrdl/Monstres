@@ -41,6 +41,8 @@ du village, accueille le joueur et lui confie la quête principale.
 
 Contrôles :
 - joystick en bas à gauche, ou ZQSD / flèches : se déplacer (par rapport à la caméra) ;
+  sur ordinateur, les quatre touches sont écrites sur le bord du joystick, chacune
+  de son côté, et « Espace » dans le bouton de saut ;
 - glisser sur l'écran (doigt ou souris) : regarder autour de soi ;
 - bouton en bas à droite, ou Espace : sauter. Les petits obstacles (un rocher bas, une
   bûche, une souche, un buisson : jusqu'à 75 cm) ne bloquent pas : on monte dessus en marchant ;
@@ -620,14 +622,17 @@ sur les côtés : on tourne autour), le magicien attend.
 Viser : les icônes des adversaires s'affichent en haut de l'écran, la cible
 entourée de rouge. Toucher une autre icône (ou le monstre lui-même) le vise ;
 toucher la cible actuelle ne vise plus personne : mode libre, le compagnon se
-déplace par rapport à la caméra (qu'on tourne à nouveau librement), ses
-projectiles partent droit devant (vers un adversaire s'il est juste en face),
-sa morsure touche ce qui est devant lui, son onde tout ce qui est autour. Au
+déplace par rapport à la caméra (qu'on tourne à nouveau librement) et, pour
+attaquer, se tourne vers le centre de l'écran : ses projectiles partent par là
+(vers un adversaire s'il est juste en face), sa morsure touche ce qui est
+devant lui, son onde tout ce qui est autour. Au
 clavier, T passe à l'adversaire suivant, puis au mode libre. Quand la cible
 est battue, le compagnon vise le plus proche des autres.
 
 Les adversaires ont les mêmes délais d'attaque que le compagnon (le temps de
-recharge compte depuis le début de leur élan). Ils tournent autour du
+recharge compte depuis le début de leur élan). En combat, tous les monstres
+courent 20 % moins vite qu'en balade (`kBattlePace`) : les combats se lisent
+mieux. Ils tournent autour du
 compagnon, s'approchent quand leur morsure est prête et reculent sinon,
 s'écartent les uns des autres, et esquivent parfois les projectiles qui
 arrivent sur eux. Chaque espèce a sa façon de se battre (`species_temper`) :
@@ -641,13 +646,33 @@ le relâche.
 
 Boutons en bas à droite pendant un combat :
 - esquive (le bouton de saut, Espace) : un bond rapide dans la direction du
-  déplacement (à l'arrêt : un saut sur place ; un Croa, lui, s'élève), pendant
-  lequel on ne peut pas être touché ;
+  déplacement (3,1 m en 0,2 s ; à l'arrêt : un saut sur place ; un Croa, lui,
+  s'élève), pendant lequel on ne peut pas être touché ; une traînée blanche le
+  suit ;
 - au-dessus, trois attaques (touches 1, 2, 3) : une attaque rapide au corps à
-  corps, qu'on peut enchaîner, et deux attaques spéciales avec un temps de
-  recharge (un projectile de son élément, une onde tout autour de lui) ;
+  corps, qu'on peut enchaîner (le monstre recule un peu puis bondit en avant),
+  et deux attaques spéciales avec un temps de recharge (un projectile de son
+  élément, une onde tout autour de lui) ;
 - à gauche de l'esquive, parer (F) : la prochaine attaque est bloquée, et un
-  ennemi dont le coup est paré reste étourdi un moment.
+  ennemi dont le coup est paré reste étourdi un moment ; le monstre se met en
+  boule (pattes rentrées, tête baissée).
+
+Ces quatre actions sont listées dans la fiche du monstre (Grimoire › Équipe),
+la parade en dernier.
+
+L'onde se charge pendant une seconde (`kBurstCharge`) avant de frapper, chez
+le compagnon comme chez l'adversaire : un anneau de son élément se resserre
+sur sa portée, des étincelles convergent vers le monstre qui tremble de plus
+en plus. Cela laisse le temps de parer l'onde d'un adversaire ou de s'en
+éloigner ; esquiver pendant la charge du compagnon l'annule (la recharge est
+déjà lancée).
+
+Zapou a ses propres effets : sa boule électrique crépite d'éclairs en vol et
+éclate en étoile d'éclairs à l'impact ; pendant la charge de sa décharge, des
+éclairs de plus en plus nombreux convergent vers lui et ses épines changent
+de couleur, de plus en plus vite ; à la décharge, des éclairs fouettent le sol
+tout autour. Tout projectile qui s'arrête (sur un monstre, le sol, un mur)
+laisse une gerbe d'étincelles de son élément.
 
 L'ennemi montre ses attaques avant de frapper (anneau rouge qui bat, zone de
 l'onde, boule qui grossit) : c'est le moment d'esquiver ou de parer. Dans le

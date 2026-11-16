@@ -28,10 +28,14 @@ namespace monstres {
 // During a fight the joystick moves the companion relative to the line
 // between it and its target (forward: towards it); the jump becomes a
 // dodge (a flying companion climbs while it is held), and the companion has
-// three attacks: a quick one, and two special ones with a cooldown. Parrying
-// blocks the next hit and stuns a foe whose bite was parried. Foes have the
-// same attacks and delays, but show theirs before (Windup); they circle,
-// dodge, and fly if they can. No elemental strengths or weaknesses yet.
+// three attacks: a quick one, and two special ones with a cooldown. Moving
+// freely, it turns where the camera looks to attack (the middle of the
+// screen). A burst gathers for a second (Windup) before it hits, the
+// companion's as the foes': time to parry it, or to get away; dodging
+// cancels the companion's. Parrying blocks the next hit and stuns a foe
+// whose bite was parried. Foes have the same attacks and delays, but show
+// theirs before (Windup); they circle, dodge, and fly if they can. No
+// elemental strengths or weaknesses yet.
 
 namespace rules {
 inline constexpr uint16_t kCompanionStartLevel = 3;
@@ -41,12 +45,15 @@ inline constexpr uint16_t kCaptureHpPercent = 25;   // weakened: at most this mu
 inline constexpr float kFleeArrival = 2.0f;         // the companion is back next to the player
 inline constexpr uint16_t kFleeMaxTicks = 8 * rules::kTicksPerSecond;
 inline constexpr uint16_t kDodgeTicks = 12;         // 0.2 s
-inline constexpr float kDodgeSpeed = 13.0f;         // m/s
+inline constexpr float kDodgeSpeed = 15.6f;         // m/s
+inline constexpr float kBattlePace = 0.8f;          // monsters run this much slower in a fight (easier to follow)
+inline constexpr uint16_t kBurstCharge = rules::kTicksPerSecond;  // a burst gathers this long before it hits
 inline constexpr uint16_t kDodgeCooldown = 36;
 inline constexpr uint16_t kParryTicks = 18;         // 0.3 s guard
 inline constexpr uint16_t kParryCooldown = 42;
 inline constexpr uint16_t kStunTicks = 70;          // an enemy whose attack was parried
 inline constexpr float kProjectileSpeed = 13.0f;
+inline constexpr uint16_t kImpactTicks = 30;        // where a projectile stopped is remembered this long (drawing)
 inline constexpr float kCompanionMinRunSpeed = 6.0f;  // slow species keep up with the player
 inline constexpr size_t kMaxFoes = 3;               // a wild monster and those of its kind around
 inline constexpr float kGroupRadius = 7.0f;         // they join from this far (from the one engaged)
@@ -121,6 +128,10 @@ inline FightStats monster_fight_stats(const Monster& m) { return monster_fight_s
 // A build's fight stats, in percent of a normal one's.
 
 uint32_t monster_xp_to_next(uint16_t level);
+
+// How long attack `slot` shows before it comes: a foe's windup; the
+// companion's burst gathers as long (its other attacks come at once).
+uint16_t windup_ticks(uint8_t slot);
 
 // Hit points dealt by `move` of an attacker with these characteristics.
 uint16_t move_damage(const Move& move, const FightStats& attacker, const FightStats& defender);

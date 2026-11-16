@@ -137,15 +137,16 @@ test.describe('on-screen controls', () => {
     test.skip(browserName === 'firefox', 'headless Firefox reports no mouse (pointer: none)');
     await openGame(page, '?seed=42&new&frozen');
     await expect(page.locator('#move-hint')).toBeVisible();
-    await expect(page.locator('#move-hint')).toContainText('pour se déplacer');
-    await expect(page.getByText('pour sauter')).toBeVisible();
+    await expect(page.locator('#move-hint kbd')).toHaveCount(4);  // on the joystick's sides
+    await expect(page.locator('#jump kbd')).toHaveText('Espace');  // in the jump button
+    await expect(page.locator('#jump kbd')).toBeVisible();
   });
 
   test('keyboard hints appear once a key is pressed', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     await page.keyboard.press('KeyW');
     await expect(page.locator('#move-hint')).toBeVisible();
-    await expect(page.getByText('pour sauter')).toBeVisible();
+    await expect(page.locator('#jump kbd')).toBeVisible();
   });
 });
 
@@ -874,8 +875,10 @@ test.describe('battles', () => {
     await expect(page.locator('#team-list li')).toHaveCount(2);
     await page.locator('#team-list li').nth(1).locator('button').click();
     await expect(page.locator('#team-detail h2')).toHaveText('Piou');
-    await expect(page.locator('#team-detail .move')).toHaveCount(3);
+    await expect(page.locator('#team-detail .move')).toHaveCount(4);  // three attacks, and the parry
     await expect(page.locator('#team-detail .move').first()).toContainText('Coup de bec');
+    await expect(page.locator('#team-detail .move').last()).toContainText('Parer');
+    await expect(page.locator('#team-detail .move').nth(2)).toContainText('se charge 1 s');
     await page.locator('#team-list li').first().locator('button').click();
     await expect(page.locator('#team-detail h2')).toHaveText('Pompon');
     await expect(page.locator('#team-detail')).toContainText('Boule de braise');

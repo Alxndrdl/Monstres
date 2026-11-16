@@ -132,27 +132,58 @@ TEST_CASE("beating one of a group: the companion aims at the next; all beaten, a
   CHECK(w.battle.outcome_xp == xp);
 }
 
-TEST_CASE("a burst hits every foe around; moving freely, a throw goes straight ahead") {
+TEST_CASE("a burst gathers for a second, then hits every foe around; moving freely, a throw goes where the camera looks") {
   World w = group();
   step(w, command(Command::Engage, 1));
   REQUIRE(w.battle.foes.size() == 3);
-  // All three close around the companion.
-  w.creatures[0].body.pos = {0, 0, -5};
-  for (size_t k = 0; k < 3; ++k) {
-    w.creatures[w.battle.foes[k].index].body.pos = {static_cast<float>(k) - 1.0f, 0, -6.5f};
-  }
+  // All three close around the companion (held there).
+  const auto hold = [&] {
+    w.creatures[0].body.pos = {0, 0, -5};
+    for (size_t k = 0; k < 3; ++k) {
+      w.creatures[w.battle.foes[k].index].body.pos = {static_cast<float>(k) - 1.0f, 0, -6.5f};
+    }
+  };
+  hold();
   step(w, attack_input(3));
+  CHECK(w.battle.ally.state == FighterState::Windup);
+  for (const Foe& f : w.battle.foes) CHECK(f.hp == f.max_hp);  // not yet
+  for (int t = 1; t < rules::kBurstCharge; ++t) {
+    hold();
+    step(w, Input{});
+  }
+  for (const Foe& f : w.battle.foes) CHECK(f.hp == f.max_hp);
+  hold();
+  step(w, Input{});
+  CHECK(w.battle.ally.attack_move == 2);
+  CHECK(w.battle.ally.attack_tick == w.tick);
   for (const Foe& f : w.battle.foes) CHECK(f.hp < f.max_hp);
-  // Free: the throw goes where the companion faces.
+  // Free: the throw goes where the camera looks, and the companion turns that way.
   step(w, command(Command::Target, kNoTarget));
-  w.creatures[0].body.facing_x = 1;
-  w.creatures[0].body.facing_z = 0;
+  w.creatures[0].body.facing_x = 0;
+  w.creatures[0].body.facing_z = 1;
   w.battle.ally.cooldown = {};
   w.battle.ally.state = FighterState::Ready;
-  step(w, attack_input(2));
+  Input in = attack_input(2);
+  in.yaw = angle16_from_radians(-kPi / 2);  // the camera looks along +X
+  step(w, in);
   REQUIRE_FALSE(w.battle.projectiles.empty());
   const Projectile& p = w.battle.projectiles.back();
   CHECK(p.dir_x > 0.99f);
+  CHECK(w.creatures[0].body.facing_x > 0.99f);
+}
+
+TEST_CASE("dodging cancels a gathering burst") {
+  World w = group();
+  step(w, command(Command::Engage, 1));
+  step(w, attack_input(3));
+  REQUIRE(w.battle.ally.state == FighterState::Windup);
+  Input in;
+  in.jump = true;
+  in.move_x = 127;
+  step(w, in);
+  CHECK(w.battle.ally.state == FighterState::Dodge);
+  for (int t = 0; t < rules::kBurstCharge; ++t) step(w, Input{});
+  CHECK(w.battle.ally.attack_tick == 0);  // it never came
 }
 
 TEST_CASE("foes attack as often as the companion, and show it first") {

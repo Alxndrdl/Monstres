@@ -176,7 +176,7 @@ void tick(App& app, const Input& in) {
   const Fighter& ally = w.battle.ally;
   if (in.jump && (fighting ? ally.state == FighterState::Dodge : was_on_ground)) app.jump_buffer = 0;
   if (app.jump_buffer > 0) --app.jump_buffer;
-  if (in.attack && ally.attack_tick == w.tick) app.attack_buffer = 0;
+  if (in.attack && (ally.attack_tick == w.tick || ally.state == FighterState::Windup)) app.attack_buffer = 0;
   if (app.attack_buffer > 0) --app.attack_buffer;
   if (in.parry && ally.state == FighterState::Parry) app.parry_buffer = 0;
   if (app.parry_buffer > 0) --app.parry_buffer;
