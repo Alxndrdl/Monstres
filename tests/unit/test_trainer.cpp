@@ -132,6 +132,14 @@ TEST_CASE("beating one of a group: the companion aims at the next; all beaten, a
   CHECK(w.battle.outcome_xp == xp);
 }
 
+TEST_CASE("up to six monsters of a kind fight together") {
+  World w = group();
+  for (int k = 0; k < 6; ++k) add_wild(w, Species::Slime, {static_cast<float>(k % 3) * 1.5f - 1.5f, 0, -7.0f - static_cast<float>(k / 3)});
+  step(w, command(Command::Engage, 1));
+  CHECK(w.battle.foes.size() == rules::kMaxFoes);
+  CHECK(rules::kMaxFoes == 6);
+}
+
 TEST_CASE("a burst gathers for a second, then hits every foe around; moving freely, a throw goes where the camera looks") {
   World w = group();
   step(w, command(Command::Engage, 1));

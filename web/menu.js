@@ -918,6 +918,18 @@
     return top + (bottom - top) * tz;
   }
 
+  // Distance to a place's center in its radii, stretched by its outline
+  // (village.hpp, outline_distance): 1 on its edge.
+  function outlineDistance(data, center, rx, rz, phases, x, z) {
+    const dx = (x - center.x) / rx, dz = (z - center.z) / rz;
+    const r = Math.hypot(dx, dz);
+    if (r < 1e-6) return 0;
+    const a = Math.atan2(dz, dx);
+    let inward = 0;
+    for (let k = 0; k < 4; ++k) inward += data.outlineDepths[k] * 0.5 * (1 + Math.sin(data.outlineWaves[k] * a + phases[k]));
+    return r / (1 - inward);
+  }
+
   // The playable area, drawn once per world: terrain, path and objects.
   function buildBase(data, continent) {
     const R = data.world + 7;
@@ -933,9 +945,9 @@
         const h = heightAt(data, x, z);
         const t = Math.min(Math.max((h + 4) / 12, 0), 1);
         let r = 78 + 70 * t, g = 128 + 46 * t, b = 62 + 30 * t;
-        if (forest) {  // darker under the trees
-          const fx = (x - forest.x) / forest.rx, fz = (z - forest.z) / forest.rz;
-          if (fx * fx + fz * fz < 1) { r *= 0.8; g *= 0.88; b *= 0.8; }
+        if (forest && outlineDistance(data, forest, forest.rx, forest.rz, forest.outline, x, z) < 1 &&
+            outlineDistance(data, forest, forest.clearing, forest.clearing, forest.clearingOutline, x, z) >= 1) {
+          r *= 0.8; g *= 0.88; b *= 0.8;  // darker under the trees (not in the clearing)
         }
         if (cave && Math.hypot(x - cave.x, z - cave.z) < cave.r) { const k = Math.min(1, (h + 2) / 14); r = 110 + 50 * k; g = 106 + 46 * k; b = 104 + 44 * k; }
         if (village && Math.hypot(x - village.x, z - village.z) < 7) { r = 168; g = 142; b = 104; }
@@ -946,9 +958,8 @@
         if (h < data.seaLevel + 2.5 && around < data.seaLevel + 1) { r = 214; g = 196; b = 140; }
         if (h < data.seaLevel && around < data.seaLevel) { const k = Math.min(1, (data.seaLevel - h) / 12); r = 70 - 40 * k; g = 150 - 60 * k; b = 190 - 40 * k; }
         if (lake) {
-          const dx = (x - lake.x) / lake.rx, dz = (z - lake.z) / lake.rz;
-          const d = dx * dx + dz * dz;
-          if (d < 1.08 && h > data.waterLevel - 0.05) { r = 214; g = 196; b = 140; }  // sandy shore
+          const d = outlineDistance(data, lake, lake.rx, lake.rz, lake.outline, x, z);
+          if (d < 1.04 && h > data.waterLevel - 0.05) { r = 214; g = 196; b = 140; }  // sandy shore
           if (d < 1 && h < data.waterLevel) { const k = Math.min(1, (data.waterLevel - h) / 1.2); r = 80 - 30 * k; g = 150 - 40 * k; b = 196 - 20 * k; }
         }
         // Light from the north-west, shading the slopes.
@@ -1005,6 +1016,9 @@
     if (!target) return;
     game.teleportTo(target.id);
     close();  // the game goes on: the teleport happens with the next tick
+    // The teleporter arrived at is the one selected now (not the one left).
+    const there = (game.teleporters().list || []).find((t) => t.id === target.id);
+    window.dispatchEvent(new CustomEvent('monstres-object', { detail: { index: there ? there.object : -1 } }));
   });
 
   // Opening the map: on the player, up close (to choose a teleporter: the whole playable area).
@@ -1207,5 +1221,6 @@
     mapData = null;
     base = null;
   });
-  window.monstresMenu = { open, close, isOpen, show };
+  // teleportTargets: where the teleporters are on the map (teleport mode), for tests.
+  window.monstresMenu = { open, close, isOpen, show, teleportTargets: () => teleportTargets.slice() };
 })();

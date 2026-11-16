@@ -90,7 +90,11 @@ namespace monstres {
 //      to the village.
 //  20  at the end, the battles won (u32). Before: guessed from the
 //      species beaten and Bastien's battles.
-inline constexpr uint32_t kSaveVersion = 20;
+//  21  same layout; the forest is bigger, with a clearing (its teleporter at
+//      the clearing's edge), and fallen logs lie any way (Colliders along
+//      them). Before: the forest's objects and teleporter grow anew
+//      (regrow_forest).
+inline constexpr uint32_t kSaveVersion = 21;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

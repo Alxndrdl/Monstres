@@ -110,7 +110,9 @@ TEST_CASE("the village and its shore are flat, the lake bed is sunken") {
     }
     const Lake& lake = w.village.lake;
     CHECK(w.ground.height(lake.center.x, lake.center.z) < rules::kWaterLevel - 0.5f);
-    CHECK(w.ground.height(lake.center.x + lake.radius_x + 0.5f, lake.center.z) > rules::kWaterLevel);
+    // Just past its shore (east: its outline there), the ground is dry.
+    const float shore = lake.center.x + lake.radius_x * outline_scale(lake.center, kLakeOutline, 0);
+    CHECK(w.ground.height(shore + 0.5f, lake.center.z) > rules::kWaterLevel);
   }
 }
 

@@ -34,7 +34,8 @@ inline constexpr float kJumpSpeed = 7.0f;       // m/s, jumps ~1.2 m high
 inline constexpr float kGravity = 20.0f;        // m/s²
 inline constexpr float kMaxFallSpeed = 30.0f;
 inline constexpr uint32_t kObjectCount = 1250;  // trees, rocks... in the open (outside the places below)
-inline constexpr uint32_t kForestTrees = 650;    // more trees in the forest
+inline constexpr uint32_t kForestTrees = 100000;  // more trees in the forest: as many as fit
+inline constexpr int kForestAttempts = 70000;      // tries over the forest's box (inside the valley, and beyond)
 inline constexpr float kSpawnClearRadius = 4.0f;
 inline constexpr float kObjectGap = 0.6f;       // free space kept between objects
 inline constexpr uint32_t kVillagers = 8;
@@ -682,8 +683,13 @@ void build_castle(World& world);
 void build_cave(World& world);
 
 // Puts a teleporter in each place (village, ruins, forest, cave, castle),
-// clearing trees and rocks around it if needed.
-void build_teleporters(World& world);
+// clearing trees and rocks around it if needed (`only`: that one alone).
+void build_teleporters(World& world, TeleporterId only = TeleporterId::Count);
+
+// The forest grown anew (saves before version 21: a smaller one, its
+// teleporter in its middle, no clearing): its objects and its teleporter
+// replaced by today's (bigger, a clearing, the teleporter at its edge).
+void regrow_forest(World& world);
 
 // Where teleporter `id` stands (its center on the ground), or false if this world has none.
 bool teleporter_position(const World& world, TeleporterId id, Vec3& at);

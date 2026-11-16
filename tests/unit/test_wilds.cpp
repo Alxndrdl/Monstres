@@ -32,7 +32,8 @@ TEST_CASE("the wilds: many objects around the valley, the valley's own unchanged
   size_t trees = 0, rocks = 0, north_pines = 0, north = 0;
   for (size_t k = valley.size(); k < w.objects.size(); ++k) {
     const Object& o = w.objects[k];
-    CHECK(o.kind <= ObjectKind::Bush);  // nature only
+    CHECK((o.kind <= ObjectKind::Bush || o.kind == ObjectKind::Collider));  // nature only (and the pieces of logs)
+    if (o.kind == ObjectKind::Collider) continue;  // a piece of a log, along it
     CHECK(chebyshev(o.pos.x, o.pos.z) >= rules::kValleyHalfSize - 2.0f);
     CHECK_FALSE((w.ground.sea(o.pos.x, o.pos.z) && w.ground.height(o.pos.x, o.pos.z) < rules::kSeaLevel + 1.0f));
     trees += o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine;

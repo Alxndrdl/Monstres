@@ -285,6 +285,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_builds = version >= 18;  // builds, mana, traits of the team, counts of the bestiary
   const bool with_looks = version >= 19;   // the magician's look, Zapou and Ploufi, the main quest
   const bool with_victories = version >= 20;  // the battles won
+  const bool with_new_forest = version >= 21;  // the bigger forest and its clearing
   // Species in the bestiary and the counts: two more from version 19.
   const size_t species_saved = with_looks ? kSpeciesCount : kSpeciesCountV18;
 
@@ -573,6 +574,8 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   // The wilds around the valley (not saved). Before version 18 the relief at
   // the valley's edge rose into hills: it changed, the objects there settle again.
   if (grown && !with_builds) settle_objects(w);
+  // Before version 21: a smaller forest, no clearing, its teleporter in its middle.
+  if (!with_new_forest) regrow_forest(w);
   generate_wilds(w);
   // Before version 19: Isidore comes to the village (and Bastien's lesson is
   // learned if he was beaten already: told to him, it is done).

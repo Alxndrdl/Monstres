@@ -120,7 +120,7 @@
   };
   // Under the capture button: why it cannot be used yet.
   const CAPTURE_NOTES = {
-    notWeak: (b) => `PV < ${b.captureHpPercent} %`,
+    notWeak: () => '',  // the golden mark on its bar says it (and the button's title)
     teamFull: () => 'Équipe complète',
     noTarget: () => 'Vise un monstre',
     ok: () => 'Il est affaibli !',
@@ -147,7 +147,8 @@
       build = () => {
         contextTitle.replaceChildren(`Combat · ${name} `, el('small', { textContent: target ? `niv. ${target.level}` : '' }));
         const capture = action('capture', 'Capturer', b.capture === 'ok', () => game.capture());
-        capture.append(el('small', { textContent: (CAPTURE_NOTES[b.capture] || (() => ''))(b) }));
+        const note = (CAPTURE_NOTES[b.capture] || (() => ''))(b);
+        if (note) capture.append(el('small', { textContent: note }));
         capture.title = b.capture === 'notWeak'
           ? `Affaiblis-le d’abord : moins de ${b.captureHpPercent} % de ses PV (le trait doré sur sa barre).` : '';
         contextActions.replaceChildren(action('flee', 'Fuir', true, () => game.flee()), capture);

@@ -6,6 +6,7 @@
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <span>
 #include <tuple>
@@ -67,9 +68,9 @@ Object random_object(Rng& rng, float x, float z, bool forest = false) {
       o.size = {random_range(rng, 0.4f, 1.6f), random_range(rng, 0.3f, 1.4f), random_range(rng, 0.4f, 1.6f)};
       o.yaw = quarter_yaw(rng);
       break;
-    case ObjectKind::Log:
+    case ObjectKind::Log:  // lying any way (see add_log_pieces)
       o.size = {random_range(rng, 1.0f, 2.0f), random_range(rng, 0.25f, 0.4f), 0};
-      o.yaw = quarter_yaw(rng);
+      o.yaw = any_yaw(rng);
       break;
     case ObjectKind::Stump:
       o.size = {random_range(rng, 0.3f, 0.5f), random_range(rng, 0.3f, 0.7f), 0};
@@ -93,8 +94,10 @@ Object random_object(Rng& rng, float x, float z, bool forest = false) {
 
 // Space an object takes for placement: its collision box, widened to the
 // foliage for trees so that crowns do not grow into each other.
+Box object_extent(const Object& o);
+
 Box footprint(const Object& o) {
-  Box b = object_box(o);
+  Box b = object_extent(o);
   float r = 0;
   if (o.kind == ObjectKind::Tree) r = 1.2f * o.size.x;
   if (o.kind == ObjectKind::Pine) r = 1.0f * o.size.x;
@@ -148,14 +151,89 @@ private:
   std::vector<std::vector<Box>> cells_;
 };
 
-// Whether (x, z) belongs to a place built by hand (no random trees or rocks there).
+// Whether (x, z) belongs to a place built by hand, or the forest's clearing
+// (no random trees or rocks there).
 bool in_a_place(const World& w, float x, float z) {
   return in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.5f) || in_ruins(w.ruins, x, z, 2.0f) ||
          in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f);
 }
 
-// The valley's trees and rocks (from the world's random stream, as before the world grew).
-void generate_objects(World& w) {
+// A number in [0, 1) for a spot of the world (the same each time).
+float spot01(uint64_t seed, float x, float z, uint64_t salt) {
+  uint64_t h = seed ^ (static_cast<uint64_t>(std::bit_cast<uint32_t>(x)) << 32) ^ std::bit_cast<uint32_t>(z) ^
+               (salt * 0x9E3779B97F4A7C15ULL);
+  h = (h ^ (h >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  h = (h ^ (h >> 27)) * 0x94D049BB133111EBULL;
+  h ^= h >> 31;
+  return static_cast<float>(h >> 40) / static_cast<float>(1ULL << 24);
+}
+
+// The forest's ways, for the valley's objects as for the wilds'. Its
+// clearing has what the meadows have, as many (`forest_pass`: the forest's
+// own trees, none there), but no trees; around it, the trees thin out, with
+// no logs or stumps. Its trees are taller than elsewhere, some much taller
+// (normal, taller and tallest ones mixed). False: nothing there.
+bool forest_ways(const World& w, Object& o, bool forest_pass) {
+  const float x = o.pos.x, z = o.pos.z;
+  if (!in_forest(w.forest, x, z)) return true;
+  const bool tree = o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine;
+  const float clearing = clearing_distance(w.forest, x, z);
+  if (clearing < 1) return !forest_pass && !tree;
+  const float fringe = (clearing - 1) / rules::kClearingFringe;
+  if (fringe < 1) {
+    if (o.kind == ObjectKind::Log || o.kind == ObjectKind::Stump) return false;
+    if (tree && spot01(w.seed, x, z, 1) >= fringe) return false;
+    if (!tree && forest_pass) return false;
+  }
+  if (tree) {
+    const float roll = spot01(w.seed, x, z, 2);
+    o.size = o.size * (roll < 0.4f ? 1.0f : roll < 0.8f ? rules::kForestTreeScale : 1.75f);
+  }
+  return true;
+}
+
+// A fallen trunk lying any way: its collision is a row of small boxes along
+// it (Colliders right after it in World::objects), its own box only says
+// where it lies. One along an axis is solid by itself.
+bool turned_log(const Object& o) { return o.kind == ObjectKind::Log && (o.yaw & 0x3FFF) != 0; }
+
+// Where an object lies (its collision box; a log turned any way: the box around it).
+Box object_extent(const Object& o) {
+  if (!turned_log(o)) return object_box(o);
+  const SinCos sc = sincos16(o.yaw);
+  const float c = std::fabs(sc.cos), n = std::fabs(sc.sin), r = o.size.y;
+  const Vec3 half{c * o.size.x + n * r, r, n * o.size.x + c * r};
+  const Vec3 center = o.pos + Vec3{0, r, 0};
+  return {center - half, center + half};
+}
+
+void add_log_pieces(std::vector<Object>& objects, const Object& log) {
+  if (!turned_log(log)) return;
+  const float half = log.size.x, r = log.size.y;
+  const SinCos sc = sincos16(log.yaw);
+  // The log's axis: its local +X turned by its yaw (as the model is drawn).
+  const float ax = sc.cos, az = -sc.sin;
+  // In pairs from its middle outwards, not touching each other (boxes along
+  // the axes: farther apart when it lies across them), and leaving its
+  // middle free (its own box stands there).
+  const float across = std::max(std::fabs(ax), std::fabs(az));
+  const float step = 1.45f * r / across, first = 0.75f * r / across, last = half - 0.7f * r;
+  for (float u = first; u <= std::max(last, first); u += step) {
+    for (const float t : {-u, u}) {
+      Object piece;
+      piece.kind = ObjectKind::Collider;
+      piece.pos = {log.pos.x + ax * t, log.pos.y, log.pos.z + az * t};
+      piece.size = {0.7f * r, r, 0.7f * r};
+      piece.yaw = 0;
+      piece.variant = 0;
+      objects.push_back(piece);
+    }
+  }
+}
+
+// The valley's trees and rocks (from the world's random stream, as before
+// the world grew). `forest_only`: only in the forest (old saves, given a new one).
+void generate_objects(World& w, Rng& rng, bool forest_only = false) {
   const float limit = rules::kValleyHalfSize - 3.0f;
   const float gap = rules::kObjectGap;
   PlacementGrid grid(w.objects);
@@ -168,23 +246,26 @@ void generate_objects(World& w) {
     uint32_t count;
     int attempts;
     bool forest;
-  } passes[] = {{rules::kObjectCount, 60000, false}, {rules::kForestTrees, 30000, true}};
+  } passes[] = {{rules::kObjectCount, 60000, false}, {rules::kForestTrees, rules::kForestAttempts, true}};
   for (const auto& pass : passes) {
     if (pass.forest && w.forest.radius_x <= 0) continue;
     uint32_t nature = 0;  // the village is already there
     for (int attempt = 0; attempt < pass.attempts && nature < pass.count; ++attempt) {
-      float x = random_range(w.rng, -limit, limit);
-      float z = random_range(w.rng, -limit, limit);
-      if (pass.forest) {  // somewhere in the forest's ellipse
-        const float u = random_range(w.rng, -1, 1), v = random_range(w.rng, -1, 1);
-        x = std::clamp(w.forest.center.x + u * w.forest.radius_x, -limit, limit);
-        z = std::clamp(w.forest.center.z + v * w.forest.radius_z, -limit, limit);
-        if (!in_forest(w.forest, x, z)) continue;
+      float x = random_range(rng, -limit, limit);
+      float z = random_range(rng, -limit, limit);
+      if (pass.forest) {  // somewhere in the forest (beyond the valley: the wilds', generate_wilds)
+        const float u = random_range(rng, -1, 1), v = random_range(rng, -1, 1);
+        x = w.forest.center.x + u * w.forest.radius_x;
+        z = w.forest.center.z + v * w.forest.radius_z;
+        if (std::fabs(x) > limit || std::fabs(z) > limit || !in_forest(w.forest, x, z)) continue;
       }
-      Object o = random_object(w.rng, x, z, pass.forest);
-      if (pass.forest && (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine) && w.rng.below(60) == 0) {
+      if (forest_only && !in_forest(w.forest, x, z)) continue;
+      Object o = random_object(rng, x, z, pass.forest);
+      const bool tree = o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine;
+      if (pass.forest && tree && rng.below(60) == 0) {
         o.size = o.size * 1.7f;  // an old giant
       }
+      if (!forest_ways(w, o, pass.forest)) continue;
 
       // Keep the spawn area clear.
       const Box b = footprint(o);
@@ -194,7 +275,7 @@ void generate_objects(World& w) {
 
       // Not on a slope too steep for its size (a flat rock would float).
       if (!w.ground.empty()) {
-        const Box box = object_box(o);
+        const Box box = object_extent(o);
         const float center = w.ground.height(o.pos.x, o.pos.z);
         float lowest = center;
         for (float cx : {box.min.x, box.max.x}) {
@@ -222,6 +303,7 @@ void generate_objects(World& w) {
       if (!grid.overlaps_any(wide)) {
         w.objects.push_back(o);
         grid.add(o);
+        add_log_pieces(w.objects, o);
         ++nature;
       }
     }
@@ -260,6 +342,7 @@ void generate_wilds(World& w) {
       if (static_cast<float>(roll) >= chance * 1000.0f) continue;
       if (o.kind == ObjectKind::Crate) continue;  // not in the wild
       if (zone == Zone::Hills && o.kind == ObjectKind::Tree) o.kind = ObjectKind::Pine;
+      if (!forest_ways(w, o, false)) continue;
       if (zone == Zone::Coast && (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine)) {
         o.kind = ObjectKind::Rock;  // its size will do; turned by quarters, as rocks are
         o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
@@ -267,7 +350,7 @@ void generate_wilds(World& w) {
       // Not on a slope too steep for its size, not across the path, not on
       // another one (tried at the height of the ground, as those around it).
       o.pos.y = h;
-      const Box box = object_box(o);
+      const Box box = object_extent(o);
       float lowest = h;
       for (float cx : {box.min.x, box.max.x}) {
         for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
@@ -283,6 +366,40 @@ void generate_wilds(World& w) {
       if (grid.overlaps_any(wide)) continue;
       w.objects.push_back(o);
       grid.add(o);
+      add_log_pieces(w.objects, o);
+    }
+  }
+  // The valley's forest past the valley's edge: as dense as inside it (the
+  // same tries per square meter as generate_objects' forest pass).
+  if (w.forest.radius_x > 0) {
+    Rng trees(w.seed ^ 0x464F524553543231ULL, 5);  // "FOREST21": its own stream
+    const float inner = rules::kValleyHalfSize - 2.0f;
+    for (int attempt = 0; attempt < rules::kForestAttempts; ++attempt) {
+      const float u = random_range(trees, -1, 1), v = random_range(trees, -1, 1);
+      Object o = random_object(trees, 0, 0, true);
+      const float x = w.forest.center.x + u * w.forest.radius_x, z = w.forest.center.z + v * w.forest.radius_z;
+      if (std::max(std::fabs(x), std::fabs(z)) < inner || !in_forest(w.forest, x, z)) continue;
+      o.pos = {x, 0, z};
+      if (!forest_ways(w, o, true)) continue;
+      const float h = w.ground.height(x, z);
+      o.pos.y = h;
+      const Box box = object_extent(o);
+      float lowest = h;
+      for (float cx : {box.min.x, box.max.x}) {
+        for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+      }
+      if (h - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
+      const Box b = footprint(o);
+      const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
+      const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
+      if (distance_to_path(w.path, x, z, keep_off + 1) < keep_off) continue;
+      Box wide = b;
+      wide.min = wide.min - Vec3{gap, 0, gap};
+      wide.max = wide.max + Vec3{gap, 0, gap};
+      if (grid.overlaps_any(wide)) continue;
+      w.objects.push_back(o);
+      grid.add(o);
+      add_log_pieces(w.objects, o);
     }
   }
   settle_objects(w, first);
@@ -1375,7 +1492,7 @@ void settle_objects(World& w, size_t first) {
   if (w.ground.empty()) return;  // flat: objects stay where they are
   for (size_t k = first; k < w.objects.size(); ++k) {
     Object& o = w.objects[k];
-    const Box b = object_box(o);
+    const Box b = object_extent(o);
     const float center = w.ground.height(o.pos.x, o.pos.z);
     float lowest = center;
     for (float x : {b.min.x, b.max.x}) {
@@ -1607,7 +1724,7 @@ void build_cave(World& w) {
   }
 }
 
-void build_teleporters(World& w) {
+void build_teleporters(World& w, TeleporterId only) {
   struct Place {
     TeleporterId id;
     Vec2 spot;   // where it should be
@@ -1617,12 +1734,16 @@ void build_teleporters(World& w) {
   const Vec2 vc = w.village.center;
   const float lake_side = w.village.lake.center.x > vc.x ? 1.0f : -1.0f;
   const float ruins_side = w.ruins.center.x > vc.x ? 1.0f : -1.0f;
+  const float forest_side = w.forest.center.x > 0 ? 1.0f : -1.0f;  // the forest's side of the path
+  const float gate = rules::kClearingRadius * outline_scale(w.forest.center, kClearingOutline, forest_side > 0 ? static_cast<float>(kPi) : 0.0f) - 5.0f;
+  const Vec2 forest_gate{w.forest.center.x - forest_side * gate, w.forest.center.z};
   const Place places[] = {
       // On the village square, on the side away from the lake.
       {TeleporterId::Village, {vc.x - lake_side * 7.0f, vc.z + 6.0f}, {-lake_side, 0}, w.village.lake.radius_x > 0},
       // Before the ruins' entrance, towards the path.
       {TeleporterId::Ruins, {w.ruins.center.x - ruins_side * 20.0f, w.ruins.center.z - 5.0f}, {0, -1}, w.ruins.radius > 0},
-      {TeleporterId::Forest, w.forest.center, {0, 1}, w.forest.radius_x > 0},
+      // At the edge of the clearing, on the side of the path (the giant lives in its middle).
+      {TeleporterId::Forest, forest_gate, {forest_side, 0}, w.forest.radius_x > 0},
       // Out of the ravine of the cave.
       {TeleporterId::Cave, {w.cave.mouth.x + w.cave.facing.x * 12.0f, w.cave.mouth.z + 4.0f}, w.cave.facing,
        w.cave.radius > 0},
@@ -1631,7 +1752,7 @@ void build_teleporters(World& w) {
        w.castle.facing, w.castle.radius > 0},
   };
   for (const Place& p : places) {
-    if (!p.exists) continue;
+    if (!p.exists || (only != TeleporterId::Count && p.id != only)) continue;
     // The first free spot along `away` (its stones need about 2 m around);
     // in the village, around the square, between the well and the houses.
     Vec2 at = p.spot;
@@ -1748,7 +1869,10 @@ Box object_box(const Object& o) {
     case ObjectKind::Tree:  half = {0.28f * s.x, 1.6f * s.x, 0.28f * s.x}; break;  // trunk only
     case ObjectKind::Pine:  half = {0.25f * s.x, 1.6f * s.x, 0.25f * s.x}; break;
     case ObjectKind::Rock:  half = {0.85f * s.x, 0.5f * s.y, 0.85f * s.z}; break;
-    case ObjectKind::Log:   half = {s.x, s.y, s.y}; break;
+    case ObjectKind::Log:
+      // Along its yaw; turned any way, solid through its pieces (add_log_pieces): walked onto.
+      half = (o.yaw & 0x3FFF) != 0 ? Vec3{0, s.y, 0} : Vec3{s.x, s.y, s.y};
+      break;
     case ObjectKind::Stump: half = {s.x, 0.5f * s.y, s.x}; break;
     case ObjectKind::Bush:  half = {0.8f * s.x, 0.5f * s.y, 0.8f * s.x}; break;
     // Village: fixed sizes, matching the models of tools/make_models.py.
@@ -1833,6 +1957,24 @@ void build_layouts(World& w) {
   w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle});
 }
 
+void regrow_forest(World& w) {
+  if (w.forest.radius_x <= 0 || w.ground.empty()) return;
+  // Its trees, rocks, logs... and its teleporter go (the wilds are not there yet).
+  std::erase_if(w.objects, [&](const Object& o) {
+    const bool nature = o.kind <= ObjectKind::Crate;
+    const bool its_teleporter = o.kind == ObjectKind::Teleporter && o.variant == static_cast<uint8_t>(TeleporterId::Forest);
+    return (nature && in_forest(w.forest, o.pos.x, o.pos.z, 1.0f)) || its_teleporter;
+  });
+  build_teleporters(w, TeleporterId::Forest);
+  const size_t first = w.objects.size();
+  Rng rng(w.seed ^ 0x524547524F575321ULL, 41);  // "REGROWS!": its own stream
+  generate_objects(w, rng, true);
+  settle_objects(w, first);
+  for (Object& o : w.objects) {
+    if (o.kind == ObjectKind::Teleporter) o.pos.y = w.ground.height(o.pos.x, o.pos.z) - 0.05f;
+  }
+}
+
 World new_game(uint64_t seed) {
   World w;
   w.seed = seed;
@@ -1844,7 +1986,7 @@ World new_game(uint64_t seed) {
   build_castle(w);
   build_cave(w);
   build_teleporters(w);
-  generate_objects(w);
+  generate_objects(w, w.rng);
   settle_objects(w);
   generate_wilds(w);
   w.player.pos.y = w.ground.height(0, 0);

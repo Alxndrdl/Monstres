@@ -90,8 +90,7 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
     const float vx = x - village.center.x, vz = z - village.center.z;
     const float to_village = std::sqrt(vx * vx + vz * vz);
     const Lake& lake = village.lake;
-    const float lx = (x - lake.center.x) / lake.radius_x, lz = (z - lake.center.z) / lake.radius_z;
-    const float lake_depth = 1 - std::sqrt(lx * lx + lz * lz);  // 0 at the shore, 1 in the middle
+    const float lake_depth = 1 - lake_distance(lake, x, z);  // 0 at the shore, 1 in the middle
     h *= std::min(smooth(rules::kVillageRadius + 3, rules::kVillageRadius + 15, to_village),
                   smooth(0.1f, 1.3f, -lake_depth));
     if (lake_depth > 0) h = -kLakeDepth * std::min(1.0f, lake_depth * 2.5f);

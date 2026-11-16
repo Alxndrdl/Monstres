@@ -31,7 +31,8 @@ TEST_CASE("new_game builds a valid world") {
       const float bound = i + w.wild_objects < w.objects.size() ? rules::kValleyHalfSize : rules::kReliefHalfSize;
       CHECK(b.max.x <= bound);
       CHECK(b.min.x >= -bound);
-      if (!is_round(o.kind)) CHECK((o.yaw & 0x3FFF) == 0);  // boxy objects turn by quarters
+      // Boxy objects turn by quarters (fallen logs lie any way: solid through their pieces).
+      if (!is_round(o.kind) && o.kind != ObjectKind::Log) CHECK((o.yaw & 0x3FFF) == 0);
     }
     std::vector<Box> boxes;
     for (const Object& o : w.objects) boxes.push_back(object_box(o));

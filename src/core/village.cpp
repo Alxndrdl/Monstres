@@ -2,6 +2,7 @@
 
 #include "monstres/core/rng.hpp"
 
+#include <bit>
 #include <cmath>
 #include <limits>
 
@@ -22,7 +23,41 @@ float path_x_at(const Path& path, float z) {
   return best_x;
 }
 
+constexpr float kTwoPi = 6.28318530718f;
+
+uint64_t mix(uint64_t z) {
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  return z ^ (z >> 31);
+}
+
 }  // namespace
+
+std::array<float, 4> outline_phases(Vec2 c, uint64_t salt) {
+  uint64_t h = mix((static_cast<uint64_t>(std::bit_cast<uint32_t>(c.x)) << 32) ^ std::bit_cast<uint32_t>(c.z) ^
+                   (salt * 0x9E3779B97F4A7C15ULL));
+  std::array<float, 4> phases{};
+  for (float& p : phases) {
+    h = mix(h + 0x632BE59BD9B4E019ULL);
+    p = kTwoPi * static_cast<float>(h >> 40) / static_cast<float>(1ULL << 24);
+  }
+  return phases;
+}
+
+float outline_scale(Vec2 c, uint64_t salt, float angle) {
+  const std::array<float, 4> phases = outline_phases(c, salt);
+  float in = 0;
+  for (size_t k = 0; k < phases.size(); ++k) in += kOutlineDepths[k] * 0.5f * (1 + std::sin(kOutlineWaves[k] * angle + phases[k]));
+  return 1 - in;
+}
+
+float outline_distance(Vec2 c, float rx, float rz, uint64_t salt, float x, float z) {
+  if (rx <= 0 || rz <= 0) return std::numeric_limits<float>::max();
+  const float dx = (x - c.x) / rx, dz = (z - c.z) / rz;
+  const float r = std::sqrt(dx * dx + dz * dz);
+  if (r < 1e-6f) return 0;
+  return r / outline_scale(c, salt, std::atan2(dz, dx));
+}
 
 VillageLayout make_village_layout(uint64_t, const Path& path) {
   VillageLayout v;
@@ -55,12 +90,21 @@ ForestLayout make_forest_layout(uint64_t, const Path& path, const RuinsLayout& r
   return f;
 }
 
-bool in_forest(const ForestLayout& f, float x, float z, float margin) {
-  if (f.radius_x <= 0) return false;
-  const float rx = f.radius_x + margin, rz = f.radius_z + margin;
-  if (rx <= 0 || rz <= 0) return false;
-  const float dx = (x - f.center.x) / rx, dz = (z - f.center.z) / rz;
-  return dx * dx + dz * dz < 1.0f;
+float forest_distance(const ForestLayout& f, float x, float z, float margin) {
+  if (f.radius_x <= 0) return std::numeric_limits<float>::max();
+  return outline_distance(f.center, f.radius_x + margin, f.radius_z + margin, kForestOutline, x, z);
+}
+
+bool in_forest(const ForestLayout& f, float x, float z, float margin) { return forest_distance(f, x, z, margin) < 1.0f; }
+
+float clearing_distance(const ForestLayout& f, float x, float z, float margin) {
+  if (f.radius_x <= 0) return std::numeric_limits<float>::max();
+  const float r = rules::kClearingRadius + margin;
+  return outline_distance(f.center, r, r, kClearingOutline, x, z);
+}
+
+bool in_clearing(const ForestLayout& f, float x, float z, float margin) {
+  return clearing_distance(f, x, z, margin) < 1.0f;
 }
 
 CaveLayout make_cave_layout(uint64_t seed, const Path& path) {
@@ -105,13 +149,12 @@ bool in_ruins(const RuinsLayout& r, float x, float z, float margin) {
   return dx * dx + dz * dz < radius * radius;
 }
 
-bool in_lake(const Lake& lake, float x, float z, float margin) {
-  if (lake.radius_x <= 0) return false;
-  const float rx = lake.radius_x + margin, rz = lake.radius_z + margin;
-  if (rx <= 0 || rz <= 0) return false;
-  const float dx = (x - lake.center.x) / rx, dz = (z - lake.center.z) / rz;
-  return dx * dx + dz * dz < 1.0f;
+float lake_distance(const Lake& lake, float x, float z, float margin) {
+  if (lake.radius_x <= 0) return std::numeric_limits<float>::max();
+  return outline_distance(lake.center, lake.radius_x + margin, lake.radius_z + margin, kLakeOutline, x, z);
 }
+
+bool in_lake(const Lake& lake, float x, float z, float margin) { return lake_distance(lake, x, z, margin) < 1.0f; }
 
 bool in_village(const VillageLayout& v, float x, float z, float margin) {
   const float dx = x - v.center.x, dz = z - v.center.z;

@@ -1253,6 +1253,26 @@ test.describe('the bigger world', () => {
     expect((await state(page)).player.zone).toBe('castle');
   });
 
+  test('after a trip, the teleporter arrived at is the one selected', async ({ page }) => {
+    await openGame(page, '?seed=3&new&frozen');
+    const tps = await page.evaluate(() => window.monstres.teleporters().list);
+    const castle = tps.find((t) => t.place === 'castle');
+    const village = tps.find((t) => t.place === 'village');
+    await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(2); }, [castle.x, castle.z]);
+    await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(2); }, [village.x, village.z]);
+    // The village's teleporter selected, its map opened, the castle chosen on it.
+    await page.evaluate((i) => window.dispatchEvent(new CustomEvent('monstres-object', { detail: { index: i } })), village.object);
+    await expect(page.locator('#context .context-title')).toContainText('Village');
+    await page.locator('#action-teleport').click();
+    await expect(page.locator('#map-hint')).toBeVisible();
+    const target = (await page.evaluate(() => window.monstresMenu.teleportTargets())).find((t) => t.id === castle.id);
+    const box = await page.locator('#map-canvas').boundingBox();
+    await page.mouse.click(box.x + target.x, box.y + target.y);
+    await page.evaluate(() => window.monstres.step(1));
+    expect((await state(page)).player.zone).toBe('castle');
+    await expect(page.locator('#context .context-title')).toContainText('Corbeval');
+  });
+
   test('a signpost of the village says where the places are', async ({ page }) => {
     await openGame(page, '?seed=42&new&frozen');
     const sign = await page.evaluate(() => window.monstres.map().objects.find((o) => o[0] === 'sign'));

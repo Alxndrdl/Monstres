@@ -60,8 +60,7 @@ void vertex(MeshData& m, float x, float y, float z, Color c, Vec3 n = {0, 1, 0})
 // 0 at the shore, 1 in the middle of the lake, negative outside.
 float lake_depth_factor(const Lake& lake, float x, float z) {
   if (lake.radius_x <= 0) return -1;
-  const float dx = (x - lake.center.x) / lake.radius_x, dz = (z - lake.center.z) / lake.radius_z;
-  return 1 - std::sqrt(dx * dx + dz * dz);
+  return 1 - lake_distance(lake, x, z);
 }
 
 Color base_ground_color(uint64_t seed, float x, float z) {
@@ -92,9 +91,10 @@ Color ground_color(const World& w, float x, float z) {
     c = lerp(c, kLakeBed, smooth(0.08f, 0.35f, depth));
   }
   if (w.forest.radius_x > 0) {
-    // Under the trees: darker grass and moss, fading out at the edge of the forest.
-    const float fx = (x - w.forest.center.x) / w.forest.radius_x, fz = (z - w.forest.center.z) / w.forest.radius_z;
-    const float inside = 1 - smooth(0.75f, 1.05f, std::sqrt(fx * fx + fz * fz));
+    // Under the trees: darker grass and moss, fading out at the edge of the
+    // forest, and in its clearing (bright grass in the sun).
+    const float inside = (1 - smooth(0.75f, 1.05f, forest_distance(w.forest, x, z))) *
+                         smooth(0.75f, 1.1f, clearing_distance(w.forest, x, z));
     c = lerp(c, kForestFloor, inside * (0.55f + 0.3f * value_noise(w.seed + 33, x, z, 5.0f)));
   }
   if (w.castle.radius > 0) {
@@ -470,8 +470,11 @@ MeshData build_water_mesh(const World& world) {
                           {0.28f, 0.56f, 0.64f, 0.72f}, {0.42f, 0.68f, 0.70f, 0.0f}};
   auto point = [&](int ring, int seg, float& x, float& z) {
     const float a = kTau * static_cast<float>(seg) / kSegments;
-    x = lake.center.x + std::cos(a) * lake.radius_x * rings[ring];
-    z = lake.center.z + std::sin(a) * lake.radius_z * rings[ring];
+    // Along the lake's outline (the angle of a point on it, seen from its center).
+    const float c = std::cos(a) * lake.radius_x, s = std::sin(a) * lake.radius_z;
+    const float k = outline_scale(lake.center, kLakeOutline, a);
+    x = lake.center.x + c * rings[ring] * k;
+    z = lake.center.z + s * rings[ring] * k;
   };
   for (int ring = 0; ring < 3; ++ring) {
     for (int seg = 0; seg < kSegments; ++seg) {

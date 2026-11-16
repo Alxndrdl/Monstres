@@ -100,7 +100,9 @@ TEST_CASE("the player cannot walk into the lake") {
   w.creatures.clear();
   run(w, forward(), 3 * rules::kTicksPerSecond);  // walk north, towards the water
   CHECK_FALSE(in_lake(lake, w.player.pos.x, w.player.pos.z, 0));
-  CHECK(w.player.pos.z > lake.center.z + lake.radius_z - 0.5f);
+  // The shore on that side (its outline: not an ellipse).
+  const float shore = lake.center.z + lake.radius_z * outline_scale(lake.center, kLakeOutline, static_cast<float>(kPi / 2));
+  CHECK(w.player.pos.z > shore - 0.5f);
 }
 
 TEST_CASE("fish stay in the lake and jump out of it now and then") {

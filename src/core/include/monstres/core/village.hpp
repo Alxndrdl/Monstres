@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "monstres/core/terrain.hpp"
 
 #include <cstdint>
@@ -20,10 +22,13 @@ inline constexpr float kSwimLevel = -0.3f;        // where fish bodies float
 inline constexpr float kRuinsZ = 50.0f;           // the ruins are south of the start, by the path
 inline constexpr float kRuinsRadius = 15.0f;      // no trees or rocks inside
 inline constexpr float kRuinsFromPath = 14.0f;    // the tower stands this far beside the path
-inline constexpr float kForestX = 88.0f;          // the forest: on the other side of the path than the ruins
+inline constexpr float kForestX = 100.0f;         // the forest: on the other side of the path than the ruins
 inline constexpr float kForestZ = -5.0f;
-inline constexpr float kForestRadiusX = 45.0f;
-inline constexpr float kForestRadiusZ = 58.0f;
+inline constexpr float kForestRadiusX = 73.0f;
+inline constexpr float kForestRadiusZ = 94.0f;
+inline constexpr float kForestTreeScale = 1.35f;  // its trees grow taller than elsewhere
+inline constexpr float kClearingRadius = 22.0f;   // the heart of the forest: no trees (the giant; the teleporter at its edge)
+inline constexpr float kClearingFringe = 0.35f;   // beyond it (in its radii), the trees thin out
 inline constexpr float kCaveX = 62.0f;            // the cave: in a rocky hill, far north
 inline constexpr float kCaveZ = -110.0f;
 inline constexpr float kCaveHillRadius = 21.0f;   // the foot of its cliffs
@@ -68,6 +73,25 @@ bool in_lake(const Lake& lake, float x, float z, float margin = 0);
 bool in_village(const VillageLayout& village, float x, float z, float margin = 0);
 
 // The forest: an ellipse of dense woods.
+// Natural outlines: the lake, the forest and its clearing are no ellipses.
+// At each angle around its center, a place reaches its ellipse's radius times
+// outline_scale (between kOutlineLeast and 1): a few waves, whose phases come
+// from the place's center and a number of its own.
+inline constexpr float kOutlineLeast = 0.6f;
+// Its waves: how many around, and how deep (their sum: 1 - kOutlineLeast).
+inline constexpr std::array<float, 4> kOutlineWaves = {2, 3, 5, 7};
+inline constexpr std::array<float, 4> kOutlineDepths = {0.16f, 0.11f, 0.08f, 0.05f};
+float outline_scale(Vec2 center, uint64_t salt, float angle);
+// Distance from a center to (x, z), in its ellipse's radii, stretched by the
+// outline: 1 on the outline, 0 at the center.
+float outline_distance(Vec2 center, float radius_x, float radius_z, uint64_t salt, float x, float z);
+// The phases of outline_scale's waves (for the map, which draws the same outlines).
+std::array<float, 4> outline_phases(Vec2 center, uint64_t salt);
+inline constexpr uint64_t kLakeOutline = 1, kForestOutline = 2, kClearingOutline = 3;
+
+// 0 in the middle of the lake, 1 on its shore (moved out by `margin` meters).
+float lake_distance(const Lake& lake, float x, float z, float margin = 0);
+
 struct ForestLayout {
   Vec2 center;
   float radius_x = 0;  // 0: no forest
@@ -76,6 +100,10 @@ struct ForestLayout {
 };
 ForestLayout make_forest_layout(uint64_t seed, const Path& path, const RuinsLayout& ruins);
 bool in_forest(const ForestLayout& forest, float x, float z, float margin = 0);
+float forest_distance(const ForestLayout& forest, float x, float z, float margin = 0);  // 1 at its edge
+// The clearing in the heart of the forest, around its teleporter: no trees.
+bool in_clearing(const ForestLayout& forest, float x, float z, float margin = 0);
+float clearing_distance(const ForestLayout& forest, float x, float z, float margin = 0);  // 1 at its edge
 
 // The cave: a rocky hill with steep sides; its mouth, at the foot of the
 // cliff, faces the path.

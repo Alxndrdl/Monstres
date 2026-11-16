@@ -17,14 +17,30 @@ villageois variés qui se promènent et saluent de la main, des corbeaux (Croa)
 perchés sur les toits, et un lac où nagent des poissons (Bloup) qui sautent
 hors de l'eau.
 
+Le lac et la forêt n'ont pas des bords en ellipse : leur contour ondule
+(`outline_scale` dans `village.hpp` : quatre vagues de 2, 3, 5 et 7 bosses,
+dont les phases viennent du centre du lieu), entre 60 % et 100 % du rayon de
+l'ellipse selon la direction. Le fond du lac, sa surface, son sable, le
+sous-bois, les arbres, la zone et la carte suivent tous ce contour.
+
 Au sud, sur une butte au bord du sentier, se dressent les ruines de la Tour :
 la tour abandonnée d'un ancien magicien (visible de loin), les restes d'une
 enceinte, une colonnade à moitié effondrée, des éboulis et quatre pierres à
 runes qui brillent encore, entourées d'étincelles magiques.
 
 À l'ouest ou à l'est (de l'autre côté du sentier que les ruines), la forêt
-des Murmures : arbres et sapins serrés, quelques géants, sous-bois sombre,
-Champi et Piou. Tout au nord, la grotte aux Cristaux : une colline rocheuse
+des Murmures (73 × 94 m de rayon, elle déborde de la vallée) : arbres et
+sapins serrés, aussi denses jusqu'à ses bords (au-delà de la vallée, les
+objets sauvages la continuent avec le même nombre d'essais au mètre carré),
+de tailles mêlées (normaux, × 1,35 et × 1,75, plus quelques vieux géants),
+sous-bois sombre, Champi et Piou. En son cœur, une clairière sans arbres, au
+contour irrégulier elle aussi (22 m de rayon au plus), à l'herbe claire, avec
+ce qu'ont les prairies, autant (une dizaine de rochers, troncs, souches ou
+buissons), mais pas d'arbres : l'arène du Champi géant, qui vit en son
+milieu. Autour, les arbres s'éclaircissent peu à peu, sans troncs ni
+souches. Le téléporteur se trouve à l'orée de la clairière, du côté du
+sentier. Une partie commencée avant (sauvegarde de version 20 ou moins)
+reçoit la nouvelle forêt au chargement (`regrow_forest`). Tout au nord, la grotte aux Cristaux : une colline rocheuse
 aux falaises abruptes, une ravine qui mène à une arche de pierre, un creux
 sombre éclairé par des cristaux lumineux. Tout au sud, sur une butte, le
 château de Corbeval : remparts crénelés, quatre tours à drapeau, une porte
@@ -32,7 +48,8 @@ fortifiée qu'on franchit, un donjon aux fenêtres éclairées la nuit. Plus on
 s'éloigne du départ, plus les monstres sont forts.
 
 Partout : herbes qui ondulent au vent, fleurs, arbres, sapins, rochers,
-troncs, souches et buissons ; forêt au-delà des bords, montagnes enneigées,
+troncs couchés dans tous les sens (solides par une rangée de petits blocs
+invisibles le long d'eux), souches et buissons ; forêt au-delà des bords, montagnes enneigées,
 ciel et soleil, et une météo qui change d'un endroit à l'autre (voir Météo).
 
 Une partie commence par la **création du personnage** (voir Nouvelle
@@ -382,7 +399,8 @@ forêt, devant la grotte et devant le château. S'en approcher (6 m) le fait
 connaître pour toujours : ses runes s'allument et tournent, une note le
 signale. Debout au milieu d'un téléporteur connu, on peut aller vers
 n'importe quel autre déjà découvert, en le choisissant sur la carte
-(`Command::Teleport`) ; le compagnon suit.
+(`Command::Teleport`) ; le compagnon suit, et le téléporteur d'arrivée devient
+celui qui est sélectionné.
 
 Le Piou de Mirabelle : Mirabelle a perdu son Piou au plumage émeraude, une
 couleur très rare (environ un Piou sur 128). Il rôde à une trentaine de
@@ -399,7 +417,7 @@ celui du château, aller du village au château par téléporteur, revenir, puis
 tout lui raconter. Récompense : 40 XP au magicien, 25 au compagnon.
 
 Le Champi géant : Lison a vu un Champi gigantesque au cœur de la forêt. Un
-Champi oméga (niveau 8) y vit, à côté du téléporteur, avec deux Champi alpha
+Champi oméga (niveau 8) y vit, au milieu de la clairière, avec deux Champi alpha
 (niveau 5) et deux normaux (niveau 4) ; le groupe revient chaque fois qu'on
 approche tant que l'oméga n'est pas capturé (il rejoint le combat avec les
 siens). Une fois capturé, il faut le montrer à Lison. Récompense : 80 XP au
@@ -611,7 +629,7 @@ moins d'un demi-milliseconde de calcul par image.
 Règles dans `src/core/battle.hpp` / `battle.cpp`, interface dans
 `web/battle.js`. Depuis le menu contextuel, « Combattre » lance un combat entre
 le compagnon et le monstre visé (à moins de 15 m du joueur). Les monstres de la
-même espèce à moins de 7 m de lui se joignent au combat (3 adversaires au
+même espèce à moins de 7 m de lui se joignent au combat (6 adversaires au
 plus). Les Croa s'envolent et tournent autour du compagnon, à 2 m du sol, et
 piquent pour mordre : en l'air, on les atteint avec les attaques à distance
 (projectiles visés en hauteur) ou l'onde, pas avec une morsure. Les Bloup du
@@ -679,7 +697,10 @@ l'onde, boule qui grossit) : c'est le moment d'esquiver ou de parer. Dans le
 menu contextuel : « Fuir » (le compagnon revient vers le joueur, puis le
 combat s'arrête et le joueur reprend la main) et « Capturer », possible quand
 l'ennemi n'a plus que 25 % de ses points de vie (trait doré sur sa barre) : il
-rejoint l'équipe (il faut viser celui qu'on veut capturer). Chaque monstre
+rejoint l'équipe (il faut viser celui qu'on veut capturer). Ce menu reste
+court pour ne pas recouvrir le bouton d'attaque rapide en dessous ; en bas,
+les panneaux du compagnon et du mana restent entre le joystick et les
+boutons (la parade, les sorts). Chaque monstre
 battu ou capturé rapporte 8 points d'expérience par niveau, partagés entre les monstres de l'équipe
 qui ont combattu selon les dégâts infligés par chacun : XP × dégâts du monstre
 / (1 + dégâts de toute l'équipe), arrondi ; le magicien en gagne la moitié.

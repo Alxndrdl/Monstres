@@ -430,7 +430,12 @@ std::string teleporters_json(const World& w) {
     if (!teleporter_position(w, id, at)) continue;
     if (!first) s += ',';
     first = false;
-    s += "{\"id\":" + std::to_string(k) + ",\"place\":\"" + teleporter_name(id) + "\",\"x\":" + num(at.x) +
+    int object = -1;  // its index in World::objects (to select it)
+    for (size_t i = 0; i < w.objects.size() && object < 0; ++i) {
+      if (w.objects[i].kind == ObjectKind::Teleporter && w.objects[i].variant == k) object = static_cast<int>(i);
+    }
+    s += "{\"id\":" + std::to_string(k) + ",\"object\":" + std::to_string(object) + ",\"place\":\"" +
+         teleporter_name(id) + "\",\"x\":" + num(at.x) +
          ",\"z\":" + num(at.z) + ",\"known\":" + (teleporter_known(w, id) ? "true" : "false") +
          ",\"reachable\":" + (can_teleport(w, id) ? "true" : "false") + "}";
   }
@@ -565,9 +570,15 @@ std::string map_json(const World& w) {
   s += ",\"points\":" + std::to_string(w.ground.empty() ? 0 : Heightmap::kPoints);
   s += ",\"cell\":" + num(Heightmap::kCellSize);
   s += ",\"waterLevel\":" + num(rules::kWaterLevel) + ",\"seaLevel\":" + num(rules::kSeaLevel);
+  // The lake's, the forest's and its clearing's outlines (village.hpp, outline_scale).
+  const auto numbers = [](const std::array<float, 4>& a) {
+    return "[" + num(a[0]) + "," + num(a[1]) + "," + num(a[2]) + "," + num(a[3]) + "]";
+  };
+  s += ",\"outlineWaves\":" + numbers(kOutlineWaves) + ",\"outlineDepths\":" + numbers(kOutlineDepths);
   const Lake& l = w.village.lake;
   s += ",\"lake\":" + (l.radius_x > 0 ? "{\"x\":" + num(l.center.x) + ",\"z\":" + num(l.center.z) +
-                                          ",\"rx\":" + num(l.radius_x) + ",\"rz\":" + num(l.radius_z) + "}"
+                                          ",\"rx\":" + num(l.radius_x) + ",\"rz\":" + num(l.radius_z) +
+                                          ",\"outline\":" + numbers(outline_phases(l.center, kLakeOutline)) + "}"
                                     : std::string("null"));
   s += ",\"village\":" + (l.radius_x > 0 ? "{\"x\":" + num(w.village.center.x) + ",\"z\":" +
                                              num(w.village.center.z) + ",\"r\":" + num(rules::kVillageRadius) + "}"
@@ -578,7 +589,10 @@ std::string map_json(const World& w) {
                                    : std::string("null"));
   const ForestLayout& f = w.forest;
   s += ",\"forest\":" + (f.radius_x > 0 ? "{\"x\":" + num(f.center.x) + ",\"z\":" + num(f.center.z) +
-                                          ",\"rx\":" + num(f.radius_x) + ",\"rz\":" + num(f.radius_z) + "}"
+                                          ",\"rx\":" + num(f.radius_x) + ",\"rz\":" + num(f.radius_z) +
+                                          ",\"outline\":" + numbers(outline_phases(f.center, kForestOutline)) +
+                                          ",\"clearing\":" + num(rules::kClearingRadius) +
+                                          ",\"clearingOutline\":" + numbers(outline_phases(f.center, kClearingOutline)) + "}"
                                     : std::string("null"));
   const CaveLayout& c = w.cave;
   s += ",\"cave\":" + (c.radius > 0 ? "{\"x\":" + num(c.center.x) + ",\"z\":" + num(c.center.z) +

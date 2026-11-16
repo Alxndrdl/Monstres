@@ -585,7 +585,7 @@
     /* ---- Context menu (right) ---- */
     #context {
       position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 54px); right: var(--edge-right); z-index: 2;
-      width: 190px; padding: 9px 10px; display: flex; flex-direction: column; gap: 6px;
+      width: 190px; padding: 7px 9px; display: flex; flex-direction: column; gap: 5px;
     }
     #context[hidden] { display: none; }
     .context-title { margin: 0; font-weight: 700; font-size: 14px; }
@@ -605,7 +605,10 @@
     .context-note:empty { display: none; }
     /* In a battle: the two actions side by side, above the battle buttons. */
     #context.in-battle .context-actions { flex-direction: row; }
-    #context.in-battle .context-actions button { flex: 1; flex-direction: column; gap: 2px; padding: 6px 4px; text-align: center; }
+    #context.in-battle .context-actions button { flex: 1; flex-wrap: wrap; justify-content: center; gap: 2px 6px; padding: 5px 4px; text-align: center; }
+    #context.in-battle .context-actions button small { flex-basis: 100%; }
+    /* Kept short: it must not reach the battle buttons below it (the quick attack's top). */
+    #context.in-battle .context-title, #context.in-battle .context-note { font-size: 12px; }
     .context-actions button small { font-size: 10px; font-weight: 400; color: rgba(255, 255, 255, 0.8); }
 
     /* ---- Battle: hit points, outcome, damage numbers ---- */
@@ -644,8 +647,10 @@
     .spell-button.active { opacity: 1; box-shadow: 0 0 12px rgba(170, 200, 255, 0.9); }
     .spell-button.no-mana { border-color: rgba(120, 140, 220, 0.6); }
     /* At the bottom, side by side: the companion's hit points, the magician's mana. */
-    .fighter.ally { left: auto; right: calc(50% + 5px); transform: none; }
-    #mana { left: calc(50% + 5px); bottom: var(--edge-bottom); transform: none; width: min(200px, 28vw);
+    /* Both between the joystick and the battle buttons (the parry, the spells), never over them. */
+    /* (the joystick ends 152 px from the left; the parry starts 213 px from the right; 22 px of padding and border). */
+    .fighter.ally { left: auto; right: calc(50% + 5px); transform: none; width: min(240px, 34vw, calc(50% - 194px)); }
+    #mana { left: calc(50% + 5px); bottom: var(--edge-bottom); transform: none; width: min(200px, 28vw, calc(50% - 256px));
       border-color: rgba(140, 170, 255, 0.6); pointer-events: none; }
     #mana .mana-bar > span { background: linear-gradient(90deg, #4f6cff, #8fb0ff); }
     #mana .mana-text::before { content: '✦ '; color: #c8d6ff; }

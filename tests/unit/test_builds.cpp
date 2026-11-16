@@ -404,7 +404,8 @@ TEST_CASE("a crow companion flies over the lake; a walker stops at its shore") {
       CHECK(at.z < -8.0f);  // past the middle of the lake
       CHECK(at.y >= rules::kWaterLevel);
     } else {
-      CHECK(at.z > -4.5f);  // stopped by the water
+      // Stopped by the water (its shore on that side: the outline's).
+      CHECK(at.z > -7.0f + 3.0f * outline_scale({0, -7}, kLakeOutline, static_cast<float>(kPi / 2)) - 0.3f);
     }
   }
 }
