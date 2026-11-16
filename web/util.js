@@ -58,21 +58,34 @@ if ('serviceWorker' in navigator) {
   // in a browser tab, the first touch asks for it (a browser grants it only
   // right after a gesture), then the screen is held in landscape. Once the
   // player leaves full screen, it is not asked again. Not on iPhones, which
-  // have no full screen for a page, nor under automated tests.
+  // have no full screen for a page, nor under automated tests. Where the
+  // screen can be held in landscape, the message shown in portrait says that
+  // a touch is enough, even with the phone's rotation locked.
   const root = document.documentElement;
   if (root.requestFullscreen && !navigator.webdriver) {
     let wanted = true;
+    const rotateText = $('rotate-text');
+    const turnText = (canTurn) => {
+      if (rotateText) {
+        rotateText.textContent = canTurn ? 'Touche l’écran pour jouer.' : 'Tournez votre téléphone pour jouer.';
+      }
+    };
+    const installed = matchMedia('(display-mode: fullscreen)').matches;  // already full screen
+    turnText(!installed && !!(screen.orientation && screen.orientation.lock));
     const onTouch = (e) => {
       if (!wanted || e.pointerType === 'mouse' || document.fullscreenElement) return;
-      if (matchMedia('(display-mode: fullscreen)').matches) return;  // already
+      if (installed) return;
       root.requestFullscreen({ navigationUI: 'hide' })
         .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
-        .catch(() => {});  // refused or no lock: the game works the same
+        .catch(() => turnText(false));  // refused or no lock: the player turns the phone
     };
     window.addEventListener('pointerup', onTouch, { capture: true, passive: true });
     let wasFull = false;
     document.addEventListener('fullscreenchange', () => {
-      if (wasFull && !document.fullscreenElement && !document.hidden) wanted = false;
+      if (wasFull && !document.fullscreenElement && !document.hidden) {
+        wanted = false;
+        turnText(false);
+      }
       wasFull = !!document.fullscreenElement;
     });
   }

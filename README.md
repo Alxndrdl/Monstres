@@ -106,8 +106,10 @@ Une fois ouvert, le jeu est gardé sur l'appareil (`sw.js`) : sans connexion,
 ou si le serveur répond par une erreur (404 d'un site retiré, 5xx), il se lance
 avec la dernière version téléchargée, dans le navigateur comme installé.
 Le jeu passe en plein écran, sans barre d'état ni boutons système : installé
-sur Android, il s'ouvre ainsi ; dans un onglet, le premier toucher le demande
-(et bloque le paysage), sauf si le joueur en est sorti. Sur iPhone, une page
+sur Android, il s'ouvre ainsi (`"display": "fullscreen"`) ; dans un onglet, le
+premier toucher le demande et bloque le paysage, même avec la rotation
+verrouillée (en portrait, le message dit alors « Touche l'écran pour jouer »),
+sauf si le joueur en est sorti. Sur iPhone, une page
 web n'a pas de plein écran : installée, elle s'ouvre sans les barres de Safari,
 et en paysage iOS cache de lui-même la barre d'état.
 
