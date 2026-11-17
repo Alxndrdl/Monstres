@@ -2,6 +2,7 @@
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/continent.hpp"
+#include "monstres/core/interior.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
 
@@ -17,7 +18,7 @@ std::string carried_variants_json(Species species, const Genes& genes);
 
 namespace {
 const char* species_name(Species s) {
-  static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish", "spark", "axolotl"};
+  static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish", "spark", "axolotl", "cristi"};
   static_assert(std::size(kNames) == kSpeciesCount);
   const auto i = static_cast<size_t>(s);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -79,7 +80,7 @@ std::string num(float v) {
 std::string command_names_json() {
   static const char* kNames[] = {"none",        "engage",    "flee",          "capture", "summon",    "release",
                                  "train",       "teleport",  "questAccept",   "questGive", "questComplete", "target",
-                                 "challenge",   "ready",     "cast",          "equipSpell", "healTeam"};
+                                 "challenge",   "ready",     "cast",          "equipSpell", "healTeam", "door"};
   static_assert(std::size(kNames) == kCommandCount);
   static_assert(static_cast<size_t>(Command::Engage) == 1 && static_cast<size_t>(Command::Train) == 6 &&
                 static_cast<size_t>(Command::Target) == 11 && static_cast<size_t>(Command::HealTeam) == 16);
@@ -97,7 +98,14 @@ std::string to_json(const World& w) {
        ",\"ground\":" + num(w.ground.height(p.pos.x, p.pos.z)) +  // height of the ground under it
        ",\"zone\":\"" + zone_name(zone_at(w, p.pos.x, p.pos.z)) + "\"" +
        ",\"onGround\":" + (p.on_ground ? "true" : "false") +
-       ",\"facingX\":" + num(p.facing_x) + ",\"facingZ\":" + num(p.facing_z) + "}";
+       ",\"facingX\":" + num(p.facing_x) + ",\"facingZ\":" + num(p.facing_z);
+  // Inside (interior.hpp): where it is, and on the map where it went in.
+  static const char* kPlaces[] = {"outside", "cave", "house", "tower"};
+  static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
+  const Body& m = map_body(w);
+  s += std::string(",\"place\":\"") + kPlaces[static_cast<size_t>(w.place.kind)] + "\"" +
+       ",\"mapX\":" + num(m.pos.x) + ",\"mapZ\":" + num(m.pos.z) + ",\"mapFacingX\":" + num(m.facing_x) +
+       ",\"mapFacingZ\":" + num(m.facing_z) + "}";
   s += ",\"objects\":" + std::to_string(w.objects.size());
   s += ",\"creatures\":[";
   for (size_t i = 0; i < w.creatures.size(); ++i) {
@@ -170,7 +178,7 @@ const char* zone_name(Zone zone) {
 }
 
 const char* element_name(Element element) {
-  static const char* kNames[] = {"fire", "water", "nature", "air", "shadow", "light", "electric", "normal"};
+  static const char* kNames[] = {"fire", "water", "nature", "air", "shadow", "light", "electric", "normal", "arcane"};
   static_assert(std::size(kNames) == static_cast<size_t>(Element::Count));
   const auto i = static_cast<size_t>(element);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -214,7 +222,8 @@ const char* object_kind_name(ObjectKind kind) {
                                  "crate",  "cottage", "chimney", "hut",       "fence",        "sign",
                                  "well",   "barrel", "lamp",     "tower",     "ruinWall",     "pillar",
                                  "fallenPillar", "rubble", "runeStone", "castleWall", "castleTower", "castleGate",
-                                 "castleKeep", "caveMouth", "crystal", "collider", "teleporter"};
+                                 "castleKeep", "caveMouth", "crystal", "collider", "teleporter",
+                                 "table", "chair", "bed", "shelf", "hearth", "rug", "step", "hatch"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -304,6 +313,7 @@ std::string spells_json(const World& w) {
   s += std::string(",\"mercy\":") + (w.battle.mercy ? "true" : "false");
   s += ",\"mercyTick\":" + std::to_string(w.battle.mercy_tick);
   s += ",\"detect\":" + seconds(w.detect_ticks);
+  s += ",\"wayOut\":" + seconds(w.way_out_ticks);
   const int found = detect_rare(w);
   if (found > 0) {
     const Creature& c = w.creatures[static_cast<size_t>(found)];
@@ -504,11 +514,11 @@ std::string sign_json(const World& w, int index) {
   if (index < 0 || static_cast<size_t>(index) >= w.objects.size()) return "null";
   const Object& o = w.objects[static_cast<size_t>(index)];
   if (o.kind != ObjectKind::Sign) return "null";
-  struct Place {
+  struct Sight {
     Zone zone;
     Vec2 at;
   };
-  std::vector<Place> places;
+  std::vector<Sight> places;
   if (w.village.lake.radius_x > 0) {
     places.push_back({Zone::Village, w.village.center});
     places.push_back({Zone::Lake, w.village.lake.center});
@@ -517,15 +527,15 @@ std::string sign_json(const World& w, int index) {
   if (w.forest.radius_x > 0) places.push_back({Zone::Forest, w.forest.center});
   if (w.cave.radius > 0) places.push_back({Zone::Cave, w.cave.mouth});
   if (w.castle.radius > 0) places.push_back({Zone::Castle, w.castle.center});
-  const auto distance = [&](const Place& p) {
+  const auto distance = [&](const Sight& p) {
     const float dx = p.at.x - o.pos.x, dz = p.at.z - o.pos.z;
     return std::sqrt(dx * dx + dz * dz);
   };
-  std::sort(places.begin(), places.end(), [&](const Place& a, const Place& b) { return distance(a) < distance(b); });
+  std::sort(places.begin(), places.end(), [&](const Sight& a, const Sight& b) { return distance(a) < distance(b); });
   std::string s = "{\"kind\":\"sign\",\"index\":" + std::to_string(index) + ",\"x\":" + num(o.pos.x) + ",\"z\":" + num(o.pos.z);
   s += std::string(",\"zone\":\"") + zone_name(zone_at(w, o.pos.x, o.pos.z)) + "\",\"places\":[";
   for (size_t i = 0; i < places.size(); ++i) {
-    const Place& p = places[i];
+    const Sight& p = places[i];
     if (i) s += ',';
     s += std::string("{\"zone\":\"") + zone_name(p.zone) + "\",\"dx\":" + num(p.at.x - o.pos.x) +
          ",\"dz\":" + num(p.at.z - o.pos.z) + ",\"distance\":" + num(distance(p)) + "}";
@@ -848,7 +858,17 @@ std::string battle_json(const World& w) {
        species_name(b.outcome_species) + "\",\"count\":" + std::to_string(b.outcome_count) + ",\"noXp\":\"" +
        no_xp_name(b.outcome_no_xp) + "\",\"rival\":" + std::to_string(b.outcome_rival) + ",\"gains\":" + gains_json(w) +
        ",\"wizardXp\":" + std::to_string(b.outcome_wizard_xp) + "}";
-  if (b.phase == BattlePhase::None) return s + "}";
+  if (b.phase == BattlePhase::None) {
+    // A door the player stands at (interior.hpp): its panel.
+    const DoorNear d = door_near(w);
+    if (d.action != DoorAction::None) {
+      static const char* kActions[] = {"none", "enter", "leave", "climb", "descend"};
+      static const char* kPlaces[] = {"outside", "cave", "house", "tower"};
+      s += std::string(",\"door\":{\"action\":\"") + kActions[static_cast<size_t>(d.action)] + "\",\"place\":\"" +
+           kPlaces[static_cast<size_t>(d.place)] + "\",\"building\":\"" + object_kind_name(d.building) + "\"}";
+    }
+    return s + "}";
+  }
   s += ",\"target\":" + (b.target == kNoTarget ? std::string("-1") : std::to_string(b.target));
   // Too far from the foes: seconds left to come back.
   if (b.away_ticks > 0) s += ",\"away\":" + seconds(rules::kAwayTicks - b.away_ticks);

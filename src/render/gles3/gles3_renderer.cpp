@@ -48,7 +48,8 @@ void main() {
   if (material > 2.5) {
     vec2 range = material > 4.5 ? uFadeTree : material > 3.5 ? uFadeFar : uFadeNear;
     fade = 1.0 - smoothstep(range.x, range.y, distance(iPosWind.xz, uFadeCenter));
-    material = 0.0;  // then lit as usual
+    // Then lit as usual; grass and flowers never show through (kSolid).
+    material = material < 3.5 ? -1.0 : 0.0;
   }
   vec3 local = aPos * iScale.xyz * fade;
   // Normals of a non-uniformly scaled mesh: divide by the scale.
@@ -83,6 +84,8 @@ uniform vec3 uAmbientGround;
 uniform float uNight;
 uniform bool uOpaquePass;
 uniform float uTimeFs;
+uniform vec4 uFadeFrom;  // xyz the camera, w the radius (0: nothing fades)
+uniform vec3 uFadeTo;    // what it looks at
 uniform vec3 uFog;
 uniform vec3 uFogRange;  // start, half (distance for half of it), end
 uniform int uLightCount;
@@ -97,6 +100,21 @@ void main() {
   vec3 toCamera = vToCamera / big;
   float d = big * length(toCamera);
   vec3 view = toCamera / length(toCamera);
+  // What stands between the camera and what it looks at shows through: a
+  // fine dither leaves most of its pixels out (not water, not glowing things).
+  if (uFadeFrom.w > 0.0 && uOpaquePass && vMaterial > -0.5 && vMaterial < 0.5) {
+    vec3 ab = uFadeTo - uFadeFrom.xyz;
+    float t = clamp(dot(vWorld - uFadeFrom.xyz, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
+    float off = length(vWorld - (uFadeFrom.xyz + ab * t));
+    float radius = uFadeFrom.w * (0.55 + 0.45 * t);
+    if (t < 0.9 && off < radius) {
+      ivec2 c = ivec2(gl_FragCoord.xy) & 3;
+      int k = (c.x ^ c.y) | ((c.y & 1) << 1);  // a 4x4 pattern: 0..3 twice over
+      // Right in front of the camera (big on screen): gone; farther: a third left; fading in at the edges.
+      float keep = 0.3 * smoothstep(0.08, 0.3, t) + 0.7 * smoothstep(0.7, 0.9, t) + 0.5 * smoothstep(radius * 0.7, radius, off);
+      if (float(((c.x * 3 + c.y * 2) & 3) * 4 + k) / 16.0 >= keep) discard;
+    }
+  }
   vec3 n = normalize(vNormal);
   if (!gl_FrontFacing) n = -n;  // double-sided meshes
   float diffuse = max(dot(n, uLight), 0.0);
@@ -279,6 +297,8 @@ public:
     u_ambient_sky_ = glGetUniformLocation(mesh_program_, "uAmbientSky");
     u_ambient_ground_ = glGetUniformLocation(mesh_program_, "uAmbientGround");
     u_night_ = glGetUniformLocation(mesh_program_, "uNight");
+    u_fade_from_ = glGetUniformLocation(mesh_program_, "uFadeFrom");
+    u_fade_to_ = glGetUniformLocation(mesh_program_, "uFadeTo");
     u_opaque_pass_ = glGetUniformLocation(mesh_program_, "uOpaquePass");
     u_light_count_ = glGetUniformLocation(mesh_program_, "uLightCount");
     u_light_pos_ = glGetUniformLocation(mesh_program_, "uLightPos");
@@ -384,7 +404,12 @@ public:
   }
 
   void draw(const View& view, std::span<const DrawList* const> lists) override {
-    if (view.sky) draw_sky(view);
+    if (view.sky) {
+      draw_sky(view);
+    } else if (view.fill) {
+      glClearColor(view.background.r, view.background.g, view.background.b, 1);
+      glClear(GL_COLOR_BUFFER_BIT);
+    }
 
     glUseProgram(mesh_program_);
     glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.view_projection.m);
@@ -397,6 +422,8 @@ public:
     glUniform3f(u_ambient_sky_, view.ambient_sky.r, view.ambient_sky.g, view.ambient_sky.b);
     glUniform3f(u_ambient_ground_, view.ambient_ground.r, view.ambient_ground.g, view.ambient_ground.b);
     glUniform1f(u_night_, view.night);
+    glUniform4f(u_fade_from_, view.fade_from_x, view.fade_from_y, view.fade_from_z, view.fade_radius);
+    glUniform3f(u_fade_to_, view.fade_to_x, view.fade_to_y, view.fade_to_z);
     {
       const auto count = static_cast<GLsizei>(std::min(view.light_count, kMaxPointLights));
       float pos[kMaxPointLights * 4] = {}, colors[kMaxPointLights * 3] = {};
@@ -678,6 +705,7 @@ private:
   GLint u_opaque_pass_ = -1, u_wind_ = -1, u_eye_ = -1;
   GLint u_sky_cover_ = -1, u_sky_cloud_light_ = -1, u_sky_cloud_shade_ = -1, u_sky_cloud_shift_ = -1;
   GLint u_light_color_ = -1, u_ambient_sky_ = -1, u_ambient_ground_ = -1, u_night_ = -1;
+  GLint u_fade_from_ = -1, u_fade_to_ = -1;
   GLint u_light_count_ = -1, u_light_pos_ = -1, u_light_colors_ = -1, u_sky_moon_ = -1, u_sky_night_ = -1;
   GLint u_fade_center_ = -1, u_fade_near_ = -1, u_fade_far_ = -1, u_fade_tree_ = -1;
   GLuint sky_vao_ = 0;

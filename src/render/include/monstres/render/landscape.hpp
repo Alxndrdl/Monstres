@@ -141,4 +141,7 @@ void build_landscape(const World& world, DrawList& list);
 bool follow_player(const World& world, DrawList& list, LandscapeCache& cache, Vec2& built, double budget_ms,
                    bool all_now = false, int* prepared = nullptr);
 
+// One object of an interior (interior.hpp) into `list`, with its shadow.
+void add_interior_object(const World& world, const Object& object, DrawList& list);
+
 }  // namespace monstres

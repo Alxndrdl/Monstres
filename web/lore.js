@@ -156,11 +156,30 @@ window.MonstresLore = {
         elemental: { name: 'Ploufi des mousses', description: 'Vert comme la mousse des berges : des feuilles poussent sur sa queue.' },
       },
     },
+    cristi: {
+      name: 'Cristi', kind: 'Boule de cristaux',
+      description: 'Une petite boule de poils bleu nuit, deux grands yeux ronds, des oreilles pointues et des ' +
+        'cristaux magiques plantés dans le dos. Immobile sur les parois, au sol ou au plafond de la grotte, ' +
+        'on le prend pour un tas de cristaux… jusqu’à ce qu’on s’approche trop. Il grimpe partout, même la tête en bas.',
+      habitat: 'Grotte aux Cristaux',
+      genes: { crystal: 'Cristaux', ears: 'Oreilles', crown: 'Couronne' },
+      variants: {
+        'crystal.violet': { name: 'Cristaux violets', description: 'Ils luisent d’un violet profond, comme ceux de la grotte.' },
+        'crystal.cyan': { name: 'Cristaux bleus', description: 'Une lueur bleu glacier, froide comme l’eau qui suinte des parois.' },
+        'crystal.rose': { name: 'Cristaux roses', description: 'Un rose très rare : les mineurs en rêvent.' },
+        'ears.pointed': { name: 'Oreilles pointues', description: 'Deux oreilles en pointe, toujours aux aguets.' },
+        'ears.long': { name: 'Grandes oreilles', description: 'De longues oreilles qui tremblent au moindre bruit.' },
+        'crown.three': { name: 'Trois cristaux', description: 'Trois cristaux serrés au milieu du dos.' },
+        'crown.crown': { name: 'Couronne', description: 'Une couronne de petits cristaux a poussé autour des trois premiers.' },
+        chromatic: { name: 'Cristi de neige', description: 'Une fourrure toute blanche, des cristaux blancs comme la lune.' },
+        elemental: { name: 'Cristi d’or', description: 'Une fourrure dorée et des cristaux de lumière : il brille comme un trésor.' },
+      },
+    },
   },
   // The three monsters to start a game with (kStarters), and their element.
   starterElements: { companion: 'fire', spark: 'electric', axolotl: 'water' },
   // Order of the species in the game (Species in src/core/world.hpp).
-  speciesOrder: ['companion', 'slime', 'mushroom', 'bird', 'villager', 'crow', 'fish', 'spark', 'axolotl'],
+  speciesOrder: ['companion', 'slime', 'mushroom', 'bird', 'villager', 'crow', 'fish', 'spark', 'axolotl', 'cristi'],
 
   elements: {
     fire: { name: 'Feu', color: '#ff9a5a' },
@@ -171,6 +190,7 @@ window.MonstresLore = {
     light: { name: 'Lumière', color: '#fff3c4' },
     electric: { name: 'Électrique', color: '#ffd23f' },
     normal: { name: 'Normal', color: '#cfc6b8' },
+    arcane: { name: 'Arcane', color: '#e08cff' },
   },
 
   // Kinds of creatures (Family in src/core/variants.hpp).
@@ -197,6 +217,9 @@ window.MonstresLore = {
     detect: { name: 'Détection', text: 'Pendant 1 minute, le cristal de ton bâton cherche les monstres très rares à ' +
       'moins de 50 m : variante très rare, forme chromatique ou élémentaire, micro ou alpha. S’il en sent un, ' +
       'sa lumière pointe vers lui.' },
+    wayOut: { name: 'Fil d’Ariane', text: 'Dans une grotte ou un bâtiment, pendant 1 minute, la lumière de ton bâton ' +
+      'montre le chemin vers l’entrée par laquelle tu es venu : elle suit les tunnels et contourne les parois, ' +
+      'pas juste la direction de la sortie. Gratuit.' },
   },
   // Builds of the monsters (Form in src/core/world.hpp): variants of every species.
   builds: {
@@ -257,6 +280,23 @@ window.MonstresLore = {
       name: 'Geyser', byElement: { nature: 'Racines jaillissantes' },
       description: 'L’eau jaillit du sol tout autour de lui.',
     },
+    tumble: { name: 'Roulé-boulé', description: 'Il se roule en boule et fonce dans l’ennemi.' },
+    shard: {
+      name: 'Éclat de cristal', byElement: { light: 'Éclat de lumière' },
+      description: 'Son cristal s’illumine et lance un éclat tranchant droit sur l’ennemi.',
+    },
+    prism: {
+      name: 'Prisme', byElement: { light: 'Prisme solaire' },
+      description: 'Son cristal s’embrase : la magie jaillit en éclats tout autour de lui.',
+    },
+  },
+  // Doors (interior.hpp): what the panel says near one. Houses by their kind.
+  doors: {
+    cave: 'Grotte aux Cristaux',
+    tower: 'Tour des ruines',
+    roof: 'Toit de la tour',
+    house: { cottage: 'Maison', chimney: 'Grande maison', hut: 'Hutte' },
+    actions: { enter: 'Entrer', leave: 'Sortir', climb: 'Monter', descend: 'Descendre' },
   },
   // Every monster's fourth move.
   parry: {

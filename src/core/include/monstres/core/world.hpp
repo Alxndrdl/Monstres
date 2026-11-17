@@ -86,11 +86,12 @@ enum class Command : uint8_t {
   Cast,       // the magician casts its spell Input::target (0 or 1: combat spells in a battle, else adventure ones)
   EquipSpell, // out of battles: spell slot Input::target / 16 (0, 1: combat; 2, 3: adventure) gets SpellId target % 16
   HealTeam,   // the healer (Npc Input::target) heals the whole team, and wakes the knocked out
+  Door,       // through the door the player stands at (interior.hpp: in, out, up to the tower's roof...)
 };
-inline constexpr size_t kCommandCount = static_cast<size_t>(Command::HealTeam) + 1;  // the last one
+inline constexpr size_t kCommandCount = static_cast<size_t>(Command::Door) + 1;  // the last one
 
 // The magician's spells (see battle.hpp: what each does, where it can be cast).
-enum class SpellId : uint8_t { None, Heal, Shield, Mercy, Detect, Count };
+enum class SpellId : uint8_t { None, Heal, Shield, Mercy, Detect, WayOut, Count };
 inline constexpr size_t kSpellCount = static_cast<size_t>(SpellId::Count);
 inline constexpr size_t kSpellSlots = 2;  // combat spells, and adventure spells
 inline constexpr uint16_t kNoTarget = 0xFFFF;
@@ -144,6 +145,15 @@ enum class ObjectKind : uint8_t {
   Crystal,       // a cluster of glowing crystals. size.x = scale
   Collider,      // invisible: the solid parts of a gate or a cave. size = half extents
   Teleporter,    // a circle of standing stones; variant = its TeleporterId. Walked onto (no collision)
+  // Inside (interior.hpp; fixed sizes unless said otherwise, front at -Z):
+  Table,         // 1.4 x 0.8 m, 0.75 m high
+  Chair,         // 0.45 m wide, its back at +Z
+  Bed,           // 1 x 2 m, its head at +Z
+  Shelf,         // 1.2 m wide, 1.8 m high, against a wall behind it (+Z)
+  Hearth,        // a stone fireplace, 1.6 m wide, its fire glows (back at +Z)
+  Rug,           // flat, size.x / size.z = half extents (walked over)
+  Step,          // a solid block of stone: a stair's step, a landing. size = half extents
+  Hatch,         // the trapdoor of the tower's roof (walked over)
   Count
 };
 
@@ -156,6 +166,11 @@ struct Object {
   Vec3 size;           // meaning depends on the kind (see ObjectKind)
   Angle16 yaw = 0;     // multiples of 90° for non-round kinds (rocks, logs, crates)
   uint8_t variant = 0; // picks a shape and a color variation, visual only
+  // Inside a cave (not saved: interiors are built again): 0 standing on the
+  // ground, kHanging from the ceiling, kOnWall sticking out of a wall
+  // towards its yaw. Hanging and on the walls, nothing bumps into it.
+  uint8_t mount = 0;
+  static constexpr uint8_t kHanging = 1, kOnWall = 2;
   bool operator==(const Object&) const = default;
 };
 
@@ -167,6 +182,11 @@ struct Body {
   float facing_x = 0;  // unit vector of the last movement direction
   float facing_z = -1;
   float speed = 0;     // horizontal speed during the last tick (m/s), drives animations
+  // A climber (Cristi, inside: interior.hpp) holds on to walls and ceilings:
+  // `up` is the normal of what it stands on, its facing then goes up or
+  // down too (facing_y). Walkers: up (0, 1, 0), facing_y 0. Not saved.
+  Vec3 up{0, 1, 0};
+  float facing_y = 0;
   bool operator==(const Body&) const = default;
 };
 using Player = Body;
@@ -186,6 +206,7 @@ enum class Species : uint8_t {
   Fish,       // Bloup, swims in the lake and jumps out of it
   Spark,      // Zapou, a little mouse of lightning, quick on its feet
   Axolotl,    // Ploufi, an axolotl walking on the banks
+  Cristi,     // Cristi, a black cristi with a crystal on its back: still on the cave's walls and ceilings
   Count
 };
 
@@ -318,7 +339,7 @@ WizardStats wizard_stats(const Wizard& wizard);
 
 // Elements of magic, for monsters (and later spells).
 // Count also means "none" (a monster with a single element).
-enum class Element : uint8_t { Fire, Water, Nature, Air, Shadow, Light, Electric, Normal, Count };
+enum class Element : uint8_t { Fire, Water, Nature, Air, Shadow, Light, Electric, Normal, Arcane, Count };
 
 // Base characteristics of a monster species (bestiary). Villagers have none.
 struct MonsterStats {
@@ -530,6 +551,7 @@ struct QuestState {
 
 struct Box {
   Vec3 min, max;
+  bool operator==(const Box&) const = default;
 };
 
 // Where the objects are, for collisions and placing things: their boxes
@@ -550,6 +572,69 @@ struct ObjectIndex {
   Vec3 last;
   static int cell_of(float v) { return std::clamp(static_cast<int>((v + kHalf) / kCell), 0, kCells - 1); }
   bool operator==(const ObjectIndex&) const { return true; }  // derived data
+};
+
+// Interiors (see interior.hpp): the crystal cave, the village's houses, the
+// tower of the ruins. The player goes in through a door; inside, the world
+// is the interior's (its objects, a flat floor at y = 0, walls and a
+// ceiling), and what was outside waits in World::outdoors.
+enum class PlaceKind : uint8_t { Outside, Cave, House, Tower, Count };
+struct Place {
+  PlaceKind kind = PlaceKind::Outside;
+  uint32_t door = 0;  // inside: World::outdoors.objects[door] is the way in (cave mouth, house, tower)
+  bool operator==(const Place&) const = default;
+};
+
+// One part of an interior's open floor: a capsule from a to b (a circle when
+// they are the same), or a box (a house's room). Its walls rise around it, up
+// to its height (a cave's ceiling, rounded into the walls).
+struct RoomPiece {
+  Vec2 a, b;
+  float radius = 0;      // capsule
+  Vec2 half;             // box (radius 0)
+  float height = 3;      // of the ceiling
+  float wobble = 0;      // caves: how much the walls wander (meters)
+  bool operator==(const RoomPiece&) const = default;
+};
+
+// A way out of an interior (or up, or down): where it is, which way it faces
+// (into the room), and where it leads.
+enum class ExitKind : uint8_t { Out, Roof };
+struct Exit {
+  Vec3 at;
+  Vec2 facing;
+  ExitKind kind = ExitKind::Out;
+  bool operator==(const Exit&) const = default;
+};
+
+// What an interior is made of, derived from the seed and its door (not saved).
+struct Interior {
+  PlaceKind kind = PlaceKind::Outside;
+  std::vector<RoomPiece> pieces;
+  float rounding = 0;    // how round the floor meets the walls, the walls the ceiling (caves)
+  uint64_t noise = 0;    // seed of the walls' wobble
+  Vec3 entry;            // where one arrives through the door, looking along entry_facing
+  Vec2 entry_facing;
+  Vec3 top;              // the tower: where one arrives from the roof
+  std::vector<Exit> exits;
+  // The way out (the WayOut spell): the floor on a grid of kNavCell, each
+  // cell how many steps from the door (kNoWay: not walkable, or no way).
+  static constexpr float kNavCell = 0.5f;
+  static constexpr uint16_t kNoWay = 0xFFFF;
+  int nav_x = 0, nav_z = 0;
+  std::vector<uint16_t> nav;
+  Box bounds;            // around everything
+  bool operator==(const Interior&) const = default;
+};
+
+// While the player is inside: the world outside, as it was left.
+struct Outdoors {
+  std::vector<Object> objects;
+  uint32_t wild_objects = 0;
+  Heightmap ground;
+  std::vector<Creature> creatures;  // all but the companion
+  Body player;                      // where it went in
+  bool operator==(const Outdoors&) const = default;
 };
 
 struct World {
@@ -597,6 +682,17 @@ struct World {
   uint64_t healed_tick = 0;    // not saved: the healer healed the team
   uint64_t teleport_tick = 0;  // not saved: the last teleport, for the drawing
   Vec3 teleport_from;          // not saved: where it left
+  Place place;                 // inside a cave, a house, the tower (saved), or outside
+  Interior interior;           // inside: its shape (derived from the seed and the door, not saved)
+  Outdoors outdoors;           // inside: the world outside, waiting
+  uint64_t door_tick = 0;      // not saved: the last time the player went through a door
+  // Not saved: Cristi steered on the walls and the ceiling (interior.hpp,
+  // climb_steered): the joystick's forward along them, carried over the
+  // corners as it climbs, turned with the camera (the yaw last seen).
+  bool climbing = false;
+  uint16_t way_out_ticks = 0;  // not saved: the WayOut spell, ticks left
+  Vec3 climb_forward{0, 0, -1};
+  Angle16 climb_yaw = 0;
   bool operator==(const World&) const = default;
 };
 

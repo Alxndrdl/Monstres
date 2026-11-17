@@ -8,6 +8,7 @@
 #include "gles3_renderer.hpp"
 #include "monstres/core/battle.hpp"
 #include "monstres/core/debug.hpp"
+#include "monstres/core/interior.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/weather.hpp"
@@ -19,12 +20,14 @@
 #include "monstres/render/scene.hpp"
 #include "monstres/render/weather_view.hpp"
 #include "monstres/render/intro.hpp"
+#include "monstres/render/interior_mesh.hpp"
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <optional>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -74,6 +77,8 @@ struct App {
   DrawList terrain;     // the ground (coarse, and detailed tiles around the player), the path, the water
   DrawList landscape;   // objects, grass: rebuilt around the player as it walks
   DrawList dynamic;     // player, clouds: rebuilt every frame
+  DrawList interior;    // inside (interior.hpp): its walls and objects, built when going in
+  uint64_t door_tick = ~0ULL;  // World::door_tick when the place was last set up
   Continent continent;  // the land beyond the playable area (built once per seed)
   GroundColors ground_colors;    // the ground's colors, kept as the tiles are built
   GroundTiles ground_tiles;      // the detailed tiles drawn, built ahead of time
@@ -265,6 +270,26 @@ bool update_landscape(App& app, bool all_now = false) {
   return rebuilt;
 }
 
+// Through a door (or a world loaded inside): the interior's walls and
+// objects, or the landscape outside again; the camera turned the way the
+// player goes.
+void place_changed(App& app, bool through_door = true) {
+  const World& w = app.world;
+  app.door_tick = w.door_tick;
+  app.selected = -1;
+  app.redraw = true;
+  app.camera.up = {0, 1, 0};
+  if (through_door) app.camera.yaw = std::atan2(-w.player.facing_x, -w.player.facing_z);
+  if (inside(w)) {
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::InteriorShell), build_interior_mesh(w));
+    build_interior_list(w, app.interior);
+  } else {
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::InteriorShell), MeshData{});
+    app.interior.batches.clear();
+    update_landscape(app, true);
+  }
+}
+
 // Call whenever app.world is replaced (new game, loaded or imported save).
 void world_changed(App& app) {
   app.redraw = true;
@@ -274,16 +299,21 @@ void world_changed(App& app) {
   app.landscape_center = {1e9f, 1e9f};
   app.ground_colors = {};  // another world: other colors
   app.landscape_cache.clear();
-  const MeshData coarse = build_coarse_ground(app.world, app.ground_colors);
+  // The ground outside (loaded inside: the world outside, as left).
+  std::optional<World> outside;
+  if (inside(app.world)) outside = outside_world(app.world);
+  const World& out = outside ? *outside : app.world;
+  const MeshData coarse = build_coarse_ground(out, app.ground_colors);
   app.ground_tiles.reset(coarse);
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), coarse);
-  MeshData path = build_path_mesh(app.world);
+  MeshData path = build_path_mesh(out);
   app.path_parts = path.parts;
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), path);
-  MeshData water = build_water_mesh(app.world);
+  MeshData water = build_water_mesh(out);
   app.water_parts = water.parts;
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), water);
-  update_landscape(app, true);
+  if (!inside(app.world)) update_landscape(app, true);
+  place_changed(app, false);
   // The continent depends on the seed only: built again for another world.
   if (app.continent.empty() || app.continent.seed != app.world.seed) {
     const double start = emscripten_get_now();
@@ -502,7 +532,9 @@ void frame(void* user) {
     }
   }
   mark = emscripten_get_now();
-  if (update_landscape(app, app.frozen) && profiling) ++prof.landscape_builds;  // frozen: pictures right away
+  if (app.world.door_tick != app.door_tick) place_changed(app);  // through a door
+  const bool in = inside(app.world);
+  if (!in && update_landscape(app, app.frozen) && profiling) ++prof.landscape_builds;  // frozen: pictures right away
   measure(kLandscape);
 
   adapt_resolution(app, dt, now);
@@ -540,20 +572,30 @@ void frame(void* user) {
   }
   follow_weather_choice(app, dt);
   const WeatherField weather = weather_field(app);
-  const float flash = apply_weather(view, weather);
+  // Inside: no weather, no landscape, nothing far away; the interior.
+  const float flash = in ? 0.0f : apply_weather(view, weather);
   // Only what the camera can see (cull.hpp).
   const Frustum in_front = frustum_of(view.view_projection);
-  cull_list(app.terrain, in_front);
-  cull_list(app.landscape, in_front);
-  cull_list(app.far_landscape, frustum_of(view.far_view_projection));
+  if (!in) {
+    cull_list(app.terrain, in_front);
+    cull_list(app.landscape, in_front);
+    cull_list(app.far_landscape, frustum_of(view.far_view_projection));
+  }
   measure(kView);
   build_dynamic(app.world, time, app.dynamic, app.selected, &in_front);
-  build_far_dynamic(app.world, time, app.far_dynamic);
-  build_weather(weather, view, flash, time, app.far_dynamic, app.dynamic);
+  if (!in) {
+    build_far_dynamic(app.world, time, app.far_dynamic);
+    build_weather(weather, view, flash, time, app.far_dynamic, app.dynamic);
+  }
   measure(kScene);
-  const DrawList* lists[] = {&app.far_landscape, &app.far_dynamic, &app.terrain, &app.landscape, &app.dynamic};
+  const DrawList* outdoors[] = {&app.far_landscape, &app.far_dynamic, &app.terrain, &app.landscape, &app.dynamic};
+  const DrawList* indoors[] = {&app.interior, &app.dynamic};
   app.renderer->begin_frame({pw, ph});
-  app.renderer->draw(view, lists);
+  if (in) {
+    app.renderer->draw(view, indoors);
+  } else {
+    app.renderer->draw(view, outdoors);
+  }
   app.renderer->end_frame();
   measure(kDraw);
   if (profiling) {
@@ -751,6 +793,11 @@ EMSCRIPTEN_KEEPALIVE void monstres_debug_teleport(float x, float z) {
   x = std::clamp(x, -limit, limit);
   z = std::clamp(z, -limit, limit);
   w.player.pos = {x, w.ground.height(x, z), z};
+  if (inside(w)) {  // on top of what stands there (the tower's stair, its landing)
+    for_objects_near(w, {{x - 0.1f, -1, z - 0.1f}, {x + 0.1f, 50, z + 0.1f}}, [&](uint32_t, const Box& b) {
+      if (b.min.x < x && b.max.x > x && b.min.z < z && b.max.z > z) w.player.pos.y = std::max(w.player.pos.y, b.max.y);
+    });
+  }
   w.player.velocity_y = 0;
   if (!w.creatures.empty()) {
     Body& c = w.creatures[0].body;
@@ -933,7 +980,8 @@ JSON_EXPORT(monstres_marks_json, marks_json(g_app->world))
 
 JSON_EXPORT(monstres_bestiary_json, bestiary_json(g_app->world))
 
-JSON_EXPORT(monstres_map_json, map_json(g_app->world))
+// The map: of the world outside (inside: as it was left).
+JSON_EXPORT(monstres_map_json, map_json(inside(g_app->world) ? outside_world(g_app->world) : g_app->world))
 
 JSON_EXPORT(monstres_continent_json, continent_json(g_app->continent))
 
@@ -941,7 +989,10 @@ JSON_EXPORT(monstres_continent_json, continent_json(g_app->continent))
 EMSCRIPTEN_KEEPALIVE const float* monstres_continent_heights() { return g_app->continent.heights.data(); }
 
 // Heights of the ground, Heightmap::kPoints squared floats (see map_json).
-EMSCRIPTEN_KEEPALIVE const float* monstres_heights() { return g_app->world.ground.heights.data(); }
+EMSCRIPTEN_KEEPALIVE const float* monstres_heights() {
+  const World& w = *&g_app->world;
+  return (inside(w) ? w.outdoors.ground : w.ground).heights.data();
+}
 
 // Draws a portrait of `size` x `size` pixels: species index, or -1 for the
 // magician; `look` is the genes of a monster (genes_code, as in the JSON).

@@ -32,6 +32,8 @@ void scale_for(const Object& o, Instance& in) {
     case ObjectKind::Crate: in.sx = s.x; in.sy = s.y; in.sz = s.z; in.y += s.y; break;  // centered cube
     case ObjectKind::Pillar: in.sx = in.sz = 1; in.sy = s.y; break;                    // unit height
     case ObjectKind::Crystal: in.sx = in.sy = in.sz = s.x; break;
+    case ObjectKind::Rug:   in.sx = s.x; in.sz = s.z; break;
+    case ObjectKind::Step:  in.sx = s.x; in.sy = s.y; in.sz = s.z; break;  // its base on the ground
     default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
   }
 }
@@ -142,6 +144,11 @@ LandscapeCache::Item make_item(const World& w, const Object& o) {
     case ObjectKind::CastleKeep: shadow(6.2f, 6.2f, yaw, 0.75f); break;
     case ObjectKind::Crystal: shadow(0.5f * s.x, 0.5f * s.x, 0, 0.5f); break;
     case ObjectKind::Teleporter: shadow(2.3f, 2.3f, 0, 0.6f); break;
+    case ObjectKind::Table: shadow(1.0f, 0.65f, yaw, 0.6f); break;
+    case ObjectKind::Chair: shadow(0.35f, 0.35f, yaw, 0.6f); break;
+    case ObjectKind::Bed: shadow(0.75f, 1.3f, yaw, 0.6f); break;
+    case ObjectKind::Shelf: shadow(0.8f, 0.35f, yaw, 0.5f); break;
+    case ObjectKind::Hearth: shadow(1.0f, 0.5f, yaw, 0.5f); break;
     default: break;
   }
   return item;
@@ -563,6 +570,25 @@ void build_landscape(const World& w, DrawList& list, Vec2 center) {
 
 void build_landscape(const World& w, DrawList& list) {
   build_landscape(w, list, landscape_center(w.player.pos.x, w.player.pos.z));
+}
+
+// One object inside (interior.hpp), with its shadow: as in the landscape,
+// and turned upside down or sideways when it hangs from the ceiling or
+// sticks out of a wall.
+void add_interior_object(const World& w, const Object& o, DrawList& list) {
+  const LandscapeCache::Item item = make_item(w, o);
+  Instance in = item.instance;
+  in.material = scene_util::material_for(item.full, kLit);
+  const Quat yaw = quat_yaw(static_cast<float>(radians_from_angle16(o.yaw)));
+  if (o.mount == Object::kHanging) in.rotation = yaw * quat_x(static_cast<float>(kPi));
+  if (o.mount == Object::kOnWall) in.rotation = yaw * quat_x(static_cast<float>(kPi) / 2);
+  scene_util::add(list, item.full, in);
+  if (item.has_shadow && o.mount == 0) scene_util::add(list, MeshId::Shadow, item.shadow);
+  if (o.kind == ObjectKind::Hearth) {
+    Instance fire = in;
+    fire.tint = {1, 1, 1, 1};
+    scene_util::add(list, MeshId::HearthFire, fire);
+  }
 }
 
 }  // namespace monstres

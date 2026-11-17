@@ -43,6 +43,7 @@ enum class MeshId : size_t {
   BirdBody, BirdWing, BirdLeg,
   SparkBody, SparkQuills, SparkQuillsLong, SparkHead, SparkEar, SparkTail, SparkLeg,
   AxolotlBody, AxolotlHead, AxolotlGills, AxolotlTail, AxolotlLeg,
+  CristiBody, CristiEar, CristiLeg, CristiCrystal, CristiShards,
   // Village.
   HouseCottage, HouseChimney, HouseHut, Fence, Sign, Well, Barrel, Lamp,
   VillagerTorso, VillagerLeg, VillagerArm, VillagerHand, VillagerHead,
@@ -54,11 +55,14 @@ enum class MeshId : size_t {
   Tower, RuinWallLow, RuinWallHigh, Pillar, FallenPillar, Rubble, RuneStone,
   // The castle and the cave.
   CastleWall, CastleTower, CastleGate, CastleKeep, CaveMouth, Crystal, Teleporter,
+  // Inside (interior.hpp): furniture, the tower's stair and trapdoor.
+  Table, Chair, Bed, Shelf, Hearth, HearthFire, Rug, Step, Hatch,
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar,
   GrassShortFar, GrassTallFar, FlowerFar,
   IconQuestion, IconExclaim, IconPlus, IconCross,  // over villagers (npc_marks)
   Ground,  // built at runtime
+  InteriorShell,  // inside: floor, walls and ceiling, built at runtime (interior_mesh.hpp)
   FarGround, Lava,  // the continent (far pass), built at runtime
   // Transparent, drawn last, in this order:
   Path,    // built at runtime
@@ -68,6 +72,7 @@ enum class MeshId : size_t {
   Ripple,
   Smoke,
   Sparkle,
+  DoorGlow,    // the light in a door's opening, when the player comes near
   RuneCircle,  // the capture seal
   RainShaft, Bolt,  // the weather (far pass)
   Rain, Snow,       // around the camera
@@ -83,7 +88,7 @@ enum class MeshGroup : uint8_t { Terrain, Vegetation, Scenery, Characters, Effec
 inline MeshGroup mesh_group(MeshId id) {
   switch (id) {
     case MeshId::Ground: case MeshId::Path: case MeshId::Water: case MeshId::FarGround: case MeshId::FarWater:
-    case MeshId::Lava:
+    case MeshId::Lava: case MeshId::InteriorShell:
       return MeshGroup::Terrain;
     case MeshId::GrassShort: case MeshId::GrassTall: case MeshId::Flower:
     case MeshId::GrassShortFar: case MeshId::GrassTallFar: case MeshId::FlowerFar:
@@ -92,12 +97,13 @@ inline MeshGroup mesh_group(MeshId id) {
     case MeshId::CloudLow0: case MeshId::CloudLow1: case MeshId::CloudLow2: case MeshId::RainShaft: case MeshId::Bolt:
       return MeshGroup::Sky;
     case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::RuneCircle:
+    case MeshId::DoorGlow:
     case MeshId::Rain: case MeshId::Snow:
       return MeshGroup::Effects;
     default: break;
   }
   const auto i = static_cast<size_t>(id);
-  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::AxolotlLeg)) return MeshGroup::Characters;
+  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::CristiShards)) return MeshGroup::Characters;
   if (i >= static_cast<size_t>(MeshId::VillagerTorso) && i <= static_cast<size_t>(MeshId::Bulb)) return MeshGroup::Characters;
   return MeshGroup::Scenery;
 }

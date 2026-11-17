@@ -603,8 +603,8 @@ test.describe('grimoire', () => {
     await page.locator('#menu-button').click();
     await page.getByRole('tab', { name: 'Bestiaire' }).click();
     const entries = page.locator('.bestiary-entry');
-    await expect(entries).toHaveCount(8);  // villagers are not monsters
-    await expect(entries.locator('strong')).toHaveText(['Pompon', 'Gloubi', 'Champi', 'Piou', 'Croa', 'Bloup', 'Zapou', 'Ploufi']);
+    await expect(entries).toHaveCount(9);  // villagers are not monsters
+    await expect(entries.locator('strong')).toHaveText(['Pompon', 'Gloubi', 'Champi', 'Piou', 'Croa', 'Bloup', 'Zapou', 'Ploufi', 'Cristi']);
     await page.locator('.bestiary-entry[data-species="mushroom"]').click();
     const detail = page.locator('#bestiary-detail');
     await expect(detail.locator('h2')).toHaveText('Champi');
@@ -1026,7 +1026,7 @@ test.describe('the bigger world', () => {
     await expect(page.locator('#spell-detail h2')).toHaveText('Soin');
     // Emptied (the menu stops time: it happens at once).
     await page.locator('#spell-edit').click();
-    await expect(page.locator('.spell-choice')).toHaveCount(3);  // none, heal, detection (the shield is for battles)
+    await expect(page.locator('.spell-choice')).toHaveCount(4);  // none, heal, detection, way out (the shield is for battles)
     await page.locator('#spell-choice-none').click();
     await page.locator('#spell-confirm').click();
     await expect(page.locator('#spell-slot-2')).toHaveAttribute('data-spell', 'none');
@@ -1349,4 +1349,32 @@ test('what the page sends to the game is bounded, and nothing breaks the securit
   expect(Number.isFinite(after.camera.yaw)).toBe(true);
   expect(Number.isFinite(after.camera.pitch)).toBe(true);
   expect(problems).toEqual([]);
+});
+
+test('at the cave\'s mouth, "Entrer" leads inside in a fade to black, "Sortir" back out; the map stays outside', async ({ page }) => {
+  await openGame(page, '?seed=5&new&frozen');
+  const map = await page.evaluate(() => window.monstres.map());
+  const cave = map.cave;
+  const fx = cave.mouthX - cave.x, fz = cave.mouthZ - cave.z;
+  const l = Math.hypot(fx, fz);
+  // Inside the arch, in front of its dark hollow.
+  await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(1); },
+    [cave.mouthX - fx / l * 2.0, cave.mouthZ - fz / l * 2.0]);
+  const context = page.locator('#context');
+  await expect(context).toBeVisible();
+  await expect(context).toContainText('Grotte aux Cristaux');
+  await context.getByRole('menuitem', { name: 'Entrer' }).click();
+  await expect.poll(async () => (await state(page)).player.place).toBe('cave');
+  await expect(page.locator('#fade')).not.toHaveClass(/on/);
+  const inside = await state(page);
+  expect(inside.player.zone).toBe('cave');
+  // On the map: at the mouth.
+  expect(Math.hypot(inside.player.mapX - cave.mouthX, inside.player.mapZ - cave.mouthZ)).toBeLessThan(4);
+  // Cristis wait in the cave.
+  expect(inside.creatures.filter((c) => c.species === 'cristi').length).toBeGreaterThanOrEqual(7);
+  // Back to the way out.
+  await page.evaluate(() => { window.monstres.input.move(0, -1); window.monstres.step(40); window.monstres.input.move(0, 0); });
+  await expect(context).toContainText('Sortir');
+  await context.getByRole('menuitem', { name: 'Sortir' }).click();
+  await expect.poll(async () => (await state(page)).player.place).toBe('outside');
 });

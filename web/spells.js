@@ -24,6 +24,10 @@
     detect: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/>' +
       '<path d="M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>',
+    // Way out: a winding path to a door.
+    wayOut: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M4 20c4 0 4-5 8-5s4-5 8-5"/><path d="M16 3h5v7"/>' +
+      '<circle cx="4" cy="20" r="1.2"/></svg>',
   };
   const WHY = {
     cooldown: 'en recharge',
@@ -33,6 +37,7 @@
     mana: 'pas assez de mana',
     active: 'déjà actif',
     training: 'inutile à l’entraînement',
+    outside: 'seulement dans une grotte ou un bâtiment',
   };
   const spellName = (id) => (LORE.spells[id] || { name: id }).name;
 
@@ -121,7 +126,7 @@
     if (id === 'none') return [el('p', { className: 'facts', textContent: 'Aucun sort : le bouton n’apparaît pas.' })];
     const known = game.spells().known.find((k) => k.id === id) || {};
     const kinds = known.combat && known.adventure ? 'combat et aventure' : known.combat ? 'combat seulement' : 'aventure seulement';
-    const wait = id === 'mercy' ? 'jusqu’à la fin du combat' : id === 'detect' ? 'dure 1 min'
+    const wait = id === 'mercy' ? 'jusqu’à la fin du combat' : id === 'detect' || id === 'wayOut' ? 'dure 1 min'
       : `recharge ${known.cooldown} s`;
     return [
       el('p', { textContent: (LORE.spells[id] || {}).text || '' }),

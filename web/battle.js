@@ -97,7 +97,33 @@
       'stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>',
     teleport: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round"><ellipse cx="12" cy="18" rx="8" ry="3"/><path d="M12 15V3M8 7l4-4 4 4"/></svg>',
+    door: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M3 21h18"/><circle cx="14.5" cy="12.5" r="1"/></svg>',
   };
+
+  // ---- Doors (interior.hpp): in a fade to black of 0.3 s ----
+  const fade = $('fade');
+  let fading = false;
+  function goThrough() {
+    if (fading) return;
+    fading = true;
+    fade.classList.add('on');
+    setTimeout(() => {
+      if (game) game.door();
+      // The new place is set up with the next frame: then the light comes back.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        fade.classList.remove('on');
+        setTimeout(() => { fading = false; }, 150);
+      }));
+    }, 150);
+  }
+  // What the panel at a door says: where it leads (or where one is), and what to do.
+  function doorTitle(d) {
+    const doors = LORE.doors;
+    if (d.place === 'cave') return doors.cave;
+    if (d.place === 'tower') return d.action === 'climb' ? doors.roof : doors.tower;
+    return doors.house[d.building] || doors.house.cottage;
+  }
 
   const action = (id, label, enabled, onClick) => {
     const button = el('button', { type: 'button', className: id, id: `action-${id}`, disabled: !enabled });
@@ -173,7 +199,15 @@
     } else {
       const c = selected >= 0 && game.selected();
       const t = !c && object >= 0 ? game.object(object) : null;
-      if (t && t.kind === 'teleporter') {
+      if (b.door && !c) {
+        const d = b.door;
+        key = `door/${d.action}/${d.place}/${d.building}`;
+        build = () => {
+          contextTitle.replaceChildren(doorTitle(d));
+          contextActions.replaceChildren(action('door', LORE.doors.actions[d.action] || 'Entrer', true, goThrough));
+          contextNote.textContent = '';
+        };
+      } else if (t && t.kind === 'teleporter') {
         const reachable = game.teleporters().list.filter((x) => x.reachable).length;
         key = `teleporter/${t.id}/${t.known}/${t.here}/${reachable}`;
         build = () => {

@@ -472,12 +472,77 @@ Les caractéristiques des monstres et du magicien sont des règles du jeu
 (`monster_stats`, `wizard_stats` dans `src/core/world.cpp`) ; les noms et
 descriptions, eux, sont dans `web/lore.js`.
 
+## Intérieurs
+
+On entre dans la grotte aux Cristaux, dans les maisons du village et dans la
+tour des ruines (`src/core/interior.cpp`). Près d'une porte, son ouverture
+s'illumine et le panneau d'actions (là où s'affiche « S'entraîner ») propose
+« Entrer » (« Grotte aux Cristaux », « Maison », « Grande maison », « Hutte »,
+« Tour des ruines ») ; dedans, « Sortir » à la porte. Le passage se fait dans
+un fondu au noir de 0,3 s (`#fade`, `web/battle.js`), le temps de construire
+l'intérieur. Dedans, la carte du monde montre le joueur à la porte par
+laquelle il est entré (pas de carte de l'intérieur pour l'instant).
+
+- **Le principe** : un intérieur est un monde à part, tiré de la graine et de
+  sa porte. En entrant, les objets, le sol et les créatures du dehors sont mis
+  de côté (`World::outdoors`) ; le monde devient celui de l'intérieur : ses
+  objets, un sol plat à y = 0, des murs et un plafond (`World::interior` :
+  des capsules et des boîtes, `wall_distance`, `ceiling_height`,
+  `open_distance`). En sortant, le dehors revient tel qu'il était. Toute la
+  physique, les combats et les sorts marchent tels quels ; les murs arrêtent
+  les marcheurs.
+- **La grotte aux Cristaux** : un large couloir depuis l'arche, puis 4 à 6
+  grandes salles (7 à 11 m de rayon : de la place pour combattre) reliées par
+  des tunnels de 6 à 8 m de large, aux parois irrégulières qui s'arrondissent
+  jusqu'au plafond (7 à 11 m). Des rochers, des cristaux lumineux par terre, au plafond
+  et dans les parois, et 7 à 10 Cristis.
+- **Les maisons** : une pièce par maison (rectangulaire, carrée ou ronde pour
+  la hutte), meublée différemment dans chacune : table et chaises, lit(s),
+  cheminée au feu qui éclaire, étagères de livres, tapis, tonneaux, caisses.
+- **La tour des ruines** : une grande salle ronde ; un escalier tourne le long
+  du mur jusqu'à un palier sous une trappe, qui mène au sommet de la tour (son
+  sol en ruine, entre les créneaux) ; la trappe, là-haut, ramène au palier.
+- **La caméra** : partout, elle garde sa distance. Ce qui se trouve entre elle
+  et ce qu'elle regarde (un tronc, un rocher, une maison, un pilier de la
+  grotte) devient transparent, en pointillé fin (`View::fade_*`, le shader
+  laisse tomber une partie de ses pixels). Dedans, les murs et le plafond ne
+  sont dessinés que vus de l'intérieur : la caméra peut passer derrière, la
+  pièce (ou la grotte) se voit comme une maison de poupée. Seule une colline,
+  dehors, la fait encore s'approcher.
+- **Le sort Fil d'Ariane** (aventure, gratuit) : dans une grotte ou un
+  bâtiment, pendant 1 minute, la lumière du bâton montre le chemin vers
+  l'entrée. Elle suit le chemin réel (tunnels, détours autour des parois et des
+  rochers) : le sol de l'intérieur est quadrillé tous les 50 cm, chaque case
+  sait à combien de pas elle est de la porte (`map_way_out`, `way_out`).
+- **Le rendu** : dedans, ni terrain, ni paysage, ni ciel, ni météo : la
+  coquille de l'intérieur (un seul maillage, `MeshId::InteriorShell`,
+  `src/render/interior_mesh.cpp` : la surface de la grotte calculée sur une
+  grille de 45 cm, celle même sur laquelle grimpe Cristi) et ses objets (une
+  liste construite une fois en entrant). La grotte est sombre et brumeuse,
+  éclairée par ses cristaux, le bâton du magicien et les Cristis ; les
+  maisons, par la cheminée et les fenêtres.
+- **Les sauvegardes** : une partie sauvegardée dedans enregistre le monde du
+  dehors tel qu'il a été laissé, puis l'intérieur et la place du joueur
+  (version 22) : au chargement, on se retrouve au même endroit.
+
 ## Espèces
 
 Monstres : Pompon (renard des braises, feu), Gloubi (gelée, eau), Champi
 (champignon, nature), Piou (oiseau, air), Croa (corbeau, ombre et air), Bloup
 (poisson, eau), Zapou (hérisson aux piquants lumineux, électricité : collines, ruines, grotte,
-château) et Ploufi (axolotl, eau : bords de l'eau, côte, forêt). Pompon,
+château), Ploufi (axolotl, eau : bords de l'eau, côte, forêt) et Cristi
+(boule de poils bleu nuit aux grands yeux et aux oreilles pointues, des cristaux
+magiques plantés dans le dos, arcane : seulement dans la grotte aux Cristaux).
+Les Cristis attendent immobiles par terre, sur les parois ou au plafond, à
+peine distincts des cristaux ; ils détalent quand on s'approche (3 m) et se
+laissent tomber au sol pour combattre. Quand le joueur dirige un Cristi en
+combat (ou à l'entraînement), il grimpe partout : le sol, les rochers, les
+troncs, les maisons, les meubles, les parois et le plafond des intérieurs
+(`surface_distance` : le sol ou l'intérieur, et les boîtes des objets aux
+arêtes arrondies, fondues dans le sol). Pousser vers un mur le fait monter, il
+passe les angles et continue de l'autre côté, la tête en bas au plafond. La direction « en avant » suit la surface d'un
+angle à l'autre (`climb_steered`, `World::climb_forward`) et la caméra se
+retourne avec lui en douceur (`Camera::up`). Pompon,
 Zapou et Ploufi sont les trois compagnons qu'on peut choisir en début de
 partie ; Pompon se rencontre aussi, rarement, dans les prairies. Les
 caractéristiques, attaques et façons de combattre de chaque espèce sont dans
@@ -870,6 +935,10 @@ sauvegarde est lu sans construire son monde (`peek_save`,
 `monstres_delete_slot`, `monstres_new_game`, `monstres_import_save`
 (`src/platform/web/main.cpp`) ; dans la console : `monstres.saves()`,
 `monstres.playSave(n)`, `monstres.newGame(n, nom, graine, apparence, compagnon)`.
+
+Version 22 : Cristi (le bestiaire et les compteurs comptent 10 espèces) et
+l'endroit où se trouve le joueur (dehors, ou dans un intérieur : sa porte et sa
+place).
 
 ## Sécurité
 

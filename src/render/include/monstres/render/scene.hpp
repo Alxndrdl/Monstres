@@ -31,6 +31,7 @@ struct Camera {
   CameraSubject subject = CameraSubject::Magician;
   CameraSubject previous = CameraSubject::Magician;
   float blend = 1;      // 0: on `previous`, 1: on `subject`
+  Vec3 up{0, 1, 0};     // turns over with Cristi on a wall or the ceiling (update_camera)
 };
 
 // Who the camera should follow now.
@@ -47,6 +48,7 @@ Mat4 multiply(const Mat4& a, const Mat4& b);
 Mat4 inverse(const Mat4& m);
 Mat4 perspective(float fov_y_radians, float aspect, float near_z, float far_z);
 Mat4 look_at(float eye_x, float eye_y, float eye_z, float target_x, float target_y, float target_z);
+Mat4 look_at_up(float eye_x, float eye_y, float eye_z, float target_x, float target_y, float target_z, Vec3 up);
 
 inline constexpr float kShadowHeight = 0.045f;  // above the ground and the path
 
@@ -84,7 +86,9 @@ inline constexpr float kFogStart = 30.0f, kFogHalf = 1800.0f, kFogEnd = 9000.0f;
 void build_dynamic(const World& world, float time, DrawList& list, int selected = -1, const Frustum* view = nullptr);
 
 // How far the camera can be from the target (tx, ty, tz) along the unit
-// direction (dx, dy, dz) without an object in between, at most `wanted`.
+// direction (dx, dy, dz), at most `wanted`: only a hill in between brings it
+// closer (objects show through instead, View::fade_*; inside, the walls are
+// not drawn from behind).
 float camera_distance(const World& world, float tx, float ty, float tz, float dx, float dy, float dz,
                       float wanted);
 
@@ -110,7 +114,7 @@ float night_amount(const World& world);
 // Camera matrices, sky and lighting (time of day, lanterns...) for one frame.
 View build_view(const World& world, const Camera& camera, float aspect, float time);
 // The same from any place, looking at `target` (the arrival's flight, intro.hpp).
-View build_view_from(const World& world, Vec3 eye, Vec3 target, float aspect, float time);
+View build_view_from(const World& world, Vec3 eye, Vec3 target, float aspect, float time, Vec3 up = {0, 1, 0});
 
 // A portrait for the menus: one figure (see add_portrait_figure), framed
 // from a little above, lit from the front, without sky (draw it with

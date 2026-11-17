@@ -108,6 +108,9 @@ inline void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<cons
   add_rig(list, rig, poses, body, std::span<const Color>(&tint, 1), size, glow_slot);
 }
 
+// How a body is turned: around the vertical (its facing), or, clinging to a
+// wall or the ceiling (Body::up), with its back along that surface's normal.
+Quat body_rotation(const Body& body);
 // Where the crystal of the magician's staff is (its right hand).
 Vec3 crystal_position(const Body& player);
 

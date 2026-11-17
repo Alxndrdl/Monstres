@@ -1,5 +1,7 @@
 #include "monstres/core/save.hpp"
 
+#include "monstres/core/interior.hpp"
+
 #include "monstres/core/battle.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
@@ -119,6 +121,7 @@ namespace {
 
 constexpr uint32_t kMaxCreaturesInSave = 4096;
 constexpr size_t kSpeciesCountV18 = 7;  // before Zapou and Ploufi
+constexpr size_t kSpeciesCountV21 = 9;  // before Cristi
 
 // Chromatic (1), elemental (2), the build (bits 2-3).
 uint8_t forms_byte(const Genes& g) {
@@ -155,8 +158,10 @@ bool read_body(Reader& in, Body& b, bool with_speed) {
 
 }  // namespace
 
-std::vector<uint8_t> serialize(const World& w) {
-  Writer out;
+namespace {
+
+// Everything but where the player is (inside or out).
+void write_world(Writer& out, const World& w) {
   out.bytes(kMagic, sizeof kMagic);
   out.u32(kSaveVersion);
   out.u64(w.seed);
@@ -251,6 +256,25 @@ std::vector<uint8_t> serialize(const World& w) {
     out.u16(w.released_count[s]);
   }
   out.u32(w.battles_won);
+}
+
+}  // namespace
+
+std::vector<uint8_t> serialize(const World& w) {
+  Writer out;
+  // Inside: the world outside as it was left, then where the player is inside.
+  if (inside(w)) {
+    write_world(out, outside_world(w));
+  } else {
+    write_world(out, w);
+  }
+  out.u8(static_cast<uint8_t>(w.place.kind));
+  if (inside(w)) {
+    out.u32(w.place.door);
+    out.vec3(w.player.pos);
+    out.f32(w.player.facing_x);
+    out.f32(w.player.facing_z);
+  }
   return out.take();
 }
 
@@ -286,8 +310,9 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_looks = version >= 19;   // the magician's look, Zapou and Ploufi, the main quest
   const bool with_victories = version >= 20;  // the battles won
   const bool with_new_forest = version >= 21;  // the bigger forest and its clearing
+  const bool with_places = version >= 22;      // inside a cave, a house, the tower; Cristi
   // Species in the bestiary and the counts: two more from version 19.
-  const size_t species_saved = with_looks ? kSpeciesCount : kSpeciesCountV18;
+  const size_t species_saved = with_places ? kSpeciesCount : with_looks ? kSpeciesCountV21 : kSpeciesCountV18;
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -507,6 +532,19 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     }
   }
   if (with_victories && !in.u32(w.battles_won)) return fail(error, LoadError::Corrupt);
+  // Where the player is: inside a cave, a house, the tower (version 22).
+  uint8_t place = 0;
+  Body inner;
+  if (with_places) {
+    if (!in.u8(place) || place >= static_cast<uint8_t>(PlaceKind::Count)) return fail(error, LoadError::Corrupt);
+    if (place != 0) {
+      const bool ok = in.u32(w.place.door) && in.vec3(inner.pos) && in.f32(inner.facing_x) && in.f32(inner.facing_z);
+      if (!ok || !std::isfinite(inner.pos.x) || !std::isfinite(inner.pos.y) || !std::isfinite(inner.pos.z) ||
+          !std::isfinite(inner.facing_x) || !std::isfinite(inner.facing_z)) {
+        return fail(error, LoadError::Corrupt);
+      }
+    }
+  }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
   if (!whole) return w;
 
@@ -584,6 +622,28 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   if (!with_victories) {
     for (const uint16_t n : w.beaten_count) w.battles_won += n > 0 ? 1 : 0;
     w.battles_won += w.rival_wins;
+  }
+  // Saved inside: in again, where the player stood (if it is a place to stand).
+  if (place != 0) {
+    const Place where{static_cast<PlaceKind>(place), w.place.door};
+    w.place = {};
+    if (enter_place(w, where)) {
+      const Interior& room = w.interior;
+      const Vec3 p = inner.pos;
+      const bool fits = p.x > room.bounds.min.x && p.x < room.bounds.max.x && p.z > room.bounds.min.z &&
+                        p.z < room.bounds.max.z && p.y >= 0 && p.y < room.bounds.max.y &&
+                        wall_distance(room, p.x, p.z) > 0.3f && open_distance(room, p + Vec3{0, 0.5f, 0}) > 0.2f;
+      if (fits) {
+        w.player.pos = p;
+        const float l = std::sqrt(inner.facing_x * inner.facing_x + inner.facing_z * inner.facing_z);
+        if (l > 1e-3f) {
+          w.player.facing_x = inner.facing_x / l;
+          w.player.facing_z = inner.facing_z / l;
+        }
+        w.player.on_ground = false;
+        if (!w.creatures.empty()) w.creatures[0].body.pos = p;
+      }
+    }
   }
   if (!with_builds) {
     // Before version 18: the team members get their traits (as if they

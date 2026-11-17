@@ -117,14 +117,14 @@ TEST_CASE("grass and flowers are small, double-sided and stand on the ground") {
   CHECK(bounds(model(MeshId::GrassTall)).max[1] > bounds(model(MeshId::GrassShort)).max[1]);
 }
 
-TEST_CASE("only the shadow, smoke, ripples, sparks, the rune circle and the weather are transparent") {
+TEST_CASE("only the shadow, smoke, ripples, sparks, the rune circle, the weather and doors' glow are transparent") {
   for (size_t id = 0; id < kMeshCount; ++id) {
     const auto mesh = static_cast<MeshId>(id);
     if (!model_name(mesh)) continue;
     CAPTURE(model_name(mesh));
     const bool expected = mesh == MeshId::Shadow || mesh == MeshId::Smoke || mesh == MeshId::Ripple ||
                           mesh == MeshId::Sparkle || mesh == MeshId::RuneCircle || mesh == MeshId::RainShaft ||
-                          mesh == MeshId::Bolt || mesh == MeshId::Rain || mesh == MeshId::Snow;
+                          mesh == MeshId::Bolt || mesh == MeshId::Rain || mesh == MeshId::Snow || mesh == MeshId::DoorGlow;
     CHECK(models()[id].transparent == expected);
     if (expected) CHECK(mesh > MeshId::Ground);  // drawn after the opaque meshes
   }
@@ -138,7 +138,8 @@ TEST_CASE("village and ruins models match their collision boxes") {
                    Expect{MeshId::HouseChimney, ObjectKind::HouseChimney, 0, false},
                    Expect{MeshId::HouseHut, ObjectKind::HouseHut, 0, false}, Expect{MeshId::Fence, ObjectKind::Fence},
                    Expect{MeshId::Well, ObjectKind::Well, 0, false}, Expect{MeshId::Barrel, ObjectKind::Barrel},
-                   Expect{MeshId::Lamp, ObjectKind::Lamp}, Expect{MeshId::Tower, ObjectKind::Tower},
+                   Expect{MeshId::Lamp, ObjectKind::Lamp},
+                   Expect{MeshId::Tower, ObjectKind::Tower, 0, false},  // its merlons rise above its broken top
                    Expect{MeshId::RuinWallLow, ObjectKind::RuinWall, 0},
                    Expect{MeshId::RuinWallHigh, ObjectKind::RuinWall, 1},
                    Expect{MeshId::FallenPillar, ObjectKind::FallenPillar}, Expect{MeshId::Rubble, ObjectKind::Rubble},

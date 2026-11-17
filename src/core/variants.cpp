@@ -81,6 +81,13 @@ constexpr Genetics kGenetics[] = {
        {"gills", Shape, 2, {{{"small", Common}, {"large", Uncommon}}}},
        {"tail", Shape, 2, {{{"short", Common}, {"long", Rare}}}}}},
      Element::Nature},
+    // Cristi: a ball of fur, the crystals on its back glow like the cave's.
+    {Family::Beast, 4,
+     {{kSex,
+       {"crystal", Color, 3, {{{"violet", Common}, {"cyan", Uncommon}, {"rose", Rare}}}},
+       {"ears", Shape, 2, {{{"pointed", Common}, {"long", Uncommon}}}},
+       {"crown", Shape, 2, {{{"three", Common}, {"crown", Rare}}}}}},
+     Element::Light},
 };
 static_assert(std::size(kGenetics) == kSpeciesCount);
 
@@ -427,6 +434,7 @@ constexpr Measures kMeasures[] = {
       {350, 2400},  // Fish
       {260, 900},   // Spark
       {300, 1300},  // Axolotl
+      {220, 300},   // Cristi
 };
 static_assert(std::size(kMeasures) == kSpeciesCount);
 }  // namespace

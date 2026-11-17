@@ -12,6 +12,7 @@ add_library(monstres_core STATIC
   quests.cpp
   continent.cpp
   weather.cpp
+  interior.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

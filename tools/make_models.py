@@ -1537,6 +1537,10 @@ def tower():
             continue  # fallen
         c = (2.15 * math.cos(a), 9.2 + h / 2, -2.15 * math.sin(a))
         box(m, c, (0.32, h / 2, 0.32), shade(RUIN_STONE, 0.9 + 0.15 * hash01(1102, i)))
+    # The trapdoor in the middle of its top (inside, a stair goes up to it).
+    box(m, (0, 9.2, 0), (0.5, 0.03, 0.5), DOOR)
+    for z in (-0.3, 0.3):
+        box(m, (0, 9.235, z), (0.48, 0.008, 0.04), METAL)
     # Door and windows, dark inside; a band of glowing runes.
     box(m, (0, 1.25, -2.38), (0.62, 1.25, 0.1), RUIN_DARK)
     frustum(m, lambda p: (p[0], 2.5 + p[2], -2.36 - p[1]), 0.62, 0.62, 0.1, 10, RUIN_DARK)
@@ -2215,6 +2219,224 @@ def bulb():
     return m
 
 
+# ---------------------------------------------------------------- Cristi
+
+FLUFF = (0.20, 0.16, 0.30, 1)       # night-blue fur: hard to see among the cave's rocks
+FLUFF_LIGHT = (0.42, 0.36, 0.56, 1)
+EAR_INSIDE = (0.78, 0.55, 0.85, 1)
+
+
+def cristi_body():
+    """Cristi: a round ball of fur (rig in src/render/characters.cpp), tufts all over."""
+    m = Mesh()
+    def fur(n, face):
+        light = n[2] < -0.35 and n[1] < 0.25  # its front, below the eyes: paler
+        return shade(FLUFF_LIGHT if light else FLUFF, 0.92 + 0.16 * hash01(1800, face))
+    blob(m, (0, 0, 0), (0.2, 0.18, 0.2), 0.05, 1800, fur, detail=2)
+    golden = math.pi * (3 - math.sqrt(5))
+    for k in range(46):  # tufts of fur, spread evenly, pointing outwards
+        y = 1 - 2 * (k + 0.5) / 46
+        r = math.sqrt(1 - y * y)
+        d = (r * math.cos(golden * k), y, r * math.sin(golden * k))
+        if d[1] < -0.55:
+            continue  # not under it
+        base = (0.19 * d[0], 0.17 * d[1], 0.19 * d[2])
+        axis = normalize(cross((0.0, 1.0, 0.0), d)) if abs(d[1]) < 0.999 else (1.0, 0.0, 0.0)
+        angle = math.acos(max(-1.0, min(1.0, d[1])))
+        def turn(p, axis=axis, angle=angle, base=base):
+            c, s_ = math.cos(angle), math.sin(angle)
+            q = add(add(mul(p, c), mul(cross(axis, p), s_)), mul(axis, dot(axis, p) * (1 - c)))
+            return add(base, q)
+        frustum(m, turn, 0.035, 0.0, 0.05 + 0.02 * hash01(1801, k), 5, shade(FLUFF, 0.9 + 0.2 * hash01(1802, k)))
+    return m
+
+
+def cristi_ear():
+    """A pointed ear, up from its base, its pale inside towards -Z."""
+    m = Mesh()
+    frustum(m, lambda p: (p[0], p[1], p[2] * 0.6), 0.06, 0.0, 0.17, 8, FLUFF)
+    frustum(m, lambda p: (p[0] * 0.7, p[1] + 0.015, p[2] * 0.3 - 0.022), 0.05, 0.0, 0.13, 8, EAR_INSIDE)
+    return m
+
+
+def cristi_leg():
+    """A short round paw under the hip."""
+    m = Mesh()
+    blob(m, (0, -0.035, -0.005), (0.045, 0.045, 0.05), 0.02, 1803, solid(FLUFF), detail=1)
+    return m
+
+
+def cristi_crystal():
+    """The crystals set in its back: white (tinted and made to glow by the game)."""
+    m = Mesh()
+    for k, (x, z, h, r, lean) in enumerate(((0, 0, 0.13, 0.045, 0.0), (0.05, 0.03, 0.08, 0.03, 0.4),
+                                             (-0.045, 0.035, 0.07, 0.028, -0.4))):
+        def t(p, x=x, z=z, lean=lean):
+            return (x + p[0] + lean * p[1], p[1], z + p[2] + 0.25 * p[1])
+        frustum(m, t, r, r * 0.85, h * 0.7, 6, WHITE)
+        frustum(m, lambda p, t=t, h=h: t((p[0], p[1] + h * 0.7, p[2])), r * 0.85, 0, h * 0.4, 6, shade(WHITE, 0.9))
+    return m
+
+
+def cristi_shards():
+    """More crystals around the first ones (the rare "crown")."""
+    m = Mesh()
+    for k in range(4):
+        a = TAU * k / 4 + 0.4
+        cx, cz = 0.085 * math.cos(a), 0.085 * math.sin(a) + 0.02
+        def t(p, cx=cx, cz=cz, a=a):
+            return (cx + p[0] + 0.35 * math.cos(a) * p[1], p[1] - 0.02, cz + p[2] + 0.35 * math.sin(a) * p[1])
+        frustum(m, t, 0.022, 0.018, 0.045, 6, WHITE)
+        frustum(m, lambda p, t=t: t((p[0], p[1] + 0.045, p[2])), 0.018, 0, 0.03, 6, shade(WHITE, 0.9))
+    return m
+
+
+# ---------------------------------------------------------------- inside
+
+LINEN = (0.93, 0.90, 0.84, 1)
+QUILT = (0.70, 0.30, 0.28, 1)
+BOOKS = [(0.62, 0.22, 0.20, 1), (0.25, 0.40, 0.62, 1), (0.30, 0.52, 0.30, 1), (0.82, 0.68, 0.30, 1)]
+EMBER = (1.0, 0.55, 0.18, 1)
+FLAME = (1.0, 0.80, 0.35, 1)
+
+
+def table():
+    """1.4 x 0.8 m, its top at 0.75 m."""
+    m = Mesh()
+    box(m, (0, 0.725, 0), (0.7, 0.025, 0.4), WOOD)
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            box(m, (sx * 0.62, 0.35, sz * 0.32), (0.035, 0.35, 0.035), shade(WOOD, 0.8))
+    box(m, (0, 0.62, 0), (0.6, 0.03, 0.3), shade(WOOD, 0.7))  # the frame under the top
+    return m
+
+
+def chair():
+    """0.45 m wide, the seat at 0.45 m, its back at +Z."""
+    m = Mesh()
+    box(m, (0, 0.44, 0), (0.22, 0.025, 0.22), WOOD)
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            box(m, (sx * 0.19, 0.21, sz * 0.19), (0.022, 0.21, 0.022), shade(WOOD, 0.8))
+        box(m, (sx * 0.19, 0.7, 0.2), (0.022, 0.25, 0.022), shade(WOOD, 0.8))
+    for y in (0.62, 0.84):
+        box(m, (0, y, 0.2), (0.19, 0.035, 0.015), WOOD)
+    return m
+
+
+def bed():
+    """1 x 2 m, its head at +Z."""
+    m = Mesh()
+    box(m, (0, 0.16, 0), (0.5, 0.12, 1.0), TIMBER)
+    box(m, (0, 0.33, 0.02), (0.46, 0.06, 0.95), LINEN)
+    box(m, (0, 0.4, -0.25), (0.48, 0.035, 0.68), QUILT)
+    box(m, (0, 0.43, 0.72), (0.3, 0.05, 0.15), shade(LINEN, 1.05))
+    box(m, (0, 0.45, 0.98), (0.5, 0.38, 0.03), TIMBER)  # the headboard
+    box(m, (0, 0.3, -0.98), (0.5, 0.22, 0.03), TIMBER)
+    return m
+
+
+def shelf():
+    """1.2 m wide, 1.8 m high, its back against the wall (+Z); books and jars."""
+    m = Mesh()
+    box(m, (0, 0.9, 0.18), (0.6, 0.9, 0.015), shade(WOOD, 0.7))
+    for sx in (-1, 1):
+        box(m, (sx * 0.585, 0.9, 0), (0.015, 0.9, 0.2), shade(WOOD, 0.85))
+    for k, y in enumerate((0.04, 0.6, 1.16, 1.76)):
+        box(m, (0, y, 0), (0.57, 0.015, 0.19), WOOD)
+        if k == 3:
+            continue
+        x = -0.5
+        j = 0
+        while x < 0.45:
+            w = 0.03 + 0.03 * hash01(1900 + k, j)
+            h = 0.16 + 0.14 * hash01(1910 + k, j)
+            if hash01(1920 + k, j) < 0.2:  # a jar
+                frustum(m, translate(x + 0.06, y + 0.015, 0), 0.06, 0.05, 0.14, 8, shade(GLASS, 0.9), top_cap=METAL)
+                x += 0.16
+            else:
+                box(m, (x + w, y + 0.015 + h / 2, 0.02), (w, h / 2, 0.11), BOOKS[j % len(BOOKS)])
+                x += 2 * w + 0.01
+            j += 1
+    return m
+
+
+def hearth():
+    """A stone fireplace 1.6 m wide, its back at +Z (its fire: hearth_fire)."""
+    m = Mesh()
+    box(m, (0, 0.06, -0.05), (0.8, 0.06, 0.4), DARK_STONE)
+    for sx in (-1, 1):
+        box(m, (sx * 0.62, 0.62, 0), (0.18, 0.56, 0.32), STONE)
+    box(m, (0, 1.24, -0.02), (0.84, 0.07, 0.37), shade(TIMBER, 1.1))  # the mantel
+    box(m, (0, 1.6, 0.12), (0.5, 0.3, 0.2), STONE)
+    box(m, (0, 0.62, 0.28), (0.45, 0.56, 0.04), CAVE_DARK)
+    for k in range(3):  # logs
+        box(m, (-0.18 + 0.18 * k, 0.17, 0.05), (0.06, 0.05, 0.22), BARK)
+    for k in range(2):  # pots on the mantel
+        frustum(m, translate(-0.5 + 1.0 * k, 1.31, 0), 0.07, 0.06, 0.12, 8, shade(MUD, 0.9))
+    return m
+
+
+def hearth_fire():
+    """The flames of the hearth (made to glow by the game)."""
+    m = Mesh()
+    for k, (x, z, h) in enumerate(((-0.12, 0.05, 0.42), (0.1, 0.0, 0.36), (0.0, 0.1, 0.5), (0.2, 0.1, 0.25),
+                                   (-0.22, 0.12, 0.28))):
+        frustum(m, translate(x, 0.2, z), 0.09, 0.0, h, 6, FLAME if k % 2 else EMBER)
+    return m
+
+
+def rug():
+    """A woven rug, fits [-1, 1] x [0, 0.02] x [-1, 1] (scaled by the game)."""
+    m = Mesh()
+    colors = [(0.62, 0.24, 0.22, 1), (0.85, 0.66, 0.32, 1), (0.30, 0.38, 0.58, 1)]
+    rings = 4
+    for r in range(rings):
+        lo, hi = 1 - (r + 1) / rings, 1 - r / rings
+        c = colors[r % len(colors)]
+        for (ax, az, bx, bz) in ((-hi, -hi, hi, -lo), (-hi, lo, hi, hi), (-hi, -lo, -lo, lo), (lo, -lo, hi, lo)):
+            m.quad((ax, 0.02, az), (ax, 0.02, bz), (bx, 0.02, bz), (bx, 0.02, az), c)
+    return m
+
+
+def step():
+    """A block of stone, fits [-1, 1] x [0, 2] x [-1, 1] (a step, a landing: scaled by the game)."""
+    m = Mesh()
+    box(m, (0, 1, 0), (1, 1, 1), RUIN_STONE)
+    box(m, (0, 1.9, 0), (1.01, 0.1, 1.01), shade(RUIN_STONE, 1.08))
+    return m
+
+
+def hatch():
+    """The trapdoor of the tower's roof: 1 x 1 m of planks with iron bands, lying flat."""
+    m = Mesh()
+    box(m, (0, 0.02, 0), (0.5, 0.02, 0.5), DOOR)
+    for z in (-0.3, 0.3):
+        box(m, (0, 0.045, z), (0.48, 0.008, 0.04), METAL)
+    blob(m, (0.0, 0.06, 0.0), (0.06, 0.02, 0.06), 0.0, 1950, solid(METAL), detail=0)
+    return m
+
+
+def door_glow():
+    """The light in a door's opening: a soft square in the XY plane facing -Z,
+    fits [-0.5, 0.5]^2, brighter in the middle. Transparent, tinted by the game."""
+    m = Mesh(transparent=True, double_sided=True)
+    n = 6
+    def alpha(x, y):
+        d = max(abs(x), abs(y)) * 2
+        return max(0.0, 1 - d ** 2.5)
+    for i in range(n):
+        for j in range(n):
+            x0, x1 = -0.5 + i / n, -0.5 + (i + 1) / n
+            y0, y1 = -0.5 + j / n, -0.5 + (j + 1) / n
+            corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+            cols = [(1, 1, 1, alpha(x, y)) for x, y in corners]
+            pts = [(x, y, 0) for x, y in corners]
+            m.tri(pts[0], pts[2], pts[1], None, colors=[cols[0], cols[2], cols[1]], normal=(0, 0, -1))
+            m.tri(pts[0], pts[3], pts[2], None, colors=[cols[0], cols[3], cols[2]], normal=(0, 0, -1))
+    return m
+
+
 def all_models():
     models = {
         "cube": cube(),
@@ -2331,6 +2553,21 @@ def all_models():
         "bush_far": bush_far(),
         "sparkle": sparkle(),
         "rune_circle": rune_circle(),
+        "cristi_body": cristi_body(),
+        "cristi_ear": cristi_ear(),
+        "cristi_leg": cristi_leg(),
+        "cristi_crystal": cristi_crystal(),
+        "cristi_shards": cristi_shards(),
+        "table": table(),
+        "chair": chair(),
+        "bed": bed(),
+        "shelf": shelf(),
+        "hearth": hearth(),
+        "hearth_fire": hearth_fire(),
+        "rug": rug(),
+        "step": step(),
+        "hatch": hatch(),
+        "door_glow": door_glow(),
     }
     for v in range(4):
         models[f"rock{v}"] = rock(v)
@@ -2349,7 +2586,7 @@ def all_models():
         models[f"mountain{v}"] = mountain(v)
     # The characters' parts are soft (their lumps are smooth); the rest keeps its facets.
     soft = ("player_", "companion_", "slime_", "mushroom_", "bird_", "villager_", "hair_", "hat_", "crow_", "fish_",
-            "eye", "horn", "bulb", "spark_", "axolotl_")
+            "eye", "horn", "bulb", "spark_", "axolotl_", "cristi_")
     for name, mesh in models.items():
         mesh.finish(soft=name.startswith(soft))
     return models

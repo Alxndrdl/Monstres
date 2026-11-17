@@ -1,4 +1,5 @@
 #include "monstres/core/battle.hpp"
+#include "monstres/core/interior.hpp"
 
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
@@ -36,6 +37,8 @@ constexpr Moves kMoves[] = {
       {"discharge", Burst, true, 19, kBig, 3.0f}}},  // Spark
     {{{"nip", Melee, false, 6, kQuick, 0.8f}, {"water_jet", Projectile, true, 13, kSpecial, 11.0f},
       {"geyser", Burst, true, 18, kBig, 2.8f}}},  // Axolotl
+    {{{"tumble", Melee, false, 7, kQuick, 0.8f}, {"shard", Projectile, true, 13, kSpecial, 12.0f},
+      {"prism", Burst, true, 19, kBig, 3.0f}}},  // Cristi
 };
 static_assert(std::size(kMoves) == kSpeciesCount);
 
@@ -59,6 +62,7 @@ constexpr Temper kTempers[] = {
     {3.5f, 0.7f, 0.0f, 24, 1.0f, 2.0f},   // Fish: holds its place in the lake
     {4.5f, 0.7f, 3.0f, 12, 1.2f, 2.0f},   // Spark: quick, darts in and out
     {3.0f, 0.7f, 3.0f, 28, 0.95f, 2.0f},  // Axolotl: patient, sprays from close by
+    {4.0f, 0.7f, 3.0f, 18, 1.1f, 2.0f},   // Cristi: scuttles around, throws its shards
 };
 static_assert(std::size(kTempers) == kSpeciesCount);
 constexpr float kLeapSpeed = 1.9f;  // a slime leaping at its foe: this much faster
@@ -872,6 +876,7 @@ const SpellInfo& spell_info(SpellId spell) {
       {"shield", true, false, rules::kShieldCooldown, 3},
       {"mercy", true, false, rules::kMercyCooldown, 5},
       {"detect", false, true, rules::kDetectTicks, 6},
+      {"wayOut", false, true, rules::kWayOutTicks, 0},
   };
   static_assert(std::size(kSpells) == kSpellCount);
   const auto i = static_cast<size_t>(spell);
@@ -894,11 +899,15 @@ const char* cannot_cast(const World& w, size_t slot) {
   const SpellId s = current_spells(w)[slot];
   if (s == SpellId::None) return "none";
   if (w.battle.phase == BattlePhase::Flee) return "fleeing";
-  if ((s == SpellId::Mercy && w.battle.mercy) || (s == SpellId::Detect && w.detect_ticks > 0)) return "active";
+  if ((s == SpellId::Mercy && w.battle.mercy) || (s == SpellId::Detect && w.detect_ticks > 0) ||
+      (s == SpellId::WayOut && w.way_out_ticks > 0)) {
+    return "active";
+  }
+  if (s == SpellId::WayOut && !inside(w)) return "outside";
   if (w.spell_cooldowns[static_cast<size_t>(s)] > 0) return "cooldown";
   if (s == SpellId::Mercy && training(w)) return "training";  // no one is hurt there
   const Monster* a = active_monster(w);
-  if (s != SpellId::Detect) {
+  if (s != SpellId::Detect && s != SpellId::WayOut) {
     if (!a) return "noCompanion";
     if (s == SpellId::Heal && a->hp >= monster_fight_stats(*a).hp) return "full";
   }
@@ -1022,6 +1031,8 @@ void battle_command(World& w, const Input& in) {
         b.mercy = true;
       } else if (s == SpellId::Detect) {
         w.detect_ticks = rules::kDetectTicks;
+      } else if (s == SpellId::WayOut) {
+        w.way_out_ticks = rules::kWayOutTicks;
       }
       w.wizard.mana = static_cast<uint16_t>(w.wizard.mana - spell_info(s).mana);
       w.spell_cooldowns[static_cast<size_t>(s)] = spell_info(s).cooldown;
@@ -1046,6 +1057,7 @@ void battle_command(World& w, const Input& in) {
       break;
     }
     case Command::HealTeam:
+    case Command::Door:
       if (in.target >= 256 || !can_heal_team(w, static_cast<uint8_t>(in.target))) break;
       for (Monster& m : w.team) m.hp = monster_fight_stats(m).hp;
       if (w.active >= 0 && companion(w).mind == Mind::KnockedOut) companion(w).mind = Mind::Idle;
@@ -1517,6 +1529,7 @@ void battle_resolve(World& w) {
 void spells_step(World& w) {
   for (uint16_t& c : w.spell_cooldowns) c = c > 0 ? static_cast<uint16_t>(c - 1) : 0;
   if (w.detect_ticks > 0) --w.detect_ticks;
+  if (w.way_out_ticks > 0) --w.way_out_ticks;
 }
 
 }  // namespace monstres

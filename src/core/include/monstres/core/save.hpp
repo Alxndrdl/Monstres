@@ -94,7 +94,12 @@ namespace monstres {
 //      the clearing's edge), and fallen logs lie any way (Colliders along
 //      them). Before: the forest's objects and teleporter grow anew
 //      (regrow_forest).
-inline constexpr uint32_t kSaveVersion = 21;
+//  22  Cristi (the bestiary and the counts list 10 species); at the end
+//      where the player is (u8 PlaceKind; inside: u32 index of its door among
+//      the objects, its position, its facing x and z). Saved inside, the
+//      world written is the one outside, as left (interior.hpp). Before:
+//      outside.
+inline constexpr uint32_t kSaveVersion = 22;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

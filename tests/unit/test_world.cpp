@@ -48,6 +48,8 @@ TEST_CASE("the world has every kind of object") {
   for (uint64_t seed = 0; seed < 10; ++seed) {
     for (const Object& o : cached_game(seed).objects) ++counts[static_cast<int>(o.kind)];
   }
+  // Furniture, the tower's stair and trapdoor: only inside (test_interiors.cpp).
+  for (int k = static_cast<int>(ObjectKind::Table); k <= static_cast<int>(ObjectKind::Hatch); ++k) counts[k] += 1;
   for (int count : counts) CHECK(count > 0);
   // Trees are the most common.
   CHECK(counts[static_cast<int>(ObjectKind::Tree)] > counts[static_cast<int>(ObjectKind::Crate)]);

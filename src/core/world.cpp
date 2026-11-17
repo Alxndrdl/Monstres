@@ -1,6 +1,7 @@
 #include "monstres/core/world.hpp"
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/interior.hpp"
 #include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
@@ -415,6 +416,7 @@ struct Surroundings {
   const World& world;
   const Lake& lake;
   const Heightmap& ground;
+  const Interior* interior = nullptr;  // inside: its walls
 
   // Calls f(box) for every object box that may touch `area` (a box may be
   // visited more than once; callers do not mind).
@@ -491,9 +493,20 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
   const bool too_steep = medium == Medium::Land &&
                          s.ground.height(b.pos.x, b.pos.z) - b.pos.y >
                              std::fabs(*coord - start) * rules::kMaxWalkSlope + kStepUp;
+  // Inside: the walls (a body against one may still move away from it). The
+  // floor curves up into them: walkers keep a little away.
+  bool walled = false;
+  if (s.interior) {
+    const float margin = shape.half_width + 0.35f;
+    const float now = wall_distance(*s.interior, b.pos.x, b.pos.z);
+    if (now < margin) {  // moving deeper into it?
+      const float bx = axis == 0 ? start : b.pos.x, bz = axis == 2 ? start : b.pos.z;
+      walled = now < wall_distance(*s.interior, bx, bz);
+    }
+  }
   // Pushed out of one object into another (a gap narrower than the body):
   // do not move along this axis at all.
-  if (too_steep || s.any_overlap(body_box(b, shape)) || wrong_medium(s, b, shape, medium)) {
+  if (walled || too_steep || s.any_overlap(body_box(b, shape)) || wrong_medium(s, b, shape, medium)) {
     *coord = start;
     b.pos.y = y0;
   }
@@ -562,6 +575,7 @@ constexpr SpeciesInfo kSpecies[] = {
     {{0.30f, 0.30f}, 1.3f, 1.3f, 5.0f},  // Fish: swims, jumps out of the water
     {{0.24f, 0.55f}, 2.6f, 5.8f, 5.5f},  // Spark
     {{0.28f, 0.42f}, 1.7f, 3.4f, 4.0f},  // Axolotl
+    {{0.27f, 0.5f}, 2.2f, 5.0f, 4.0f},   // Cristi: climbs too (interior.hpp)
 };
 
 // A companion that flies: it moves like a walker (objects stop it) but stays
@@ -990,6 +1004,7 @@ uint32_t density_in(Zone zone) {
 
 uint32_t species_chance(Species species, Zone zone) {
   if (species == Species::Fish) return zone == Zone::Lake ? 100 : 0;  // the lake's fish
+  if (species == Species::Cristi) return zone == Zone::Cave ? 100 : 0;  // inside the crystal cave only (interior.cpp)
   if (species == Species::Crow) {  // on the roofs, the tower, the castle's towers
     return zone == Zone::Village || zone == Zone::Ruins || zone == Zone::Castle ? 100 : 0;
   }
@@ -1725,7 +1740,7 @@ void build_cave(World& w) {
 }
 
 void build_teleporters(World& w, TeleporterId only) {
-  struct Place {
+  struct Spot {
     TeleporterId id;
     Vec2 spot;   // where it should be
     Vec2 away;   // where to look further if that is taken
@@ -1737,7 +1752,7 @@ void build_teleporters(World& w, TeleporterId only) {
   const float forest_side = w.forest.center.x > 0 ? 1.0f : -1.0f;  // the forest's side of the path
   const float gate = rules::kClearingRadius * outline_scale(w.forest.center, kClearingOutline, forest_side > 0 ? static_cast<float>(kPi) : 0.0f) - 5.0f;
   const Vec2 forest_gate{w.forest.center.x - forest_side * gate, w.forest.center.z};
-  const Place places[] = {
+  const Spot places[] = {
       // On the village square, on the side away from the lake.
       {TeleporterId::Village, {vc.x - lake_side * 7.0f, vc.z + 6.0f}, {-lake_side, 0}, w.village.lake.radius_x > 0},
       // Before the ruins' entrance, towards the path.
@@ -1751,7 +1766,7 @@ void build_teleporters(World& w, TeleporterId only) {
       {TeleporterId::Castle, {w.castle.center.x + w.castle.facing.x * (rules::kCastleHalf + 8.0f), w.castle.center.z + 5.0f},
        w.castle.facing, w.castle.radius > 0},
   };
-  for (const Place& p : places) {
+  for (const Spot& p : places) {
     if (!p.exists || (only != TeleporterId::Count && p.id != only)) continue;
     // The first free spot along `away` (its stones need about 2 m around);
     // in the village, around the square, between the well and the houses.
@@ -1791,6 +1806,12 @@ bool teleporter_position(const World& w, TeleporterId id, Vec3& at) {
 }
 
 Zone zone_at(const World& w, float x, float z) {
+  switch (w.place.kind) {
+    case PlaceKind::Cave: return Zone::Cave;
+    case PlaceKind::House: return Zone::Village;
+    case PlaceKind::Tower: return Zone::Ruins;
+    default: break;
+  }
   if (in_lake(w.village.lake, x, z, 1.5f)) return Zone::Lake;
   if (w.village.lake.radius_x > 0 && in_village(w.village, x, z, 2.0f)) return Zone::Village;
   if (in_ruins(w.ruins, x, z, 3.0f)) return Zone::Ruins;
@@ -1823,6 +1844,7 @@ const MonsterStats& monster_stats(Species species) {
       {28, 6, 6, 8, 7, Element::Water, true},     // Fish
       {26, 8, 5, 12, 9, Element::Electric, true}, // Spark: Zapou
       {36, 6, 8, 7, 8, Element::Water, true},     // Axolotl: Ploufi
+      {30, 8, 9, 9, 10, Element::Arcane, true},   // Cristi: Cristi
   };
   static_assert(std::size(kStats) == static_cast<size_t>(Species::Count));
   const auto i = static_cast<size_t>(species);
@@ -1885,7 +1907,7 @@ Box object_box(const Object& o) {
     case ObjectKind::Barrel:       half = {0.35f, 0.45f, 0.35f}; break;
     case ObjectKind::Lamp:         half = {0.1f, 1.25f, 0.1f}; break;
     // Ruins: matching the models of tools/make_models.py.
-    case ObjectKind::Tower:        half = {2.35f, 5.25f, 2.35f}; break;
+    case ObjectKind::Tower:        half = {2.35f, 0.5f * rules::kRoofHeight, 2.35f}; break;  // up to its broken top
     case ObjectKind::RuinWall:     half = o.variant & 1 ? Vec3{1.5f, 1.1f, 0.28f} : Vec3{1.5f, 0.5f, 0.28f}; break;
     case ObjectKind::Pillar:       half = {0.4f, 0.5f * s.y, 0.4f}; break;
     case ObjectKind::FallenPillar: half = {1.5f, 0.38f, 0.38f}; break;
@@ -1899,8 +1921,17 @@ Box object_box(const Object& o) {
     case ObjectKind::CaveMouth:
     case ObjectKind::Teleporter:   half = {0, 0, 0}; break;  // walked onto
     case ObjectKind::Crystal:      half = {0.35f * s.x, 0.5f * s.x, 0.35f * s.x}; break;
-    default:                half = s; break;  // Crate, Collider
+    // Inside (interior.cpp): matching the models of tools/make_models.py.
+    case ObjectKind::Table:        half = {0.7f, 0.375f, 0.4f}; break;
+    case ObjectKind::Chair:        half = {0.23f, 0.45f, 0.23f}; break;
+    case ObjectKind::Bed:          half = {0.5f, 0.3f, 1.0f}; break;
+    case ObjectKind::Shelf:        half = {0.6f, 0.9f, 0.2f}; break;
+    case ObjectKind::Hearth:       half = {0.8f, 0.7f, 0.35f}; break;
+    case ObjectKind::Rug:
+    case ObjectKind::Hatch:        half = {0, 0, 0}; break;  // walked over
+    default:                half = s; break;  // Crate, Collider, Step
   }
+  if (o.mount != 0) half = {0, 0, 0};  // on a wall or the ceiling: out of the way
   if (!is_round(o.kind) && ((o.yaw >> 14) & 1)) std::swap(half.x, half.z);  // turned 90° or 270°
   const Vec3 center = o.pos + Vec3{0, half.y, 0};
   return {center - half, center + half};
@@ -2112,6 +2143,7 @@ void step(World& w, const Input& in) {
   ++w.tick;
   w.clock = (w.clock + 1) % rules::kTicksPerDay;
   quest_command(w, in);   // teleports, quests accepted or done
+  if (in.command == Command::Door) use_door(w);  // in, out (interior.hpp)
   battle_command(w, in);  // may start or end a battle, or remove a captured monster
   const BattlePhase phase = w.battle.phase;
   // The companion is steered by the joystick (fighting or training).
@@ -2128,14 +2160,17 @@ void step(World& w, const Input& in) {
     my /= len;
   }
   float forward_x, forward_z;
-  if (!battle_forward(w, forward_x, forward_z)) {
+  const bool aimed = battle_forward(w, forward_x, forward_z);
+  bool climbed = false;  // Cristi steered on the walls (World::climbing)
+  if (!aimed) {
     const SinCos sc = sincos16(in.yaw);
     forward_x = -sc.sin;  // forward = (-sin, 0, -cos), right = (cos, 0, -sin)
     forward_z = -sc.cos;
   }
   const float dir_x = -mx * forward_z + my * forward_x;
   const float dir_z = mx * forward_x + my * forward_z;
-  Surroundings s{w, w.village.lake, w.ground};
+  static const Lake kNoLake{};
+  Surroundings s{w, inside(w) ? kNoLake : w.village.lake, w.ground, inside(w) ? &w.interior : nullptr};
 
   // During a battle the magician waits: the joystick moves the companion
   // (before a trainer's battle, the magician walks to its place).
@@ -2154,6 +2189,27 @@ void step(World& w, const Input& in) {
     }
     const int foe = i > 0 ? foe_slot(w, i) : -1;
     const bool preparing = phase == BattlePhase::Prepare && (i == 0 || foe >= 0);
+    // Cristi climbs inside (steered, or wild and waiting); else it lets go and drops to the floor.
+    // Cristi climbs on everything when steered; wild ones, in the cave.
+    const bool climbs = c.species == Species::Cristi &&
+                        ((i == 0 && steered) || (inside(w) && i > 0 && foe < 0 && c.mind != Mind::KnockedOut));
+    if (!climbs && clinging(c.body)) {
+      c.body.up = {0, 1, 0};
+      c.body.facing_y = 0;
+      c.body.on_ground = false;
+      const float l = std::sqrt(c.body.facing_x * c.body.facing_x + c.body.facing_z * c.body.facing_z);
+      c.body.facing_x = l > 1e-3f ? c.body.facing_x / l : 0.0f;
+      c.body.facing_z = l > 1e-3f ? c.body.facing_z / l : -1.0f;
+    }
+    if (climbs && i == 0) {
+      // The joystick's way, along the wall or the ceiling it clings to.
+      const Steer st = battle_ally(w, in, dir_x, dir_z);
+      const float f = st.dir_x * forward_x + st.dir_z * forward_z;
+      const float r = -st.dir_x * forward_z + st.dir_z * forward_x;
+      climb_steered(w, c.body, forward_x, forward_z, aimed, in.yaw, r, f, st.speed);
+      climbed = true;
+      continue;
+    }
     if ((steered && i == 0) || foe >= 0 || preparing) {
       const Steer st = preparing ? battle_prepare(w, i == 0 ? Stand::Ally : Stand::Foe)
                        : i == 0  ? battle_ally(w, in, dir_x, dir_z)
@@ -2217,9 +2273,14 @@ void step(World& w, const Input& in) {
         step_crow(w, perches, c);
         break;
       case Species::Fish: step_fish(w, s, c); break;
+      case Species::Cristi:
+        if (climbs) step_cristi(w, c);
+        else step_wild(w, s, c);
+        break;
       default: step_wild(w, s, c); break;
     }
   }
+  if (!climbed) w.climbing = false;
   battle_resolve(w);
   spells_step(w);
   discover(w);

@@ -403,8 +403,10 @@ void GroundTiles::fill_list(DrawList& list, const std::vector<Part>& path_parts,
   list.cached = true;
   list.far = false;
   ++list.version;
+  Instance solid;
+  solid.material = kSolid;  // the ground never shows through (View::fade_*)
   const auto ground = static_cast<size_t>(MeshId::Ground);
-  list.batches[ground].push_back(Instance{});
+  list.batches[ground].push_back(solid);
   list.mesh_parts[ground] = coarse_sorted_parts_;
   const auto path = static_cast<size_t>(MeshId::Path);
   list.batches[path].push_back(Instance{});
@@ -414,7 +416,7 @@ void GroundTiles::fill_list(DrawList& list, const std::vector<Part>& path_parts,
   list.batches[static_cast<size_t>(MeshId::Water)].push_back(water);
   list.mesh_parts[static_cast<size_t>(MeshId::Water)] = water_parts;
   if (!detail_.parts.empty()) {
-    list.batches[terrain::kDetailMesh].push_back(Instance{});
+    list.batches[terrain::kDetailMesh].push_back(solid);
     list.mesh_parts[terrain::kDetailMesh] = detail_.parts;
   }
 }

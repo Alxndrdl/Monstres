@@ -1,6 +1,7 @@
 #include "monstres/render/scene.hpp"
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/interior.hpp"
 #include "monstres/core/variants.hpp"
 
 #include "monstres/render/characters.hpp"
@@ -66,13 +67,23 @@ Mat4 perspective(float fov_y, float aspect, float n, float f) {
 }
 
 Mat4 look_at(float ex, float ey, float ez, float tx, float ty, float tz) {
+  return look_at_up(ex, ey, ez, tx, ty, tz, {0, 1, 0});
+}
+
+Mat4 look_at_up(float ex, float ey, float ez, float tx, float ty, float tz, Vec3 up) {
   float fx = tx - ex, fy = ty - ey, fz = tz - ez;
   float len = std::sqrt(fx * fx + fy * fy + fz * fz);
   fx /= len; fy /= len; fz /= len;
-  // side = forward x up(0,1,0)
-  float sx = -fz, sy = 0, sz = fx;
-  len = std::sqrt(sx * sx + sz * sz);
-  sx /= len; sz /= len;
+  // side = forward x up
+  float sx = fy * up.z - fz * up.y, sy = fz * up.x - fx * up.z, sz = fx * up.y - fy * up.x;
+  len = std::sqrt(sx * sx + sy * sy + sz * sz);
+  if (len < 1e-5f) {  // looking straight along up
+    sx = -fz;
+    sy = 0;
+    sz = fx;
+    len = std::max(std::sqrt(sx * sx + sz * sz), 1e-5f);
+  }
+  sx /= len; sy /= len; sz /= len;
   // up = side x forward
   const float ux = sy * fz - sz * fy, uy = sz * fx - sx * fz, uz = sx * fy - sy * fx;
   Mat4 r;
@@ -117,6 +128,14 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::Crystal: return MeshId::Crystal;
     case ObjectKind::Collider: return MeshId::Count;  // invisible
     case ObjectKind::Teleporter: return MeshId::Teleporter;
+    case ObjectKind::Table: return MeshId::Table;
+    case ObjectKind::Chair: return MeshId::Chair;
+    case ObjectKind::Bed: return MeshId::Bed;
+    case ObjectKind::Shelf: return MeshId::Shelf;
+    case ObjectKind::Hearth: return MeshId::Hearth;
+    case ObjectKind::Rug: return MeshId::Rug;
+    case ObjectKind::Step: return MeshId::Step;
+    case ObjectKind::Hatch: return MeshId::Hatch;
     default:                return MeshId::Crate;
   }
 }
@@ -516,6 +535,22 @@ void add_spell_effects(const World& w, float time, DrawList& list) {
       }
     }
   }
+  // The way out: the crystal glows green-gold, and a trail of light runs
+  // from it the way to go (along the way to the door, not straight at it).
+  Vec2 way;
+  if (w.way_out_ticks > 0 && way_out(w, way)) {
+    const Vec3 at = crystal_position(w.player);
+    const float fade = std::min(1.0f, static_cast<float>(w.way_out_ticks) / 120.0f);
+    const float pulse = 0.5f + 0.5f * std::sin(time * 4.0f);
+    const Color gold{1.3f, 2.2f, 0.9f, 1};
+    for (int k = 0; k < 8; ++k) {
+      const float u = std::fmod(time * 1.2f + static_cast<float>(k) / 8, 1.0f);
+      const float r = 0.25f + 2.0f * u;
+      add_spark(list, at.x + way.x * r, at.y - 0.25f * u, at.z + way.z * r, 0.07f - 0.03f * u, gold, (1 - u) * fade,
+                time * 4 + static_cast<float>(k));
+    }
+    add_spark(list, at.x, at.y, at.z, 0.15f + 0.05f * pulse, gold, 0.5f * fade, time);
+  }
 }
 
 // Battle: the enemy's red ring, what it is preparing, projectiles, bursts,
@@ -742,6 +777,29 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected, con
   add_battle_effects(w, time, list);
   add_crystal_effects(w, time, list);
 
+  // The opening of a door the player comes near glows, brighter as it comes
+  // closer (and pulsing once it can go through).
+  const DoorNear door = door_near(w, rules::kDoorGlowReach);
+  if (door.action != DoorAction::None) {
+    const float near = 1 - std::clamp((door.distance - rules::kDoorReach) / (rules::kDoorGlowReach - rules::kDoorReach), 0.0f, 1.0f);
+    const float pulse = door.distance < rules::kDoorReach ? 0.8f + 0.2f * std::sin(time * 4.0f) : 1.0f;
+    Instance g;
+    g.x = door.at.x;
+    g.y = door.at.y;
+    g.z = door.at.z;
+    const bool flat = door.facing.x == 0 && door.facing.z == 0;
+    g.rotation = flat ? quat_x(kTau / 4) : quat_yaw(std::atan2(-door.facing.x, -door.facing.z));
+    g.sx = door.width;
+    g.sy = door.height;
+    const bool cave = door.place == PlaceKind::Cave;
+    const Color c = cave ? Color{1.1f, 0.9f, 1.9f, 1} : door.place == PlaceKind::Tower ? Color{0.9f, 1.3f, 1.9f, 1}
+                                                                                      : Color{1.9f, 1.35f, 0.7f, 1};
+    // Inside, the camera is often behind the door's wall: a fainter glow, not to veil the room.
+    const float strength = inside(w) && !flat ? 0.3f : 1.0f;
+    g.tint = {c.r, c.g, c.b, (0.15f + 0.6f * near) * pulse * strength};
+    add(list, MeshId::DoorGlow, g);
+  }
+
   // At night: a glowing halo around each lantern (their light is in build_view).
   const float dark = night_amount(w);
   if (dark > 0.01f) {
@@ -759,37 +817,13 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected, con
 }
 
 float camera_distance(const World& w, float tx, float ty, float tz, float dx, float dy, float dz, float wanted) {
-  constexpr float kMargin = 0.25f;   // keep the camera this far from objects
+  // Objects do not push the camera in (they show through: View::fade_*), nor
+  // do the walls inside (drawn from inside only: a doll's house). Only a
+  // hill behind the player does: the camera stops just before it.
+  constexpr float kMargin = 0.25f;
   constexpr float kClosest = 1.2f;
+  if (inside(w)) return wanted;
   float best = wanted;
-  // Only the objects around the line from the target to where the camera would be.
-  const float ex = tx + dx * wanted, ey = ty + dy * wanted, ez = tz + dz * wanted;
-  const Box around{{std::min(tx, ex) - 1, std::min(ty, ey) - 1, std::min(tz, ez) - 1},
-                   {std::max(tx, ex) + 1, std::max(ty, ey) + 1, std::max(tz, ez) + 1}};
-  std::vector<uint32_t> near;
-  for_objects_near(w, around, [&](uint32_t k, const Box&) { near.push_back(k); });
-  for (const uint32_t k : near) {
-    const Box b = objects_index(w).boxes[k];
-    // Ray (t, d) against the box widened by the margin (slab method).
-    const float lo[3] = {b.min.x - kMargin, b.min.y - kMargin, b.min.z - kMargin};
-    const float hi[3] = {b.max.x + kMargin, b.max.y + kMargin, b.max.z + kMargin};
-    const float origin[3] = {tx, ty, tz}, dir[3] = {dx, dy, dz};
-    float enter = 0, leave = wanted;
-    bool hit = true;
-    for (int a = 0; a < 3 && hit; ++a) {
-      if (std::fabs(dir[a]) < 1e-6f) {
-        hit = origin[a] > lo[a] && origin[a] < hi[a];
-        continue;
-      }
-      float t0 = (lo[a] - origin[a]) / dir[a], t1 = (hi[a] - origin[a]) / dir[a];
-      if (t0 > t1) std::swap(t0, t1);
-      enter = std::max(enter, t0);
-      leave = std::min(leave, t1);
-      hit = enter <= leave;
-    }
-    if (hit && enter > 0) best = std::min(best, enter);
-  }
-  // The ground (a hill behind the player): stop just before it.
   constexpr float kStep = 0.2f;
   for (float t = kStep; t < best; t += kStep) {
     if (ty + dy * t < w.ground.height(tx + dx * t, tz + dz * t) + kMargin) {
@@ -1096,8 +1130,10 @@ CameraGoal camera_goal(const World& w, CameraSubject subject) {
   }
   // Aiming: closer, between the companion and its target. Moving freely (or
   // after a battle): the same camera as for the magician, on the companion.
+  // Clinging to a wall or the ceiling (Cristi): above it is along the surface's normal.
   const float up = other ? 0.75f : 1.0f;
-  g = {a.pos.x, a.pos.y + up, a.pos.z, a.pos.x, a.pos.y + up, a.pos.z, other ? 0.8f : 1.0f};
+  const Vec3 above = a.pos + a.up * up;
+  g = {above.x, above.y, above.z, above.x, above.y, above.z, other ? 0.8f : 1.0f};
   if (other) {
     g.look_x = lerp(g.tx, other->pos.x, 0.4f);
     g.look_y = lerp(g.ty, other->pos.y + other_mid, 0.4f);
@@ -1134,7 +1170,75 @@ void update_camera(Camera& cam, const World& w, float dt) {
     cam.blend = cam.blend < 0.5f ? 1 - cam.blend : 0;
   }
   cam.blend = std::min(1.0f, cam.blend + dt / kCameraBlendSeconds);
+  // Its up follows the companion's when it clings to a wall or the ceiling
+  // (Cristi, inside): turning over smoothly, never at once.
+  const Vec3 target = cam.subject == CameraSubject::Companion && !w.creatures.empty()
+                          ? w.creatures[0].body.up
+                          : Vec3{0, 1, 0};
+  const float k = 1.0f - std::exp(-dt * 4.0f);
+  Vec3 u = cam.up + (target - cam.up) * k;
+  float l = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z);
+  if (l < 1e-3f) {  // turned right over: through the side
+    u = {target.x + 0.01f, target.y, target.z + 0.01f};
+    l = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z);
+  }
+  cam.up = u * (1.0f / l);
 }
+
+namespace {
+
+// Inside (interior.hpp): no sky, no sun; the cave in the dark, lit by its
+// crystals, the magician's staff and Cristi's glow; houses warm, by their
+// hearth and windows; the tower dim, its crystals in the walls.
+void interior_light(const World& w, float time, View& v) {
+  v.sky = false;
+  v.fill = true;
+  v.cloud_cover = 0;
+  v.wind = 0;
+  v.fade_near_start = v.fade_far_start = v.fade_tree_start = 1e6f;
+  v.fade_near_end = v.fade_far_end = v.fade_tree_end = 2e6f;
+  v.light_x = 0.3f;
+  v.light_y = 0.9f;
+  v.light_z = -0.3f;
+  float night = v.night;
+  switch (w.place.kind) {
+    case PlaceKind::Cave:
+      night = 1;
+      v.background = {0.02f, 0.018f, 0.035f, 1};
+      v.ambient_sky = {0.13f, 0.12f, 0.19f, 1};
+      v.ambient_ground = {0.07f, 0.06f, 0.10f, 1};
+      v.light_color = {0.04f, 0.04f, 0.07f, 1};
+      v.fog_start = 7;
+      v.fog_half = 16;
+      v.fog_end = 70;
+      break;
+    case PlaceKind::Tower:
+      night = std::max(night, 0.6f);
+      v.background = {0.04f, 0.04f, 0.05f, 1};
+      v.ambient_sky = {0.40f, 0.40f, 0.46f, 1};
+      v.ambient_ground = {0.24f, 0.23f, 0.27f, 1};
+      v.light_color = {0.22f, 0.21f, 0.2f, 1};
+      v.fog_start = 40;
+      v.fog_half = 400;
+      v.fog_end = 2000;
+      break;
+    default:
+      v.background = {0.05f, 0.04f, 0.035f, 1};
+      v.ambient_sky = {0.62f, 0.54f, 0.44f, 1};
+      v.ambient_ground = {0.40f, 0.33f, 0.27f, 1};
+      v.light_color = {0.30f, 0.27f, 0.22f, 1};
+      v.fog_start = 40;
+      v.fog_half = 400;
+      v.fog_end = 2000;
+      break;
+  }
+  v.fog = v.background;
+  v.sky_zenith = v.sky_horizon = v.background;
+  v.night = night;
+  v.light_count = world_lights(w, w.player.pos.x, w.player.pos.z, night, time, v.lights);
+}
+
+}  // namespace
 
 View build_view(const World& w, const Camera& cam, float aspect, float time) {
   CameraGoal g = camera_goal(w, cam.smooth ? cam.subject : camera_subject(w));
@@ -1150,22 +1254,49 @@ View build_view(const World& w, const Camera& cam, float aspect, float time) {
   const float wanted = cam.distance * g.zoom;
 
   // The camera sits behind the player, opposite to where it looks, and comes
-  // closer when an object (a trunk, a rock...) is in between.
+  // closer when an object (a trunk, a rock...) is in between. Its up is the
+  // world's, or the wall's or the ceiling's the companion clings to: its
+  // forward then runs along that surface (as the joystick, interior.hpp).
+  const Vec3 n = cam.smooth ? cam.up : Vec3{0, 1, 0};
   const float cp = std::cos(cam.pitch), sp = std::sin(cam.pitch);
-  const float fx = -std::sin(cam.yaw) * cp, fz = -std::cos(cam.yaw) * cp;
-  const float distance = camera_distance(w, tx, ty, tz, -fx, sp, -fz, wanted);
-  float ex = tx - fx * distance;
-  float ey = ty + sp * distance;
-  float ez = tz - fz * distance;
-  ey = std::max(ey, w.ground.height(ex, ez) + 0.2f);  // never below the ground
-  return build_view_from(w, {ex, ey, ez}, {look_x, look_y, look_z}, aspect, time);
+  Vec3 forward{-std::sin(cam.yaw), 0, -std::cos(cam.yaw)};
+  if (w.climbing && !battle_target(w) && cam.subject == CameraSubject::Companion) {
+    // Moving freely on the walls: the forward the joystick follows (interior.hpp).
+    const Vec3 f = w.climb_forward - n * (w.climb_forward.x * n.x + w.climb_forward.y * n.y + w.climb_forward.z * n.z);
+    const float fl = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
+    if (fl > 1e-3f) forward = f * (1.0f / fl);
+  } else if (n.y < 0.999f) {
+    const float dn = forward.x * n.x + forward.z * n.z;
+    Vec3 up_t = Vec3{0, 1, 0} - n * n.y;
+    const float ul = std::sqrt(up_t.x * up_t.x + up_t.y * up_t.y + up_t.z * up_t.z);
+    up_t = ul > 1e-4f ? up_t * (1.0f / ul) : Vec3{0, 0, 0};
+    Vec3 f = forward - n * dn - up_t * dn;
+    const float fl = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
+    if (fl > 1e-4f) forward = f * (1.0f / fl);
+  }
+  const Vec3 back = n * sp - forward * cp;
+  const float distance = camera_distance(w, tx, ty, tz, back.x, back.y, back.z, wanted);
+  float ex = tx + back.x * distance;
+  float ey = ty + back.y * distance;
+  float ez = tz + back.z * distance;
+  if (n.y > 0.95f) ey = std::max(ey, w.ground.height(ex, ez) + 0.2f);  // never below the ground
+  View v = build_view_from(w, {ex, ey, ez}, {look_x, look_y, look_z}, aspect, time, n);
+  // Whatever stands in between (a trunk, a rock, a wall) shows through.
+  v.fade_from_x = ex;
+  v.fade_from_y = ey;
+  v.fade_from_z = ez;
+  v.fade_radius = 0.9f;
+  v.fade_to_x = tx;
+  v.fade_to_y = ty;
+  v.fade_to_z = tz;
+  return v;
 }
 
-View build_view_from(const World& w, Vec3 eye, Vec3 target, float aspect, float time) {
+View build_view_from(const World& w, Vec3 eye, Vec3 target, float aspect, float time, Vec3 up) {
   const float ex = eye.x, ey = eye.y, ez = eye.z;
   const float tx = w.player.pos.x, tz = w.player.pos.z;  // the lights around the player
   View v;
-  const Mat4 look = look_at(ex, ey, ez, target.x, target.y, target.z);
+  const Mat4 look = look_at_up(ex, ey, ez, target.x, target.y, target.z, up);
   v.view_projection = multiply(perspective(1.0f, aspect, 0.1f, view_range::kNearFar), look);
   v.far_view_projection = multiply(perspective(1.0f, aspect, view_range::kFarNear, view_range::kFarFar), look);
   v.fog_start = view_range::kFogStart;
@@ -1207,6 +1338,7 @@ View build_view_from(const World& w, Vec3 eye, Vec3 target, float aspect, float 
   v.fade_far_end = landscape::kDetailFadeEnd;
   v.fade_tree_start = landscape::kTreeFadeStart;
   v.fade_tree_end = landscape::kTreeFadeEnd;
+  if (inside(w)) interior_light(w, time, v);
   return v;
 }
 

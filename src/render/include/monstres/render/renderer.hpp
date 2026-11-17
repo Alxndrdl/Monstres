@@ -142,6 +142,7 @@ inline constexpr float kGlowing = 2;  // gives its own light: as bright by night
 inline constexpr float kFadeNear = 3; // lit, shrinks away between View::fade_near_* (grass, flowers)
 inline constexpr float kFadeFar = 4;  // lit, shrinks away between View::fade_far_* (small things)
 inline constexpr float kFadeTree = 5; // lit, shrinks away between View::fade_tree_* (trees and rocks far away)
+inline constexpr float kSolid = -1;   // lit, never shows through when in the camera's way (the ground)
 
 // Vertex colors with this alpha (opaque meshes: windows, lanterns) light up
 // at night (View::night).
@@ -234,6 +235,13 @@ struct View {
   Color cloud_light{1, 1, 1, 1}, cloud_shade{0.7f, 0.72f, 0.78f, 1};
   float cloud_shift_x = 0, cloud_shift_z = 0;
   bool sky = true;  // false: no sky, the background stays transparent (portraits)
+  bool fill = false;  // without sky: the background filled with this color (inside)
+  // What stands between the camera (fade_from) and what it looks at
+  // (fade_to), within fade_radius of the line, shows through (dithered).
+  // 0: nothing fades (portraits).
+  float fade_from_x = 0, fade_from_y = 0, fade_from_z = 0, fade_radius = 0;
+  float fade_to_x = 0, fade_to_y = 0, fade_to_z = 0;
+  Color background{0, 0, 0, 1};
 };
 
 struct Frame {

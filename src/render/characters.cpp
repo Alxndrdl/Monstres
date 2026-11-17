@@ -169,6 +169,22 @@ constexpr RigPart kAxolotlRig[] = {
     {MeshId::AxolotlLeg, -1, {0.13f, 0.09f, 0.14f}, {1, 1, 1}, 1},
 };
 
+// Cristi: a round ball of night-blue fur, big eyes, pointed ears, glowing
+// crystals set in its back (tint 4).
+enum CristiPart { kRBody, kREyeL, kREyeR, kREarL, kREarR, kRCrystal, kRLegFL, kRLegFR, kRLegBL, kRLegBR };
+constexpr RigPart kCristiRig[] = {
+    {MeshId::CristiBody, -1, {0, 0.2f, 0}, {1, 1, 1}, 1},
+    {MeshId::Eye, kRBody, {-0.075f, 0.035f, -0.165f}, {0.05f, 0.062f, 0.05f}},
+    {MeshId::Eye, kRBody, {0.075f, 0.035f, -0.165f}, {0.05f, 0.062f, 0.05f}},
+    {MeshId::CristiEar, kRBody, {-0.1f, 0.12f, -0.03f}, {1, 1, 1}, 1, Quat{0, 0, 0.17365f, 0.98481f}},   // quat_z(0.35)
+    {MeshId::CristiEar, kRBody, {0.1f, 0.12f, -0.03f}, {1, 1, 1}, 1, Quat{0, 0, -0.17365f, 0.98481f}},   // quat_z(-0.35)
+    {MeshId::CristiCrystal, kRBody, {0, 0.14f, 0.07f}, {1, 1, 1}, 4, Quat{0.17365f, 0, 0, 0.98481f}},    // quat_x(0.35)
+    {MeshId::CristiLeg, -1, {-0.1f, 0.07f, -0.08f}, {1, 1, 1}, 1},
+    {MeshId::CristiLeg, -1, {0.1f, 0.07f, -0.08f}, {1, 1, 1}, 1},
+    {MeshId::CristiLeg, -1, {-0.1f, 0.07f, 0.09f}, {1, 1, 1}, 1},
+    {MeshId::CristiLeg, -1, {0.1f, 0.07f, 0.09f}, {1, 1, 1}, 1},
+};
+
 // Drawn size of each species' rig (the models are made at a "unit" size).
 float rig_scale(Species species) {
   switch (species) {
@@ -180,6 +196,7 @@ float rig_scale(Species species) {
     case Species::Fish: return 1.3f;
     case Species::Spark: return 1.2f;
     case Species::Axolotl: return 1.25f;
+    case Species::Cristi: return 1.25f;
     default: return 1.0f;
   }
 }
@@ -212,6 +229,7 @@ Color element_glow(Element e) {
     case Element::Shadow: return {1.3f, 0.75f, 1.9f, 1};
     case Element::Light: return {2.0f, 1.9f, 1.25f, 1};
     case Element::Electric: return {2.0f, 1.85f, 0.45f, 1};
+    case Element::Arcane: return {1.75f, 0.6f, 2.1f, 1};
     default: return {1.5f, 1.5f, 1.5f, 1};
   }
 }
@@ -279,6 +297,7 @@ float support_height(const World& w, const Body& b, const BodyShape& shape) {
 }
 
 void add_body_shadow(const World& w, const Body& b, const BodyShape& shape, float radius, DrawList& list) {
+  if (b.up.y < 0.95f) return;  // on a wall or the ceiling
   const float support = support_height(w, b, shape);
   const float lift = std::clamp(1.0f - (b.pos.y - support) / 3.0f, 0.35f, 1.0f);
   const bool on_ground = support == w.ground.height(b.pos.x, b.pos.z);  // not on top of an object
@@ -363,6 +382,7 @@ std::span<const RigPart> creature_rig(Species species) {
     case Species::Fish: return kFishRig;
     case Species::Spark: return kSparkRig;
     case Species::Axolotl: return kAxolotlRig;
+    case Species::Cristi: return kCristiRig;
     case Species::Villager: return kVillagerRig;
     default: return {};
   }
@@ -519,6 +539,18 @@ CreatureLook creature_look(Species species, const Genes& g) {
       if (g.allele[3] == 1) at(kTail).scale = {1.0f, 1.25f, 1.7f};  // a long tail
       break;
     }
+    case Species::Cristi: {
+      // Its crystals glow violet, cyan or rose; chromatic: white fur, white
+      // crystals; elemental (light): golden fur.
+      static constexpr Color kGlow[] = {{1.55f, 0.75f, 2.2f, 1}, {0.5f, 1.6f, 2.1f, 1}, {2.1f, 0.8f, 1.35f, 1}};
+      look.tints[3] = g.chromatic ? Color{2.0f, 2.0f, 2.1f, 1} : g.elemental ? Color{2.1f, 1.8f, 0.9f, 1}
+                                                                         : kGlow[g.allele[1] < 3 ? g.allele[1] : 0];
+      if (g.chromatic) look.tints[0] = {3.6f, 3.8f, 3.0f, 1};
+      if (g.elemental) look.tints[0] = {4.2f, 3.5f, 1.4f, 1};
+      if (g.allele[2] == 1) at(kREarL).scale = at(kREarR).scale = {0.9f, 1.55f, 0.9f};  // long ears
+      if (g.allele[3] == 1) look.add({MeshId::CristiShards, kRBody, {0, 0.14f, 0.07f}, {1, 1, 1}, 4, at(kRCrystal).rest});
+      break;
+    }
     default:
       break;
   }
@@ -637,6 +669,24 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
       poses[kEarR].rotation = quat_z(-spread) * quat_x(-twitch - (b.on_ground ? 0 : 0.5f));
       break;
     }
+    case Species::Cristi: {
+      // It trots on its little paws, bouncing; its ears twitch, its crystals
+      // pulse; it blinks.
+      const float phase = t * kTau * (2.4f + 3.0f * walk);
+      const float swing = std::sin(phase) * 0.8f * clamp01(walk * 1.5f);
+      poses[kRLegFL].rotation = poses[kRLegBR].rotation = quat_x(swing);
+      poses[kRLegFR].rotation = poses[kRLegBL].rotation = quat_x(-swing);
+      poses[kRBody].offset.y = std::fabs(std::sin(phase)) * 0.035f * walk + 0.006f * std::sin(t * 2.0f) * (1 - walk);
+      const float squash = 1.0f + 0.04f * std::sin(t * 2.0f) * (1 - walk);
+      poses[kRBody].scale = {squash, 2.0f - squash, squash};
+      const float twitch = std::sin(t * 1.7f + seed) > 0.96f ? 0.3f : 0.0f;
+      poses[kREarL].rotation = quat_z(0.1f * std::sin(phase) * walk + twitch);
+      poses[kREarR].rotation = quat_z(-0.1f * std::sin(phase) * walk - twitch);
+      const float pulse = 1.0f + 0.06f * std::sin(t * 2.2f);
+      poses[kRCrystal].scale = {pulse, pulse, pulse};
+      close_eyes(poses, kREyeL, kREyeR, t, seed + 0.3f);
+      break;
+    }
     case Species::Slime: {
       // Squash and stretch: stretched going up, squashed coming down.
       float stretch = 0;
@@ -728,12 +778,51 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
 
 // ---- Assembly -------------------------------------------------------------------------
 
+Quat body_rotation(const Body& body) {
+  if (body.up.y > 0.9999f && body.facing_y == 0) return quat_yaw(std::atan2(-body.facing_x, -body.facing_z));
+  // Clinging to a wall or the ceiling (interior.hpp): its up is the
+  // surface's normal, it faces along it. Local -Z forward, +Y up, +X right.
+  const float ux = body.up.x, uy = body.up.y, uz = body.up.z;
+  float fx = body.facing_x, fy = body.facing_y, fz = body.facing_z;
+  const float along = fx * ux + fy * uy + fz * uz;
+  fx -= ux * along;
+  fy -= uy * along;
+  fz -= uz * along;
+  float l = std::sqrt(fx * fx + fy * fy + fz * fz);
+  if (l < 1e-4f) return quat_yaw(std::atan2(-body.facing_x, -body.facing_z));
+  fx /= l;
+  fy /= l;
+  fz /= l;
+  // Columns of the rotation: right = forward x up, up, back = -forward.
+  const float rx = fy * uz - fz * uy, ry = fz * ux - fx * uz, rz = fx * uy - fy * ux;
+  const float m00 = rx, m01 = ux, m02 = -fx;
+  const float m10 = ry, m11 = uy, m12 = -fy;
+  const float m20 = rz, m21 = uz, m22 = -fz;
+  Quat q;
+  const float trace = m00 + m11 + m22;
+  if (trace > 0) {
+    const float s = std::sqrt(trace + 1.0f) * 2;
+    q = {(m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25f * s};
+  } else if (m00 > m11 && m00 > m22) {
+    const float s = std::sqrt(1.0f + m00 - m11 - m22) * 2;
+    q = {0.25f * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s};
+  } else if (m11 > m22) {
+    const float s = std::sqrt(1.0f + m11 - m00 - m22) * 2;
+    q = {(m01 + m10) / s, 0.25f * s, (m12 + m21) / s, (m02 - m20) / s};
+  } else {
+    const float s = std::sqrt(1.0f + m22 - m00 - m11) * 2;
+    q = {(m02 + m20) / s, (m12 + m21) / s, 0.25f * s, (m10 - m01) / s};
+  }
+  l = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+  return {q.x / l, q.y / l, q.z / l, q.w / l};
+}
+
 void add_rig(DrawList& list, std::span<const RigPart> rig, std::span<const PartPose> poses, const Body& body,
              std::span<const Color> tints, float size, uint8_t glow_slot) {
   constexpr size_t kMaxParts = kMaxRigParts;
   std::array<Quat, kMaxParts> world_rotation;
   std::array<Vec3f, kMaxParts> world_position;
-  const Quat root = quat_yaw(std::atan2(-body.facing_x, -body.facing_z));
+  const Quat root = body_rotation(body);
 
   for (size_t i = 0; i < rig.size() && i < kMaxParts; ++i) {
     const RigPart& part = rig[i];
@@ -799,6 +888,7 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   if (c.species == Species::Fish) height = 0.8f;
   if (c.species == Species::Crow) height = 0.7f;
   if (c.species == Species::Axolotl) height = 0.72f;  // low, but long: framed whole
+  if (c.species == Species::Cristi) height = 0.62f;   // its ears and crystals above it
   if (c.species == Species::Spark) height = 0.78f;    // with its big ears
   height += look.extra_height * scale;
   if (look.aura) {
@@ -1260,6 +1350,11 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
       const bool violet = o.variant % 2 == 0;
       offer(o.pos.x, o.pos.y + 0.6f * o.size.x, o.pos.z, 3.0f + 3.0f * o.size.x,
             scaled(violet ? Color{0.75f, 0.45f, 1.0f, 1} : Color{0.4f, 0.85f, 1.0f, 1}, 0.35f + 0.9f * night));
+    }
+    if (o.kind == ObjectKind::Hearth) {  // a fire, always (inside)
+      const SinCos sc = sincos16(o.yaw);
+      const float flame = 1 + 0.12f * std::sin(time * 9.0f) + 0.06f * std::sin(time * 23.0f);
+      offer(o.pos.x - 0.3f * sc.sin, o.pos.y + 0.6f, o.pos.z - 0.3f * sc.cos, 7.5f, scaled({1.0f, 0.6f, 0.28f, 1}, 1.4f * flame));
     }
     if (o.kind == ObjectKind::Teleporter && ((w.teleporters >> o.variant) & 1u)) {
       offer(o.pos.x, o.pos.y + 0.8f, o.pos.z, 5.0f, scaled({0.45f, 0.9f, 1.0f, 1}, 0.2f + 0.9f * night));

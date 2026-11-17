@@ -180,6 +180,8 @@ window.monstres = {
   spells: () => JSON.parse(UTF8ToString(_monstres_spells_json())),
   // The healer (Odette): heals the team.
   healTeam: (npc) => monstresCommand('healTeam', npc),
+  // Through the door the player stands at (in, out, up, down: interior.hpp).
+  door: () => monstresCommand('door', 0),
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),
   holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),

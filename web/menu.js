@@ -596,7 +596,7 @@
       if (!view.isConnected || !isOpen()) return;
       const data = mapBase();
       const w = view.clientWidth, h = view.clientHeight;
-      const p = game.state().player;
+      const p = mapPlayer();
       const scale = Math.min(w, h) / (2 * data.world) * 1.02;
       drawMap(view, { cx: 0, cz: 0, scale, player: p }, { habitat: e, habitatAlpha: 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(now / 280)) });
       habitatLoop = requestAnimationFrame(frame);
@@ -766,8 +766,15 @@
     const hi = d ? { x: d.minX + (d.pointsX - 1) * d.cell, z: d.minZ + (d.pointsZ - 1) * d.cell } : { x: 600, z: 600 };
     return { x: Math.min(hi.x, Math.max(lo.x, c.x)), z: Math.min(hi.z, Math.max(lo.z, c.z)) };
   }
-  function currentView() {
+  // Where the player is on the map: inside a cave, a house or the tower, at
+  // the door it went in by (the map shows the world outside).
+  function mapPlayer() {
     const p = game.state().player;
+    return p.mapX === undefined ? p
+      : { ...p, x: p.mapX, z: p.mapZ, facingX: p.mapFacingX, facingZ: p.mapFacingZ };
+  }
+  function currentView() {
+    const p = mapPlayer();
     center = clampCenter(center);
     return { cx: center ? center.x : p.x, cz: center ? center.z : p.z, scale: clampScale(scale), player: p };
   }

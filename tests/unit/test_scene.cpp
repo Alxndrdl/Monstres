@@ -240,7 +240,7 @@ TEST_CASE("the sun is above the horizon, the light comes from above") {
   CHECK(std::sqrt(v.sun_x * v.sun_x + v.sun_y * v.sun_y + v.sun_z * v.sun_z) == Approx(1));
 }
 
-TEST_CASE("the camera comes closer when an object is between it and the player") {
+TEST_CASE("the camera keeps its distance when an object is between it and the player: the object shows through") {
   World w = empty_world();
   Camera cam;  // behind the player: towards +Z
   const View free = build_view(w, cam, 1.5f, 0);
@@ -248,11 +248,12 @@ TEST_CASE("the camera comes closer when an object is between it and the player")
 
   w.objects.push_back(make_object(ObjectKind::Tree, {0, 0, 3}, {1, 1, 1}));  // trunk 3 m behind
   const View blocked = build_view(w, cam, 1.5f, 0);
-  CHECK(blocked.camera_z < 3.0f - 0.28f);
-  CHECK(blocked.camera_z > 1.0f);
-
-  CHECK(camera_distance(w, 0, 1, 0, 0, 0, 1, 6) < 3.0f);
-  CHECK(camera_distance(w, 0, 1, 0, 0, 0, -1, 6) == Approx(6));  // nothing in front
+  CHECK(blocked.camera_z == Approx(free.camera_z));
+  // What lies between the camera and the player fades (dithered by the renderer).
+  CHECK(blocked.fade_radius > 0);
+  CHECK(blocked.fade_from_z == Approx(blocked.camera_z));
+  CHECK(blocked.fade_to_z == Approx(w.player.pos.z));
+  CHECK(camera_distance(w, 0, 1, 0, 0, 0, 1, 6) == Approx(6));
 }
 
 namespace {

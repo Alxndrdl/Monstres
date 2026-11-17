@@ -583,6 +583,17 @@
     .xp.hp { margin-top: 6px; }
 
     /* ---- Context menu (right) ---- */
+    /* Going through a door: a fade to black (0.15 s down, 0.15 s up). */
+    #fade {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+      z-index: 5;
+    }
+    #fade.on { opacity: 1; pointer-events: auto; }
     #context {
       position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 54px); right: var(--edge-right); z-index: 2;
       width: 190px; padding: 7px 9px; display: flex; flex-direction: column; gap: 5px;
@@ -889,6 +900,7 @@
 </head>
 <body>
   <canvas id="canvas" tabindex="-1"></canvas>
+  <div id="fade" aria-hidden="true"></div>
   <div id="message" hidden></div>
   <div id="rotate" role="alert">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"

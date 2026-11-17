@@ -70,6 +70,7 @@ inline constexpr uint16_t kShieldTicks = rules::kTicksPerSecond;
 inline constexpr uint16_t kShieldCooldown = 5 * rules::kTicksPerSecond;
 inline constexpr uint16_t kMercyCooldown = rules::kTicksPerSecond;
 inline constexpr uint16_t kDetectTicks = 60 * rules::kTicksPerSecond;
+inline constexpr uint16_t kWayOutTicks = 60 * rules::kTicksPerSecond;
 inline constexpr uint16_t kWizardManaPerLevel = 5;  // see wizard_stats
 }  // namespace rules
 
@@ -83,6 +84,9 @@ inline constexpr uint16_t kWizardManaPerLevel = 5;  // see wizard_stats
 // Detection (adventure): for a minute, the staff's crystal looks for very
 // rare monsters within 50 m (see variants.hpp, detect_rare), and points at
 // the closest one.
+// Way out (adventure, free): inside a cave or a building, for a minute, the
+// staff's crystal points the way back to the door one came in by, along the
+// way (round the walls, through the tunnels), not straight at it.
 // Two combat spells and two adventure spells are chosen out of battles
 // (Command::EquipSpell); training uses the combat ones.
 struct SpellInfo {
