@@ -835,8 +835,24 @@ L'ennemi montre ses attaques avant de frapper (anneau rouge qui bat, zone de
 l'onde, boule qui grossit) : c'est le moment d'esquiver ou de parer. Dans le
 menu contextuel : « Fuir » (le compagnon revient vers le joueur, puis le
 combat s'arrête et le joueur reprend la main) et « Capturer », possible quand
-l'ennemi n'a plus que 25 % de ses points de vie (trait doré sur sa barre) : il
-rejoint l'équipe (il faut viser celui qu'on veut capturer). Ce menu reste
+l'ennemi n'a plus que 25 % de ses points de vie (trait doré sur sa barre ; il
+faut viser celui qu'on veut capturer). Les boutons du combat (menu, équipe,
+adversaires) répondent au doigt levé : ils marchent aussi quand l'autre pouce
+tient le joystick (sans quoi le navigateur ne fait pas de clic).
+
+La capture est un sceau (`Battle::seal`, `battle.hpp`) : le monde se fige,
+la caméra glisse vers le monstre et le cadre de trois quarts, un cercle de
+six runes s'ouvre autour de lui (et un cercle magique de son élément à ses
+pieds). Cinq runes s'illuminent l'une après l'autre, de la couleur de son
+élément, jamais deux fois la même d'affilée ; le joueur les touche ensuite
+dans le même ordre (touches 1 à 6 au clavier). La barre du sceau, de « Fuite »
+à « Capture », part du milieu : l'ordre entier juste la pousse de 25 % vers la
+capture, une erreur de 40 % vers la fuite ; chaque manche montre un nouvel
+ordre. Le monstre se débat, plus fort après une erreur, moins à mesure que le
+sceau se resserre. À 100 % il s'illumine et rejoint l'équipe (ou la ferme) ;
+à 0 % il se libère et s'enfuit (le combat continue avec les autres, ou se
+termine : « … s'est libéré »). Pendant le sceau, rien d'autre ne bouge, ni
+l'heure, ni les autres monstres, et on ne peut pas fuir. Ce menu reste
 court pour ne pas recouvrir le bouton d'attaque rapide en dessous ; en bas,
 les panneaux du compagnon et du mana restent entre le joystick et les
 boutons (la parade, les sorts). Chaque monstre

@@ -1039,7 +1039,7 @@ void west_step(World& w) {
   if (w.battle.phase != BattlePhase::None || (w.rescue_tick > 0 && w.tick - w.rescue_tick < kAggroRest)) return;
   for (size_t i = 1; i < w.creatures.size(); ++i) {
     const Creature& c = w.creatures[i];
-    if (c.tag != Tag::Raider || c.mind == Mind::KnockedOut) continue;
+    if (c.tag != Tag::Raider || c.mind == Mind::KnockedOut || c.mind == Mind::Flee) continue;  // broke free: it runs first
     if (flat2(c.body.pos, w.player.pos) > rules::kAggroDistance * rules::kAggroDistance ||
         std::fabs(c.body.pos.y - w.player.pos.y) > 2.5f) {
       continue;

@@ -2280,6 +2280,10 @@ void step_lamb(World& w, const Surroundings& s, Creature& c) {
 
 void step(World& w, const Input& in) {
   ++w.tick;
+  if (sealing(w)) {  // capturing: the world holds still, but the runes
+    seal_step(w, in);
+    return;
+  }
   w.clock = (w.clock + 1) % rules::kTicksPerDay;
   quest_command(w, in);   // teleports, quests accepted or done
   west_command(w, in);    // the bag, the merchant, the farm

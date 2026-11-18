@@ -16,8 +16,8 @@ inline constexpr Color kPlayerNose{0.25f, 0.20f, 0.30f, 1};
 }  // namespace palette
 
 // Who the camera follows: the player, or the companion (in a battle, and
-// for a moment after a victory).
-enum class CameraSubject : uint8_t { Magician, Companion };
+// for a moment after a victory), or close on the foe being captured.
+enum class CameraSubject : uint8_t { Magician, Companion, Seal };  // Seal: the foe being captured
 inline constexpr uint64_t kCameraHoldTicks = 100;     // on the companion after a victory
 inline constexpr float kCameraBlendSeconds = 0.9f;    // gliding from one subject to the other
 

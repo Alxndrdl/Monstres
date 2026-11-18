@@ -167,6 +167,24 @@ test.describe('on a phone in landscape', () => {
     await page.locator('#jump').tap();
     await expect.poll(async () => { const p = (await state(page)).player; return p.y - p.ground; }).toBeGreaterThan(0.3);
   });
+
+  test('a button works while the other thumb holds the joystick', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'two fingers at once: through Chromium\'s DevTools protocol');
+    await openGame(page, '?seed=42&new&frozen');
+    await expect(page.locator('.team-icon[data-slot="0"]')).toHaveAttribute('aria-pressed', 'true');
+    const stick = await center(page.locator('#joystick'));
+    const icon = await center(page.locator('.team-icon[data-slot="0"]'));
+    const cdp = await page.context().newCDPSession(page);
+    const thumb = { x: stick.x, y: stick.y - 30, id: 1 };
+    const finger = { x: icon.x, y: icon.y, id: 2 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [thumb] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [thumb, finger] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [finger] });
+    // Pompon goes back into the crystal, the joystick still held.
+    await expect.poll(async () => (await state(page)).active).toBe(-1);
+    await expect(page.locator('#joystick')).toHaveClass(/active/);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [thumb] });
+  });
 });
 
 test.describe('on a phone in portrait', () => {
@@ -849,6 +867,35 @@ test.describe('battles', () => {
     expect(result).toBe('weak');
     await expect(page.locator('#action-capture')).toBeEnabled();
     await page.locator('#action-capture').click();
+    // The seal: a circle of runes around it, lit in an order to touch again.
+    const seal = page.locator('#seal');
+    await expect(seal).toBeVisible();
+    await expect(seal.locator('.seal-title')).toHaveText('Capture · Piou');
+    await expect(seal.locator('.rune')).toHaveCount(6);
+    await expect(page.locator('#action-capture')).toBeHidden();  // the rest waits
+    const untilInput = () => page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 0; i < 400 && m.battle().seal && m.battle().seal.stage !== 'input'; i++) m.step(1);
+      return m.battle().seal;
+    });
+    let s0 = await untilInput();
+    expect(s0.bar).toBe(50);
+    await expect(seal.locator('.seal-text')).toContainText('touche les runes dans le même ordre (0/5)');
+    // A mistake: the bar moves towards the escape.
+    await seal.locator('.rune').nth((s0.order[0] + 1) % 6).click();
+    await expect(seal.locator('.seal-text')).toContainText('Raté');
+    // Then the right orders, until it is caught.
+    for (let round = 0; round < 6; round++) {
+      s0 = await untilInput();
+      if (!s0) break;
+      for (const k of s0.order) await seal.locator('.rune').nth(k).click();
+      expect((await page.evaluate(() => window.monstres.battle().seal || {})).stage || 'none').not.toBe('wrong');
+    }
+    await page.evaluate(() => {
+      const m = window.monstres;
+      for (let i = 0; i < 400 && m.battle().seal; i++) m.step(1);
+    });
+    await expect(seal).toBeHidden();
     await expect(page.locator('#battle-banner')).toContainText('Piou capturé');
     // The experience Pompon earned, on its bar.
     await expect(page.locator('#battle-banner .xp-card')).toHaveCount(1);

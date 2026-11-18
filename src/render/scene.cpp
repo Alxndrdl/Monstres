@@ -1289,11 +1289,27 @@ struct CameraGoal {
   float tx, ty, tz;           // pivot
   float look_x, look_y, look_z;
   float zoom;                 // times Camera::distance
+  float pitch;
+  float turn = 0;             // around the pivot, from the camera's yaw (radians)
 };
 
-CameraGoal camera_goal(const World& w, CameraSubject subject) {
+CameraGoal camera_goal(const World& w, CameraSubject subject, const Camera& cam) {
   const Player& p = w.player;
-  CameraGoal g{p.pos.x, p.pos.y + 1.0f, p.pos.z, p.pos.x, p.pos.y + 1.0f, p.pos.z, 1.0f};
+  CameraGoal g{p.pos.x, p.pos.y + 1.0f, p.pos.z, p.pos.x, p.pos.y + 1.0f, p.pos.z, 1.0f, cam.pitch};
+  if (subject == CameraSubject::Seal && sealing(w)) {
+    // Close on the foe being captured, a little from above: its circle of runes around it.
+    const Creature& c = w.creatures[w.battle.seal.foe];
+    const BodyShape shape = species_info(c.species).shape;
+    const float k = build_scale(c.genes.form);
+    const float size = std::max(shape.height, 2 * shape.half_width) * k;
+    const Vec3 mid = c.body.pos + c.body.up * (shape.height * k * 0.5f);
+    const float distance = std::clamp(2.4f * size + 1.1f, 2.0f, 14.0f);
+    // Three quarters from the front (it faces the companion, now out of the
+    // way), looking a little above it: it stands low on the screen, under
+    // the seal's bar.
+    const float above = 0.22f * distance;
+    return {mid.x, mid.y, mid.z, mid.x, mid.y + above, mid.z, distance / std::max(cam.distance, 0.5f), 0.36f, 0.9f};
+  }
   if (subject != CameraSubject::Companion || w.creatures.empty()) return g;
   // In a battle the camera follows the companion; in a fight it looks
   // between the companion and its enemy (the yaw is turned towards it, see
@@ -1314,7 +1330,7 @@ CameraGoal camera_goal(const World& w, CameraSubject subject) {
   // Clinging to a wall or the ceiling (Cristi): above it is along the surface's normal.
   const float up = other ? 0.75f : 1.0f;
   const Vec3 above = a.pos + a.up * up;
-  g = {above.x, above.y, above.z, above.x, above.y, above.z, other ? 0.8f : 1.0f};
+  g = {above.x, above.y, above.z, above.x, above.y, above.z, other ? 0.8f : 1.0f, cam.pitch};
   if (other) {
     g.look_x = lerp(g.tx, other->pos.x, 0.4f);
     g.look_y = lerp(g.ty, other->pos.y + other_mid, 0.4f);
@@ -1326,6 +1342,7 @@ CameraGoal camera_goal(const World& w, CameraSubject subject) {
 }  // namespace
 
 CameraSubject camera_subject(const World& w) {
+  if (sealing(w)) return CameraSubject::Seal;
   if (w.battle.phase != BattlePhase::None) return CameraSubject::Companion;
   // Just after a battle: a moment on the companion (its victory), unless the player walks away.
   const Battle& b = w.battle;
@@ -1443,13 +1460,14 @@ void interior_light(const World& w, float time, View& v) {
 }  // namespace
 
 View build_view(const World& w, const Camera& cam, float aspect, float time) {
-  CameraGoal g = camera_goal(w, cam.smooth ? cam.subject : camera_subject(w));
+  CameraGoal g = camera_goal(w, cam.smooth ? cam.subject : camera_subject(w), cam);
   if (cam.smooth && cam.blend < 1) {
     // Gliding from one subject to the other (both may move meanwhile).
-    const CameraGoal from = camera_goal(w, cam.previous);
+    const CameraGoal from = camera_goal(w, cam.previous, cam);
     const float t = cam.blend * cam.blend * (3 - 2 * cam.blend);
-    g = {lerp(from.tx, g.tx, t), lerp(from.ty, g.ty, t), lerp(from.tz, g.tz, t), lerp(from.look_x, g.look_x, t),
-         lerp(from.look_y, g.look_y, t), lerp(from.look_z, g.look_z, t), lerp(from.zoom, g.zoom, t)};
+    g = {lerp(from.tx, g.tx, t),         lerp(from.ty, g.ty, t),         lerp(from.tz, g.tz, t),
+         lerp(from.look_x, g.look_x, t), lerp(from.look_y, g.look_y, t), lerp(from.look_z, g.look_z, t),
+         lerp(from.zoom, g.zoom, t),     lerp(from.pitch, g.pitch, t),   lerp(from.turn, g.turn, t)};
   }
   const float tx = g.tx, ty = g.ty, tz = g.tz;
   const float look_x = g.look_x, look_y = g.look_y, look_z = g.look_z;
@@ -1460,8 +1478,9 @@ View build_view(const World& w, const Camera& cam, float aspect, float time) {
   // world's, or the wall's or the ceiling's the companion clings to: its
   // forward then runs along that surface (as the joystick, interior.hpp).
   const Vec3 n = cam.smooth ? cam.up : Vec3{0, 1, 0};
-  const float cp = std::cos(cam.pitch), sp = std::sin(cam.pitch);
-  Vec3 forward{-std::sin(cam.yaw), 0, -std::cos(cam.yaw)};
+  const float cp = std::cos(g.pitch), sp = std::sin(g.pitch);
+  const float yaw = cam.yaw + g.turn;
+  Vec3 forward{-std::sin(yaw), 0, -std::cos(yaw)};
   if (w.climbing && !battle_target(w) && cam.subject == CameraSubject::Companion) {
     // Moving freely on the walls: the forward the joystick follows (interior.hpp).
     const Vec3 f = w.climb_forward - n * (w.climb_forward.x * n.x + w.climb_forward.y * n.y + w.climb_forward.z * n.z);

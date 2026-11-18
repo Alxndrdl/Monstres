@@ -794,7 +794,7 @@ int foe_slot(const World& w, size_t index) {
 
 bool can_capture(const World& w) {
   const Foe* t = battle_target(w);
-  return t && w.battle.rival.npc == 0 && t->hp > 0 && (w.team.size() < rules::kTeamSize || farm_open(w)) &&
+  return t && !sealing(w) && w.battle.rival.npc == 0 && t->hp > 0 && (w.team.size() < rules::kTeamSize || farm_open(w)) &&
          uint32_t{t->hp} * 100u <= uint32_t{t->max_hp} * rules::kCaptureHpPercent;
 }
 
@@ -1060,6 +1060,81 @@ void force_battle(World& w, size_t index) {
   w.battle.forced = true;
 }
 
+namespace {
+
+// foes[k] joins the team (or the farm, the team being full).
+void capture_foe(World& w, size_t k) {
+  Battle& b = w.battle;
+  const Foe f = b.foes[k];
+  const Creature& e = w.creatures[f.index];
+  Monster m;
+  m.species = e.species;
+  m.genes = e.genes;
+  m.level = e.level;
+  m.hp = f.hp;
+  m.tag = e.tag;
+  m.beaten = e.beaten || e.released;
+  give_traits(m, roll_traits(w.seed, e.id, e.species, e.genes), world_day(w));
+  uint16_t& n = w.captured_count[static_cast<size_t>(e.species)];
+  n = static_cast<uint16_t>(std::min(n + 1, 65535));
+  if (e.tag == Tag::Giant) w.quests[static_cast<size_t>(QuestId::GiantChampi)].progress |= kGiantCaught;
+  raider_down(w, e);
+  if (m.tag == Tag::Raider) m.tag = Tag::None;
+  capture(w, f.index);
+  w.went_in = {w.tick, true, e.species, e.genes, e.body};  // runes, then into the crystal
+  count_beaten(w, f);
+  drop_foe(w, k);
+  remove_creature(w, f.index);
+  if (b.foes.empty()) end_battle(w, BattleOutcome::Captured, b.won_xp);
+  if (w.team.size() < rules::kTeamSize) w.team.push_back(m);
+  else send_to_farm(w, m);  // the transfer stone: the team is full
+}
+
+// A new order of runes: never the same twice in a row.
+void seal_order(World& w) {
+  Seal& s = w.battle.seal;
+  Rng r(w.seed ^ (w.tick * 0x9E3779B97F4A7C15ULL), 0x5EA1u + s.foe);
+  s.order[0] = static_cast<uint8_t>(r.below(kSealRunes));
+  for (size_t i = 1; i < kSealLength; ++i) {
+    const uint32_t step = 1 + r.below(kSealRunes - 1);
+    s.order[i] = static_cast<uint8_t>((s.order[i - 1] + step) % kSealRunes);
+  }
+  s.done = 0;
+  s.timer = 0;
+  s.stage = SealStage::Show;
+}
+
+void start_seal(World& w) {
+  Battle& b = w.battle;
+  Seal& s = b.seal;
+  s = {};
+  s.foe = b.foes[b.target].index;
+  s.power = s.before = rules::kSealStart;
+  b.ally.state = FighterState::Ready;  // its burst, if gathering, is lost
+  b.ally.state_ticks = 0;
+  seal_order(w);
+}
+
+uint16_t seal_lead(const Seal& s) { return s.round == 0 ? rules::kSealGlideTicks : rules::kSealPauseTicks; }
+
+// The sealed monster broke free: it runs away from the companion.
+void seal_escape(World& w, size_t k) {
+  Battle& b = w.battle;
+  Creature& c = w.creatures[b.foes[k].index];
+  float dx = c.body.pos.x - companion(w).body.pos.x, dz = c.body.pos.z - companion(w).body.pos.z;
+  const float l = std::sqrt(dx * dx + dz * dz);
+  dx = l > 1e-3f ? dx / l : 0.0f;
+  dz = l > 1e-3f ? dz / l : 1.0f;
+  c.mind = Mind::Flee;
+  c.timer = 5 * rules::kTicksPerSecond;
+  const float edge = rules::kWorldHalfSize - 1.0f;
+  c.target = {std::clamp(c.body.pos.x + dx * 18, -edge, edge), std::clamp(c.body.pos.z + dz * 18, -edge, edge)};
+  drop_foe(w, k);
+  if (b.foes.empty()) end_battle(w, BattleOutcome::Escaped, b.won_xp);
+}
+
+}  // namespace
+
 void battle_command(World& w, const Input& in) {
   Battle& b = w.battle;
   switch (in.command) {
@@ -1083,6 +1158,7 @@ void battle_command(World& w, const Input& in) {
     case Command::Discard:
     case Command::Buy:
     case Command::FarmSwap:
+    case Command::Rune:  // seal_step
       break;  // quests.cpp, west.cpp
     case Command::Cast: {
       if (in.target >= kSpellSlots || cannot_cast(w, in.target)) break;
@@ -1174,35 +1250,95 @@ void battle_command(World& w, const Input& in) {
     case Command::Summon:
       summon(w, in.target);
       break;
-    case Command::Capture: {
-      if (!can_capture(w)) break;
-      const size_t k = b.target;
-      const Foe f = b.foes[k];
-      const Creature& e = w.creatures[f.index];
-      Monster m;
-      m.species = e.species;
-      m.genes = e.genes;
-      m.level = e.level;
-      m.hp = f.hp;
-      m.tag = e.tag;
-      m.beaten = e.beaten || e.released;
-      give_traits(m, roll_traits(w.seed, e.id, e.species, e.genes), world_day(w));
-      uint16_t& n = w.captured_count[static_cast<size_t>(e.species)];
-      n = static_cast<uint16_t>(std::min(n + 1, 65535));
-      if (e.tag == Tag::Giant) w.quests[static_cast<size_t>(QuestId::GiantChampi)].progress |= kGiantCaught;
-      raider_down(w, e);
-      if (m.tag == Tag::Raider) m.tag = Tag::None;
-      capture(w, f.index);
-      w.went_in = {w.tick, true, e.species, e.genes, e.body};  // runes, then into the crystal
-      count_beaten(w, f);
-      drop_foe(w, k);
-      remove_creature(w, f.index);
-      if (b.foes.empty()) end_battle(w, BattleOutcome::Captured, b.won_xp);
-      if (w.team.size() < rules::kTeamSize) w.team.push_back(m);
-      else send_to_farm(w, m);  // the transfer stone: the team is full
+    case Command::Capture:
+      if (can_capture(w)) start_seal(w);
       break;
-    }
   }
+}
+
+bool sealing(const World& w) { return w.battle.seal.stage != SealStage::None; }
+
+void seal_step(World& w, const Input& in) {
+  Battle& b = w.battle;
+  Seal& s = b.seal;
+  const int k = foe_slot(w, s.foe);
+  if (k < 0 || b.phase != BattlePhase::Fight) {  // cannot happen: let go
+    s = {};
+    return;
+  }
+  ++s.timer;
+  switch (s.stage) {
+    case SealStage::Show:
+      if (s.timer >= seal_lead(s) + kSealLength * rules::kSealRuneTicks) {
+        s.stage = SealStage::Input;
+        s.timer = 0;
+      }
+      break;
+    case SealStage::Input:
+      if (in.command != Command::Rune || in.target >= kSealRunes) break;
+      s.touched = static_cast<uint8_t>(in.target);
+      s.touch_tick = w.tick;
+      s.before = s.power;
+      if (in.target != s.order[s.done]) {
+        s.power = static_cast<uint8_t>(s.power > rules::kSealLoss ? s.power - rules::kSealLoss : 0);
+        s.stage = SealStage::Wrong;
+        s.timer = 0;
+      } else if (++s.done == kSealLength) {
+        s.power = static_cast<uint8_t>(std::min(100, s.power + rules::kSealGain));
+        s.stage = SealStage::Right;
+        s.timer = 0;
+      }
+      break;
+    case SealStage::Right:
+    case SealStage::Wrong:
+      if (s.timer < rules::kSealResultTicks) break;
+      s.before = s.power;
+      if (s.power >= 100) {
+        s.stage = SealStage::Caught;
+        s.timer = 0;
+      } else if (s.power == 0) {
+        s.stage = SealStage::Escaped;
+        s.timer = 0;
+      } else {
+        ++s.round;
+        seal_order(w);
+      }
+      break;
+    case SealStage::Caught:
+      if (s.timer >= rules::kSealEndTicks) {
+        s = {};
+        capture_foe(w, static_cast<size_t>(k));
+      }
+      break;
+    case SealStage::Escaped:
+      if (s.timer >= rules::kSealEndTicks) {
+        s = {};
+        seal_escape(w, static_cast<size_t>(k));
+      }
+      break;
+    case SealStage::None: break;
+  }
+}
+
+int seal_lit(const World& w, float* glow) {
+  const Seal& s = w.battle.seal;
+  if (s.stage != SealStage::Show) return -1;
+  const uint16_t lead = seal_lead(s);
+  if (s.timer < lead) return -1;
+  const uint16_t t = static_cast<uint16_t>(s.timer - lead);
+  const size_t i = t / rules::kSealRuneTicks;
+  const uint16_t in = static_cast<uint16_t>(t % rules::kSealRuneTicks);
+  if (i >= kSealLength || in >= rules::kSealLitTicks) return -1;
+  if (glow) *glow = static_cast<float>(in) / rules::kSealLitTicks;
+  return s.order[i];
+}
+
+float seal_bar(const World& w) {
+  const Seal& s = w.battle.seal;
+  if (s.stage != SealStage::Right && s.stage != SealStage::Wrong) return s.power;
+  const float t = std::min(1.0f, static_cast<float>(s.timer) / (rules::kSealResultTicks * 0.6f));
+  const float e = t * t * (3 - 2 * t);
+  return static_cast<float>(s.before) + (static_cast<float>(s.power) - s.before) * e;
 }
 
 Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {

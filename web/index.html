@@ -772,6 +772,72 @@
     .rules-list { margin: 0 0 12px; padding-left: 18px; font-size: 13px; line-height: 1.45; }
     .rules-list li { margin-bottom: 3px; }
     .rules-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    /* Capturing (battle.js): a circle of runes around the foe, the seal's bar at the top. */
+    html.sealing .control, html.sealing #team-bar, html.sealing #context, html.sealing #foe-icons,
+    html.sealing #battle-hud, html.sealing #creature, html.sealing #away-warning, html.sealing #damage-layer,
+    html.sealing #mana {
+      visibility: hidden !important;
+    }
+    #seal { position: fixed; inset: 0; z-index: 4; pointer-events: none; --seal-color: #f2c94c; }
+    #seal[hidden] { display: none; }
+    #seal .seal-top {
+      position: absolute; left: 50%; top: max(10px, env(safe-area-inset-top)); transform: translateX(-50%);
+      width: min(440px, calc(100vw - 32px)); padding: 6px 14px 7px; border-radius: 12px;
+      background: rgba(20, 24, 40, 0.82); border: 1px solid rgba(255, 255, 255, 0.18); text-align: center;
+    }
+    #seal .seal-title { margin: 0 0 4px; font-weight: 700; font-size: 14px; }
+    #seal .seal-bar { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    #seal .seal-end { flex: none; width: 58px; color: rgba(255, 255, 255, 0.75); }
+    #seal .seal-end.flee { text-align: right; color: #ff8a7a; }
+    #seal .seal-end.catch { text-align: left; color: #ffe08a; }
+    #seal .seal-track {
+      position: relative; flex: 1; height: 12px; border-radius: 6px; overflow: hidden;
+      background: linear-gradient(90deg, rgba(255, 90, 70, 0.35), rgba(255, 255, 255, 0.08) 50%, rgba(242, 201, 76, 0.35));
+    }
+    #seal .seal-fill {
+      position: absolute; top: 0; bottom: 0; left: 0; width: 50%; border-radius: 6px;
+      background: linear-gradient(90deg, #ff6a5c, #f2c94c); box-shadow: 0 0 10px rgba(242, 201, 76, 0.6);
+    }
+    #seal .seal-mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: rgba(255, 255, 255, 0.6); }
+    #seal .seal-text {
+      display: flex; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin: 5px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.9); min-height: 1.3em;
+    }
+    #seal .seal-pips { display: inline-flex; gap: 5px; }
+    #seal .seal-pips i {
+      width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.5);
+    }
+    #seal .seal-pips i.on { background: var(--seal-color); border-color: var(--seal-color); box-shadow: 0 0 6px var(--seal-color); }
+    #seal .seal-ring {
+      position: absolute; left: 50%; top: 50%; width: var(--ring); height: var(--ring);
+      transform: translate(-50%, -50%); --ring: min(50vmin, 360px); transition: opacity 0.4s, transform 0.4s;
+    }
+    #seal .seal-ring.closed { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+    #seal .seal-ring > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    #seal .seal-ring > svg circle { fill: none; stroke: var(--seal-color); }
+    #seal .seal-ring > svg .turn { transform-origin: 50% 50%; animation: seal-turn 24s linear infinite; }
+    @keyframes seal-turn { to { transform: rotate(360deg); } }
+    #seal .rune {
+      position: absolute; width: 54px; height: 54px; margin: -27px 0 0 -27px; padding: 0; border-radius: 50%;
+      pointer-events: auto; touch-action: none; cursor: pointer; color: rgba(255, 255, 255, 0.55);
+      background: radial-gradient(circle, rgba(20, 24, 40, 0.85) 55%, rgba(20, 24, 40, 0.4));
+      border: 2px solid rgba(255, 255, 255, 0.35); transition: transform 0.12s, box-shadow 0.2s, color 0.2s, border-color 0.2s;
+    }
+    #seal .rune svg { width: 28px; height: 28px; display: block; margin: auto; }
+    @media (min-height: 600px) { #seal .seal-ring { --ring: min(56vmin, 420px); } #seal .rune { width: 62px; height: 62px; margin: -31px 0 0 -31px; } }
+    #seal .rune:disabled { cursor: default; }
+    #seal .rune.lit, #seal .rune.good {
+      color: #fff; border-color: var(--seal-color); transform: scale(1.18);
+      box-shadow: 0 0 calc(22px * var(--glow, 1)) var(--seal-color), inset 0 0 14px var(--seal-color);
+      background: radial-gradient(circle, color-mix(in srgb, var(--seal-color) 55%, transparent), rgba(20, 24, 40, 0.6));
+    }
+    #seal .rune.bad { color: #fff; border-color: #ff5a4a; box-shadow: 0 0 22px #ff5a4a; animation: rune-shake 0.35s; }
+    @keyframes rune-shake { 25% { translate: -5px 0; } 50% { translate: 5px 0; } 75% { translate: -3px 0; } }
+    #seal.input .rune:not(:disabled) { color: rgba(255, 255, 255, 0.9); border-color: rgba(255, 255, 255, 0.7); }
+    #seal.caught .rune { color: #fff; border-color: #ffe08a; box-shadow: 0 0 18px #ffd25a; }
+    #seal.escaped .seal-ring { opacity: 0; transform: translate(-50%, -50%) scale(1.5); transition-duration: 0.6s; }
+    #seal kbd { display: none; position: absolute; right: -6px; bottom: -6px; font-size: 10px; }
+    .has-keyboard #seal kbd { display: block; }
     #battle-banner {
       position: fixed; left: 50%; top: 28%; transform: translate(-50%, -50%); z-index: 3; padding: 10px 22px;
       border-radius: 12px; background: rgba(20, 24, 40, 0.85); border: 1px solid rgba(242, 201, 76, 0.6);
@@ -1231,6 +1297,19 @@
       <button type="button" class="button" id="rules-forfeit">Renoncer</button>
       <button type="button" class="button primary" id="rules-ready">Prêt !</button>
     </div>
+  </div>
+  <!-- Capturing: the circle of runes, the seal's bar (battle.js). -->
+  <div id="seal" role="dialog" aria-label="Capture : le sceau" hidden>
+    <div class="seal-top">
+      <p class="seal-title"></p>
+      <div class="seal-bar" aria-hidden="true">
+        <span class="seal-end flee">Fuite</span>
+        <div class="seal-track"><span class="seal-fill"></span><span class="seal-mid"></span></div>
+        <span class="seal-end catch">Capture</span>
+      </div>
+      <p class="seal-text"><span aria-live="polite"></span><span class="seal-pips" aria-hidden="true"></span></p>
+    </div>
+    <div class="seal-ring closed"></div>
   </div>
   <div id="battle-banner" role="status" aria-live="polite" hidden></div>
   <div id="toast" role="status" aria-live="polite" hidden></div>

@@ -227,7 +227,7 @@ TEST_CASE("capture needs a weakened enemy; the monster then joins the team") {
   w.battle.dealt[0] = w.battle.foes[0].max_hp - w.battle.foes[0].hp;  // as if the companion had done it
   const size_t creatures = w.creatures.size();
   const uint32_t xp = w.team[0].xp;
-  step(w, command(Command::Capture));
+  REQUIRE(seal(w));
   CHECK(w.battle.phase == BattlePhase::None);
   CHECK(w.battle.outcome == BattleOutcome::Captured);
   REQUIRE(w.team.size() == 2);
@@ -459,7 +459,7 @@ TEST_CASE("a captured monster leaves a trace for the runes; the companion out is
   engage(w);
   w.battle.foes[0].hp = 1;
   const Vec3 where = w.creatures[1].body.pos;
-  step(w, command(Command::Capture));
+  REQUIRE(seal(w));
   CHECK(w.went_in.captured);
   CHECK(w.went_in.species == Species::Slime);
   CHECK(w.went_in.body.pos.x == doctest::Approx(where.x));
@@ -704,8 +704,150 @@ TEST_CASE("a monster beaten once gives no more experience, captured or beaten ag
   engage(w);
   w.battle.dealt[0] = 20;
   w.battle.foes[0].hp = 1;
-  step(w, command(Command::Capture));
+  REQUIRE(seal(w));
   REQUIRE(w.battle.outcome == BattleOutcome::Captured);
   CHECK(w.battle.outcome_xp == 0u);
   CHECK(w.team.back().beaten);
+}
+
+namespace {
+// Steps until the runes can be touched.
+void until_input(World& w) {
+  for (int i = 0; i < 1000 && w.battle.seal.stage != SealStage::Input; ++i) step(w, Input{});
+  REQUIRE(w.battle.seal.stage == SealStage::Input);
+}
+// Touches the whole order right (or one wrong rune first).
+void touch_round(World& w, bool wrong) {
+  until_input(w);
+  const Seal& s = w.battle.seal;
+  if (wrong) {
+    step(w, command(Command::Rune, static_cast<uint16_t>((s.order[0] + 1) % kSealRunes)));
+    return;
+  }
+  for (size_t i = 0; i < kSealLength; ++i) step(w, command(Command::Rune, s.order[i]));
+}
+void until_next_round(World& w) {
+  for (int i = 0; i < 1000 && (w.battle.seal.stage == SealStage::Right || w.battle.seal.stage == SealStage::Wrong); ++i) {
+    step(w, Input{});
+  }
+}
+}  // namespace
+
+TEST_CASE("capturing: a circle of runes, lit in an order to touch again; the world holds still") {
+  World w = arena();
+  engage(w);
+  w.battle.foes[0].hp = 1;
+  run(w, Input{}, 5);
+  step(w, command(Command::Capture));
+  REQUIRE(sealing(w));
+  const Vec3 player = w.player.pos;
+  const Vec3 ally = w.creatures[0].body.pos;
+  const Vec3 crow = w.creatures[3].body.pos;
+  const uint32_t clock = w.clock;
+  const Seal& s = w.battle.seal;
+  CHECK(s.stage == SealStage::Show);
+  CHECK(s.foe == 1);
+  CHECK(s.power == rules::kSealStart);
+  CHECK_FALSE(can_capture(w));  // once is enough
+  for (size_t i = 0; i < kSealLength; ++i) {
+    CHECK(s.order[i] < kSealRunes);
+    if (i > 0) CHECK(s.order[i] != s.order[i - 1]);  // never twice in a row
+  }
+  // The runes light up one after the other, in that order.
+  std::vector<int> seen;
+  for (int i = 0; i < 1000 && s.stage == SealStage::Show; ++i) {
+    // Touching too early does nothing.
+    step(w, command(Command::Rune, 0));
+    const int lit = seal_lit(w);
+    if (lit >= 0 && (seen.empty() || seen.back() != lit)) seen.push_back(lit);  // never twice in a row
+  }
+  REQUIRE(seen.size() == kSealLength);
+  for (size_t i = 0; i < kSealLength; ++i) CHECK(seen[i] == s.order[i]);
+  CHECK(s.stage == SealStage::Input);
+  CHECK(s.power == rules::kSealStart);
+  // Nothing else moved, and time stood still (but the world's ticks, for the drawing).
+  run(w, Input{}, 200);
+  CHECK(w.player.pos == player);
+  CHECK(w.creatures[0].body.pos == ally);
+  CHECK(w.creatures[3].body.pos == crow);
+  CHECK(w.clock == clock);
+  CHECK(sealing(w));  // it waits for the player
+  // Fleeing does nothing either.
+  step(w, command(Command::Flee));
+  CHECK(w.battle.phase == BattlePhase::Fight);
+  const std::string json = battle_json(w);
+  CHECK(json.find("\"seal\":{\"stage\":\"input\"") != std::string::npos);
+}
+
+TEST_CASE("capturing: the order right moves the bar towards the capture, a mistake towards the escape") {
+  World w = arena();
+  engage(w);
+  w.battle.foes[0].hp = 1;
+  step(w, command(Command::Capture));
+  touch_round(w, false);
+  CHECK(w.battle.seal.stage == SealStage::Right);
+  CHECK(w.battle.seal.power == rules::kSealStart + rules::kSealGain);  // 75
+  const auto first = w.battle.seal.order;
+  until_next_round(w);
+  CHECK(w.battle.seal.stage == SealStage::Show);
+  CHECK(w.battle.seal.round == 1);
+  CHECK(w.battle.seal.done == 0);
+  CHECK(w.battle.seal.order != first);  // a new order (this seed)
+  touch_round(w, true);
+  CHECK(w.battle.seal.stage == SealStage::Wrong);
+  CHECK(w.battle.seal.power == 75 - rules::kSealLoss);  // 35
+  until_next_round(w);
+  touch_round(w, false);
+  CHECK(w.battle.seal.power == 60);
+  until_next_round(w);
+  touch_round(w, false);
+  CHECK(w.battle.seal.power == 85);
+  until_next_round(w);
+  touch_round(w, false);
+  CHECK(w.battle.seal.power == 100);
+  until_next_round(w);
+  CHECK(w.battle.seal.stage == SealStage::Caught);
+  CHECK(w.team.size() == 1);  // not yet: it glows first
+  run(w, Input{}, rules::kSealEndTicks);
+  CHECK_FALSE(sealing(w));
+  CHECK(w.team.size() == 2);
+  CHECK(w.battle.outcome == BattleOutcome::Captured);
+  CHECK(w.went_in.captured);
+}
+
+TEST_CASE("capturing: two mistakes and the monster breaks free, the battle goes on without it") {
+  World w = arena();
+  // A second slime with the first one: the battle goes on.
+  Creature other = w.creatures[1];
+  other.body.pos = {2, 0, -3};
+  add_creature(w, other);
+  engage(w);
+  REQUIRE(w.battle.foes.size() == 2);
+  w.battle.target = 0;
+  w.battle.foes[0].hp = 1;
+  const uint16_t index = w.battle.foes[0].index;
+  step(w, command(Command::Capture));
+  touch_round(w, true);
+  CHECK(w.battle.seal.power == rules::kSealStart - rules::kSealLoss);  // 10
+  until_next_round(w);
+  touch_round(w, true);
+  CHECK(w.battle.seal.power == 0);
+  until_next_round(w);
+  CHECK(w.battle.seal.stage == SealStage::Escaped);
+  run(w, Input{}, rules::kSealEndTicks);
+  CHECK_FALSE(sealing(w));
+  CHECK(w.battle.phase == BattlePhase::Fight);
+  CHECK(w.battle.foes.size() == 1);
+  CHECK(w.battle.foes[0].index != index);
+  CHECK(w.creatures[index].mind == Mind::Flee);
+  CHECK(w.team.size() == 1);
+
+  // Alone, it ends the battle.
+  World a = arena();
+  engage(a);
+  a.battle.foes[0].hp = 1;
+  CHECK(seal(a, 2));
+  CHECK(a.battle.phase == BattlePhase::None);
+  CHECK(a.battle.outcome == BattleOutcome::Escaped);
+  CHECK(a.team.size() == 1);
 }

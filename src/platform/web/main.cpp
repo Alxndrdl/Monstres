@@ -35,6 +35,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace monstres;
@@ -105,6 +106,7 @@ struct App {
   uint32_t held_clock = 0;
   Command command = Command::None;  // sent with the next tick
   uint16_t command_target = 0;
+  std::vector<std::pair<Command, uint16_t>> queued;  // more in the same frame (two runes touched at once): one per tick
   bool frozen = false;           // ?frozen: no automatic ticks (tests, screenshots)
   bool redraw = true;            // frozen mode only redraws when something changed
   int selected = -1;             // creature shown in the info panel (-1: none)
@@ -186,6 +188,11 @@ void tick(App& app, const Input& in) {
   if (in.parry && ally.state == FighterState::Parry) app.parry_buffer = 0;
   if (app.parry_buffer > 0) --app.parry_buffer;
   app.command = Command::None;
+  if (!app.queued.empty()) {
+    app.command = app.queued.front().first;
+    app.command_target = app.queued.front().second;
+    app.queued.erase(app.queued.begin());
+  }
   // Creatures come and go: follow the selected one by its id.
   if (w.creatures.size() != creatures && app.selected >= 0) app.selected = find_creature(w, app.selected_id);
   if (w.battle.phase == BattlePhase::Fight || w.battle.phase == BattlePhase::Prepare) {
@@ -616,6 +623,7 @@ void enter_world(App& app, World world, int slot) {
   app.placeholder = false;
   app.intro = false;
   app.command = Command::None;
+  app.queued.clear();
   app.jump_buffer = app.attack_buffer = app.parry_buffer = 0;
   app.accumulator = 0;
   app.last_saved_tick = app.world.tick;
@@ -705,6 +713,10 @@ JSON_EXPORT(monstres_command_names_json, command_names_json())
 
 EMSCRIPTEN_KEEPALIVE void monstres_command(int command, int target) {
   if (command < 1 || command >= static_cast<int>(kCommandCount) || target < 0 || target > 65535) return;
+  if (g_app->command != Command::None && !g_app->frozen && !g_app->paused) {
+    if (g_app->queued.size() < 8) g_app->queued.emplace_back(static_cast<Command>(command), static_cast<uint16_t>(target));
+    return;
+  }
   g_app->command = static_cast<Command>(command);
   g_app->command_target = static_cast<uint16_t>(target);
   // Frozen (tests), or a menu open (time stands still: choosing spells,

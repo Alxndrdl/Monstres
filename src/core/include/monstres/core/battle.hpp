@@ -42,6 +42,17 @@ inline constexpr uint16_t kCompanionStartLevel = 3;
 inline constexpr float kEngageDistance = 15.0f;     // from the player to the monster
 inline constexpr float kBattleLeash = 25.0f;        // companion this far from the enemy: the battle ends
 inline constexpr uint16_t kCaptureHpPercent = 25;   // weakened: at most this much of its hit points left
+// Capturing (Battle::seal): the bar starts halfway; the whole order touched
+// moves it towards the capture, a mistake towards the escape.
+inline constexpr uint8_t kSealStart = 50;
+inline constexpr uint8_t kSealGain = 25;
+inline constexpr uint8_t kSealLoss = 40;
+inline constexpr uint16_t kSealGlideTicks = 60;   // the camera glides to the monster first
+inline constexpr uint16_t kSealPauseTicks = 30;   // before the next rounds
+inline constexpr uint16_t kSealRuneTicks = 39;    // one rune after the other...
+inline constexpr uint16_t kSealLitTicks = 30;     // ...lit this long
+inline constexpr uint16_t kSealResultTicks = 50;  // the bar moves
+inline constexpr uint16_t kSealEndTicks = 70;     // caught or escaped, then the battle goes on
 inline constexpr float kFleeArrival = 2.0f;         // the companion is back next to the player
 inline constexpr uint16_t kFleeMaxTicks = 8 * rules::kTicksPerSecond;
 inline constexpr uint16_t kDodgeTicks = 12;         // 0.2 s
@@ -174,6 +185,22 @@ EngageCheck can_engage(const World& world, size_t index);
 const char* engage_check_name(EngageCheck check);
 
 bool can_capture(const World& world);
+
+// Capturing (Command::Capture starts it, Battle::seal): the camera glides to
+// the foe, a circle of kSealRunes runes around it; kSealLength of them light
+// up one after the other (never the same twice in a row), then the player
+// touches them in that order (Command::Rune). The bar starts at kSealStart:
+// the whole order right moves it kSealGain towards the capture (100), a
+// mistake kSealLoss towards the escape (0); each round shows a new order.
+// Caught, it goes into the crystal; escaped, it runs away (the battle goes
+// on with the others, or ends). Meanwhile the world holds still: step() only
+// calls seal_step.
+bool sealing(const World& world);
+void seal_step(World& world, const Input& in);
+// The rune lit now (Show), or -1; and how far into its light (0..1).
+int seal_lit(const World& world, float* glow = nullptr);
+// The bar, 0..100, as drawn now (moving after a round).
+float seal_bar(const World& world);
 
 // Can the player challenge the trainer `npc` now (close to it, a monster out, no battle)?
 bool can_challenge(const World& world, uint8_t npc);

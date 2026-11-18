@@ -1044,6 +1044,31 @@ void vanish(CreatureLook& look, Element element, float t) {
 // guards, trembles while a burst gathers, and flashes when it is hurt.
 // Zapou's quills flicker from color to color as its discharge gathers and
 // goes off.
+// Capturing (Battle::seal): the foe struggles against the circle of runes,
+// harder when it pulls away (a mistake), less as the seal tightens; caught,
+// it holds still and starts to glow.
+void seal_struggle(const World& w, float time, CreatureLook& look, Body& body) {
+  const Seal& s = w.battle.seal;
+  const float tightened = seal_bar(w) / 100.0f;
+  float k = 1.0f - 0.6f * tightened;
+  if (s.stage == SealStage::Wrong) k += 1.2f * std::max(0.0f, 1 - static_cast<float>(s.timer) / rules::kSealResultTicks);
+  if (s.stage == SealStage::Right) k *= 0.4f;
+  if (s.stage == SealStage::Escaped) k = 1.6f;
+  if (s.stage == SealStage::Caught) {
+    const float g = std::min(1.0f, static_cast<float>(s.timer) / rules::kSealEndTicks);
+    for (Color& c : look.tints) c = {c.r * (1 + g), c.g * (1 + g), c.b * (1 + g), c.a};
+    k = 0.15f;
+  }
+  body.pos.x += 0.05f * k * std::sin(time * 23.0f);
+  body.pos.z += 0.05f * k * std::cos(time * 19.0f);
+  body.pos.y += 0.07f * k * std::fabs(std::sin(time * 6.5f));
+  const float twist = 0.4f * k * std::sin(time * 7.0f);
+  const float fx = body.facing_x, fz = body.facing_z;
+  body.facing_x = fx * std::cos(twist) - fz * std::sin(twist);
+  body.facing_z = fx * std::sin(twist) + fz * std::cos(twist);
+  body.speed = 2.5f * k;  // its legs kick
+}
+
 void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body, std::vector<PartPose>& poses) {
   const Battle& b = w.battle;
   const int slot = index == 0 ? -1 : foe_slot(w, index);
@@ -1272,6 +1297,12 @@ void add_characters(const World& w, float time, DrawList& list, const Frustum* v
       CreatureLook look = creature_look(c.species, c.genes);
       Body body = c.body;
       battle_pose(w, i, look, body, poses);
+      if (sealing(w) && w.battle.seal.foe == i) {
+        seal_struggle(w, time, look, body);
+        Creature held = c;
+        held.body = body;
+        pose_creature(held, time, static_cast<float>(i) * 0.731f, poses);
+      }
       const bool released = i > 0 && c.id == w.released_id && w.released_tick > 0;
       const uint64_t came_out = i == 0 ? w.came_out_tick : released ? w.released_tick : 0;
       if (came_out > 0 && w.tick - came_out < kSummonTicks) {
@@ -1405,6 +1436,38 @@ void add_crystal_effects(const World& w, float time, DrawList& list) {
     const float h = species_info(c.species).shape.height * 0.5f;
     add_beam(list, crystal, {c.body.pos.x, c.body.pos.y + h, c.body.pos.z}, glow, 1 - t * t, time);
     add_burst(list, {c.body.pos.x, c.body.pos.y + 0.1f, c.body.pos.z}, glow, t, 0.9f);
+  }
+
+  // Capturing: the circle of runes at the foe's feet, of its element; golden
+  // once caught, flickering out when it breaks free.
+  if (sealing(w)) {
+    const Seal& s = w.battle.seal;
+    const Creature& c = w.creatures[s.foe];
+    const BodyShape& shape = species_info(c.species).shape;
+    const float size = build_scale(c.genes.form);
+    const Color glow = element_glow(creature_elements(c.species, c.genes).first);
+    const float open = s.round == 0 && s.stage == SealStage::Show
+                           ? std::min(1.0f, static_cast<float>(s.timer) / rules::kSealGlideTicks) : 1.0f;
+    float alpha = 0.55f + 0.45f * seal_bar(w) / 100.0f;
+    Color tint = glow;
+    if (s.stage == SealStage::Caught) tint = {1.9f, 1.7f, 1.0f, 1};
+    if (s.stage == SealStage::Wrong) alpha *= 0.6f + 0.4f * std::fabs(std::sin(time * 30.0f));
+    if (s.stage == SealStage::Escaped) {
+      alpha *= std::max(0.0f, 1 - static_cast<float>(s.timer) / (rules::kSealEndTicks * 0.5f));
+      tint = {2.2f, 0.4f, 0.3f, 1};
+    }
+    Instance seal;
+    seal.x = c.body.pos.x;
+    seal.y = c.body.pos.y + 0.04f;
+    seal.z = c.body.pos.z;
+    seal.rotation = quat_yaw(time * 0.6f);
+    seal.sx = seal.sz = (shape.half_width * 2.6f * size + 0.8f) * (0.3f + 0.7f * open);
+    seal.tint = {tint.r, tint.g, tint.b, alpha};
+    add_glow(list, MeshId::RuneCircle, seal);
+    seal.rotation = quat_yaw(-time * 1.1f);
+    seal.sx = seal.sz *= 0.6f;
+    seal.tint = {tint.r, tint.g, tint.b, alpha * 0.7f};
+    add_glow(list, MeshId::RuneCircle, seal);
   }
 
   // Gone in: held by runes first if captured, then it vanishes into the beam.

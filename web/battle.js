@@ -8,7 +8,7 @@
   'use strict';
 
   const LORE = window.MonstresLore;
-  const { $, el, whenReady, setText } = window.MonstresUtil;
+  const { $, el, whenReady, setText, onTap } = window.MonstresUtil;
   const speciesName = (id) => (LORE.species[id] || { name: id }).name;
   const npcName = (n) => (LORE.npcs[n] || { name: 'Dresseur' }).name;
 
@@ -51,7 +51,7 @@
     (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName));
   const KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Numpad1: 1, Numpad2: 2, Numpad3: 3 };
   window.addEventListener('keydown', (event) => {
-    if (!game || !fighting || event.repeat || event.ctrlKey || event.metaKey || event.altKey || typing(event)) return;
+    if (!game || !fighting || sealStage !== 'none' || event.repeat || event.ctrlKey || event.metaKey || event.altKey || typing(event)) return;
     if (KEYS[event.code]) {
       event.preventDefault();
       game.input.attack(KEYS[event.code]);
@@ -134,9 +134,7 @@
     button.setAttribute('role', 'menuitem');
     button.innerHTML = ICONS[id];
     button.append(label);
-    button.addEventListener('click', () => {
-      if (game && !button.disabled) onClick();
-    });
+    onTap(button, () => { if (game) onClick(); });  // also while the other hand moves the monster
     return button;
   };
 
@@ -389,10 +387,7 @@
           button.disabled = !clickable;
           button.title = !clickable ? name : b.target === x.slot ? `${name} — viser personne (mode libre)` : `${name} — le viser`;
           button.setAttribute('aria-label', button.title);
-          button.addEventListener('pointerdown', (event) => event.preventDefault());
-          button.addEventListener('click', () => {
-            if (game && !button.disabled) toggleTarget(game.battle(), x.slot);
-          });
+          onTap(button, () => { if (game) toggleTarget(game.battle(), x.slot); });
           return button;
         }));
     }
@@ -623,6 +618,7 @@
       captured: [`${foe} capturé !`, 'Il rejoint ton équipe'],
       defeat: [`${companion} est K.O.`, 'Soigne-le d’un sort, ou va voir Odette au village.'],
       fled: ['Tu as pris la fuite', ''],
+      escaped: [`${foe} s’est libéré`, 'Il s’enfuit : le sceau n’a pas tenu.'],
     }[o.result];
     if (!texts) return;
     const won = o.result === 'victory' || o.result === 'captured';
@@ -648,6 +644,143 @@
     bannerTimer = setTimeout(() => { banner.hidden = true; }, gains.length ? 4200 : 2800);
   }
 
+
+  // ---- Capturing: the circle of runes (Battle::seal, src/core/battle.cpp) ----
+  // The runes light up one after the other; then the player touches them in
+  // the same order (keys 1 to 6 too). The bar: the escape on the left, the
+  // capture on the right; it starts halfway.
+  const RUNE_GLYPHS = [
+    'M12 3v18M12 9l6-5M12 14l6-5',
+    'M7 21V3l10 6v12',
+    'M8 3v18M8 7l8 5-8 5',
+    'M12 3v18M12 4l-6 5M12 9l-6 5',
+    'M6 3l12 18M18 3L6 21',
+    'M12 3l7 9-7 9-7-9z',
+  ];
+  const sealLayer = $('seal');
+  const sealRing = sealLayer.querySelector('.seal-ring');
+  const sealTitle = sealLayer.querySelector('.seal-title');
+  const sealText = sealLayer.querySelector('.seal-text > span');
+  const sealFill = sealLayer.querySelector('.seal-fill');
+  const sealPips = sealLayer.querySelector('.seal-pips');
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const svg = (tag, attrs, children = []) => {
+    const node = document.createElementNS(svgNs, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    node.append(...children);
+    return node;
+  };
+  let sealStage = 'none';
+  let runeButtons = [];
+  let lastTouch = 0;
+  function buildRing(count) {
+    const ring = svg('svg', { viewBox: '0 0 100 100', 'aria-hidden': 'true' }, [
+      svg('g', { class: 'turn' }, [
+        svg('circle', { cx: 50, cy: 50, r: 47, 'stroke-width': 0.6, 'stroke-dasharray': '2 3', opacity: 0.8 }),
+        svg('circle', { cx: 50, cy: 50, r: 42, 'stroke-width': 0.4, opacity: 0.6 }),
+        svg('polygon', { points: Array.from({ length: count }, (_, k) => {
+          const a = -Math.PI / 2 + k * 2 * Math.PI / count;
+          return `${50 + 42 * Math.cos(a)},${50 + 42 * Math.sin(a)}`;
+        }).join(' '), fill: 'none', stroke: 'var(--seal-color)', 'stroke-width': 0.35, opacity: 0.5 }),
+      ]),
+    ]);
+    // Two at the top, two at the bottom, one on each side: none under the bar.
+    runeButtons = Array.from({ length: count }, (_, k) => {
+      const a = -Math.PI / 2 + (k * 2 + 1) * Math.PI / count;
+      const button = el('button', { type: 'button', className: 'rune', disabled: true });
+      button.setAttribute('aria-label', `Rune ${k + 1}`);
+      button.style.left = `${50 + 50 * Math.cos(a)}%`;
+      button.style.top = `${50 + 50 * Math.sin(a)}%`;
+      button.append(svg('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2.2,
+        'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
+      [svg('path', { d: RUNE_GLYPHS[k % RUNE_GLYPHS.length] })]), el('kbd', { textContent: String(k + 1) }));
+      // At once, finger down: quick sequences, and two hands.
+      let pressed = -Infinity;
+      button.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        pressed = event.timeStamp;
+        if (game && !button.disabled) game.rune(k);
+      });
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (event.timeStamp - pressed < 1000) return;  // that press's own click
+        if (game && !button.disabled) game.rune(k);  // the keyboard's Enter
+      });
+      return button;
+    });
+    sealRing.replaceChildren(ring, ...runeButtons);
+  }
+  window.addEventListener('keydown', (event) => {
+    if (!game || sealStage !== 'input' || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+    const k = /^(Digit|Numpad)([1-9])$/.exec(event.code);
+    if (!k || Number(k[2]) > runeButtons.length) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();  // not an attack
+    game.rune(Number(k[2]) - 1);
+  }, true);
+
+  const SEAL_TEXTS = {
+    show: () => 'Observe l’ordre des runes…',
+    input: (s) => `À toi : touche les runes dans le même ordre (${s.done}/${s.length})`,
+    right: (s) => `Bravo ! Le sceau se resserre (+${s.gain} %)`,
+    wrong: (s) => `Raté ! Il se débat (−${s.loss} %)`,
+    caught: () => 'Le sceau est complet !',
+    escaped: () => 'Il s’est libéré !',
+  };
+  function renderSeal(b) {
+    const s = b.seal;
+    root.classList.toggle('sealing', !!s);
+    if (!s) {
+      if (sealStage !== 'none') {
+        sealStage = 'none';
+        sealLayer.hidden = true;
+        sealRing.classList.add('closed');
+      }
+      return;
+    }
+    if (runeButtons.length !== s.runes) buildRing(s.runes);
+    if (sealLayer.hidden) {
+      sealLayer.hidden = false;
+      lastTouch = s.touchTick;
+    }
+    sealStage = s.stage;
+    const color = (LORE.elements[s.element] || { color: '#f2c94c' }).color;
+    sealLayer.style.setProperty('--seal-color', color);
+    sealLayer.className = s.stage;
+    // Around the monster, where it is drawn (the camera glides to it first).
+    const at = game.creatureOnScreen(s.foe);
+    if (at) {
+      sealRing.style.left = `${at.x}px`;
+      sealRing.style.top = `${at.y}px`;
+    }
+    // The ring opens once the camera is on the monster.
+    sealRing.classList.toggle('closed', s.stage === 'show' && s.round === 0 && s.lit < 0 && s.timer < 40);
+    setText(sealTitle, `Capture · ${speciesName(s.species)}`);
+    setText(sealText, (SEAL_TEXTS[s.stage] || (() => ''))(s));
+    sealFill.style.width = `${Math.max(0, Math.min(100, s.bar))}%`;
+    if (sealPips.childElementCount !== s.length) {
+      sealPips.replaceChildren(...Array.from({ length: s.length }, () => el('i')));
+    }
+    const done = s.stage === 'right' || s.stage === 'caught' ? s.length : s.stage === 'input' ? s.done : 0;
+    [...sealPips.children].forEach((pip, i) => pip.classList.toggle('on', i < done));
+    const touched = s.touchTick !== lastTouch;
+    if (touched) lastTouch = s.touchTick;
+    runeButtons.forEach((button, k) => {
+      button.disabled = s.stage !== 'input';
+      const lit = s.lit === k;
+      button.classList.toggle('lit', lit);
+      if (lit) button.style.setProperty('--glow', String(1 - s.glow * 0.5));
+      if (touched && k === s.touched) {
+        const kind = s.stage === 'wrong' ? 'bad' : 'good';
+        button.classList.remove('good', 'bad');
+        void button.offsetWidth;
+        button.classList.add(kind);
+        clearTimeout(button.flash);
+        button.flash = setTimeout(() => button.classList.remove(kind), kind === 'bad' ? 500 : 220);
+      }
+    });
+  }
+
   // ---- Every frame ----
   let fighting = false;
   let quiet = false;  // no battle, nothing selected: the game is asked less often
@@ -670,6 +803,7 @@
     renderRules(b);
     renderAway(b);
     renderContext(b);
+    renderSeal(b);
   }
 
   const start = () => {

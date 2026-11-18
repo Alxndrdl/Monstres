@@ -1,5 +1,6 @@
 #pragma once
 
+#include "monstres/core/battle.hpp"
 #include "monstres/core/world.hpp"
 
 #include <doctest.h>
@@ -95,6 +96,28 @@ inline void run(World& w, const Input& in, int ticks) {
 }
 
 // Rules that must hold after every tick of any game.
+// Capturing (battle.hpp): Command::Capture, then the runes touched right
+// (or, `mistakes`: wrong ones first, each round) until the seal ends.
+// False if no seal started.
+inline bool seal(World& w, int mistakes = 0) {
+  Input in;
+  in.command = Command::Capture;
+  step(w, in);
+  if (w.battle.seal.stage == SealStage::None) return false;
+  for (int guard = 0; guard < 6000 && w.battle.seal.stage != SealStage::None; ++guard) {
+    Input t;
+    const Seal& s = w.battle.seal;
+    if (s.stage == SealStage::Input) {
+      t.command = Command::Rune;
+      const uint8_t right = s.order[s.done];
+      t.target = mistakes > 0 ? static_cast<uint16_t>((right + 1) % kSealRunes) : right;
+      if (mistakes > 0) --mistakes;
+    }
+    step(w, t);
+  }
+  return true;
+}
+
 inline void check_invariants(const World& w) {
   const Player& p = w.player;
   CHECK(std::isfinite(p.pos.x));

@@ -158,6 +158,8 @@ window.monstres = {
   engage: (index) => monstresCommand('engage', index),
   flee: () => monstresCommand('flee', 0),
   capture: () => monstresCommand('capture', 0),
+  // Capturing (the circle of runes, web/battle.js): rune `k` touched.
+  rune: (k) => monstresCommand('rune', k),
   // Team bar (web/team.js): team member `slot` out of the crystal, where the
   // companion is (it goes back in); the one already out goes back in.
   summon: (slot) => monstresCommand('summon', slot),

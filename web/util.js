@@ -90,5 +90,33 @@ if ('serviceWorker' in navigator) {
     });
   }
 
-  window.MonstresUtil = { $, el, whenReady, prefs, setText };
+  // A button pressed with a finger while another one is on the screen (the
+  // joystick held): browsers make no click of it, so a touch acts when it is
+  // lifted on the button. Mouse and keyboard still click.
+  function onTap(button, action) {
+    let pointer = null;
+    let touched = -Infinity;
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault();  // no focus, no text selection
+      if (event.pointerType !== 'mouse') pointer = event.pointerId;
+    });
+    button.addEventListener('pointerup', (event) => {
+      if (event.pointerId !== pointer) return;
+      pointer = null;
+      touched = event.timeStamp;
+      const r = button.getBoundingClientRect();
+      const inside = event.clientX >= r.left - 8 && event.clientX <= r.right + 8 &&
+        event.clientY >= r.top - 8 && event.clientY <= r.bottom + 8;
+      if (inside && !button.disabled) action(event);
+    });
+    button.addEventListener('pointercancel', (event) => {
+      if (event.pointerId === pointer) pointer = null;
+    });
+    button.addEventListener('click', (event) => {
+      if (event.timeStamp - touched < 800) return;  // that touch's own click, when there is one
+      if (!button.disabled) action(event);
+    });
+  }
+
+  window.MonstresUtil = { $, el, whenReady, prefs, setText, onTap };
 })();

@@ -47,9 +47,8 @@
       const level = document.createElement('small');
       level.className = 'team-level';
       button.append(img, hp, level);
-      button.addEventListener('pointerdown', (event) => event.preventDefault());  // no focus
-      button.addEventListener('click', () => {
-        if (!game || button.disabled) return;
+      window.MonstresUtil.onTap(button, () => {  // also while the other hand moves
+        if (!game) return;
         game.summon(m.slot);
         refresh();
       });

@@ -92,8 +92,9 @@ enum class Command : uint8_t {
   Buy,        // from the merchant close by (Anselme): one Item Input::target
   FarmSwap,   // at the farm (Capucine): team slot Input::target % 8 (7: none) with the farm's monster
               // Input::target / 8 (8191: none): swapped, taken back, or left there (west.hpp)
+  Rune,       // capturing (Battle::seal): the player touches rune Input::target of the circle
 };
-inline constexpr size_t kCommandCount = static_cast<size_t>(Command::FarmSwap) + 1;  // the last one
+inline constexpr size_t kCommandCount = static_cast<size_t>(Command::Rune) + 1;  // the last one
 
 // The magician's spells (see battle.hpp: what each does, where it can be cast).
 enum class SpellId : uint8_t { None, Heal, Shield, Mercy, Detect, WayOut, Count };
@@ -404,7 +405,7 @@ using Dex = std::array<std::array<Discovery, kMaxVariants>, kSpeciesCount>;
 // is hurt). Prepare: before a trainer's battle, both sides take their places
 // while the player reads the rules.
 enum class BattlePhase : uint8_t { None, Fight, Flee, Training, Prepare };
-enum class BattleOutcome : uint8_t { None, Victory, Defeat, Fled, Captured, Forfeit };
+enum class BattleOutcome : uint8_t { None, Victory, Defeat, Fled, Captured, Forfeit, Escaped };
 
 // What one side of a battle is doing.
 enum class FighterState : uint8_t {
@@ -501,6 +502,34 @@ struct Rival {
   bool operator==(const Rival&) const = default;
 };
 
+// Capturing (battle.hpp): a circle of runes around the foe; some light up
+// one after the other, the player touches them in the same order. The world
+// holds still meanwhile.
+enum class SealStage : uint8_t {
+  None,
+  Show,     // the runes light up, one by one
+  Input,    // the player touches them
+  Right,    // the whole order was touched: the seal tightens
+  Wrong,    // a mistake: the monster pulls away
+  Caught,   // the seal is full: it goes into the crystal
+  Escaped,  // it broke free: it runs away
+};
+inline constexpr size_t kSealRunes = 6;   // around the circle
+inline constexpr size_t kSealLength = 5;  // lit each round
+struct Seal {
+  SealStage stage = SealStage::None;
+  uint16_t foe = 0;      // in World::creatures
+  uint8_t power = 0;     // 0: it breaks free, 100: caught
+  uint8_t before = 0;    // power before the last round (the bar moves from it)
+  std::array<uint8_t, kSealLength> order{};  // the runes to touch (never the same twice in a row)
+  uint8_t done = 0;      // touched right so far this round
+  uint8_t touched = 0xFF;  // the last rune touched (0xFF: none)
+  uint8_t round = 0;
+  uint16_t timer = 0;    // ticks in this stage
+  uint64_t touch_tick = 0;
+  bool operator==(const Seal&) const = default;
+};
+
 // Why a victory gave no experience.
 enum class NoXp : uint8_t { None, Beaten, Released, Trainer };
 
@@ -524,6 +553,7 @@ struct Battle {
   bool mercy = false;       // the Mercy spell holds: the next blow that would beat a foe leaves it 1 hit point
   uint64_t mercy_tick = 0;  // when it last held one back (for the interface)
   Rival rival;
+  Seal seal;  // capturing: the rest of the world holds still
   // How the last battle ended, for the interface.
   BattleOutcome outcome = BattleOutcome::None;
   uint64_t outcome_tick = 0;

@@ -208,7 +208,7 @@ TEST_CASE("the main quest goes on: the strange stone, the transfer to the farm, 
   REQUIRE(w.battle.phase == BattlePhase::Fight);
   w.battle.foes[0].hp = 1;
   CHECK(can_capture(w));
-  step(w, command(Command::Capture));
+  REQUIRE(seal(w));
   CHECK(w.team.size() == rules::kTeamSize);
   REQUIRE(w.farm.size() == 1);
   CHECK(w.farm[0].species == Species::Bird);

@@ -333,7 +333,7 @@ TEST_CASE("a captured monster gets its traits, counted in the bestiary; saved an
   step(w, command(Command::Engage, static_cast<uint16_t>(i)));
   REQUIRE(w.battle.phase == BattlePhase::Fight);
   w.battle.foes[0].hp = 1;
-  step(w, command(Command::Capture));
+  REQUIRE(seal(w));
   REQUIRE(w.team.size() == 2);
   const Monster& m = w.team[1];
   const Traits t = roll_traits(w.seed, id, Species::Slime, m.genes);
@@ -447,7 +447,7 @@ uint32_t catch_giant(World& w) {
   w.battle.target = 0;
   w.battle.foes[0].hp = 1;
   const uint32_t xp = w.battle.foes[0].xp;
-  step(w, command(Command::Capture));
+  REQUIRE(seal(w));
   for (Foe& f : w.battle.foes) f.hp = 0;
   step(w, Input{});
   REQUIRE(w.battle.phase == BattlePhase::None);

@@ -84,7 +84,7 @@ std::string command_names_json() {
   static const char* kNames[] = {"none",        "engage",    "flee",          "capture", "summon",    "release",
                                  "train",       "teleport",  "questAccept",   "questGive", "questComplete", "target",
                                  "challenge",   "ready",     "cast",          "equipSpell", "healTeam", "door",
-                                 "useItem",     "discard",   "buy",           "farmSwap"};
+                                 "useItem",     "discard",   "buy",           "farmSwap",   "rune"};
   static_assert(std::size(kNames) == kCommandCount);
   static_assert(static_cast<size_t>(Command::Engage) == 1 && static_cast<size_t>(Command::Train) == 6 &&
                 static_cast<size_t>(Command::Target) == 11 && static_cast<size_t>(Command::HealTeam) == 16);
@@ -759,7 +759,7 @@ std::string moves_json(Species species, const Genes& genes, const FightStats& st
 }
 
 const char* outcome_name(BattleOutcome o) {
-  static const char* kNames[] = {"none", "victory", "defeat", "fled", "captured", "forfeit"};
+  static const char* kNames[] = {"none", "victory", "defeat", "fled", "captured", "forfeit", "escaped"};
   return kNames[static_cast<size_t>(o)];
 }
 
@@ -927,6 +927,30 @@ std::string foe_json(const World& w, size_t k) {
 
 }  // namespace
 
+namespace {
+// Capturing (battle.hpp): the circle of runes around the foe.
+std::string seal_json(const World& w) {
+  const Seal& e = w.battle.seal;
+  static const char* kStages[] = {"none", "show", "input", "right", "wrong", "caught", "escaped"};
+  const Creature& c = w.creatures[e.foe];
+  float glow = 0;
+  const int lit = seal_lit(w, &glow);
+  std::string s = std::string("{\"stage\":\"") + kStages[static_cast<size_t>(e.stage)] + "\"";
+  s += ",\"foe\":" + std::to_string(e.foe) + ",\"species\":\"" + species_name(c.species) + "\"";
+  s += std::string(",\"element\":\"") + element_name(creature_elements(c.species, c.genes).first) + "\"";
+  s += ",\"runes\":" + std::to_string(kSealRunes) + ",\"length\":" + std::to_string(kSealLength);
+  s += ",\"power\":" + std::to_string(e.power) + ",\"bar\":" + std::to_string(seal_bar(w));
+  s += ",\"lit\":" + std::to_string(lit) + ",\"glow\":" + std::to_string(glow);
+  s += ",\"done\":" + std::to_string(e.done) + ",\"round\":" + std::to_string(e.round);
+  s += ",\"touched\":" + (e.touched == 0xFF ? std::string("-1") : std::to_string(e.touched));
+  s += ",\"touchTick\":" + std::to_string(e.touch_tick) + ",\"timer\":" + std::to_string(e.timer);
+  s += ",\"order\":[";
+  for (size_t i = 0; i < kSealLength; ++i) s += (i ? "," : "") + std::to_string(e.order[i]);
+  s += "],\"gain\":" + std::to_string(rules::kSealGain) + ",\"loss\":" + std::to_string(rules::kSealLoss);
+  return s + "}";
+}
+}  // namespace
+
 std::string battle_json(const World& w) {
   const Battle& b = w.battle;
   std::string s = std::string("{\"phase\":\"") + phase_name(b.phase) + "\"";
@@ -980,6 +1004,7 @@ std::string battle_json(const World& w) {
     s += std::string(",\"capture\":\"") + (b.rival.npc ? "trainer" : "noTarget") + "\"";
   }
   s += ",\"captureHpPercent\":" + std::to_string(rules::kCaptureHpPercent);
+  if (sealing(w)) s += ",\"seal\":" + seal_json(w);
   if (b.rival.npc) {
     const Rival& r = b.rival;
     s += ",\"rival\":{\"npc\":" + std::to_string(r.npc) + ",\"out\":" + std::to_string(r.out);
