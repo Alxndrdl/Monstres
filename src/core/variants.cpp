@@ -88,6 +88,34 @@ constexpr Genetics kGenetics[] = {
        {"ears", Shape, 2, {{{"pointed", Common}, {"long", Uncommon}}}},
        {"crown", Shape, 2, {{{"three", Common}, {"crown", Rare}}}}}},
      Element::Light},
+    // Raccoon: Chipou, a masked thief.
+    {Family::Beast, 4,
+     {{kSex,
+       {"coat", Color, 3, {{{"grey", Common}, {"rust", Uncommon}, {"silver", Rare}}}},
+       {"tail", Shape, 2, {{{"ringed", Common}, {"bushy", Uncommon}}}},
+       {"ears", Shape, 2, {{{"round", Common}, {"tufted", Rare}}}}}},
+     Element::Light},
+    // Owl: Hulou, of the hollow tree's crown.
+    {Family::Bird, 4,
+     {{kSex,
+       {"plumage", Color, 3, {{{"brown", Common}, {"snowy", Uncommon}, {"tawny", Uncommon}}}},
+       {"tufts", Shape, 2, {{{"tufts", Common}, {"none", Uncommon}}}},
+       {"eyes", Color, 2, {{{"amber", Common}, {"blue", Rare}}}}}},
+     Element::Shadow},
+    // Sheep: Laini, its wool crackles when rubbed (elemental: electric).
+    {Family::Beast, 4,
+     {{kSex,
+       {"wool", Color, 3, {{{"white", Common}, {"black", Uncommon}, {"pink", Rare}}}},
+       {"horns", Shape, 2, {{{"none", Common}, {"curled", Uncommon}}}},
+       {"fleece", Shape, 2, {{{"fluffy", Common}, {"cloud", Rare}}}}}},
+     Element::Electric},
+    // Mole: Taupi, digger of the burrow.
+    {Family::Beast, 4,
+     {{kSex,
+       {"fur", Color, 3, {{{"brown", Common}, {"grey", Uncommon}, {"golden", Rare}}}},
+       {"claws", Shape, 2, {{{"small", Common}, {"big", Uncommon}}}},
+       {"nose", Shape, 2, {{{"pink", Common}, {"star", Rare}}}}}},
+     Element::Fire},
 };
 static_assert(std::size(kGenetics) == kSpeciesCount);
 
@@ -435,6 +463,10 @@ constexpr Measures kMeasures[] = {
       {260, 900},   // Spark
       {300, 1300},  // Axolotl
       {220, 300},   // Cristi
+      {480, 6000},  // Raccoon
+      {380, 900},   // Owl
+      {700, 32000}, // Sheep
+      {170, 110},   // Mole
 };
 static_assert(std::size(kMeasures) == kSpeciesCount);
 }  // namespace

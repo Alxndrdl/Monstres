@@ -3,6 +3,8 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/interior.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/quests.hpp"
+#include "monstres/core/west.hpp"
 
 #include "monstres/render/characters.hpp"
 #include "monstres/render/terrain_mesh.hpp"
@@ -136,6 +138,24 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::Rug: return MeshId::Rug;
     case ObjectKind::Step: return MeshId::Step;
     case ObjectKind::Hatch: return MeshId::Hatch;
+    // The west: the cart and the mill's sails are drawn as they are (build_dynamic).
+    case ObjectKind::Cart: return MeshId::Count;
+    case ObjectKind::Bridge: return MeshId::Bridge;
+    case ObjectKind::Farmhouse: return MeshId::Farmhouse;
+    case ObjectKind::Barn: return MeshId::Barn;
+    case ObjectKind::FruitTree: return MeshId::FruitTree;
+    case ObjectKind::Crops: return o.variant & 1 ? MeshId::CropsCabbage : MeshId::CropsWheat;
+    case ObjectKind::Haystack: return MeshId::Haystack;
+    case ObjectKind::Windmill: return MeshId::Windmill;
+    case ObjectKind::Cabin: return MeshId::Cabin;
+    case ObjectKind::Tent: return MeshId::Tent;
+    case ObjectKind::Campfire: return MeshId::Campfire;
+    case ObjectKind::Woodpile: return MeshId::Woodpile;
+    case ObjectKind::HollowTree: return MeshId::HollowTree;
+    case ObjectKind::Burrow: return MeshId::Burrow;
+    case ObjectKind::Lighthouse: return MeshId::Lighthouse;
+    case ObjectKind::Menhir: return MeshId::Menhir;
+    case ObjectKind::Meteorite: return MeshId::Meteorite;
     default:                return MeshId::Crate;
   }
 }
@@ -612,6 +632,29 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
       }
       continue;
     }
+    if (p.element == Element::Air) {  // a real gust: swirling streaks of wind, wisps around
+      Instance g;
+      g.x = p.pos.x;
+      g.y = p.pos.y;
+      g.z = p.pos.z;
+      const float yaw = std::atan2(-p.dir_x, -p.dir_z);
+      const float pitch = std::asin(std::clamp(p.dir_y, -1.0f, 1.0f));
+      for (int k = 0; k < 2; ++k) {
+        g.rotation = quat_yaw(yaw) * quat_x(pitch) * quat_z(time * (k ? -11.0f : 14.0f) + static_cast<float>(i));
+        const float size = k ? 1.25f : 0.9f;
+        g.sx = g.sy = size;
+        g.sz = size * 1.3f;
+        g.tint = {1.6f, 1.85f, 2.0f, k ? 0.55f : 0.85f};
+        add(list, MeshId::Gust, g);
+      }
+      for (int k = 1; k <= 4; ++k) {  // leaves and dust caught in it
+        const float a = time * 9.0f + static_cast<float>(k) * 1.6f;
+        const float back = 0.25f * static_cast<float>(k);
+        add_spark(list, p.pos.x - p.dir_x * back + std::cos(a) * 0.35f, p.pos.y + std::sin(a) * 0.35f,
+                  p.pos.z - p.dir_z * back - std::cos(a) * 0.2f, 0.05f, {1.5f, 1.8f, 1.9f, 1}, 0.8f - 0.15f * static_cast<float>(k), a);
+      }
+      continue;
+    }
     add_spark(list, p.pos.x, p.pos.y, p.pos.z, 0.24f, c, 1, time * 9);
     for (int k = 1; k <= 3; ++k) {
       const float back = 0.22f * static_cast<float>(k);
@@ -760,12 +803,148 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
 
 }  // namespace
 
+namespace {
+
+// The west's objects found near one of its places (they are among the wilds':
+// looked for around where they stand, not through all the objects).
+template <typename F>
+void west_objects_near(const World& w, Vec2 at, float r, F f) {
+  const Box area{{at.x - r, -1e9f, at.z - r}, {at.x + r, 1e9f, at.z + r}};
+  std::vector<uint32_t> seen;
+  for_objects_near(w, area, [&](uint32_t k, const Box&) {
+    if (std::find(seen.begin(), seen.end(), k) != seen.end()) return;
+    seen.push_back(k);
+    f(w.objects[k]);
+  });
+}
+
+bool near_camera(const World& w, Vec2 at, float r) {
+  const float dx = at.x - w.player.pos.x, dz = at.z - w.player.pos.z;
+  return dx * dx + dz * dz < r * r;
+}
+
+// The west: the cart as it is (overturned, or standing again), the merchant's
+// bundles lying around, the mill's sails (turning once pushed), the
+// campfire's flames, the lighthouse's light, the farm's lanterns at night.
+void add_west_effects(const World& w, float time, DrawList& list) {
+  const WestLayout& west = w.west;
+  if (!west.valid() || inside(w)) return;
+  const float dark = night_amount(w);
+  if (near_camera(w, west.cart, 160)) {
+    const QuestState& q = w.quests[static_cast<size_t>(QuestId::Merchant)];
+    west_objects_near(w, west.cart, 3.0f, [&](const Object& o) {
+      if (o.kind != ObjectKind::Cart) return;
+      Instance in;
+      in.x = o.pos.x;
+      in.y = o.pos.y;
+      in.z = o.pos.z;
+      in.rotation = quat_yaw(static_cast<float>(radians_from_angle16(o.yaw)));
+      const float k = 0.9f + 0.2f * static_cast<float>(o.variant) / 255.0f;
+      in.tint = {k, k, k, 1};
+      add(list, q.progress & kCartUp ? MeshId::CartUp : MeshId::Cart, in);
+      add_ground_shadow(list, w, o.pos.x, o.pos.z, 1.9f, 1.3f, static_cast<float>(radians_from_angle16(o.yaw)), 0.6f);
+    });
+    if (q.stage != QuestStage::Done) {
+      const auto spots = goods_spots(w);
+      for (uint32_t k = 0; k < rules::kGoods; ++k) {
+        if (q.progress & (1u << k)) continue;
+        Instance in;
+        in.x = spots[k].x;
+        in.z = spots[k].z;
+        in.y = w.ground.height(in.x, in.z) - 0.03f;
+        in.rotation = ground_tilt(w, in.x, in.z) * quat_yaw(static_cast<float>(k) * 2.1f);
+        add(list, MeshId::Goods, in);
+        add_ground_shadow(list, w, in.x, in.z, 0.4f, 0.4f, 0, 0.6f);
+        if (q.stage == QuestStage::Active) {  // a few sparks show where they are
+          for (int i = 0; i < 3; ++i) {
+            const float t = std::fmod(time * 0.5f + static_cast<float>(i) / 3, 1.0f);
+            add_spark(list, in.x + 0.3f * std::cos(time + static_cast<float>(i) * 2.1f), in.y + 0.4f + t * 1.2f,
+                      in.z + 0.3f * std::sin(time + static_cast<float>(i) * 2.1f), 0.06f, {2.0f, 1.8f, 0.8f, 1}, 1 - t);
+          }
+        }
+      }
+    }
+  }
+  Vec3 hub;
+  Vec2 facing;
+  if (near_camera(w, west.mill, 350) && mill_sails(w, hub, facing)) {
+    Instance in;
+    in.x = hub.x;
+    in.y = hub.y;
+    in.z = hub.z;
+    const float spin = mill_turning(w) ? time * 0.9f : 0.12f;
+    in.rotation = quat_yaw(std::atan2(-facing.x, -facing.z)) * quat_z(spin);
+    add(list, MeshId::WindmillSails, in);
+  }
+  if (near_camera(w, west.camp, 120)) {
+    west_objects_near(w, west.camp, 1.0f, [&](const Object& o) {
+      if (o.kind != ObjectKind::Campfire) return;
+      for (int k = 0; k < 2; ++k) {
+        Instance fire;
+        fire.x = o.pos.x;
+        fire.y = o.pos.y;
+        fire.z = o.pos.z;
+        const float flick = 1.0f + 0.15f * std::sin(time * 11.0f + static_cast<float>(k) * 2.0f);
+        fire.sx = fire.sz = (k ? 0.75f : 1.0f) * flick;
+        fire.sy = (k ? 0.8f : 1.0f) * (2.0f - flick);
+        fire.rotation = quat_yaw(time * (k ? -1.3f : 0.9f));
+        fire.tint = {2.2f, 1.4f, 0.6f, 1};
+        add(list, MeshId::CampfireFire, fire);
+      }
+      for (int i = 0; i < 5; ++i) {  // smoke
+        const float t = std::fmod(time * 0.25f + static_cast<float>(i) / 5, 1.0f);
+        Instance puff;
+        puff.x = o.pos.x + t * 0.8f + 0.1f * std::sin(time + static_cast<float>(i));
+        puff.y = o.pos.y + 0.8f + t * 3.5f;
+        puff.z = o.pos.z + t * 0.3f;
+        puff.sx = puff.sy = puff.sz = 0.15f + 0.5f * t;
+        puff.tint = {0.8f, 0.8f, 0.8f, std::min(1.0f, t * 5) * (1 - t) * 0.7f};
+        add(list, MeshId::Smoke, puff);
+      }
+    });
+  }
+  if (near_camera(w, west.lighthouse, 600)) {
+    west_objects_near(w, west.lighthouse, 1.0f, [&](const Object& o) {
+      if (o.kind != ObjectKind::Lighthouse) return;
+      Instance lamp;
+      lamp.x = o.pos.x;
+      lamp.y = o.pos.y + 13.2f;
+      lamp.z = o.pos.z;
+      const float s = 0.8f + 0.6f * dark;
+      lamp.sx = lamp.sy = lamp.sz = s;
+      lamp.tint = {2.2f, 1.9f, 1.0f, 1};
+      add(list, MeshId::LighthouseLamp, lamp);
+      if (dark > 0.01f) {  // its beam turns over the sea
+        const float a = time * 0.8f;
+        const Vec3 from{o.pos.x, o.pos.y + 13.2f, o.pos.z};
+        const Vec3 to{o.pos.x + std::cos(a) * 30.0f, o.pos.y + 11.5f, o.pos.z + std::sin(a) * 30.0f};
+        add_stroke(list, from, to, 1.6f, {1.8f, 1.6f, 1.0f, 1}, 0.18f * dark);
+      }
+    });
+  }
+  if (dark > 0.01f && near_camera(w, west.farm, 150)) {
+    west_objects_near(w, west.farm, rules::kFarmRadius + 4, [&](const Object& o) {
+      if (o.kind != ObjectKind::Lamp) return;
+      Instance halo;
+      halo.x = o.pos.x;
+      halo.y = o.pos.y + 2.29f;
+      halo.z = o.pos.z;
+      halo.sx = halo.sy = halo.sz = 0.45f + 0.03f * std::sin(time * 3 + o.pos.x);
+      halo.tint = {1.6f, 1.15f, 0.55f, 0.35f * dark};
+      add(list, MeshId::Sparkle, halo);
+    });
+  }
+}
+
+}  // namespace
+
 void build_dynamic(const World& w, float time, DrawList& list, int selected, const Frustum* view) {
   list.batches.resize(kMeshCount);
   for (auto& batch : list.batches) batch.clear();
 
   add_characters(w, time, list, view);
   add_village_effects(w, time, list);
+  add_west_effects(w, time, list);
   add_teleporter_effects(w, time, list);
 
   // A golden ring, gently pulsing, at the feet of the selected creature.
@@ -792,8 +971,10 @@ void build_dynamic(const World& w, float time, DrawList& list, int selected, con
     g.sx = door.width;
     g.sy = door.height;
     const bool cave = door.place == PlaceKind::Cave;
-    const Color c = cave ? Color{1.1f, 0.9f, 1.9f, 1} : door.place == PlaceKind::Tower ? Color{0.9f, 1.3f, 1.9f, 1}
-                                                                                      : Color{1.9f, 1.35f, 0.7f, 1};
+    const bool cool = door.place == PlaceKind::Tower || door.place == PlaceKind::Lighthouse;
+    const Color c = cave ? Color{1.1f, 0.9f, 1.9f, 1} : cool ? Color{0.9f, 1.3f, 1.9f, 1}
+                  : door.place == PlaceKind::HollowTree || door.place == PlaceKind::Burrow ? Color{1.0f, 1.8f, 0.8f, 1}
+                                                                                           : Color{1.9f, 1.35f, 0.7f, 1};
     // Inside, the camera is often behind the door's wall: a fainter glow, not to veil the room.
     const float strength = inside(w) && !flat ? 0.3f : 1.0f;
     g.tint = {c.r, c.g, c.b, (0.15f + 0.6f * near) * pulse * strength};
@@ -1212,6 +1393,27 @@ void interior_light(const World& w, float time, View& v) {
       v.fog_half = 16;
       v.fog_end = 70;
       break;
+    case PlaceKind::Burrow:  // dim earth, a little warmer than the cave
+      night = 1;
+      v.background = {0.03f, 0.022f, 0.015f, 1};
+      v.ambient_sky = {0.30f, 0.24f, 0.18f, 1};
+      v.ambient_ground = {0.16f, 0.12f, 0.09f, 1};
+      v.light_color = {0.08f, 0.07f, 0.05f, 1};
+      v.fog_start = 6;
+      v.fog_half = 14;
+      v.fog_end = 60;
+      break;
+    case PlaceKind::HollowTree:  // green light coming through the bark
+      night = std::max(night, 0.5f);
+      v.background = {0.03f, 0.04f, 0.025f, 1};
+      v.ambient_sky = {0.40f, 0.46f, 0.32f, 1};
+      v.ambient_ground = {0.24f, 0.22f, 0.16f, 1};
+      v.light_color = {0.2f, 0.22f, 0.16f, 1};
+      v.fog_start = 40;
+      v.fog_half = 400;
+      v.fog_end = 2000;
+      break;
+    case PlaceKind::Lighthouse:
     case PlaceKind::Tower:
       night = std::max(night, 0.6f);
       v.background = {0.04f, 0.04f, 0.05f, 1};

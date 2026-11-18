@@ -2,6 +2,7 @@
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/west.hpp"
 
 #include <cmath>
 
@@ -214,21 +215,54 @@ uint8_t quest_giver(QuestId q) {
     case QuestId::Teleporters: return npc::kGaspard;
     case QuestId::Combat: return npc::kBastien;
     case QuestId::Healing: return npc::kOdette;
-    case QuestId::Main: return npc::kMentor;
+    case QuestId::Main:
+    case QuestId::Delivery: return npc::kMentor;
+    case QuestId::Merchant: return npc::kAnselme;
+    case QuestId::Transfer:
+    case QuestId::Orchard: return npc::kCapucine;
+    case QuestId::Shepherd: return npc::kBasile;
+    case QuestId::Mill: return npc::kLucien;
     default: return npc::kLison;
   }
+}
+
+uint8_t quest_receiver(QuestId q) { return q == QuestId::Delivery ? npc::kCapucine : quest_giver(q); }
+
+bool quest_available(const World& w, QuestId q) {
+  const auto done = [&](QuestId p) { return w.quests[static_cast<size_t>(p)].stage == QuestStage::Done; };
+  switch (q) {
+    case QuestId::Delivery: return done(QuestId::Main);
+    case QuestId::Transfer: return done(QuestId::Delivery);
+    case QuestId::Orchard: return done(QuestId::Transfer);
+    default: return true;
+  }
+}
+
+Monster shepherd_gift(const World& w) {
+  Rng rng(w.seed ^ 0x4C41494E49ULL, 77);  // "LAINI"
+  Monster m;
+  m.species = Species::Sheep;
+  m.genes = roll_genes(Species::Sheep, Zone::Hills, rng);
+  m.genes.chromatic = m.genes.elemental = false;
+  m.genes.form = Form::Normal;
+  m.level = rules::kShepherdGiftLevel;
+  m.hp = monster_fight_stats(m).hp;
+  give_traits(m, roll_traits(w.seed, 0xFFFE0000u, m.species, m.genes), world_day(w));
+  return m;
 }
 
 uint8_t npc_marks(const World& w, uint8_t n) {
   uint8_t marks = 0;
   for (size_t k = 0; k < kQuestCount; ++k) {
     const auto id = static_cast<QuestId>(k);
-    if (quest_giver(id) != n) continue;
-    if (w.quests[k].stage == QuestStage::Unknown) marks |= kMarkNewQuest;
-    if (w.quests[k].stage == QuestStage::Active) marks |= kMarkQuest;
+    const QuestStage stage = w.quests[k].stage;
+    if (quest_giver(id) == n && stage == QuestStage::Unknown && quest_available(w, id)) marks |= kMarkNewQuest;
+    if (quest_receiver(id) == n && stage == QuestStage::Active) marks |= kMarkQuest;
   }
-  if (n == npc::kOdette) marks |= kMarkHeal;
-  if (n == npc::kBastien) marks |= kMarkFight;
+  if (n == npc::kOdette || n == npc::kViolette) marks |= kMarkHeal;
+  if (n == npc::kBastien || n == npc::kRomane) marks |= kMarkFight;
+  if (n == npc::kAnselme && w.quests[static_cast<size_t>(QuestId::Merchant)].stage == QuestStage::Done) marks |= kMarkShop;
+  if (n == npc::kCapucine && farm_open(w)) marks |= kMarkFarm;
   return marks;
 }
 
@@ -258,6 +292,12 @@ bool quest_ready(const World& w, QuestId q) {
         if (w.quests[static_cast<size_t>(part)].stage != QuestStage::Done) return false;
       }
       return true;
+    case QuestId::Merchant: return (s.progress & kGoodsFound) == kGoodsFound;
+    case QuestId::Delivery: return w.bag[static_cast<size_t>(Item::StrangeStone)] > 0;
+    case QuestId::Transfer: return (s.progress & (kSentToFarm | kTookFromFarm)) == (kSentToFarm | kTookFromFarm);
+    case QuestId::Orchard: return s.progress >= rules::kRaiders;
+    case QuestId::Shepherd: return (s.progress & kLambsHome) == kLambsHome;
+    case QuestId::Mill: return (s.progress & kMillTurning) != 0;
     default: return false;
   }
 }
@@ -271,7 +311,10 @@ void quest_command(World& w, const Input& in) {
       if (in.target >= kQuestCount) break;
       const auto id = static_cast<QuestId>(in.target);
       QuestState& q = quest(w, id);
-      if (q.stage == QuestStage::Unknown && near_npc(w, quest_giver(id))) q.stage = QuestStage::Active;
+      if (q.stage == QuestStage::Unknown && quest_available(w, id) && near_npc(w, quest_giver(id))) {
+        q.stage = QuestStage::Active;
+        if (id == QuestId::Delivery) w.bag[static_cast<size_t>(Item::StrangeStone)] = 1;  // Isidore's parcel
+      }
       break;
     }
     case Command::QuestGive:
@@ -294,11 +337,15 @@ void quest_command(World& w, const Input& in) {
       if (in.target >= kQuestCount || in.target == static_cast<uint16_t>(QuestId::LostPiou)) break;
       const auto id = static_cast<QuestId>(in.target);
       QuestState& q = quest(w, id);
-      if (q.stage != QuestStage::Active || !quest_ready(w, id) || !near_npc(w, quest_giver(id)) ||
+      if (q.stage != QuestStage::Active || !quest_ready(w, id) || !near_npc(w, quest_receiver(id)) ||
           w.battle.phase != BattlePhase::None) {
         break;
       }
+      // The shepherd's gift needs room: in the team, or at the farm.
+      if (id == QuestId::Shepherd && w.team.size() >= rules::kTeamSize && !farm_open(w)) break;
       q.stage = QuestStage::Done;
+      const auto coins = [&](uint32_t n) { w.bag[static_cast<size_t>(Item::Coin)] += n; };
+      const auto potions = [&](uint32_t n) { w.bag[static_cast<size_t>(Item::ManaPotion)] += n; };
       switch (id) {
         case QuestId::Teleporters: reward(w, rules::kTeleportersWizardXp, rules::kTeleportersMonsterXp); break;
         case QuestId::Combat: reward(w, rules::kCombatWizardXp, rules::kCombatMonsterXp); break;
@@ -306,6 +353,47 @@ void quest_command(World& w, const Input& in) {
         case QuestId::Main:
           q.progress |= kMainPart1Done;
           reward(w, rules::kMainPart1WizardXp, rules::kMainPart1MonsterXp);
+          break;
+        case QuestId::Merchant:  // his goods back, the cart up again: he sells
+          q.progress |= kCartUp;
+          w.bag[static_cast<size_t>(Item::Goods)] = 0;
+          coins(rules::kMerchantCoins);
+          potions(rules::kMerchantPotions);
+          reward(w, rules::kMerchantWizardXp, rules::kMerchantMonsterXp);
+          break;
+        case QuestId::Delivery:  // the transfer stone stays at the farm
+          w.bag[static_cast<size_t>(Item::StrangeStone)] = 0;
+          reward(w, rules::kDeliveryWizardXp, rules::kDeliveryMonsterXp);
+          break;
+        case QuestId::Transfer:
+          coins(rules::kTransferCoins);
+          reward(w, rules::kTransferWizardXp, rules::kTransferMonsterXp);
+          break;
+        case QuestId::Orchard:  // the main quest's second part
+          w.quests[static_cast<size_t>(QuestId::Main)].progress |= kMainPart2Done;
+          coins(rules::kOrchardCoins);
+          potions(rules::kOrchardPotions);
+          reward(w, rules::kOrchardWizardXp, rules::kOrchardMonsterXp);
+          break;
+        case QuestId::Shepherd: {  // a Laini of his flock
+          const Monster gift = shepherd_gift(w);
+          Creature probe;  // seen and caught in the bestiary
+          probe.species = gift.species;
+          probe.genes = gift.genes;
+          probe.body.pos = w.player.pos;
+          const size_t i = add_creature(w, probe);
+          capture(w, i);
+          remove_creature(w, i);
+          ++w.captured_count[static_cast<size_t>(gift.species)];
+          if (w.team.size() < rules::kTeamSize) w.team.push_back(gift);
+          else send_to_farm(w, gift);
+          reward(w, rules::kShepherdWizardXp, rules::kShepherdMonsterXp);
+          break;
+        }
+        case QuestId::Mill:
+          coins(rules::kMillCoins);
+          potions(rules::kMillPotions);
+          reward(w, rules::kMillWizardXp, rules::kMillMonsterXp);
           break;
         default: break;
       }

@@ -44,6 +44,10 @@ enum class MeshId : size_t {
   SparkBody, SparkQuills, SparkQuillsLong, SparkHead, SparkEar, SparkTail, SparkLeg,
   AxolotlBody, AxolotlHead, AxolotlGills, AxolotlTail, AxolotlLeg,
   CristiBody, CristiEar, CristiLeg, CristiCrystal, CristiShards,
+  RaccoonBody, RaccoonHead, RaccoonEar, RaccoonTail, RaccoonLeg,
+  OwlBody, OwlWing, OwlLeg, OwlTufts,
+  SheepBody, SheepHead, SheepEar, SheepTail, SheepLeg, SheepHorns,
+  MoleBody, MoleHead, MoleEar, MoleTail, MoleLeg, MoleStar,
   // Village.
   HouseCottage, HouseChimney, HouseHut, Fence, Sign, Well, Barrel, Lamp,
   VillagerTorso, VillagerLeg, VillagerArm, VillagerHand, VillagerHead,
@@ -57,10 +61,14 @@ enum class MeshId : size_t {
   CastleWall, CastleTower, CastleGate, CastleKeep, CaveMouth, Crystal, Teleporter,
   // Inside (interior.hpp): furniture, the tower's stair and trapdoor.
   Table, Chair, Bed, Shelf, Hearth, HearthFire, Rug, Step, Hatch,
+  // The west (west.hpp).
+  Cart, CartUp, Goods, Bridge, Farmhouse, Barn, FruitTree, CropsWheat, CropsCabbage, Haystack, Windmill, WindmillSails,
+  Cabin, Tent, Campfire, CampfireFire, Woodpile, HollowTree, Burrow, Lighthouse, LighthouseLamp, Menhir, Meteorite,
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar,
   GrassShortFar, GrassTallFar, FlowerFar,
   IconQuestion, IconExclaim, IconPlus, IconCross,  // over villagers (npc_marks)
+  IconBolt, IconCoin, IconFarm,  // over aggressive monsters; the merchant, the farm (npc_marks)
   Ground,  // built at runtime
   InteriorShell,  // inside: floor, walls and ceiling, built at runtime (interior_mesh.hpp)
   FarGround, Lava,  // the continent (far pass), built at runtime
@@ -72,6 +80,7 @@ enum class MeshId : size_t {
   Ripple,
   Smoke,
   Sparkle,
+  Gust,        // an air monster's throw: swirling wind
   DoorGlow,    // the light in a door's opening, when the player comes near
   RuneCircle,  // the capture seal
   RainShaft, Bolt,  // the weather (far pass)
@@ -97,13 +106,13 @@ inline MeshGroup mesh_group(MeshId id) {
     case MeshId::CloudLow0: case MeshId::CloudLow1: case MeshId::CloudLow2: case MeshId::RainShaft: case MeshId::Bolt:
       return MeshGroup::Sky;
     case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::RuneCircle:
-    case MeshId::DoorGlow:
+    case MeshId::DoorGlow: case MeshId::Gust:
     case MeshId::Rain: case MeshId::Snow:
       return MeshGroup::Effects;
     default: break;
   }
   const auto i = static_cast<size_t>(id);
-  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::CristiShards)) return MeshGroup::Characters;
+  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::MoleStar)) return MeshGroup::Characters;
   if (i >= static_cast<size_t>(MeshId::VillagerTorso) && i <= static_cast<size_t>(MeshId::Bulb)) return MeshGroup::Characters;
   return MeshGroup::Scenery;
 }

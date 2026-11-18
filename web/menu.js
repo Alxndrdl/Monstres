@@ -56,7 +56,7 @@
   }
 
   function show(tab) {
-    if (!['character', 'team', 'spells', 'quests', 'bestiary', 'map'].includes(tab)) tab = 'character';
+    if (!['character', 'team', 'bag', 'spells', 'quests', 'bestiary', 'map'].includes(tab)) tab = 'character';
     if (tab !== 'map') teleportMode = false;
     current = tab;
     prefs.set('menuTab', tab);
@@ -68,6 +68,7 @@
     }
     if (tab === 'character') renderCharacter();
     else if (tab === 'team') renderTeam();
+    else if (tab === 'bag') renderBag();
     else if (tab === 'spells') window.MonstresSpells.renderTab();
     else if (tab === 'quests') renderQuests();
     else if (tab === 'bestiary') renderBestiary();
@@ -75,7 +76,7 @@
   }
 
   button.addEventListener('click', () => (isOpen() ? close() : open()));
-  window.MonstresMenu = { open, close, isOpen };
+  window.MonstresMenu = { open, close, isOpen, portraitUrl: (...args) => portraitUrl(...args) };
   $('menu-close').addEventListener('click', close);
   menu.addEventListener('pointerdown', (event) => {
     if (event.target === menu) close();  // the dark backdrop around the window
@@ -84,7 +85,7 @@
 
   // Keyboard: Escape closes; C, E, B and M open a tab (not while typing a name).
   // By letter, not by key position: M is not at the same place on AZERTY.
-  const SHORTCUTS = { c: 'character', e: 'team', p: 'spells', j: 'quests', b: 'bestiary', m: 'map' };
+  const SHORTCUTS = { c: 'character', e: 'team', i: 'bag', p: 'spells', j: 'quests', b: 'bestiary', m: 'map' };
   window.addEventListener('keydown', (event) => {
     const typing = event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(event.target.tagName);
     if (event.key === 'Escape' && releaseOpen()) {
@@ -108,6 +109,56 @@
       next.focus();
     }
   }, true);
+
+  // ---- The bag ----
+  const ITEM_ICONS = { coin: '🪙', manaPotion: '🧪', strangeStone: '🪨', goods: '📦' };
+  let chosenItem = prefs.get('bagItem', 'coin');
+  function renderBag() {
+    const bag = game.bag();
+    const items = bag.items.filter((it) => it.count > 0 || it.id === 'coin');
+    $('bag-coins').textContent = `${bag.coins} ${bag.coins > 1 ? 'pièces' : 'pièce'}`;
+    if (!items.some((it) => it.id === chosenItem)) chosenItem = items[0].id;
+    $('bag-list').replaceChildren(...items.map((it) => {
+      const info = LORE.items[it.id] || { name: it.id };
+      const b = el('button', { type: 'button', className: 'bestiary-entry' }, [
+        el('span', { className: 'bag-icon', textContent: ITEM_ICONS[it.id] || '•' }),
+        el('span', {}, [el('strong', { textContent: info.name }), el('small', { textContent: `× ${it.count}` })]),
+      ]);
+      b.id = `bag-${it.id}`;
+      if (it.id === chosenItem) b.setAttribute('aria-current', 'true');
+      b.addEventListener('click', () => {
+        chosenItem = it.id;
+        prefs.set('bagItem', it.id);
+        renderBag();
+      });
+      return el('li', {}, [b]);
+    }));
+    const it = items.find((x) => x.id === chosenItem);
+    const info = LORE.items[it.id] || { name: it.id, description: '' };
+    const again = () => setTimeout(renderBag, 80);
+    const actions = [];
+    if (it.id === 'manaPotion') {
+      const drink = el('button', { type: 'button', className: 'button', id: 'bag-drink', textContent: 'Boire',
+        disabled: !bag.canDrink });
+      drink.addEventListener('click', () => { game.useItem(it.item); again(); });
+      actions.push(drink);
+    }
+    if (!it.quest && it.count > 0) {
+      const one = el('button', { type: 'button', className: 'button', id: 'bag-discard-one', textContent: 'Jeter 1' });
+      one.addEventListener('click', () => { game.discard(it.item, 1); again(); });
+      const all = el('button', { type: 'button', className: 'button danger', id: 'bag-discard-all', textContent: 'Tout jeter' });
+      all.addEventListener('click', () => { game.discard(it.item, 0); again(); });
+      actions.push(one, all);
+    }
+    $('bag-detail').replaceChildren(
+      el('h2', { textContent: `${ITEM_ICONS[it.id] || ''} ${info.name}` }),
+      el('p', { className: 'kind', textContent: it.quest ? 'Objet de quête : impossible de s’en débarrasser' : `${it.count} dans ton sac` }),
+      el('p', { className: 'description', textContent: info.description }),
+      ...(it.id === 'manaPotion' && !bag.canDrink && it.count > 0
+        ? [el('p', { className: 'facts', textContent: 'Ton mana est déjà plein.' })] : []),
+      el('div', { className: 'bag-actions' }, actions),
+    );
+  }
 
   // ---- Character sheet ----
 
@@ -429,13 +480,17 @@
     const q = quests.find((x) => x.id === chosenQuest);
     const info = LORE.quests[q.id];
     const giver = (LORE.npcs[info.giver] || { name: '?' }).name;
-    const steps = Object.entries(info.steps).map(([id, label]) => el('li', {
-      className: q.steps[id] ? 'step done' : 'step', textContent: label,
-    }));
+    // A step is done (true), or counted (so many of `of`: the bundles, the raiders, the lambs).
+    const steps = Object.entries(info.steps).map(([id, label]) => {
+      const v = q.steps[id];
+      const counted = typeof v === 'number';
+      const done = counted ? v >= (q.steps.of || 1) : !!v;
+      return el('li', { className: done ? 'step done' : 'step', textContent: counted ? `${label} (${v}/${q.steps.of})` : label });
+    });
     $('quest-detail').className = 'bestiary-detail quest';
     $('quest-detail').replaceChildren(
       el('h2', { textContent: info.title }),
-      el('p', { className: 'kind', textContent: `Demandée par ${giver} · ${q.stage === 'done' ? 'terminée' : 'en cours'}` }),
+      el('p', { className: 'kind', textContent: `${info.main ? 'Quête principale · ' : ''}Demandée par ${giver} · ${q.stage === 'done' ? 'terminée' : 'en cours'}` }),
       el('p', { className: 'description', textContent: info.summary }),
       el('h3', { textContent: 'Étapes' }),
       el('ol', { className: 'quest-steps' }, steps),
@@ -842,6 +897,10 @@
     runeStone: '#7fe0ff',
     castleWall: '#9d978e', castleTower: '#a8a298', castleGate: '#8f897f', castleKeep: '#b0aaa0',
     caveMouth: '#2a2630', crystal: '#c79bff',
+    cart: '#8a6a44', bridge: '#9a7a50', farmhouse: '#b8553a', barn: '#a33a2c', fruitTree: 'rgba(60, 120, 50, 0.9)',
+    crops: 'rgba(214, 186, 96, 0.85)', haystack: '#d8b860', windmill: '#a8a298', cabin: '#7a5534', tent: '#d8cca8',
+    campfire: '#e07a30', woodpile: '#7a5534', hollowTree: '#4e3a26', burrow: '#7a5a3a', lighthouse: '#e8e4dc',
+    menhir: '#a8a39a', meteorite: '#3a2f46',
   };
 
   function heightAt(data, x, z) {
@@ -980,6 +1039,21 @@
     ctx.putImageData(pixels, 0, 0);
     const toPx = (v) => (v + R) * PX_PER_M;
 
+    // The west's stream, and its road (west.hpp).
+    const line = (pts, color, width) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width * PX_PER_M;
+      ctx.lineCap = ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i += 2) {
+        if (i === 0) ctx.moveTo(toPx(pts[i]), toPx(pts[i + 1])); else ctx.lineTo(toPx(pts[i]), toPx(pts[i + 1]));
+      }
+      ctx.stroke();
+    };
+    if (data.west) {
+      line(data.west.stream, 'rgba(70, 150, 200, 0.95)', 3.0);
+      line(data.west.road, 'rgba(176, 140, 96, 0.95)', 2.6);
+    }
     // The path.
     ctx.strokeStyle = 'rgba(176, 140, 96, 0.95)';
     ctx.lineWidth = 2.2 * PX_PER_M;
@@ -997,7 +1071,9 @@
     for (const [kind, x, z, hx, hz] of objects) {
       ctx.fillStyle = OBJECT_COLORS[kind] || '#777';
       if (kind === 'tree' || kind === 'pine' || kind === 'bush' || kind === 'tower' || kind === 'hut' ||
-          kind === 'well' || kind === 'rubble' || kind === 'stump' || kind === 'castleTower' || kind === 'crystal') {
+          kind === 'well' || kind === 'rubble' || kind === 'stump' || kind === 'castleTower' || kind === 'crystal' ||
+          kind === 'fruitTree' || kind === 'haystack' || kind === 'windmill' || kind === 'hollowTree' ||
+          kind === 'lighthouse' || kind === 'menhir' || kind === 'meteorite' || kind === 'campfire') {
         ctx.beginPath();
         ctx.arc(toPx(x), toPx(z), Math.max(hx, 0.3) * PX_PER_M, 0, Math.PI * 2);
         ctx.fill();
@@ -1083,7 +1159,8 @@
       const n = data.zoneCount;
       const key = `${options.habitat.species}:${base.key}`;
       if (!habitatImage || habitatImage.key !== key) {
-        const zoneIds = ['meadow', 'village', 'lake', 'ruins', 'forest', 'cave', 'castle', 'coast', 'hills', 'plains'];  // Zone
+        const zoneIds = ['meadow', 'village', 'lake', 'ruins', 'forest', 'cave', 'castle', 'coast', 'hills', 'plains',
+          'farm', 'woods', 'crater'];  // Zone
         const wanted = new Set(options.habitat.habitat.map((z) => zoneIds.indexOf(z)));
         const image = document.createElement('canvas');
         image.width = image.height = n;
@@ -1130,6 +1207,16 @@
       if (data.forest) label(LORE.zones.forest, data.forest.x, data.forest.z, size);
       if (data.cave) label(LORE.zones.cave, data.cave.x, data.cave.z, size);
       if (data.castle) label(LORE.zones.castle, data.castle.x, data.castle.z - data.castle.r - 3, size);
+      // The west's places (west.hpp): the big ones zoomed out, all of them up close.
+      if (data.west) {
+        const w = data.west;
+        const big = ['farm', 'woods', 'lighthouse', 'crater', 'menhirs'];
+        for (const [id, name] of Object.entries(LORE.westPlaces)) {
+          if (!w[id] || (k < 1.2 && !big.includes(id))) continue;
+          const below = id === 'farm' ? -w.farmR - 4 : id === 'crater' ? -w.craterR - 6 : id === 'woods' ? 0 : -8;
+          label(name, w[id][0], w[id][1] + below, big.includes(id) ? size : size - 1);
+        }
+      }
     }
 
     // The teleporters found (the ones reachable from here, in teleport mode: brighter, larger).
@@ -1150,12 +1237,13 @@
 
     // Around the player: what the villagers have for it (as over their heads).
     if (options.marks && k > 0.5) {
-      const ICONS = { newQuest: ['?', '#ffffff'], quest: ['!', '#f2c94c'], heal: ['+', '#6fe07a'], fight: ['×', '#ff6a5c'] };
+      const ICONS = { newQuest: ['?', '#ffffff'], quest: ['!', '#f2c94c'], heal: ['+', '#6fe07a'], fight: ['×', '#ff6a5c'],
+        shop: ['¤', '#ffd34d'], farm: ['⌂', '#9be36a'] };
       ctx.font = '800 12px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       for (const m of game.marks()) {
-        if (Math.hypot(m.x - p.x, m.z - p.z) > 200) continue;
+        if (Math.hypot(m.x - p.x, m.z - p.z) > 200 && !m.marks.includes('farm')) continue;  // the farm: from afar too
         m.marks.forEach((id, i) => {
           const [glyph, color] = ICONS[id] || ['·', '#fff'];
           const cx = X(m.x) + (i - (m.marks.length - 1) / 2) * 15, cy = Y(m.z) - 12;

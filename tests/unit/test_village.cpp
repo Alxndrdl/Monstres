@@ -3,6 +3,7 @@
 #include "monstres/core/world.hpp"
 #include "monstres/render/scene.hpp"
 #include "monstres/render/terrain_mesh.hpp"
+#include "monstres/core/west.hpp"
 #include "test_helpers.hpp"
 
 #include <cmath>
@@ -67,7 +68,9 @@ TEST_CASE("the village has houses of every type, a well, signs, fences and lamps
       CHECK(fx * (w.village.center.x - o.pos.x) + fz * (w.village.center.z - o.pos.z) > 0);
     }
     CHECK(houses >= 5);
-    CHECK(count(w, ObjectKind::Well) == 1);
+    size_t wells = 0;  // the farm has its own (west.hpp)
+    for (const Object& o : w.objects) wells += o.kind == ObjectKind::Well && in_village(w.village, o.pos.x, o.pos.z);
+    CHECK(wells == 1);
     CHECK(count(w, ObjectKind::Sign) >= 1);
     CHECK(count(w, ObjectKind::Lamp) >= 2);
     CHECK(count(w, ObjectKind::Fence) >= 1);
@@ -146,10 +149,14 @@ TEST_CASE("crows start on roofs and fly to another perch when the player comes")
 
 TEST_CASE("villagers stay around the village and greet the player") {
   World w = cached_game(8);
-  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1);  // and Isidore, the magician
+  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1 + 8);  // and Isidore, and the west's
   run(w, move(0, 0), 30 * rules::kTicksPerSecond);
   for (const Creature& c : w.creatures) {
     if (c.species != Species::Villager) continue;
+    if (c.npc > npc::kMentor) {  // the west's stay at their place
+      CHECK(std::hypot(c.body.pos.x - c.home.x, c.body.pos.z - c.home.z) < 3.0f);
+      continue;
+    }
     CHECK(in_village(w.village, c.body.pos.x, c.body.pos.z, 2.0f));
   }
   Creature& v = first_of(w, Species::Villager);
@@ -174,7 +181,8 @@ TEST_CASE("the lake has water above a sunken bed, chimneys smoke") {
   size_t in_lake_vertices = 0;
   for (size_t i = 0; i < water.vertices.size(); i += MeshData::kFloatsPerVertex) {
     const float x = water.vertices[i], z = water.vertices[i + 2];
-    if (!in_lake(lake, x, z, 1.0f)) {  // the sea, far to the west
+    if (!in_lake(lake, x, z, 1.0f)) {  // the sea, far to the west; the west's stream, at its own level
+      if (distance_to_stream(w.west.stream, x, z, 3.0f) < 2.5f) continue;
       CHECK(water.vertices[i + 1] == Approx(rules::kSeaLevel));
       continue;
     }

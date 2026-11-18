@@ -60,7 +60,15 @@ struct Places {
   const RuinsLayout& ruins;
   const CaveLayout& cave;
   const CastleLayout& castle;
+  // The west's places (west.hpp): flat ground for the farm, knolls for the
+  // mill and the lighthouse, the crater's bowl, the stream's bed. Its stream
+  // gets its water's level here (going down along it, under the ground).
+  WestLayout* west = nullptr;
 };
+
+// The ground beyond the valley before any place shapes it: the hills and the
+// continent's (as make_heightmap draws it, near enough to place things).
+float natural_height(uint64_t seed, float x, float z);
 
 // Rolling hills, higher towards the edges of the world; flat around the
 // village, a sunken bed under the lake, gentle along the path, a knoll

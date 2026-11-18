@@ -5,8 +5,10 @@
 #include "monstres/core/interior.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/west.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <iterator>
@@ -18,7 +20,8 @@ std::string carried_variants_json(Species species, const Genes& genes);
 
 namespace {
 const char* species_name(Species s) {
-  static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish", "spark", "axolotl", "cristi"};
+  static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish", "spark", "axolotl", "cristi",
+                                 "raccoon", "owl", "sheep", "mole"};
   static_assert(std::size(kNames) == kSpeciesCount);
   const auto i = static_cast<size_t>(s);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -80,7 +83,8 @@ std::string num(float v) {
 std::string command_names_json() {
   static const char* kNames[] = {"none",        "engage",    "flee",          "capture", "summon",    "release",
                                  "train",       "teleport",  "questAccept",   "questGive", "questComplete", "target",
-                                 "challenge",   "ready",     "cast",          "equipSpell", "healTeam", "door"};
+                                 "challenge",   "ready",     "cast",          "equipSpell", "healTeam", "door",
+                                 "useItem",     "discard",   "buy",           "farmSwap"};
   static_assert(std::size(kNames) == kCommandCount);
   static_assert(static_cast<size_t>(Command::Engage) == 1 && static_cast<size_t>(Command::Train) == 6 &&
                 static_cast<size_t>(Command::Target) == 11 && static_cast<size_t>(Command::HealTeam) == 16);
@@ -100,7 +104,7 @@ std::string to_json(const World& w) {
        ",\"onGround\":" + (p.on_ground ? "true" : "false") +
        ",\"facingX\":" + num(p.facing_x) + ",\"facingZ\":" + num(p.facing_z);
   // Inside (interior.hpp): where it is, and on the map where it went in.
-  static const char* kPlaces[] = {"outside", "cave", "house", "tower"};
+  static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse"};
   static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
   const Body& m = map_body(w);
   s += std::string(",\"place\":\"") + kPlaces[static_cast<size_t>(w.place.kind)] + "\"" +
@@ -112,9 +116,15 @@ std::string to_json(const World& w) {
     const Creature& c = w.creatures[i];
     if (i) s += ',';
     s += std::string("{\"species\":\"") + species_name(c.species) + "\"" + ",\"mind\":\"" + mind_name(c.mind) +
-         "\"" + ",\"x\":" + num(c.body.pos.x) + ",\"y\":" + num(c.body.pos.y) + ",\"z\":" + num(c.body.pos.z) + "}";
+         "\"" + ",\"x\":" + num(c.body.pos.x) + ",\"y\":" + num(c.body.pos.y) + ",\"z\":" + num(c.body.pos.z) +
+         (c.tag == Tag::Raider ? ",\"aggressive\":true" : "") + (c.npc ? ",\"npc\":" + std::to_string(c.npc) : "") + "}";
   }
-  s += "]}";
+  s += "]";
+  s += ",\"bag\":" + bag_json(w);
+  s += ",\"farm\":" + std::to_string(w.farm.size());
+  s += ",\"rescueTick\":" + std::to_string(w.rescue_tick);
+  s += ",\"battleForced\":" + std::string(w.battle.forced ? "true" : "false");
+  s += "}";
   return s;
 }
 
@@ -144,6 +154,10 @@ std::string creature_json(const World& w, int index) {
     if (c.tag == Tag::LostPiou) s += ",\"tag\":\"lostPiou\"";
     if (c.tag == Tag::Rival) s += ",\"tag\":\"rival\"";
     if (c.tag == Tag::Giant) s += ",\"tag\":\"giant\"";
+    if (c.tag == Tag::Raider) s += ",\"tag\":\"raider\",\"aggressive\":true";
+    if (c.tag == Tag::Flock) s += ",\"tag\":\"flock\"";
+    if (c.tag == Tag::Lamb) s += ",\"tag\":\"lamb\"";
+    if (c.tag == Tag::Boarder) s += ",\"tag\":\"boarder\"";
     if (const int k = foe_slot(w, static_cast<size_t>(index)); k >= 0) s += ",\"foe\":" + std::to_string(k);
     if (index == 0) s += std::string(",\"train\":") + (can_train(w) ? "true" : "false");
   }
@@ -152,13 +166,15 @@ std::string creature_json(const World& w, int index) {
     s += std::string(",\"talk\":") + (near_npc(w, c.npc) ? "true" : "false");
     uint8_t rivals = 0;
     rival_team(c.npc, rivals);
-    if (c.npc == npc::kOdette) {
+    if (c.npc == npc::kOdette || c.npc == npc::kViolette) {
       s += std::string(",\"healer\":true,\"heal\":") + (can_heal_team(w, c.npc) ? "true" : "false");
     }
     if (rivals) {
       s += std::string(",\"trainer\":true,\"challenge\":") + (can_challenge(w, c.npc) ? "true" : "false");
-      s += ",\"wins\":" + std::to_string(w.rival_wins);
+      s += ",\"wins\":" + std::to_string(c.npc == npc::kRomane ? w.romane_wins : w.rival_wins);
     }
+    if (c.npc == npc::kAnselme) s += std::string(",\"shop\":") + (npc_marks(w, c.npc) & kMarkShop ? "true" : "false");
+    if (c.npc == npc::kCapucine) s += std::string(",\"farm\":") + (farm_open(w) ? "true" : "false");
   }
   s += ",\"x\":" + num(p.x) + ",\"y\":" + num(p.y) + ",\"z\":" + num(p.z);
   s += ",\"distance\":" + num(std::sqrt(dx * dx + dz * dz));
@@ -171,7 +187,8 @@ std::string creature_json(const World& w, int index) {
 namespace monstres {
 
 const char* zone_name(Zone zone) {
-  static const char* kNames[] = {"meadow", "village", "lake", "ruins", "forest", "cave", "castle", "coast", "hills", "plains"};
+  static const char* kNames[] = {"meadow", "village", "lake", "ruins", "forest", "cave", "castle", "coast", "hills", "plains",
+                                 "farm", "woods", "crater"};
   static_assert(std::size(kNames) == static_cast<size_t>(Zone::Count));
   const auto i = static_cast<size_t>(zone);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -223,7 +240,10 @@ const char* object_kind_name(ObjectKind kind) {
                                  "well",   "barrel", "lamp",     "tower",     "ruinWall",     "pillar",
                                  "fallenPillar", "rubble", "runeStone", "castleWall", "castleTower", "castleGate",
                                  "castleKeep", "caveMouth", "crystal", "collider", "teleporter",
-                                 "table", "chair", "bed", "shelf", "hearth", "rug", "step", "hatch"};
+                                 "table", "chair", "bed", "shelf", "hearth", "rug", "step", "hatch",
+                                 "cart", "bridge", "farmhouse", "barn", "fruitTree", "crops", "haystack", "windmill",
+                                 "cabin", "tent", "campfire", "woodpile", "hollowTree", "burrow", "lighthouse",
+                                 "menhir", "meteorite"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -399,13 +419,14 @@ std::string bestiary_json(const World& w) {
 namespace {
 
 const char* teleporter_name(TeleporterId id) {
-  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle"};
+  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle", "farm", "menhirs"};
   static_assert(std::size(kNames) == kTeleporterCount);
   return kNames[static_cast<size_t>(id)];
 }
 
 const char* quest_name(QuestId id) {
-  static const char* kNames[] = {"lostPiou", "teleporters", "giantChampi", "combat", "healing", "main"};
+  static const char* kNames[] = {"lostPiou", "teleporters", "giantChampi", "combat", "healing", "main",
+                                 "merchant",  "delivery",    "transfer",    "orchard", "shepherd", "mill"};
   static_assert(std::size(kNames) == kQuestCount);
   return kNames[static_cast<size_t>(id)];
 }
@@ -422,8 +443,8 @@ std::string marks_json(const World& w) {
     s += std::string(first ? "" : ",") + "{\"npc\":" + std::to_string(c.npc) + ",\"x\":" + num(c.body.pos.x) +
          ",\"z\":" + num(c.body.pos.z) + ",\"marks\":[";
     first = false;
-    const char* names[] = {"newQuest", "quest", "heal", "fight"};
-    for (int k = 0, n = 0; k < 4; ++k) {
+    const char* names[] = {"newQuest", "quest", "heal", "fight", "shop", "farm"};
+    for (int k = 0, n = 0; k < 6; ++k) {
       if (m & (1 << k)) s += std::string(n++ ? "," : "") + "\"" + names[k] + "\"";
     }
     s += "]}";
@@ -462,7 +483,10 @@ std::string quests_json(const World& w) {
     s += std::string("{\"id\":\"") + quest_name(id) + "\",\"stage\":\"" + kStages[static_cast<size_t>(q.stage)] + "\"";
     const bool done = q.stage == QuestStage::Done;
     const bool ready = quest_ready(w, id);
-    s += std::string(",\"ready\":") + (ready ? "true" : "false") + ",\"steps\":{";
+    s += std::string(",\"ready\":") + (ready ? "true" : "false");
+    s += std::string(",\"available\":") + (quest_available(w, id) ? "true" : "false");
+    s += ",\"giver\":" + std::to_string(quest_giver(id)) + ",\"receiver\":" + std::to_string(quest_receiver(id));
+    s += ",\"steps\":{";
     if (id == QuestId::LostPiou) {
       s += std::string("\"find\":") + (done || ready ? "true" : "false");
       s += std::string(",\"bring\":") + (done ? "true" : "false");
@@ -485,6 +509,39 @@ std::string quests_json(const World& w) {
              (w.quests[static_cast<size_t>(part)].stage == QuestStage::Done ? "true" : "false") + ",";
       }
       s += std::string("\"tell\":") + ((q.progress & kMainPart1Done) ? "true" : "false");
+      s += std::string(",\"part2\":") + ((q.progress & kMainPart2Done) ? "true" : "false");
+    } else if (id == QuestId::Merchant) {
+      s += "\"goods\":" + std::to_string(std::popcount(static_cast<unsigned>(q.progress & kGoodsFound)));
+      s += ",\"of\":" + std::to_string(rules::kGoods);
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
+      s += ",\"spots\":[";
+      const auto spots = goods_spots(w);
+      for (uint32_t g = 0; g < rules::kGoods; ++g) {
+        if (g) s += ',';
+        s += "{\"x\":" + num(spots[g].x) + ",\"z\":" + num(spots[g].z) + ",\"found\":" +
+             ((q.progress >> g) & 1u ? "true" : "false") + "}";
+      }
+      s += "]";
+    } else if (id == QuestId::Delivery) {
+      s += std::string("\"stone\":") + (w.bag[static_cast<size_t>(Item::StrangeStone)] > 0 ? "true" : "false");
+      s += std::string(",\"given\":") + (done ? "true" : "false");
+      s += std::string(",\"near\":") + (near_npc(w, npc::kCapucine) ? "true" : "false");
+    } else if (id == QuestId::Transfer) {
+      s += std::string("\"sent\":") + ((q.progress & kSentToFarm) || done ? "true" : "false");
+      s += std::string(",\"took\":") + ((q.progress & kTookFromFarm) || done ? "true" : "false");
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
+    } else if (id == QuestId::Orchard) {
+      s += "\"beaten\":" + std::to_string(done ? rules::kRaiders : std::min<uint32_t>(q.progress, rules::kRaiders));
+      s += ",\"of\":" + std::to_string(rules::kRaiders);
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
+    } else if (id == QuestId::Shepherd) {
+      s += "\"lambs\":" + std::to_string(std::popcount(static_cast<unsigned>(q.progress & kLambsHome)));
+      s += ",\"of\":" + std::to_string(rules::kLambs);
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
+      s += std::string(",\"room\":") + (w.team.size() < rules::kTeamSize || farm_open(w) ? "true" : "false");
+    } else if (id == QuestId::Mill) {
+      s += std::string("\"turning\":") + ((q.progress & kMillTurning) ? "true" : "false");
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
     } else {
       s += std::string("\"discover\":") + (teleporter_known(w, TeleporterId::Castle) ? "true" : "false");
       s += std::string(",\"go\":") + ((q.progress & kWentToCastle) || done ? "true" : "false");
@@ -633,12 +690,33 @@ std::string map_json(const World& w) {
     if (i) s += ',';
     s += num(w.path.points[i].x) + "," + num(w.path.points[i].z);
   }
-  s += "],\"objects\":[";
+  s += "]";
+  // The west (west.hpp): its road and stream (every other point), its places.
+  const WestLayout& west = w.west;
+  if (west.valid()) {
+    const auto line = [&](const std::vector<Vec2>& pts) {
+      std::string t = "[";
+      for (size_t i = 0; i < pts.size(); i += 2) t += std::string(i ? "," : "") + num(pts[i].x) + "," + num(pts[i].z);
+      return t + "]";
+    };
+    const auto at = [&](const char* name, Vec2 p) { return std::string(",\"") + name + "\":[" + num(p.x) + "," + num(p.z) + "]"; };
+    s += ",\"west\":{\"road\":" + line(west.road.points) + ",\"stream\":" + line(west.stream.points);
+    s += at("cart", west.cart) + at("bridge", west.bridge) + at("farm", west.farm) + at("mill", west.mill) +
+         at("pasture", west.pasture) + at("burrow", west.burrow) + at("woods", west.woods) + at("cabin", west.cabin) +
+         at("camp", west.camp) + at("hollowTree", west.hollow_tree) + at("lighthouse", west.lighthouse) +
+         at("menhirs", west.menhirs) + at("crater", west.crater);
+    s += ",\"farmR\":" + num(rules::kFarmRadius) + ",\"woodsRx\":" + num(west.woods_rx) + ",\"woodsRz\":" + num(west.woods_rz) +
+         ",\"craterR\":" + num(rules::kCraterRadius) + "}";
+  } else {
+    s += ",\"west\":null";
+  }
+  s += ",\"objects\":[";
   for (size_t i = 0; i < w.objects.size(); ++i) {
     const Object& o = w.objects[i];
     Box b = object_box(o);
     if (o.kind == ObjectKind::CastleGate) b = {o.pos - Vec3{4, 0, 4}, o.pos + Vec3{4, 0, 4}};  // its colliders
     if (o.kind == ObjectKind::Collider) continue;
+    if (o.kind == ObjectKind::Crops) b = {o.pos - o.size, o.pos + o.size};  // walked through, but drawn
     if (s.back() != '[') s += ',';
     // Trees: the crown, not the trunk.
     const float crown = o.kind == ObjectKind::Tree ? 1.2f * o.size.x : o.kind == ObjectKind::Pine ? 1.0f * o.size.x : 0;
@@ -853,6 +931,13 @@ std::string battle_json(const World& w) {
   const Battle& b = w.battle;
   std::string s = std::string("{\"phase\":\"") + phase_name(b.phase) + "\"";
   s += ",\"tick\":" + std::to_string(w.tick);
+  // An aggressive monster's battle (west.hpp); the last time the magician was sent back to the farm.
+  s += std::string(",\"forced\":") + (b.forced ? "true" : "false") + ",\"rescueTick\":" + std::to_string(w.rescue_tick);
+  s += ",\"projectiles\":[";
+  for (size_t k = 0; k < b.projectiles.size(); ++k) {
+    s += std::string(k ? "," : "") + "\"" + element_name(b.projectiles[k].element) + "\"";
+  }
+  s += "]";
   s += std::string(",\"outcome\":{\"result\":\"") + outcome_name(b.outcome) + "\",\"tick\":" +
        std::to_string(b.outcome_tick) + ",\"xp\":" + std::to_string(b.outcome_xp) + ",\"species\":\"" +
        species_name(b.outcome_species) + "\",\"count\":" + std::to_string(b.outcome_count) + ",\"noXp\":\"" +
@@ -863,7 +948,8 @@ std::string battle_json(const World& w) {
     const DoorNear d = door_near(w);
     if (d.action != DoorAction::None) {
       static const char* kActions[] = {"none", "enter", "leave", "climb", "descend"};
-      static const char* kPlaces[] = {"outside", "cave", "house", "tower"};
+      static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse"};
+      static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
       s += std::string(",\"door\":{\"action\":\"") + kActions[static_cast<size_t>(d.action)] + "\",\"place\":\"" +
            kPlaces[static_cast<size_t>(d.place)] + "\",\"building\":\"" + object_kind_name(d.building) + "\"}";
     }
@@ -918,6 +1004,69 @@ std::string battle_json(const World& w) {
     s += "]}";
   }
   return s + "}";
+}
+
+
+std::string bag_json(const World& w) {
+  std::string s = "{\"items\":[";
+  for (size_t k = 0; k < kItemCount; ++k) {
+    const ItemInfo& info = item_info(static_cast<Item>(k));
+    if (k) s += ',';
+    s += std::string("{\"id\":\"") + info.id + "\",\"item\":" + std::to_string(k) + ",\"count\":" +
+         std::to_string(w.bag[k]) + ",\"quest\":" + (info.quest ? "true" : "false") + ",\"price\":" +
+         std::to_string(info.price) + "}";
+  }
+  const uint16_t most = wizard_stats(w.wizard).mana;
+  s += "],\"coins\":" + std::to_string(w.bag[static_cast<size_t>(Item::Coin)]);
+  s += ",\"potionMana\":" + std::to_string(rules::kPotionMana);
+  s += std::string(",\"canDrink\":") +
+       (w.bag[static_cast<size_t>(Item::ManaPotion)] > 0 && w.wizard.mana < most ? "true" : "false");
+  return s + "}";
+}
+
+namespace {
+std::string kept_monster_json(const Monster& m, size_t index) {
+  std::string s = "{\"index\":" + std::to_string(index);
+  s += std::string(",\"species\":\"") + species_name(m.species) + "\"";
+  s += ",\"level\":" + std::to_string(m.level) + ",\"hp\":" + std::to_string(m.hp) +
+       ",\"maxHp\":" + std::to_string(monster_fight_stats(m).hp);
+  s += ",\"look\":" + std::to_string(genes_code(m.genes));
+  s += ",\"variants\":" + carried_variants_json(m.species, m.genes);
+  s += ",\"elements\":" + elements_json(creature_elements(m.species, m.genes));
+  s += std::string(",\"form\":\"") + form_name(m.genes.form) + "\"";
+  s += std::string(",\"chromatic\":") + (m.genes.chromatic ? "true" : "false");
+  s += std::string(",\"elemental\":") + (m.genes.elemental ? "true" : "false");
+  return s + "}";
+}
+}  // namespace
+
+std::string farm_json(const World& w) {
+  std::string s = std::string("{\"open\":") + (farm_open(w) ? "true" : "false");
+  s += std::string(",\"near\":") + (near_npc(w, npc::kCapucine) ? "true" : "false");
+  s += std::string(",\"usable\":") +
+       (farm_open(w) && near_npc(w, npc::kCapucine) && w.battle.phase == BattlePhase::None ? "true" : "false");
+  s += ",\"teamSize\":" + std::to_string(rules::kTeamSize) + ",\"active\":" + std::to_string(w.active);
+  s += ",\"team\":[";
+  for (size_t k = 0; k < w.team.size(); ++k) s += (k ? "," : "") + kept_monster_json(w.team[k], k);
+  s += "],\"kept\":[";
+  for (size_t k = 0; k < w.farm.size(); ++k) s += (k ? "," : "") + kept_monster_json(w.farm[k], k);
+  return s + "]}";
+}
+
+std::string shop_json(const World& w) {
+  const bool open = w.quests[static_cast<size_t>(QuestId::Merchant)].stage == QuestStage::Done;
+  std::string s = std::string("{\"open\":") + (open ? "true" : "false");
+  s += std::string(",\"near\":") + (near_npc(w, npc::kAnselme) ? "true" : "false");
+  s += ",\"coins\":" + std::to_string(w.bag[static_cast<size_t>(Item::Coin)]) + ",\"items\":[";
+  bool first = true;
+  for (size_t k = 0; k < kItemCount; ++k) {
+    const ItemInfo& info = item_info(static_cast<Item>(k));
+    if (info.price == 0) continue;
+    s += std::string(first ? "" : ",") + "{\"id\":\"" + info.id + "\",\"item\":" + std::to_string(k) +
+         ",\"price\":" + std::to_string(info.price) + ",\"have\":" + std::to_string(w.bag[k]) + "}";
+    first = false;
+  }
+  return s + "]}";
 }
 
 }  // namespace monstres

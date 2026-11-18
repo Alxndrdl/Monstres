@@ -3,6 +3,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/heightmap.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/west.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -61,19 +62,47 @@ uint64_t place_seed(uint64_t seed, PlaceKind kind, const Object& door) {
 }
 
 bool is_house(ObjectKind k) {
-  return k == ObjectKind::HouseCottage || k == ObjectKind::HouseChimney || k == ObjectKind::HouseHut;
+  return k == ObjectKind::HouseCottage || k == ObjectKind::HouseChimney || k == ObjectKind::HouseHut ||
+         k == ObjectKind::Farmhouse || k == ObjectKind::Cabin;
 }
 
 PlaceKind place_of(ObjectKind k) {
   if (k == ObjectKind::CaveMouth) return PlaceKind::Cave;
   if (is_house(k)) return PlaceKind::House;
   if (k == ObjectKind::Tower) return PlaceKind::Tower;
+  if (k == ObjectKind::Burrow) return PlaceKind::Burrow;
+  if (k == ObjectKind::HollowTree) return PlaceKind::HollowTree;
+  if (k == ObjectKind::Lighthouse) return PlaceKind::Lighthouse;
   return PlaceKind::Outside;
+}
+
+// Tall round halls with a stair up to a trapdoor, out onto their top: the
+// tower, the hollow tree, the lighthouse.
+bool tall(PlaceKind k) { return k == PlaceKind::Tower || k == PlaceKind::HollowTree || k == PlaceKind::Lighthouse; }
+struct Hall {
+  float radius, height, ring;  // the hall, its ceiling, the stair's circle
+  int steps;
+  float top;        // the top outside (above the door's base), where one stands
+  float hatch_z;    // the trapdoor on top: local z (x = 0)
+  float out_x;      // and where one comes out by it (local x, at hatch_z)
+};
+Hall hall_of(PlaceKind k) {
+  switch (k) {
+    case PlaceKind::HollowTree: return {5.0f, 13.5f, 4.0f, 40, rules::kHollowTreeTop, 0.0f, 0.0f};
+    case PlaceKind::Lighthouse: return {3.8f, 14.0f, 2.9f, 41, rules::kLighthouseGallery, -2.0f, 1.0f};
+    default: return {4.5f, 10.8f, 3.5f, 30, rules::kRoofHeight, 0.0f, 0.0f};
+  }
 }
 
 // Half depth of a house's front (its door is there, local -Z).
 float house_front(ObjectKind k) {
-  return k == ObjectKind::HouseCottage ? 2.0f : k == ObjectKind::HouseChimney ? 2.25f : 2.1f;
+  switch (k) {
+    case ObjectKind::HouseCottage: return 2.0f;
+    case ObjectKind::HouseChimney: return 2.25f;
+    case ObjectKind::Farmhouse: return 3.0f;
+    case ObjectKind::Cabin: return 2.5f;
+    default: return 2.1f;
+  }
 }
 
 // A building's door, from outside: where one stands to use it (local x, z),
@@ -88,6 +117,9 @@ struct DoorFrame {
 DoorFrame frame_of(ObjectKind k) {
   if (k == ObjectKind::CaveMouth) return {0, 2.0f, {0, 1.9f, 4.55f}, 4.3f, 3.7f, 0, -1.8f};
   if (k == ObjectKind::Tower) return {0, -2.9f, {0, 1.25f, -2.45f}, 1.24f, 2.5f, 0, -3.8f};
+  if (k == ObjectKind::HollowTree) return {0, -4.9f, {0, 1.3f, -4.25f}, 1.4f, 2.6f, 0, -5.8f};
+  if (k == ObjectKind::Lighthouse) return {0, -3.2f, {0, 1.2f, -2.66f}, 1.1f, 2.3f, 0, -4.0f};
+  if (k == ObjectKind::Burrow) return {0, -2.7f, {0, 0.6f, -1.95f}, 1.3f, 1.2f, 0, -3.4f};
   const float f = house_front(k);
   return {0, -f - 0.7f, {0, 0.95f, -f - 0.05f}, 0.9f, 1.9f, 0, -f - 1.4f};
 }
@@ -159,7 +191,33 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
   in.entry = {0, 0, -1.2f};
   in.entry_facing = {0, -1};
   in.exits.push_back({{0, 0, -0.4f}, {0, -1}, ExitKind::Out});
-  if (kind == PlaceKind::Cave) {
+  if (kind == PlaceKind::Burrow) {
+    // Low tunnels dug in the earth, between round dens.
+    in.rounding = 0.8f;
+    in.entry = {0, 0, -0.5f};
+    in.exits[0] = {{0, 0, 1.3f}, {0, -1}, ExitKind::Out};
+    in.pieces.push_back({{0, 1.0f}, {0, -6.0f}, 2.0f, {}, 2.8f, 0.3f});
+    std::vector<std::pair<Vec2, float>> dens{{{0, -11.0f}, 5.5f}};
+    in.pieces.push_back({{0, -11.0f}, {0, -11.0f}, 5.5f, {}, 3.6f, 0.8f});
+    Rng rng(s, 93);
+    for (int attempt = 0; attempt < 50 && dens.size() < 5; ++attempt) {
+      const auto& from = dens[rng.below(static_cast<uint32_t>(dens.size()))];
+      const Vec2 a = dir16(any_angle(rng));
+      const float r = range(rng, 4.0f, 6.0f);
+      const float d = from.second + r + range(rng, 4.0f, 7.0f);
+      const Vec2 at{from.first.x + a.x * d, from.first.z + a.z * d};
+      if (at.z > -6.0f - r) continue;
+      bool free = true;
+      for (const auto& c : dens) {
+        const float dx = c.first.x - at.x, dz = c.first.z - at.z;
+        free = free && dx * dx + dz * dz > (c.second + r + 3.0f) * (c.second + r + 3.0f);
+      }
+      if (!free) continue;
+      in.pieces.push_back({from.first, at, range(rng, 2.0f, 2.5f), {}, 2.8f, 0.4f});
+      in.pieces.push_back({at, at, r, {}, range(rng, 3.2f, 4.2f), 0.8f});
+      dens.push_back({at, r});
+    }
+  } else if (kind == PlaceKind::Cave) {
     // A corridor from the mouth, then chambers joined by tunnels, each away
     // from the others (deeper into the hill, towards -Z).
     in.rounding = 1.0f;
@@ -193,11 +251,14 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
       in.pieces.push_back({at, at, r, {}, height, 1.4f});
       chambers.push_back({at, r});
     }
-  } else if (kind == PlaceKind::Tower) {
+  } else if (tall(kind)) {
     // One tall round hall; a stair along its wall up to a landing under the trapdoor.
-    in.pieces.push_back({{0, -4.5f}, {0, -4.5f}, 4.5f, {}, 10.8f, 0});
+    const Hall h = hall_of(kind);
+    in.pieces.push_back({{0, -h.radius}, {0, -h.radius}, h.radius, {}, h.height, 0});
   } else {
     switch (door.kind) {
+      case ObjectKind::Farmhouse: in.pieces.push_back({{0, -3.6f}, {}, 0, {4.4f, 3.6f}, 3.0f, 0}); break;
+      case ObjectKind::Cabin: in.pieces.push_back({{0, -2.9f}, {}, 0, {3.3f, 2.9f}, 2.6f, 0}); break;
       case ObjectKind::HouseChimney: in.pieces.push_back({{0, -3.3f}, {}, 0, {3.3f, 3.3f}, 3.0f, 0}); break;
       case ObjectKind::HouseHut: in.pieces.push_back({{0, -3.4f}, {0, -3.4f}, 3.4f, {}, 3.2f, 0}); break;
       default: in.pieces.push_back({{0, -3.0f}, {}, 0, {3.6f, 3.0f}, 2.8f, 0}); break;
@@ -217,10 +278,12 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
     in.bounds.max.y = std::max(in.bounds.max.y, p.height + 1.5f);
   }
   in.bounds.min.y = -0.5f;
-  if (kind == PlaceKind::Tower) {
+  if (tall(kind)) {
     // The landing (see interior_objects): the way up to the roof.
-    const Vec2 a = dir16(static_cast<Angle16>(kStairStart + kStairStep * kStairSteps + kStairStep / 2));
-    in.top = {2.4f * a.x, 0.3f * (kStairSteps + 1), -4.5f + 2.4f * a.z};
+    const Hall h = hall_of(kind);
+    const Vec2 a = dir16(static_cast<Angle16>(kStairStart + kStairStep * h.steps + kStairStep / 2));
+    const float r = h.ring - 1.1f;
+    in.top = {r * a.x, 0.3f * static_cast<float>(h.steps + 1), -h.radius + r * a.z};
     in.exits.push_back({in.top, {0, -1}, ExitKind::Roof});
   }
   return in;
@@ -394,10 +457,12 @@ void furnish_house(const Interior& in, const Object& door, Rng& rng, std::vector
 }
 
 void furnish_tower(const Interior& in, Rng& rng, std::vector<Object>& out) {
+  const Hall h = hall_of(in.kind);
+  const float R = h.radius, ring = h.ring;
   // The stair: one step every 0.304 rad along the wall, 0.3 m higher each.
-  for (int i = 0; i < kStairSteps; ++i) {
+  for (int i = 0; i < h.steps; ++i) {
     const Vec2 a = dir16(static_cast<Angle16>(kStairStart + kStairStep * i));
-    Object o = thing(ObjectKind::Step, 3.5f * a.x, 0.3f * static_cast<float>(i), -4.5f + 3.5f * a.z, 0,
+    Object o = thing(ObjectKind::Step, ring * a.x, 0.3f * static_cast<float>(i), -R + ring * a.z, 0,
                      static_cast<uint8_t>(i));
     o.size = {0.55f, 0.15f, 0.55f};
     out.push_back(o);
@@ -408,25 +473,60 @@ void furnish_tower(const Interior& in, Rng& rng, std::vector<Object>& out) {
   Object hatch = thing(ObjectKind::Hatch, in.top.x, in.pieces[0].height - 0.02f, in.top.z);
   hatch.mount = Object::kHanging;  // in the ceiling, over the landing
   out.push_back(hatch);
-  // Crystals in the walls light the way up; rubble on the floor.
-  for (int k = 0; k < 9; ++k) {
+  // Crystals in the walls light the way up (the hollow tree's: glowing
+  // mushrooms-like clusters; the lighthouse: none, it has lamps).
+  const int lights = in.kind == PlaceKind::Lighthouse ? 0 : 9 + (h.steps - kStairSteps) / 4;
+  for (int k = 0; k < lights; ++k) {
     const Vec2 a = dir16(static_cast<Angle16>(2100 + 7282 * k));  // a ninth of a turn apart
     const float y = 1.6f + 0.95f * static_cast<float>(k);
     const Vec3 n{-a.x, 0, -a.z};
-    Object c = thing(ObjectKind::Crystal, 4.45f * a.x, y, -4.5f + 4.45f * a.z, yaw_towards(n.x, n.z),
+    Object c = thing(ObjectKind::Crystal, (R - 0.05f) * a.x, y, -R + (R - 0.05f) * a.z, yaw_towards(n.x, n.z),
                      static_cast<uint8_t>(rng.below(256)));
     c.size = {0.5f, 0.5f, 0.5f};
     c.mount = Object::kOnWall;
     out.push_back(c);
   }
-  for (int k = 0; k < 3; ++k) {
-    const Vec2 a = dir16(any_angle(rng));
-    const float d = range(rng, 0.8f, 2.0f);
-    Object o = thing(ObjectKind::Rubble, d * a.x, 0, -4.5f + d * a.z, 0, static_cast<uint8_t>(rng.below(256)));
-    if (distance2d(o.pos.x, o.pos.z + 1.2f) < 1.8f) continue;  // the way in
-    out.push_back(o);
+  if (in.kind == PlaceKind::Tower) {
+    for (int k = 0; k < 3; ++k) {
+      const Vec2 a = dir16(any_angle(rng));
+      const float d = range(rng, 0.8f, 2.0f);
+      Object o = thing(ObjectKind::Rubble, d * a.x, 0, -R + d * a.z, 0, static_cast<uint8_t>(rng.below(256)));
+      if (distance2d(o.pos.x, o.pos.z + 1.2f) < 1.8f) continue;  // the way in
+      out.push_back(o);
+    }
+    out.push_back(thing(ObjectKind::RuneStone, 0, 0, -6.6f, 2 * kQuarter));
+  } else if (in.kind == PlaceKind::Lighthouse) {
+    // The keeper's things at the foot of the stair.
+    out.push_back(thing(ObjectKind::Table, 0.9f, 0, -R - 0.6f, kQuarter, static_cast<uint8_t>(rng.below(256))));
+    out.push_back(thing(ObjectKind::Chair, 0.9f, 0, -R + 0.35f, 2 * kQuarter, static_cast<uint8_t>(rng.below(256))));
+    out.push_back(thing(ObjectKind::Barrel, -1.2f, 0, -R - 1.2f, 0, static_cast<uint8_t>(rng.below(256))));
+  } else {
+    // The hollow tree: a woven rug, a stump for a seat.
+    Object rug = thing(ObjectKind::Rug, 0, 0.01f, -R - 0.5f, 0, static_cast<uint8_t>(rng.below(256)));
+    rug.size = {1.4f, 0.02f, 1.1f};
+    out.push_back(rug);
+    Object stump = thing(ObjectKind::Stump, -1.4f, 0, -R - 0.4f, 0, static_cast<uint8_t>(rng.below(256)));
+    stump.size = {0.4f, 0.45f, 0};
+    out.push_back(stump);
   }
-  out.push_back(thing(ObjectKind::RuneStone, 0, 0, -6.6f, 2 * kQuarter));
+}
+
+void furnish_burrow(const Interior& in, Rng& rng, std::vector<Object>& out) {
+  // Stones and old roots (stumps) in the dens.
+  for (const RoomPiece& p : in.pieces) {
+    if (!(p.a == p.b)) continue;
+    for (int k = 0; k < 4; ++k) {
+      const Vec2 a = dir16(any_angle(rng));
+      const float d = p.radius * range(rng, 0.45f, 0.8f);
+      const float x = p.a.x + a.x * d, z = p.a.z + a.z * d;
+      const bool stone = rng.below(2) == 0;
+      const auto variant = static_cast<uint8_t>(rng.below(256));
+      if (wall_distance(in, x, z) < 1.0f || distance2d(x, z) < 4.0f) continue;
+      Object o = thing(stone ? ObjectKind::Rock : ObjectKind::Stump, x, -0.05f, z, stone ? 0 : any_angle(rng), variant);
+      o.size = stone ? Vec3{0.45f, 0.4f, 0.5f} : Vec3{0.35f, 0.4f, 0};
+      out.push_back(o);
+    }
+  }
 }
 
 }  // namespace
@@ -437,7 +537,10 @@ std::vector<Object> interior_objects(uint64_t seed, const Interior& in, const Ob
   switch (in.kind) {
     case PlaceKind::Cave: furnish_cave(in, rng, out); break;
     case PlaceKind::House: furnish_house(in, door, rng, out); break;
-    case PlaceKind::Tower: furnish_tower(in, rng, out); break;
+    case PlaceKind::Tower:
+    case PlaceKind::HollowTree:
+    case PlaceKind::Lighthouse: furnish_tower(in, rng, out); break;
+    case PlaceKind::Burrow: furnish_burrow(in, rng, out); break;
     default: break;
   }
   return out;
@@ -467,11 +570,17 @@ DoorNear door_near(const World& w, float reach) {
         best.facing = {0, -1};
         best.width = 3.6f;
         best.height = 3.2f;
-      } else {
-        best.at = {0, w.place.kind == PlaceKind::Tower ? 1.25f : 0.95f, -0.03f};
+      } else if (w.place.kind == PlaceKind::Burrow) {
+        best.at = {0, 1.0f, 2.4f};
         best.facing = {0, -1};
-        best.width = w.place.kind == PlaceKind::Tower ? 1.24f : 0.9f;
-        best.height = w.place.kind == PlaceKind::Tower ? 2.5f : 1.9f;
+        best.width = 2.4f;
+        best.height = 2.0f;
+      } else {
+        const bool big = tall(w.place.kind);
+        best.at = {0, big ? 1.25f : 0.95f, -0.03f};
+        best.facing = {0, -1};
+        best.width = big ? 1.24f : 0.9f;
+        best.height = big ? 2.5f : 1.9f;
       }
     }
     return best;
@@ -481,12 +590,16 @@ DoorNear door_near(const World& w, float reach) {
     const Object& o = w.objects[k];
     const PlaceKind place = place_of(o.kind);
     if (place == PlaceKind::Outside) return;
-    if (o.kind == ObjectKind::Tower && p.y > o.pos.y + rules::kRoofHeight - 0.6f) {
-      // On its roof: the trapdoor in the middle.
-      const float d = distance2d(p.x - o.pos.x, p.z - o.pos.z);
-      if (d >= best.distance) return;
-      best = {DoorAction::Descend, place, o.kind, k, o.pos + Vec3{0, rules::kRoofHeight + 0.03f, 0}, {0, 0}, 1.1f, 1.1f, d};
-      return;
+    if (tall(place)) {
+      const Hall h = hall_of(place);
+      if (p.y > o.pos.y + h.top - 0.6f) {
+        // On its top: the trapdoor.
+        const Vec2 t = local_to_world(o, 0, h.hatch_z);
+        const float d = distance2d(p.x - t.x, p.z - t.z);
+        if (d >= best.distance) return;
+        best = {DoorAction::Descend, place, o.kind, k, {t.x, o.pos.y + h.top + 0.03f, t.z}, {0, 0}, 1.1f, 1.1f, d};
+        return;
+      }
     }
     const DoorFrame f = frame_of(o.kind);
     const Vec2 use = local_to_world(o, f.use_x, f.use_z);
@@ -536,8 +649,9 @@ void leave(World& w, bool to_roof) {
   p = Body{};
   const Vec2 front = front_of(door.yaw);
   if (to_roof) {
-    const Vec2 at = local_to_world(door, 0, -1.0f);
-    p.pos = {at.x, door.pos.y + rules::kRoofHeight, at.z};
+    const Hall h = hall_of(place_of(door.kind));
+    const Vec2 at = local_to_world(door, h.out_x, h.hatch_z - (h.out_x == 0 ? 1.0f : 0.0f));
+    p.pos = {at.x, door.pos.y + h.top, at.z};
   } else {
     const DoorFrame f = frame_of(door.kind);
     const Vec2 at = local_to_world(door, f.out_x, f.out_z);
@@ -570,13 +684,14 @@ bool enter_place(World& w, Place place, bool from_roof) {
   w.objects = interior_objects(w.seed, w.interior, door);
   Body& p = w.player;
   p = Body{};
-  const bool top = from_roof && place.kind == PlaceKind::Tower;
+  const bool top = from_roof && tall(place.kind);
   p.pos = top ? w.interior.top : w.interior.entry;
   p.facing_x = top ? 0.0f : w.interior.entry_facing.x;
   p.facing_z = top ? 1.0f : w.interior.entry_facing.z;
   bring_companion(w);
   map_way_out(w.interior, w.objects);
   if (place.kind == PlaceKind::Cave) spawn_cristis(w);
+  if (place.kind == PlaceKind::Burrow) spawn_moles(w);
   return true;
 }
 
@@ -585,7 +700,7 @@ bool use_door(World& w) {
   const DoorNear d = door_near(w);
   switch (d.action) {
     case DoorAction::Enter: if (!enter_place(w, {d.place, d.object}, false)) return false; break;
-    case DoorAction::Descend: if (!enter_place(w, {PlaceKind::Tower, d.object}, true)) return false; break;
+    case DoorAction::Descend: if (!enter_place(w, {d.place, d.object}, true)) return false; break;
     case DoorAction::Leave: leave(w, false); break;
     case DoorAction::Climb: leave(w, true); break;
     default: return false;
@@ -895,6 +1010,33 @@ void spawn_cristis(World& w) {
     b.variant = variant;
     b.mind = Mind::Idle;
     add_creature(w, b);
+    ++n;
+  }
+}
+
+void spawn_moles(World& w) {
+  const Interior& in = w.interior;
+  Rng& rng = w.rng;
+  const uint32_t count = 4 + rng.below(3);
+  for (uint32_t n = 0, attempt = 0; n < count && attempt < 120; ++attempt) {
+    const RoomPiece& p = in.pieces[1 + rng.below(static_cast<uint32_t>(in.pieces.size() - 1))];
+    const Vec2 a = dir16(any_angle(rng));
+    const float d = (p.a == p.b ? p.radius : 1.0f) * std::sqrt(unit(rng));
+    const float t = unit(rng);
+    const float x = p.a.x + (p.b.x - p.a.x) * t + a.x * d, z = p.a.z + (p.b.z - p.a.z) * t + a.z * d;
+    Genes genes = roll_genes(Species::Mole, Zone::Plains, rng);
+    const auto level = static_cast<uint8_t>(3 + rng.below(4));
+    if (wall_distance(in, x, z) < 0.8f || distance2d(x, z) < 5.0f) continue;  // not by the way in
+    Creature m;
+    m.species = Species::Mole;
+    m.body.pos = {x, 0, z};
+    m.home = {x, z};
+    m.genes = genes;
+    m.level = level;
+    m.timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
+    Body probe = m.body;
+    if (inside_any_object(w, probe, species_info(Species::Mole).shape)) continue;
+    add_creature(w, m);
     ++n;
   }
 }

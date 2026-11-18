@@ -5,6 +5,7 @@
 #include "monstres/core/terrain.hpp"
 
 #include <cstdint>
+#include <vector>
 
 namespace monstres {
 
@@ -126,5 +127,45 @@ struct CastleLayout {
 };
 CastleLayout make_castle_layout(uint64_t seed, const Path& path);
 bool in_castle(const CastleLayout& castle, float x, float z, float margin = 0);
+
+// The west, between the valley and the sea (west.hpp): a road from the path
+// to the lighthouse, a stream down to the sea, and the places along them.
+// Derived from the seed (not saved); none in hand-made worlds.
+// Boxes around every kChunk points (min x, min z, max x, max z), to skip
+// the far ones when measuring distances.
+struct Chunks {
+  static constexpr size_t kChunk = 16;
+  std::vector<std::array<float, 4>> boxes;
+  bool operator==(const Chunks&) const = default;
+};
+struct Road {
+  std::vector<Vec2> points;  // every ~1 m, from the path westwards
+  Chunks chunks;
+  bool operator==(const Road&) const = default;
+};
+struct Stream {
+  std::vector<Vec2> points;  // every ~1 m, from its spring (north) down to the sea
+  std::vector<float> level;  // its water's surface at each point (going down, never up)
+  Chunks chunks;
+  bool operator==(const Stream&) const = default;
+};
+struct WestLayout {
+  Road road;
+  Stream stream;
+  Vec2 cart, cart_along;        // the merchant's cart by the road, the road's way there
+  Vec2 bridge, bridge_along;    // where the road crosses the stream
+  Vec2 farm, farm_front;        // the farm's middle; its front (towards the road, along X or Z)
+  Vec2 mill;                    // the mill's knoll
+  Vec2 pasture;                 // the shepherd's pen
+  Vec2 burrow, burrow_front;    // the burrow's mound; where its hole looks
+  Vec2 woods;                   // the woods' middle (an ellipse)
+  float woods_rx = 0, woods_rz = 0;
+  Vec2 cabin, camp, hollow_tree;  // in the woods
+  Vec2 lighthouse, sea;         // the lighthouse on the coast; the way to the sea from it
+  Vec2 menhirs;                 // the circle of standing stones (a teleporter in its middle)
+  Vec2 crater;                  // where the meteorite fell
+  bool valid() const { return !road.points.empty(); }
+  bool operator==(const WestLayout&) const = default;
+};
 
 }  // namespace monstres

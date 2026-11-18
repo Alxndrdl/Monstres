@@ -830,6 +830,9 @@ JSON_EXPORT(monstres_teleporters_json, teleporters_json(g_app->world))
 JSON_EXPORT(monstres_spells_json, spells_json(g_app->world))
 
 JSON_EXPORT(monstres_quests_json, quests_json(g_app->world))
+JSON_EXPORT(monstres_bag_json, bag_json(g_app->world))
+JSON_EXPORT(monstres_farm_json, farm_json(g_app->world))
+JSON_EXPORT(monstres_shop_json, shop_json(g_app->world))
 
 // Frame profiler (settings menu): on or off, and the last half second as JSON ("null" before).
 EMSCRIPTEN_KEEPALIVE void monstres_set_profiling(int on) {

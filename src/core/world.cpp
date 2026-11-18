@@ -5,6 +5,7 @@
 #include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/west.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -156,7 +157,7 @@ private:
 // (no random trees or rocks there).
 bool in_a_place(const World& w, float x, float z) {
   return in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.5f) || in_ruins(w.ruins, x, z, 2.0f) ||
-         in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f);
+         in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f) || in_west_place(w.west, x, z, 1.0f);
 }
 
 // A number in [0, 1) for a spot of the world (the same each time).
@@ -315,7 +316,8 @@ void generate_objects(World& w, Rng& rng, bool forest_only = false) {
 
 void generate_wilds(World& w) {
   if (w.ground.empty() || w.wild_objects > 0) return;  // hand-made worlds; already there
-  const size_t first = w.objects.size();
+  // The west's buildings first (the valley's trees and rocks in their way go).
+  const size_t first = build_west(w);
   Rng rng(w.seed ^ 0x57494C44535F3031ULL, 3);  // "WILDS_01": its own stream
   PlacementGrid grid(w.objects);
   const float gap = rules::kObjectGap;
@@ -330,6 +332,8 @@ void generate_wilds(World& w) {
       const uint32_t roll = rng.below(1000);
       Object o = random_object(rng, x, z, false);
       if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize - 2.0f) continue;  // the valley's own
+      // The west's places stay clear; its woods have their own trees (below).
+      if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z)) continue;
       const float h = w.ground.height(x, z);
       // How likely an object is here: woods in patches, the continent's forest
       // dense, the hills rocky with pines, the beach almost bare, none at sea.
@@ -381,7 +385,7 @@ void generate_wilds(World& w) {
       const float x = w.forest.center.x + u * w.forest.radius_x, z = w.forest.center.z + v * w.forest.radius_z;
       if (std::max(std::fabs(x), std::fabs(z)) < inner || !in_forest(w.forest, x, z)) continue;
       o.pos = {x, 0, z};
-      if (!forest_ways(w, o, true)) continue;
+      if (!forest_ways(w, o, true) || in_west_place(w.west, x, z, 1.5f)) continue;
       const float h = w.ground.height(x, z);
       o.pos.y = h;
       const Box box = object_extent(o);
@@ -394,6 +398,38 @@ void generate_wilds(World& w) {
       const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
       const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
       if (distance_to_path(w.path, x, z, keep_off + 1) < keep_off) continue;
+      Box wide = b;
+      wide.min = wide.min - Vec3{gap, 0, gap};
+      wide.max = wide.max + Vec3{gap, 0, gap};
+      if (grid.overlaps_any(wide)) continue;
+      w.objects.push_back(o);
+      grid.add(o);
+      add_log_pieces(w.objects, o);
+    }
+  }
+  // The west's woods: dense, tall trees around its clearings.
+  if (w.west.valid()) {
+    Rng trees(w.seed ^ 0x574F4F44535F3031ULL, 6);  // "WOODS_01": its own stream
+    const WestLayout& west = w.west;
+    for (int attempt = 0; attempt < 6000; ++attempt) {
+      const float u = random_range(trees, -1, 1), v = random_range(trees, -1, 1);
+      Object o = random_object(trees, 0, 0, true);
+      const float roll = random_range(trees, 0, 1);
+      const float x = west.woods.x + u * west.woods_rx, z = west.woods.z + v * west.woods_rz;
+      if (!in_woods(west, x, z) || in_west_place(west, x, z, 1.5f)) continue;
+      o.pos = {x, 0, z};
+      if (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine) {
+        o.size = o.size * (roll < 0.4f ? 1.0f : roll < 0.85f ? rules::kForestTreeScale : 1.8f);
+      }
+      const float h = w.ground.height(x, z);
+      o.pos.y = h;
+      const Box box = object_extent(o);
+      float lowest = h;
+      for (float cx : {box.min.x, box.max.x}) {
+        for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+      }
+      if (h - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
+      const Box b = footprint(o);
       Box wide = b;
       wide.min = wide.min - Vec3{gap, 0, gap};
       wide.max = wide.max + Vec3{gap, 0, gap};
@@ -576,6 +612,10 @@ constexpr SpeciesInfo kSpecies[] = {
     {{0.24f, 0.55f}, 2.6f, 5.8f, 5.5f},  // Spark
     {{0.28f, 0.42f}, 1.7f, 3.4f, 4.0f},  // Axolotl
     {{0.27f, 0.5f}, 2.2f, 5.0f, 4.0f},   // Cristi: climbs too (interior.hpp)
+    {{0.28f, 0.55f}, 2.4f, 5.6f, 5.2f},  // Raccoon: Chipou, quick on its paws
+    {{0.22f, 0.48f}, 0.0f, 5.5f, 0.0f},  // Owl: Hulou, flies at run_speed (as a crow)
+    {{0.36f, 0.66f}, 1.6f, 4.2f, 4.5f},  // Sheep: Laini
+    {{0.26f, 0.38f}, 1.8f, 3.6f, 3.6f},  // Mole: Taupi, low and stubby
 };
 
 // A companion that flies: it moves like a walker (objects stop it) but stays
@@ -686,7 +726,7 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
   bool jump = b.on_ground && (c.timer >= 8 || (player_up > own_up + 0.4f && player_distance < 2.5f));
   if (jump) c.timer = 0;
   if (const float hover = companion_hover(c.species); hover > 0) {
-    move_flyer(boxes, b, info.shape, dir_x, dir_z, speed, hover, c.species == Species::Crow);
+    move_flyer(boxes, b, info.shape, dir_x, dir_z, speed, hover, flies(c.species));
     return;
   }
   if (c.species == Species::Slime && speed > 0) {  // a slime follows by hopping
@@ -720,9 +760,9 @@ void step_wild(World& w, const Surroundings& boxes, Creature& c) {
     } else {
       c.mind = Mind::Wander;
       c.timer = 8 * rules::kTicksPerSecond;  // give up after 8 s
-      c.target = clamp_to_world({c.home.x + random_range(w.rng, -rules::kWanderRadius, rules::kWanderRadius),
-                                 c.home.z + random_range(w.rng, -rules::kWanderRadius, rules::kWanderRadius)},
-                                1.0f);
+      // The shepherd's flock stays in its pen, the farm's boarders in their paddock.
+      const float r = c.tag == Tag::Flock ? rules::kPenHalf - 1.2f : c.tag == Tag::Boarder ? 6.0f : rules::kWanderRadius;
+      c.target = clamp_to_world({c.home.x + random_range(w.rng, -r, r), c.home.z + random_range(w.rng, -r, r)}, 1.0f);
     }
   } else {
     const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
@@ -770,7 +810,7 @@ void step_villager(World& w, const Surroundings& s, Creature& c) {
       c.timer = 10 * rules::kTicksPerSecond;
       // Gaspard stays by the teleporter, Bastien at the edge of the village, Isidore on the square.
       const float r = c.npc == npc::kGaspard || c.npc == npc::kBastien ? 2.5f
-                      : c.npc == npc::kMentor                         ? 1.5f
+                      : c.npc == npc::kMentor || c.npc > npc::kMentor ? 1.5f  // the west's stay at their place
                                                                       : rules::kVillageRadius - 4.0f;
       c.target = {c.home.x + random_range(w.rng, -r, r), c.home.z + random_range(w.rng, -r, r)};
     }
@@ -914,7 +954,8 @@ Box player_box(const Player& p) { return body_box(p, kPlayerShape); }
 
 float companion_hover(Species species) {
   switch (species) {
-    case Species::Crow: return 1.3f;
+    case Species::Crow:
+    case Species::Owl: return 1.3f;
     case Species::Fish: return 0.7f;
     default: return 0;
   }
@@ -936,6 +977,9 @@ uint8_t level_in(Zone zone, Rng& rng, float x = 0, float z = 0) {
     case Zone::Ruins: base = 3; break;
     case Zone::Cave: base = 4; break;
     case Zone::Castle: base = 5; break;
+    case Zone::Farm: base = 3; break;
+    case Zone::Woods: base = 4; break;
+    case Zone::Crater: base = 6; break;
     case Zone::Coast:
     case Zone::Hills:
     case Zone::Plains: {
@@ -962,10 +1006,16 @@ std::span<const Odds> zone_odds(Zone zone) {
   static constexpr Odds kCave[] = {{50, Slime}, {30, Mushroom}, {20, Spark}};
   static constexpr Odds kCastle[] = {{40, Bird}, {25, Slime}, {20, Mushroom}, {15, Spark}};
   static constexpr Odds kCoast[] = {{45, Slime}, {35, Axolotl}, {20, Bird}};  // slimes like the wet sand
-  static constexpr Odds kHills[] = {{40, Bird}, {30, Mushroom}, {20, Spark}, {10, Slime}};
+  static constexpr Odds kHills[] = {{38, Bird}, {25, Mushroom}, {17, Spark}, {10, Slime}, {10, Sheep}};
   static constexpr Odds kRuins[] = {{30, Slime}, {30, Mushroom}, {20, Bird}, {20, Spark}};
   static constexpr Odds kLake[] = {{40, Axolotl}, {30, Slime}, {30, Bird}};
   static constexpr Odds kOpen[] = {{27, Slime}, {27, Mushroom}, {27, Bird}, {7, Spark}, {7, Axolotl}, {5, Companion}};
+  // The west: Chipous raid the farms, Taupis dig the fields; the woods' own; the crater's arcane stones.
+  static constexpr Odds kPlains[] = {{24, Slime}, {22, Mushroom}, {22, Bird}, {10, Raccoon}, {7, Spark},
+                                     {6, Axolotl}, {5, Mole}, {4, Companion}};
+  static constexpr Odds kFarm[] = {{40, Raccoon}, {25, Bird}, {20, Slime}, {15, Mole}};
+  static constexpr Odds kWoods[] = {{30, Mushroom}, {22, Raccoon}, {20, Bird}, {14, Slime}, {14, Axolotl}};
+  static constexpr Odds kCrater[] = {{45, Cristi}, {30, Spark}, {25, Slime}};
   switch (zone) {
     case Zone::Forest: return kForest;
     case Zone::Cave: return kCave;
@@ -974,6 +1024,10 @@ std::span<const Odds> zone_odds(Zone zone) {
     case Zone::Hills: return kHills;
     case Zone::Ruins: return kRuins;
     case Zone::Lake: return kLake;
+    case Zone::Plains: return kPlains;
+    case Zone::Farm: return kFarm;
+    case Zone::Woods: return kWoods;
+    case Zone::Crater: return kCrater;
     default: return kOpen;
   }
 }
@@ -1004,7 +1058,8 @@ uint32_t density_in(Zone zone) {
 
 uint32_t species_chance(Species species, Zone zone) {
   if (species == Species::Fish) return zone == Zone::Lake ? 100 : 0;  // the lake's fish
-  if (species == Species::Cristi) return zone == Zone::Cave ? 100 : 0;  // inside the crystal cave only (interior.cpp)
+  if (species == Species::Cristi && zone == Zone::Cave) return 100;  // inside the crystal cave (interior.cpp)
+  if (species == Species::Owl) return zone == Zone::Woods ? 100 : 0;  // on the hollow tree's crown
   if (species == Species::Crow) {  // on the roofs, the tower, the castle's towers
     return zone == Zone::Village || zone == Zone::Ruins || zone == Zone::Castle ? 100 : 0;
   }
@@ -1125,6 +1180,23 @@ void populate_cell(World& w, int index) {
     finish(c, zone_at(w, perch.x, perch.z));  // home: where it was born (its variants), not where it goes
     ++crows;
   }
+
+  // Owls, on the hollow tree's crown (and the woodcutter's roof).
+  int owls = 0;
+  for (const Vec3& perch : owl_perches(w)) {
+    if (cell_index(perch.x, perch.z) != index || owls >= 3) continue;
+    const bool here = rng.below(100) < 55;
+    const uint16_t timer = static_cast<uint16_t>(4 * rules::kTicksPerSecond + rng.below(8 * rules::kTicksPerSecond));
+    if (!here || near_player(w, perch.x, perch.z, 5.0f)) continue;
+    Creature c;
+    c.species = Species::Owl;
+    c.body.pos = perch;
+    c.target = {perch.x, perch.z};
+    c.target_y = perch.y;
+    c.timer = timer;
+    finish(c, Zone::Woods);
+    ++owls;
+  }
 }
 
 }  // namespace
@@ -1178,20 +1250,24 @@ void keep_giant(World& w) {
   }
 }
 
-// Bastien's monster stands beside him (the first of his team); between
-// battles it is the first one again (a game saved during a battle).
-void keep_rival(World& w) {
-  const int owner = npc_index(w, npc::kBastien);
+// A trainer's monster stands beside it (the first of its team); between
+// battles it is the first one again (a game saved during a battle). Its
+// villager number says whose it is (none: Bastien's, from older saves).
+void keep_rival(World& w, uint8_t trainer) {
+  const int owner = npc_index(w, trainer);
   if (owner < 0) return;
   int index = -1;
   for (size_t i = 1; i < w.creatures.size(); ++i) {
-    if (w.creatures[i].tag == Tag::Rival) index = static_cast<int>(i);
+    Creature& c = w.creatures[i];
+    if (c.tag != Tag::Rival) continue;
+    if (c.npc == 0) c.npc = npc::kBastien;
+    if (c.npc == trainer) index = static_cast<int>(i);
   }
   uint8_t count = 0;
-  const RivalMonster& first = rival_team(npc::kBastien, count)[0];
+  const RivalMonster& first = rival_team(trainer, count)[0];
   if (index > 0) {
     Creature& c = w.creatures[static_cast<size_t>(index)];
-    if (w.battle.rival.npc == 0 && (c.species != first.species || c.level != first.level)) {
+    if (w.battle.rival.npc != trainer && (c.species != first.species || c.level != first.level)) {
       c.species = first.species;
       c.genes = first.genes;
       c.level = first.level;
@@ -1205,6 +1281,7 @@ void keep_rival(World& w) {
   c.genes = first.genes;
   c.level = first.level;
   c.tag = Tag::Rival;
+  c.npc = trainer;
   for (int k = 0; k < 8; ++k) {  // beside him, where there is room
     const SinCos sc = sincos16(static_cast<Angle16>(k * 8192));
     const float x = o.pos.x + sc.cos * 0.9f, z = o.pos.z + sc.sin * 0.9f;
@@ -1264,13 +1341,15 @@ void update_population(World& w) {
   }
   keep_lost_piou(w);
   keep_giant(w);
-  keep_rival(w);
+  keep_rival(w, npc::kBastien);
+  keep_rival(w, npc::kRomane);
+  keep_west(w);
 }
 
 bool place_trainer(const World& w, Creature& c) {
   // Bastien waits at the edge of the village, on the side of the place where he fights.
   Vec2 center, axis;
-  if (!rival_arena(w, center, axis)) return false;
+  if (!rival_arena(w, npc::kBastien, center, axis)) return false;
   const Vec2 vc = w.village.center;
   const float dx = center.x - vc.x, dz = center.z - vc.z;
   const float d = std::sqrt(dx * dx + dz * dz);
@@ -1338,6 +1417,7 @@ void spawn_creatures(World& w) {
     }
   }
   if (has_village) add_mentor(w);
+  add_west_npcs(w);
   // The wild monsters around the player.
   update_population(w);
 }
@@ -1513,6 +1593,7 @@ void settle_objects(World& w, size_t first) {
     for (float x : {b.min.x, b.max.x}) {
       for (float z : {b.min.z, b.max.z}) lowest = std::min(lowest, w.ground.height(x, z));
     }
+    if (o.kind == ObjectKind::Bridge) continue;  // its deck spans the stream (build_west)
     if (o.kind == ObjectKind::Collider) {  // from its lowest point, raised by its variant (decimeters)
       o.pos.y = lowest + static_cast<float>(o.variant) / 10.0f;
       continue;
@@ -1751,7 +1832,8 @@ void build_teleporters(World& w, TeleporterId only) {
   const float ruins_side = w.ruins.center.x > vc.x ? 1.0f : -1.0f;
   const float forest_side = w.forest.center.x > 0 ? 1.0f : -1.0f;  // the forest's side of the path
   const float gate = rules::kClearingRadius * outline_scale(w.forest.center, kClearingOutline, forest_side > 0 ? static_cast<float>(kPi) : 0.0f) - 5.0f;
-  const Vec2 forest_gate{w.forest.center.x - forest_side * gate, w.forest.center.z};
+  // To the centimeter: the outline's sine may differ in its last digits between platforms.
+  const Vec2 forest_gate{std::round((w.forest.center.x - forest_side * gate) * 100.0f) / 100.0f, w.forest.center.z};
   const Spot places[] = {
       // On the village square, on the side away from the lake.
       {TeleporterId::Village, {vc.x - lake_side * 7.0f, vc.z + 6.0f}, {-lake_side, 0}, w.village.lake.radius_x > 0},
@@ -1810,6 +1892,9 @@ Zone zone_at(const World& w, float x, float z) {
     case PlaceKind::Cave: return Zone::Cave;
     case PlaceKind::House: return Zone::Village;
     case PlaceKind::Tower: return Zone::Ruins;
+    case PlaceKind::Burrow: return Zone::Plains;
+    case PlaceKind::HollowTree: return Zone::Woods;
+    case PlaceKind::Lighthouse: return Zone::Coast;
     default: break;
   }
   if (in_lake(w.village.lake, x, z, 1.5f)) return Zone::Lake;
@@ -1818,6 +1903,10 @@ Zone zone_at(const World& w, float x, float z) {
   if (in_castle(w.castle, x, z, 3.0f)) return Zone::Castle;
   if (in_cave_hill(w.cave, x, z, 10.0f)) return Zone::Cave;
   if (in_forest(w.forest, x, z)) return Zone::Forest;
+  // The west's places.
+  if (in_farm(w.west, x, z, 8.0f)) return Zone::Farm;
+  if (in_crater(w.west, x, z, 6.0f)) return Zone::Crater;
+  if (in_woods(w.west, x, z)) return Zone::Woods;
   // Beyond the valley: the wilds.
   if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize + 10) return Zone::Meadow;
   if (w.ground.land_height(x, z) < rules::kSeaLevel + 1.0f) return Zone::Coast;  // the shore
@@ -1845,6 +1934,10 @@ const MonsterStats& monster_stats(Species species) {
       {26, 8, 5, 12, 9, Element::Electric, true}, // Spark: Zapou
       {36, 6, 8, 7, 8, Element::Water, true},     // Axolotl: Ploufi
       {30, 8, 9, 9, 10, Element::Arcane, true},   // Cristi: Cristi
+      {28, 9, 6, 12, 7, Element::Shadow, true},   // Raccoon: Chipou, a masked thief
+      {26, 7, 6, 11, 11, Element::Air, true},     // Owl: Hulou
+      {42, 6, 10, 6, 7, Element::Normal, true},   // Sheep: Laini, a woolly cushion
+      {34, 8, 9, 6, 6, Element::Nature, true},    // Mole: Taupi
   };
   static_assert(std::size(kStats) == static_cast<size_t>(Species::Count));
   const auto i = static_cast<size_t>(species);
@@ -1881,7 +1974,10 @@ bool is_round(ObjectKind kind) {
          kind == ObjectKind::Bush || kind == ObjectKind::HouseHut || kind == ObjectKind::Well ||
          kind == ObjectKind::Barrel || kind == ObjectKind::Lamp || kind == ObjectKind::Tower ||
          kind == ObjectKind::Pillar || kind == ObjectKind::Rubble || kind == ObjectKind::CastleTower ||
-         kind == ObjectKind::Crystal || kind == ObjectKind::Teleporter;
+         kind == ObjectKind::Crystal || kind == ObjectKind::Teleporter || kind == ObjectKind::FruitTree ||
+         kind == ObjectKind::Haystack || kind == ObjectKind::Windmill || kind == ObjectKind::Campfire ||
+         kind == ObjectKind::HollowTree || kind == ObjectKind::Lighthouse || kind == ObjectKind::Menhir ||
+         kind == ObjectKind::Meteorite;
 }
 
 Box object_box(const Object& o) {
@@ -1901,7 +1997,7 @@ Box object_box(const Object& o) {
     case ObjectKind::HouseCottage: half = {2.5f, 2.15f, 2.0f}; break;
     case ObjectKind::HouseChimney: half = {2.25f, 2.8f, 2.25f}; break;
     case ObjectKind::HouseHut:     half = {2.0f, 2.1f, 2.0f}; break;
-    case ObjectKind::Fence:        half = {1.0f, 0.45f, 0.07f}; break;
+    case ObjectKind::Fence:        half = {0.995f, 0.45f, 0.07f}; break;  // side by side: never overlapping
     case ObjectKind::Sign:         half = {0.12f, 0.9f, 0.12f}; break;
     case ObjectKind::Well:         half = {0.85f, 0.45f, 0.85f}; break;
     case ObjectKind::Barrel:       half = {0.35f, 0.45f, 0.35f}; break;
@@ -1929,6 +2025,24 @@ Box object_box(const Object& o) {
     case ObjectKind::Hearth:       half = {0.8f, 0.7f, 0.35f}; break;
     case ObjectKind::Rug:
     case ObjectKind::Hatch:        half = {0, 0, 0}; break;  // walked over
+    // The west (west.hpp): matching the models of tools/make_models.py.
+    case ObjectKind::Cart:         half = {1.5f, 0.75f, 0.95f}; break;
+    case ObjectKind::Bridge:       half = s; break;  // its deck on top (build_west)
+    case ObjectKind::Farmhouse:    half = {3.6f, 3.1f, 3.0f}; break;
+    case ObjectKind::Barn:         half = {4.5f, 3.4f, 3.6f}; break;
+    case ObjectKind::FruitTree:    half = {0.22f * s.x, 1.3f * s.x, 0.22f * s.x}; break;
+    case ObjectKind::Crops:        half = {0, 0, 0}; break;  // walked through
+    case ObjectKind::Haystack:     half = {0.9f, 0.7f, 0.9f}; break;
+    case ObjectKind::Windmill:     half = {2.6f, 4.6f, 2.6f}; break;
+    case ObjectKind::Cabin:        half = {3.0f, 2.1f, 2.5f}; break;
+    case ObjectKind::Tent:         half = {1.4f, 0.9f, 1.6f}; break;
+    case ObjectKind::Campfire:     half = {0.55f, 0.18f, 0.55f}; break;
+    case ObjectKind::Woodpile:     half = {1.4f, 0.55f, 0.45f}; break;
+    case ObjectKind::HollowTree:   half = {4.2f, 0.5f * rules::kHollowTreeTop, 4.2f}; break;  // up to its crown
+    case ObjectKind::Burrow:       half = {2.0f, 0.75f, 2.0f}; break;
+    case ObjectKind::Lighthouse:   half = {2.6f, 0.5f * rules::kLighthouseGallery, 2.6f}; break;  // up to its gallery
+    case ObjectKind::Menhir:       half = {0.45f, 0.5f * s.y, 0.45f}; break;
+    case ObjectKind::Meteorite:    half = {0.9f * s.x, 0.7f * s.x, 0.9f * s.x}; break;
     default:                half = s; break;  // Crate, Collider, Step
   }
   if (o.mount != 0) half = {0, 0, 0};  // on a wall or the ceiling: out of the way
@@ -1985,7 +2099,8 @@ void build_layouts(World& w) {
   w.forest = make_forest_layout(w.seed, w.path, w.ruins);
   w.cave = make_cave_layout(w.seed, w.path);
   w.castle = make_castle_layout(w.seed, w.path);
-  w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle});
+  w.west = make_west_layout(w.seed, w.path, w.village, w.ruins, w.forest, w.cave, w.castle);
+  w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle, &w.west});
 }
 
 void regrow_forest(World& w) {
@@ -2088,6 +2203,7 @@ void step_knocked_out(World& w, const Surroundings& s, Creature& c) {
   if (c.timer > 0 && --c.timer > 0) return;
   switch (c.species) {
     case Species::Crow:
+    case Species::Owl:
       c.mind = Mind::Idle;  // takes off at once
       c.timer = 0;
       break;
@@ -2113,7 +2229,7 @@ void step_pet(World& w, const Surroundings& s, Creature& c, uint8_t owner_npc) {
   const int owner = npc_index(w, owner_npc);
   if (owner < 0) return;
   const Body& o = w.creatures[static_cast<size_t>(owner)].body;
-  const float side = owner_npc == npc::kMirabelle ? 1.0f : -1.0f;  // on her left, on his right
+  const float side = owner_npc == npc::kMirabelle ? 1.0f : -1.0f;  // on her left, on the trainer's right
   const Vec2 spot{o.pos.x - o.facing_z * 0.9f * side, o.pos.z + o.facing_x * 0.9f * side};
   float dx, dz;
   const float d = direction_to(c.body.pos.x, c.body.pos.z, spot, dx, dz);
@@ -2137,12 +2253,36 @@ void step_pet(World& w, const Surroundings& s, Creature& c, uint8_t owner_npc) {
   }
 }
 
+// A lost lamb found by the player trots after it (west.hpp), a little behind.
+void step_lamb(World& w, const Surroundings& s, Creature& c) {
+  const Body& p = w.player;
+  const SpeciesInfo& info = species_info(c.species);
+  const Vec2 spot{p.pos.x - p.facing_x * 2.0f + p.facing_z * 0.8f, p.pos.z - p.facing_z * 2.0f - p.facing_x * 0.8f};
+  float dx, dz;
+  const float d = direction_to(c.body.pos.x, c.body.pos.z, spot, dx, dz);
+  if (d > 30.0f) {  // left far behind: it waits there
+    c.mind = Mind::Idle;
+    move_body(s, c.body, info.shape, 0, 0, 0, false, info.jump_speed);
+    return;
+  }
+  const bool go = d > 0.8f;
+  const bool stuck = go && c.body.on_ground && c.timer >= 10;
+  move_body(s, c.body, info.shape, go ? dx : 0, go ? dz : 0, d > 4 ? info.run_speed : info.walk_speed, stuck,
+            info.jump_speed);
+  c.timer = (go && c.body.on_ground && c.body.speed < 0.3f) ? static_cast<uint16_t>(c.timer + 1) : 0;
+  if (go) {
+    c.body.facing_x = dx;
+    c.body.facing_z = dz;
+  }
+}
+
 }  // namespace
 
 void step(World& w, const Input& in) {
   ++w.tick;
   w.clock = (w.clock + 1) % rules::kTicksPerDay;
   quest_command(w, in);   // teleports, quests accepted or done
+  west_command(w, in);    // the bag, the merchant, the farm
   if (in.command == Command::Door) use_door(w);  // in, out (interior.hpp)
   battle_command(w, in);  // may start or end a battle, or remove a captured monster
   const BattlePhase phase = w.battle.phase;
@@ -2180,7 +2320,7 @@ void step(World& w, const Input& in) {
     const Steer st = battle_prepare(w, Stand::Magician);
     move_body(s, w.player, kPlayerShape, st.dir_x, st.dir_z, st.speed, false, 0);
   }
-  std::vector<Vec3> perches;
+  std::vector<Vec3> perches, owls;
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     Creature& c = w.creatures[i];
     if (i == 0 && w.active < 0) {  // in the crystal: it waits by the player, unseen
@@ -2220,7 +2360,7 @@ void step(World& w, const Input& in) {
         fly_free(s, c.body, st);
       } else if (const float hover = i == 0 ? companion_hover(c.species) : 0.0f; hover > 0) {
         move_flyer(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, hover + (steered ? w.battle.ally.lift : 0.0f),
-                   c.species == Species::Crow);
+                   flies(c.species));
       } else {
         move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
       }
@@ -2252,7 +2392,11 @@ void step(World& w, const Input& in) {
       continue;
     }
     if (c.tag == Tag::Rival) {
-      step_pet(w, s, c, npc::kBastien);
+      step_pet(w, s, c, c.npc ? c.npc : npc::kBastien);
+      continue;
+    }
+    if (c.tag == Tag::Lamb && c.mind == Mind::Follow) {
+      step_lamb(w, s, c);
       continue;
     }
     if (c.species == Species::Villager && w.battle.rival.npc && c.npc == w.battle.rival.npc) {
@@ -2272,6 +2416,12 @@ void step(World& w, const Input& in) {
         if (perches.empty()) perches = crow_perches(w);
         step_crow(w, perches, c);
         break;
+      case Species::Owl: {
+        if (owls.empty()) owls = owl_perches(w);
+        if (owls.size() < 2) step_wild(w, s, c);
+        else step_crow(w, owls, c);
+        break;
+      }
       case Species::Fish: step_fish(w, s, c); break;
       case Species::Cristi:
         if (climbs) step_cristi(w, c);
@@ -2285,6 +2435,7 @@ void step(World& w, const Input& in) {
   spells_step(w);
   discover(w);
   quests_step(w);
+  west_step(w);
   if (w.tick % rules::kPopulationEveryTicks == 0) update_population(w);
 }
 

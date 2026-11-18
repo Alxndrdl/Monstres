@@ -87,8 +87,13 @@ enum class Command : uint8_t {
   EquipSpell, // out of battles: spell slot Input::target / 16 (0, 1: combat; 2, 3: adventure) gets SpellId target % 16
   HealTeam,   // the healer (Npc Input::target) heals the whole team, and wakes the knocked out
   Door,       // through the door the player stands at (interior.hpp: in, out, up to the tower's roof...)
+  UseItem,    // the bag: use one Item Input::target (a mana potion)
+  Discard,    // the bag: throw away Item (Input::target % 256), (Input::target / 256) of them (0: all); never a quest's
+  Buy,        // from the merchant close by (Anselme): one Item Input::target
+  FarmSwap,   // at the farm (Capucine): team slot Input::target % 8 (7: none) with the farm's monster
+              // Input::target / 8 (8191: none): swapped, taken back, or left there (west.hpp)
 };
-inline constexpr size_t kCommandCount = static_cast<size_t>(Command::Door) + 1;  // the last one
+inline constexpr size_t kCommandCount = static_cast<size_t>(Command::FarmSwap) + 1;  // the last one
 
 // The magician's spells (see battle.hpp: what each does, where it can be cast).
 enum class SpellId : uint8_t { None, Heal, Shield, Mercy, Detect, WayOut, Count };
@@ -154,6 +159,24 @@ enum class ObjectKind : uint8_t {
   Rug,           // flat, size.x / size.z = half extents (walked over)
   Step,          // a solid block of stone: a stair's step, a landing. size = half extents
   Hatch,         // the trapdoor of the tower's roof (walked over)
+  // The west, towards the sea (west.hpp; fixed sizes unless said otherwise, front at -Z):
+  Cart,          // the merchant's cart: overturned until his quest is done (drawn as it is, see west.hpp)
+  Bridge,        // a wooden bridge over the stream, along its yaw (walked onto)
+  Farmhouse,     // the farm's house, two floors, its door at -Z
+  Barn,          // the farm's barn, big doors at -Z
+  FruitTree,     // an apple tree of the orchard. size.x = scale
+  Crops,         // a patch of wheat or cabbages, size.x / size.z = half extents (walked through); variant odd: cabbages
+  Haystack,
+  Windmill,      // the mill on its knoll: its sails turn once a wind monster gave them a push (Mill quest)
+  Cabin,         // the woodcutter's log cabin, its door at -Z
+  Tent,          // the trainer's tent, its opening at -Z
+  Campfire,      // a ring of stones and its fire (walked around)
+  Woodpile,      // logs stacked against the cabin, along X
+  HollowTree,    // the giant hollow tree: a door in its trunk, a stair inside, a crown on top (interior.hpp)
+  Burrow,        // a mound with a hole: the way into the burrow (interior.hpp), its opening at -Z
+  Lighthouse,    // the lighthouse on the coast, its door at -Z, its gallery on top (interior.hpp)
+  Menhir,        // a tall standing stone of the circle. size.y = height
+  Meteorite,     // the black stone fallen in the crater, glowing veins. size.x = scale
   Count
 };
 
@@ -207,6 +230,10 @@ enum class Species : uint8_t {
   Spark,      // Zapou, a little mouse of lightning, quick on its feet
   Axolotl,    // Ploufi, an axolotl walking on the banks
   Cristi,     // Cristi, a black cristi with a crystal on its back: still on the cave's walls and ceilings
+  Raccoon,    // Chipou, a masked thief: raids the farm's orchard (west.hpp)
+  Owl,        // Hulou, an owl perched on the crown of the giant hollow tree, flies away when approached
+  Sheep,      // Laini, a fluffy sheep: the shepherd's flock, rare in the hills
+  Mole,       // Taupi, a mole: digs the burrow's tunnels
   Count
 };
 
@@ -217,6 +244,9 @@ struct SpeciesInfo {
   float jump_speed;
 };
 const SpeciesInfo& species_info(Species species);
+
+// Whether a species flies (crows, owls): they perch high, and fly in battles.
+inline bool flies(Species species) { return species == Species::Crow || species == Species::Owl; }
 
 // How high a companion of this species flies above the ground (0: it walks).
 // A crow flies at the magician's side, a fish swims in the air.
@@ -243,7 +273,12 @@ struct Genes {
 // What a creature is doing. Battle: fighting the companion (battle.hpp).
 // What ties a creature or a team member to a quest.
 // Rival: the monster out of a trainer's team. Giant: the omega Champi of the forest.
-enum class Tag : uint8_t { None, LostPiou, Rival, Giant };
+// Raider: an aggressive monster (the orchard's raiders): it forces a battle
+// when the player comes close; losing it, or fleeing, sends the magician
+// back to the farm (west.hpp). Flock: the shepherd's sheep; Lamb: one of his
+// lambs gone astray (it follows the player once found). Boarder: a monster
+// left at the farm, grazing in its paddock (not saved: drawn from World::farm).
+enum class Tag : uint8_t { None, LostPiou, Rival, Giant, Raider, Flock, Lamb, Boarder };
 
 // KnockedOut: beaten in a battle, it lies on the ground for a while.
 enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly, Battle, KnockedOut };
@@ -353,7 +388,8 @@ const MonsterStats& monster_stats(Species species);
 // Named parts of the world, for maps and the interface.
 // Coast, Hills and Plains: the wilds around the valley (the west coast, the
 // north towards the mountains, the rest).
-enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Coast, Hills, Plains, Count };
+// Farm, Woods, Crater: the west's (west.hpp).
+enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Coast, Hills, Plains, Farm, Woods, Crater, Count };
 
 // What the player knows of each variant of each species (bestiary): every
 // variant listed by variants.hpp, in the same order.
@@ -484,6 +520,7 @@ struct Battle {
   uint8_t beaten = 0;     // how many foes were beaten or caught
   NoXp no_xp = NoXp::None;
   Species last_species = Species::Companion;  // the last one beaten
+  bool forced = false;      // an aggressive monster started it: lost or fled, the magician is sent to the farm (west.hpp)
   bool mercy = false;       // the Mercy spell holds: the next blow that would beat a foe leaves it 1 hit point
   uint64_t mercy_tick = 0;  // when it last held one back (for the interface)
   Rival rival;
@@ -528,19 +565,37 @@ inline constexpr uint8_t kLison = 3;      // saw a giant Champi in the heart of 
 inline constexpr uint8_t kBastien = 4;    // a trainer: he offers battles against his monsters
 inline constexpr uint8_t kOdette = 5;     // the healer: she heals the team, for free
 inline constexpr uint8_t kMentor = 9;     // Isidore, the old magician: the main quest (after the 8 villagers)
+// The west (west.hpp), from npc 10 on.
+inline constexpr uint8_t kAnselme = 10;   // the merchant whose cart overturned; then he sells
+inline constexpr uint8_t kCapucine = 11;  // the farm's owner: the transfer stone, the monsters left there
+inline constexpr uint8_t kViolette = 12;  // the farm's healer
+inline constexpr uint8_t kBasile = 13;    // the shepherd, his flock, his lost lambs
+inline constexpr uint8_t kFirmin = 14;    // the woodcutter, by his cabin
+inline constexpr uint8_t kRomane = 15;    // a trainer camping in the woods
+inline constexpr uint8_t kLucien = 16;    // the miller: his mill stopped turning
+inline constexpr uint8_t kYvon = 17;      // the lighthouse keeper
+inline constexpr uint8_t kLast = kYvon;
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
 // some places. Walking near one makes it known; from one, the player can go
 // to any other known one.
-enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Count };
+enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Farm, Menhirs, Count };
 inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Count);
 
 // Quests (see quests.hpp).
 // The main quest (Isidore's): its first part is the village's quests that
 // teach the game: the lost Piou (capturing), the teleporters, Bastien's
 // battle (fighting), Odette's (healing).
-enum class QuestId : uint8_t { LostPiou, Teleporters, GiantChampi, Combat, Healing, Main, Count };
+// The main quest goes on in the west: the strange stone to bring to the farm
+// (Delivery, from Isidore), the transfer to try (Transfer), the orchard's
+// raiders (Orchard), both from Capucine. And the west's own quests: the
+// merchant's goods (Merchant), the shepherd's lambs (Shepherd), the mill (Mill).
+enum class QuestId : uint8_t {
+  LostPiou, Teleporters, GiantChampi, Combat, Healing, Main,
+  Merchant, Delivery, Transfer, Orchard, Shepherd, Mill,
+  Count
+};
 inline constexpr size_t kQuestCount = static_cast<size_t>(QuestId::Count);
 enum class QuestStage : uint8_t { Unknown, Active, Done };
 struct QuestState {
@@ -548,6 +603,13 @@ struct QuestState {
   uint8_t progress = 0;  // steps done, as bits (meaning per quest)
   bool operator==(const QuestState&) const = default;
 };
+
+// The magician's bag: how many of each item. Coins pay the merchant; mana
+// potions fill the magician's mana; the strange stone and the merchant's
+// goods belong to quests (they cannot be thrown away).
+enum class Item : uint8_t { Coin, ManaPotion, StrangeStone, Goods, Count };
+inline constexpr size_t kItemCount = static_cast<size_t>(Item::Count);
+using Bag = std::array<uint32_t, kItemCount>;
 
 struct Box {
   Vec3 min, max;
@@ -578,7 +640,8 @@ struct ObjectIndex {
 // tower of the ruins. The player goes in through a door; inside, the world
 // is the interior's (its objects, a flat floor at y = 0, walls and a
 // ceiling), and what was outside waits in World::outdoors.
-enum class PlaceKind : uint8_t { Outside, Cave, House, Tower, Count };
+// House: the village's houses, the farmhouse, the woodcutter's cabin.
+enum class PlaceKind : uint8_t { Outside, Cave, House, Tower, Burrow, HollowTree, Lighthouse, Count };
 struct Place {
   PlaceKind kind = PlaceKind::Outside;
   uint32_t door = 0;  // inside: World::outdoors.objects[door] is the way in (cave mouth, house, tower)
@@ -647,6 +710,7 @@ struct World {
   ForestLayout forest; // derived from the seed (not saved)
   CaveLayout cave;     // derived from the seed (not saved)
   CastleLayout castle; // derived from the seed (not saved)
+  WestLayout west;     // the west, towards the sea (west.hpp): derived from the seed (not saved)
   Heightmap ground;    // derived from the seed (not saved)
   Body player;
   std::vector<Object> objects;
@@ -670,6 +734,12 @@ struct World {
   uint8_t teleporters = 0;  // known teleporters, as bits (1 << TeleporterId)
   std::array<QuestState, kQuestCount> quests{};
   uint8_t rival_wins = 0;      // battles won against Bastien (only the first one gives experience)
+  uint8_t romane_wins = 0;     // and against Romane, in the woods
+  Bag bag{};                   // the magician's bag (Item)
+  // The monsters left at the farm (west.hpp): caught with a full team once
+  // the transfer stone is there, or left by the player; taken back from Capucine.
+  std::vector<Monster> farm;
+  uint64_t rescue_tick = 0;    // not saved: the magician was sent back to the farm (an aggressive monster won)
   // How many monsters of each species the player captured, beat (wild ones), let go.
   std::array<uint16_t, kSpeciesCount> captured_count{}, beaten_count{}, released_count{};
   uint32_t battles_won = 0;    // victories, wild monsters' and trainers'

@@ -273,13 +273,15 @@ TEST_CASE("villagers show what they have for the player: quests to take or going
   w.quests[static_cast<size_t>(QuestId::Main)].stage = QuestStage::Active;
   CHECK(npc_marks(w, npc::kMentor) == kMarkQuest);
   w.quests[static_cast<size_t>(QuestId::Main)].stage = QuestStage::Done;
+  CHECK(npc_marks(w, npc::kMentor) == kMarkNewQuest);  // the strange stone to bring to the farm (west.hpp)
+  w.quests[static_cast<size_t>(QuestId::Delivery)].stage = QuestStage::Done;
   CHECK(npc_marks(w, npc::kMentor) == 0);
   // Drawn over their heads.
   DrawList list;
   list.batches.resize(kMeshCount);
   add_characters(w, 0, list);
-  CHECK(count(list, MeshId::IconPlus) == 1);
-  CHECK(count(list, MeshId::IconCross) == 1);
+  CHECK(count(list, MeshId::IconPlus) == 2);   // Odette, and Violette at the farm
+  CHECK(count(list, MeshId::IconCross) == 2);  // Bastien, and Romane in the woods
   CHECK(count(list, MeshId::IconQuestion) >= 4);  // Mirabelle, Gaspard, Lison, Bastien, Odette
   CHECK(count(list, MeshId::IconExclaim) == 0);
 }

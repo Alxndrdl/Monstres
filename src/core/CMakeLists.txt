@@ -13,6 +13,7 @@ add_library(monstres_core STATIC
   continent.cpp
   weather.cpp
   interior.cpp
+  west.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

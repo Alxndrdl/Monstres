@@ -5,6 +5,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/west.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -122,6 +123,10 @@ namespace {
 constexpr uint32_t kMaxCreaturesInSave = 4096;
 constexpr size_t kSpeciesCountV18 = 7;  // before Zapou and Ploufi
 constexpr size_t kSpeciesCountV21 = 9;  // before Cristi
+constexpr size_t kSpeciesCountV22 = 10;  // before Chipou, Hulou, Laini and Taupi
+constexpr size_t kQuestCountV22 = 6;     // before the west's
+constexpr uint8_t kTeleportersV22 = 5;
+constexpr uint8_t kPlacesV22 = 4;        // outside, cave, house, tower
 
 // Chromatic (1), elemental (2), the build (bits 2-3).
 uint8_t forms_byte(const Genes& g) {
@@ -160,6 +165,21 @@ bool read_body(Reader& in, Body& b, bool with_speed) {
 
 namespace {
 
+void write_monster(Writer& out, const Monster& m) {
+  out.u8(static_cast<uint8_t>(m.species));
+  for (uint8_t a : m.genes.allele) out.u8(a);
+  out.u8(forms_byte(m.genes));
+  out.u16(m.level);
+  out.u32(m.xp);
+  out.u16(m.hp);
+  out.u8(static_cast<uint8_t>(m.tag));
+  out.u8(m.beaten ? 1 : 0);
+  for (uint8_t g : m.gifts) out.u8(g);
+  out.u16(m.size_mm);
+  out.u32(m.weight_g);
+  out.u32(static_cast<uint32_t>(m.born_day));
+}
+
 // Everything but where the player is (inside or out).
 void write_world(Writer& out, const World& w) {
   out.bytes(kMagic, sizeof kMagic);
@@ -180,8 +200,11 @@ void write_world(Writer& out, const World& w) {
     out.u16(o.yaw);
     out.u8(o.variant);
   }
-  out.u32(static_cast<uint32_t>(w.creatures.size()));
+  // The farm's grazing monsters are drawn again from World::farm (not saved).
+  out.u32(static_cast<uint32_t>(std::count_if(w.creatures.begin(), w.creatures.end(),
+                                              [](const Creature& c) { return c.tag != Tag::Boarder; })));
   for (const Creature& c : w.creatures) {
+    if (c.tag == Tag::Boarder) continue;
     out.u8(static_cast<uint8_t>(c.species));
     write_body(out, c.body);
     out.u8(static_cast<uint8_t>(c.mind));
@@ -217,20 +240,7 @@ void write_world(Writer& out, const World& w) {
     for (const Discovery d : species) out.u8(static_cast<uint8_t>(d));
   }
   out.u8(static_cast<uint8_t>(w.team.size()));
-  for (const Monster& m : w.team) {
-    out.u8(static_cast<uint8_t>(m.species));
-    for (uint8_t a : m.genes.allele) out.u8(a);
-    out.u8(forms_byte(m.genes));
-    out.u16(m.level);
-    out.u32(m.xp);
-    out.u16(m.hp);
-    out.u8(static_cast<uint8_t>(m.tag));
-    out.u8(m.beaten ? 1 : 0);
-    for (uint8_t g : m.gifts) out.u8(g);
-    out.u16(m.size_mm);
-    out.u32(m.weight_g);
-    out.u32(static_cast<uint32_t>(m.born_day));
-  }
+  for (const Monster& m : w.team) write_monster(out, m);
   out.u32(w.clock);
   out.u8(w.active < 0 ? 0xff : static_cast<uint8_t>(w.active));
   out.u32(w.next_id);
@@ -256,6 +266,11 @@ void write_world(Writer& out, const World& w) {
     out.u16(w.released_count[s]);
   }
   out.u32(w.battles_won);
+  out.u8(w.romane_wins);
+  out.u8(static_cast<uint8_t>(kItemCount));
+  for (uint32_t n : w.bag) out.u32(n);
+  out.u16(static_cast<uint16_t>(w.farm.size()));
+  for (const Monster& m : w.farm) write_monster(out, m);
 }
 
 }  // namespace
@@ -311,8 +326,12 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_victories = version >= 20;  // the battles won
   const bool with_new_forest = version >= 21;  // the bigger forest and its clearing
   const bool with_places = version >= 22;      // inside a cave, a house, the tower; Cristi
+  const bool with_west = version >= 23;        // the west: its species, quests, places; the bag, the farm
   // Species in the bestiary and the counts: two more from version 19.
-  const size_t species_saved = with_places ? kSpeciesCount : with_looks ? kSpeciesCountV21 : kSpeciesCountV18;
+  const size_t species_saved = with_west     ? kSpeciesCount
+                               : with_places ? kSpeciesCountV22
+                               : with_looks  ? kSpeciesCountV21
+                                             : kSpeciesCountV18;
 
   World w;
   uint64_t rng_state = 0, rng_inc = 0;
@@ -377,7 +396,8 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
       }
       if (with_quests) {
         uint8_t tag = 0;
-        if (!in.u8(c.npc) || !in.u8(tag) || tag > static_cast<uint8_t>(with_builds ? Tag::Giant : Tag::Rival)) {
+        const Tag last = with_west ? Tag::Lamb : with_builds ? Tag::Giant : Tag::Rival;
+        if (!in.u8(c.npc) || !in.u8(tag) || tag > static_cast<uint8_t>(last)) {
           return fail(error, LoadError::Corrupt);
         }
         c.tag = static_cast<Tag>(tag);
@@ -421,36 +441,37 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
       }
     }
   }
+  const auto read_monster = [&](Monster& m) {
+    uint8_t species = 0, forms = 0;
+    bool ok = in.u8(species);
+    for (uint8_t& a : m.genes.allele) ok = ok && in.u8(a);
+    ok = ok && in.u8(forms) && in.u16(m.level) && in.u32(m.xp) && in.u16(m.hp);
+    uint8_t tag = 0, beaten = 0;
+    if (with_quests) ok = ok && in.u8(tag) && in.u8(beaten) && beaten <= 1;
+    // Never a trainer's monster; the giant Champi from version 18.
+    ok = ok && (tag <= static_cast<uint8_t>(Tag::LostPiou) || (with_builds && tag == static_cast<uint8_t>(Tag::Giant)));
+    m.tag = static_cast<Tag>(tag);
+    m.beaten = beaten == 1;
+    uint32_t born = 0;
+    if (with_builds) {
+      for (uint8_t& g : m.gifts) ok = ok && in.u8(g) && g >= kGiftBaseMin && g <= kGiftBaseMax;  // drawn bases
+      ok = ok && in.u16(m.size_mm) && in.u32(m.weight_g) && in.u32(born);
+      m.born_day = static_cast<int32_t>(born);
+    }
+    // Before version 18, forms was 0, 1 (chromatic) or 2 (elemental).
+    if (!ok || species >= species_saved || (!with_builds && forms > 2) || !read_forms(forms, with_builds, m.genes) ||
+        m.level == 0) {
+      return false;
+    }
+    m.species = static_cast<Species>(species);
+    return monster_stats(m.species).is_monster && valid_genes(m.species, m.genes) && m.hp <= monster_fight_stats(m).hp;
+  };
   if (with_team) {
     uint8_t size = 0;
     if (!in.u8(size) || size == 0 || size > rules::kTeamSize) return fail(error, LoadError::Corrupt);
     w.team.resize(size);
     for (Monster& m : w.team) {
-      uint8_t species = 0, forms = 0;
-      bool ok = in.u8(species);
-      for (uint8_t& a : m.genes.allele) ok = ok && in.u8(a);
-      ok = ok && in.u8(forms) && in.u16(m.level) && in.u32(m.xp) && in.u16(m.hp);
-      uint8_t tag = 0, beaten = 0;
-      if (with_quests) ok = ok && in.u8(tag) && in.u8(beaten) && beaten <= 1;
-      // Never a trainer's monster; the giant Champi from version 18.
-      ok = ok && (tag <= static_cast<uint8_t>(Tag::LostPiou) || (with_builds && tag == static_cast<uint8_t>(Tag::Giant)));
-      m.tag = static_cast<Tag>(tag);
-      m.beaten = beaten == 1;
-      uint32_t born = 0;
-      if (with_builds) {
-        for (uint8_t& g : m.gifts) ok = ok && in.u8(g) && g >= kGiftBaseMin && g <= kGiftBaseMax;  // drawn bases
-        ok = ok && in.u16(m.size_mm) && in.u32(m.weight_g) && in.u32(born);
-        m.born_day = static_cast<int32_t>(born);
-      }
-      // Before version 18, forms was 0, 1 (chromatic) or 2 (elemental).
-      if (!ok || species >= species_saved || (!with_builds && forms > 2) ||
-          !read_forms(forms, with_builds, m.genes) || m.level == 0) {
-        return fail(error, LoadError::Corrupt);
-      }
-      m.species = static_cast<Species>(species);
-      if (!monster_stats(m.species).is_monster || !valid_genes(m.species, m.genes) || m.hp > monster_fight_stats(m).hp) {
-        return fail(error, LoadError::Corrupt);
-      }
+      if (!read_monster(m)) return fail(error, LoadError::Corrupt);
     }
     if ((!grown && w.team[0].species != Species::Companion) || w.creatures.empty()) {
       return fail(error, LoadError::Corrupt);
@@ -491,8 +512,9 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     uint8_t quests = 0;
     // Before version 18 there were two quests (the giant Champi's came then),
     // before 19 three (fighting, healing and the main quest came then).
-    if (!in.u8(w.teleporters) || w.teleporters >= (1u << kTeleporterCount) || !in.u8(quests) ||
-        quests != (with_looks ? kQuestCount : with_builds ? 3 : 2)) {
+    const uint8_t teleporters = with_west ? static_cast<uint8_t>(kTeleporterCount) : kTeleportersV22;
+    if (!in.u8(w.teleporters) || w.teleporters >= (1u << teleporters) || !in.u8(quests) ||
+        quests != (with_west ? kQuestCount : with_looks ? kQuestCountV22 : with_builds ? 3 : 2)) {
       return fail(error, LoadError::Corrupt);
     }
     for (size_t k = 0; k < quests; ++k) {
@@ -532,11 +554,26 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     }
   }
   if (with_victories && !in.u32(w.battles_won)) return fail(error, LoadError::Corrupt);
+  if (with_west) {
+    uint8_t items = 0;
+    uint16_t kept = 0;
+    if (!in.u8(w.romane_wins) || !in.u8(items) || items != kItemCount) return fail(error, LoadError::Corrupt);
+    for (uint32_t& n : w.bag) {
+      if (!in.u32(n)) return fail(error, LoadError::Corrupt);
+    }
+    if (!in.u16(kept) || kept > rules::kMaxFarm) return fail(error, LoadError::Corrupt);
+    w.farm.resize(kept);
+    for (Monster& m : w.farm) {
+      if (!read_monster(m)) return fail(error, LoadError::Corrupt);
+    }
+  }
   // Where the player is: inside a cave, a house, the tower (version 22).
   uint8_t place = 0;
   Body inner;
   if (with_places) {
-    if (!in.u8(place) || place >= static_cast<uint8_t>(PlaceKind::Count)) return fail(error, LoadError::Corrupt);
+    if (!in.u8(place) || place >= (with_west ? static_cast<uint8_t>(PlaceKind::Count) : kPlacesV22)) {
+      return fail(error, LoadError::Corrupt);
+    }
     if (place != 0) {
       const bool ok = in.u32(w.place.door) && in.vec3(inner.pos) && in.f32(inner.facing_x) && in.f32(inner.facing_z);
       if (!ok || !std::isfinite(inner.pos.x) || !std::isfinite(inner.pos.y) || !std::isfinite(inner.pos.z) ||
@@ -615,6 +652,8 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   // Before version 21: a smaller forest, no clearing, its teleporter in its middle.
   if (!with_new_forest) regrow_forest(w);
   generate_wilds(w);
+  // The west's villagers (before version 23: they come).
+  add_west_npcs(w);
   // Before version 19: Isidore comes to the village (and Bastien's lesson is
   // learned if he was beaten already: told to him, it is done).
   if (!with_looks) add_mentor(w);

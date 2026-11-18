@@ -99,7 +99,16 @@ namespace monstres {
 //      the objects, its position, its facing x and z). Saved inside, the
 //      world written is the one outside, as left (interior.hpp). Before:
 //      outside.
-inline constexpr uint32_t kSaveVersion = 22;
+//  23  the west (west.hpp): four more species (Chipou, Hulou, Laini, Taupi:
+//      the bestiary and the counts list 14), twelve quests, seven
+//      teleporters, three more places to be inside (the burrow, the hollow
+//      tree, the lighthouse), creatures' tags up to Lamb (a trainer's monster
+//      has its trainer's villager number); at the end the battles won
+//      against Romane (u8), the bag (u8 item count, u32 each) and the
+//      monsters left at the farm (u16 count, each as a team member). The
+//      farm's grazing monsters are not saved. Before: the west's villagers
+//      come, the bag and the farm are empty.
+inline constexpr uint32_t kSaveVersion = 23;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

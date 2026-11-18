@@ -1,5 +1,7 @@
 #include "monstres/render/terrain_mesh.hpp"
 
+#include "monstres/core/west.hpp"
+
 #include "monstres/core/continent.hpp"
 
 #include "monstres/render/cull.hpp"
@@ -458,6 +460,39 @@ MeshData build_water_mesh(const World& world) {
       }
     }
   }
+  // The west's stream: a ribbon at its water's level, clear at its banks
+  // (where it meets the sea, the sea's water takes over).
+  if (world.west.valid()) {
+    const Stream& st = world.west.stream;
+    const size_t n = st.points.size();
+    constexpr int kColumns = 4;
+    const float offsets[kColumns] = {-1.15f, -0.6f, 0.6f, 1.15f};
+    const float alphas[kColumns] = {0.0f, 0.85f, 0.85f, 0.0f};
+    for (size_t i = 0; i + 1 < n && i + 1 < st.level.size(); ++i) {
+      if (st.level[i + 1] < rules::kSeaLevel + 0.02f) break;
+      const auto corner = [&](size_t k, int col, float& x, float& z) {
+        const Vec2 prev = st.points[k > 0 ? k - 1 : k], next = st.points[k + 1 < n ? k + 1 : k];
+        float tx = next.x - prev.x, tz = next.z - prev.z;
+        const float len = std::max(1e-4f, std::sqrt(tx * tx + tz * tz));
+        tx /= len;
+        tz /= len;
+        const float w = rules::kStreamWater * offsets[col];
+        x = st.points[k].x - tz * w;
+        z = st.points[k].z + tx * w;
+      };
+      for (int col = 0; col + 1 < kColumns; ++col) {
+        float ax, az, bx, bz, cx, cz, dx, dz;
+        corner(i, col, ax, az);
+        corner(i, col + 1, bx, bz);
+        corner(i + 1, col + 1, cx, cz);
+        corner(i + 1, col, dx, dz);
+        const float y0 = st.level[i], y1 = st.level[i + 1];
+        const auto water = [&](int c) { return Color{0.22f, 0.48f, 0.58f, alphas[c]}; };
+        vertex(m, ax, y0, az, water(col)); vertex(m, bx, y0, bz, water(col + 1)); vertex(m, cx, y1, cz, water(col + 1));
+        vertex(m, ax, y0, az, water(col)); vertex(m, cx, y1, cz, water(col + 1)); vertex(m, dx, y1, dz, water(col));
+      }
+    }
+  }
   const Lake& lake = world.village.lake;
   if (lake.radius_x <= 0) {
     face_up(m);
@@ -496,13 +531,13 @@ MeshData build_water_mesh(const World& world) {
   return m;
 }
 
-MeshData build_path_mesh(const World& world) {
-  MeshData m;
-  m.transparent = true;
-  const auto& pts = world.path.points;
-  if (pts.size() < 2) return m;
-  const size_t n = pts.size();
+namespace {
 
+// A dirt strip along points (the path, the west's road), following the ground
+// just above it, faded at both ends; cut into parts by stretches (culling).
+void add_path_strip(MeshData& m, const World& world, const std::vector<Vec2>& pts, float half_width, uint64_t salt) {
+  if (pts.size() < 2) return;
+  const size_t n = pts.size();
   // Across the path: soft edge, dirt, center, dirt, soft edge.
   constexpr int kColumns = 5;
   const float offsets[kColumns] = {-1.2f, -0.75f, 0.0f, 0.75f, 1.2f};
@@ -514,8 +549,8 @@ MeshData build_path_mesh(const World& world) {
     const float len = std::sqrt(tx * tx + tz * tz);
     tx /= len;
     tz /= len;
-    const float wobble = 0.9f + 0.2f * value_noise(world.seed + 9, static_cast<float>(i), static_cast<float>(col), 3.0f);
-    const float w = rules::kPathHalfWidth * offsets[col] * wobble;
+    const float wobble = 0.9f + 0.2f * value_noise(world.seed + 9 + salt, static_cast<float>(i), static_cast<float>(col), 3.0f);
+    const float w = half_width * offsets[col] * wobble;
     x = pts[i].x - tz * w;
     z = pts[i].z + tx * w;
     const float shade = 0.92f + 0.12f * value_noise(world.seed + 10, x, z, 1.5f);
@@ -525,9 +560,8 @@ MeshData build_path_mesh(const World& world) {
     c = {kPath.r * shade, kPath.g * shade, kPath.b * shade, alphas[col] * end_fade};
   };
 
-  // By stretches of the path, each a part (culling).
   constexpr size_t kStretch = 48;
-  uint32_t part_first = 0;
+  uint32_t part_first = static_cast<uint32_t>(m.vertex_count());
   Aabb part_box = empty_aabb();
   for (size_t i = 0; i + 1 < n; ++i) {
     if (i % kStretch == 0 && i > 0) {
@@ -542,7 +576,6 @@ MeshData build_path_mesh(const World& world) {
       point(i, col + 1, bx, bz, cb);
       point(i + 1, col + 1, cx, cz, cc);
       point(i + 1, col, dx, dz, cd);
-      // Following the ground, just above it.
       auto y = [&](float x, float z) { return ground_height(world, x, z) + terrain::kPathHeight; };
       vertex(m, ax, y(ax, az), az, ca); vertex(m, bx, y(bx, bz), bz, cb); vertex(m, cx, y(cx, cz), cz, cc);
       vertex(m, ax, y(ax, az), az, ca); vertex(m, cx, y(cx, cz), cz, cc); vertex(m, dx, y(dx, dz), dz, cd);
@@ -553,6 +586,15 @@ MeshData build_path_mesh(const World& world) {
     }
   }
   m.parts.push_back({{part_first, static_cast<uint32_t>(m.vertex_count()) - part_first}, part_box});
+}
+
+}  // namespace
+
+MeshData build_path_mesh(const World& world) {
+  MeshData m;
+  m.transparent = true;
+  add_path_strip(m, world, world.path.points, rules::kPathHalfWidth, 0);
+  if (world.west.valid()) add_path_strip(m, world, world.west.road.points, rules::kRoadHalfWidth, 100);
   face_up(m);  // swaps vertices within triangles: the parts stay the same
   return m;
 }

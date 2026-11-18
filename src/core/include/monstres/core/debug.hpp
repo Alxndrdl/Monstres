@@ -89,4 +89,14 @@ std::string teleporters_json(const World& world);
 // ("ready"), and each step; "near": the player can talk to its villager.
 std::string quests_json(const World& world);
 
+// The magician's bag: each item (identifier, count, whether it belongs to a
+// quest, its price), the coins, and whether a mana potion can be drunk now.
+std::string bag_json(const World& world);
+// The farm (west.hpp): whether its transfer stone is there, whether Capucine
+// is close enough to swap monsters, the team and the monsters kept there.
+std::string farm_json(const World& world);
+// The merchant's: whether he sells (his quest done), whether he is close by,
+// the coins, and what he sells (identifier, price, how many in the bag).
+std::string shop_json(const World& world);
+
 }  // namespace monstres

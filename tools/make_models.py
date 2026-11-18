@@ -2437,6 +2437,665 @@ def door_glow():
     return m
 
 
+
+# ---------------------------------------------------------------- the west's monsters (src/render/characters.cpp)
+
+RACCOON = (0.58, 0.58, 0.60, 1)       # Chipou: grey, its mask dark (tinted by its coat)
+RACCOON_PALE = (0.92, 0.91, 0.88, 1)
+RACCOON_MASK = (0.16, 0.15, 0.17, 1)
+OWL = (0.55, 0.40, 0.26, 1)           # Hulou: brown feathers, a pale face
+OWL_FACE = (0.93, 0.86, 0.72, 1)
+OWL_DARK = (0.34, 0.24, 0.16, 1)
+WOOL = (0.97, 0.96, 0.93, 1)          # Laini: white wool, a dark face
+SHEEP_FACE = (0.22, 0.20, 0.22, 1)
+HORN_COLOR = (0.85, 0.77, 0.60, 1)
+MOLE = (0.33, 0.27, 0.27, 1)          # Taupi: velvety dark fur, pink snout and claws
+MOLE_PINK = (0.98, 0.66, 0.68, 1)
+
+
+def raccoon_body():
+    """Chipou: a masked raccoon on four paws (rig as Pompon's)."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (0.16, 0.14, 0.24), 0.03, 3000,
+         lambda n, face: RACCOON_PALE if n[1] < -0.4 else shade(RACCOON, 0.95 + 0.08 * hash01(3000, face)), detail=2)
+    return m
+
+
+def raccoon_head():
+    """A round head, a pale muzzle, the black mask across its eyes."""
+    m = Mesh()
+
+    def color(n, face):
+        if n[2] < -0.55 and n[1] < 0.25:
+            return RACCOON_PALE
+        if n[2] < -0.2 and abs(n[1] - 0.15) < 0.28:
+            return RACCOON_MASK
+        return shade(RACCOON, 0.97 + 0.06 * hash01(3001, face))
+    blob(m, (0, 0.07, 0), (0.14, 0.12, 0.13), 0.02, 3001, color, detail=2)
+    frustum(m, lambda p: (p[0], 0.035 - p[2] * 0.3, -0.08 - p[1]), 0.055, 0.03, 0.08, 10, RACCOON_PALE)
+    blob(m, (0, 0.05, -0.165), (0.022, 0.018, 0.016), 0.0, 3002, solid(NOSE))
+    return m
+
+
+def raccoon_ear():
+    m = Mesh()
+    blob(m, (0, 0.035, 0), (0.04, 0.045, 0.016), 0.0, 3003, lambda n, face: RACCOON_PALE if n[2] < -0.5 else RACCOON)
+    return m
+
+
+def raccoon_tail():
+    """A bushy tail ringed dark and pale, backwards (+Z) and up."""
+    m = Mesh()
+    for k in range(6):
+        t = k / 5
+        c = (0, 0.03 + 0.1 * t, 0.06 + 0.26 * t)
+        r = 0.055 + 0.03 * math.sin(math.pi * t)
+        blob(m, c, (r, r, 0.06), 0.04, 3004 + k, solid(RACCOON_MASK if k % 2 else RACCOON), detail=1)
+    return m
+
+
+def raccoon_leg():
+    m = Mesh()
+    frustum(m, translate(0, -0.12, 0), 0.032, 0.042, 0.12, 8, RACCOON_MASK)
+    blob(m, (0, -0.125, -0.012), (0.04, 0.022, 0.048), 0.0, 3010, solid(RACCOON_MASK))
+    return m
+
+
+def owl_body():
+    """Hulou: an owl, round, its pale face disc and hooked beak (rig as Croa's)."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (0.16, 0.2, 0.15), 0.03, 3020,
+         lambda n, face: OWL_FACE if (n[2] < -0.55 and n[1] > -0.1) else shade(OWL, 0.92 + 0.14 * hash01(3020, face)),
+         detail=2)
+    blob(m, (0, -0.06, -0.08), (0.11, 0.12, 0.08), 0.03, 3021, lambda n, face: shade(OWL_FACE, 0.95), detail=1)  # breast
+    frustum(m, lambda p: (p[0], 0.03 - p[1] * 0.9, -0.15 - p[1] * 0.35), 0.025, 0.0, 0.07, 6, (0.38, 0.33, 0.25, 1),
+            bottom_cap=(0.38, 0.33, 0.25, 1))  # beak, hooked down
+    frustum(m, lambda p: (p[0], -0.12 + p[1] * 0.2, 0.12 + p[1]), 0.06, 0.02, 0.1, 4, OWL_DARK, bottom_cap=OWL_DARK)
+    return m
+
+
+def owl_wing():
+    m = Mesh()
+    blob(m, (0.03, -0.03, 0.02), (0.035, 0.13, 0.12), 0.05, 3022,  # folded against its side
+         lambda n, face: OWL_DARK if hash01(3023, face) < 0.3 else shade(OWL, 0.85))
+    return m
+
+
+def owl_leg():
+    m = Mesh()
+    frustum(m, translate(0, -0.07, 0), 0.03, 0.035, 0.07, 7, OWL_FACE)
+    for k in (-1, 0, 1):
+        box(m, (k * 0.018, -0.075, -0.03), (0.007, 0.007, 0.03), (0.25, 0.22, 0.2, 1))
+    return m
+
+
+def owl_tufts():
+    """Two feathery tufts over its head (origin at the body's center)."""
+    m = Mesh()
+    for side in (-1, 1):
+        frustum(m, lambda p, side=side: (side * 0.08 + p[0] + side * p[1] * 0.35, 0.15 + p[1], -0.04 + p[2]),
+                0.03, 0.0, 0.1, 5, OWL_DARK, bottom_cap=OWL_DARK)
+    return m
+
+
+def sheep_body():
+    """Laini: a woolly cushion on four legs (rig as Pompon's), white: tinted by its wool."""
+    m = Mesh()
+    for k in range(16):  # curls of wool
+        a = TAU * hash01(3030, k)
+        y = -0.03 + 0.13 * hash01(3031, k)
+        z = -0.18 + 0.36 * hash01(3032, k)
+        r = 0.2 * math.sqrt(max(0.0, 1 - (z / 0.26) ** 2)) + 0.02
+        c = (r * math.cos(a) * 0.9, y + 0.04 * math.sin(a), z)
+        blob(m, c, (0.08, 0.075, 0.08), 0.12, 3033 + k, jitter(WOOL, 3050 + k, 0.06), detail=1)
+    blob(m, (0, 0.02, 0), (0.2, 0.16, 0.26), 0.08, 3029, jitter(WOOL, 3029, 0.05), detail=2)
+    return m
+
+
+def sheep_head():
+    m = Mesh()
+    blob(m, (0, 0.05, -0.02), (0.085, 0.09, 0.115), 0.02, 3060, solid(SHEEP_FACE), detail=2)
+    blob(m, (0, 0.13, 0.0), (0.09, 0.05, 0.08), 0.15, 3061, solid(WOOL), detail=1)  # a curl on top
+    return m
+
+
+def sheep_ear():
+    m = Mesh()
+    blob(m, (0.0, 0.0, 0), (0.025, 0.06, 0.012), 0.0, 3062, solid(SHEEP_FACE))
+    return m
+
+
+def sheep_tail():
+    m = Mesh()
+    blob(m, (0, 0.0, 0.03), (0.045, 0.045, 0.045), 0.15, 3063, solid(WOOL))
+    return m
+
+
+def sheep_leg():
+    m = Mesh()
+    frustum(m, translate(0, -0.15, 0), 0.026, 0.032, 0.15, 8, SHEEP_FACE)
+    box(m, (0, -0.15, -0.005), (0.03, 0.012, 0.035), (0.12, 0.1, 0.1, 1))
+    return m
+
+
+def sheep_horns():
+    """Two curled horns (origin at the head's middle)."""
+    m = Mesh()
+    for side in (-1, 1):
+        pts = []
+        for k in range(9):
+            a = math.pi * 1.6 * k / 8
+            r = 0.06 - 0.025 * k / 8
+            pts.append((side * (0.08 + 0.02 * k / 8), 0.09 + r * math.sin(a), 0.01 + r * math.cos(a)))
+        for a, b in zip(pts, pts[1:]):
+            d = sub(b, a)
+            h = length(d)
+            u = normalize(d)
+            axis = normalize(cross((0.0, 1.0, 0.0), u)) if abs(u[1]) < 0.999 else (1.0, 0.0, 0.0)
+            angle = math.acos(max(-1.0, min(1.0, u[1])))
+
+            def turn(p, axis=axis, angle=angle, a=a):
+                c, s_ = math.cos(angle), math.sin(angle)
+                q = add(add(mul(p, c), mul(cross(axis, p), s_)), mul(axis, dot(axis, p) * (1 - c)))
+                return add(a, q)
+            frustum(m, turn, 0.018, 0.016, h, 6, HORN_COLOR, open_ends=True)
+        for q in pts:
+            blob(m, q, (0.018, 0.018, 0.018), 0.0, 3064, solid(HORN_COLOR), detail=0)
+    return m
+
+
+def mole_body():
+    """Taupi: a velvety mole, long and low (rig as Pompon's)."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (0.15, 0.12, 0.23), 0.02, 3070,
+         lambda n, face: shade(MOLE, 0.92 + 0.1 * hash01(3070, face) + 0.1 * max(n[1], 0)), detail=2)
+    return m
+
+
+def mole_head():
+    """A pointed snout ending in a pink nose; tiny eyes."""
+    m = Mesh()
+    blob(m, (0, 0.03, 0.0), (0.11, 0.09, 0.11), 0.02, 3071, solid(MOLE), detail=2)
+    frustum(m, lambda p: (p[0], 0.02 - p[2] * 0.25, -0.06 - p[1]), 0.06, 0.022, 0.11, 10, MOLE)
+    blob(m, (0, 0.022, -0.175), (0.028, 0.022, 0.02), 0.0, 3072, solid(MOLE_PINK))
+    return m
+
+
+def mole_ear():
+    m = Mesh()
+    blob(m, (0, 0.012, 0), (0.02, 0.016, 0.01), 0.0, 3073, solid(shade(MOLE, 0.8)), detail=0)
+    return m
+
+
+def mole_tail():
+    m = Mesh()
+    frustum(m, lambda p: (p[0], p[2], p[1]), 0.015, 0.006, 0.07, 6, MOLE_PINK)
+    return m
+
+
+def mole_leg():
+    """A short leg and a wide digging paw with pink claws."""
+    m = Mesh()
+    frustum(m, translate(0, -0.08, 0), 0.03, 0.04, 0.08, 8, MOLE)
+    blob(m, (0, -0.085, -0.02), (0.055, 0.02, 0.055), 0.0, 3074, solid(MOLE_PINK))
+    for k in range(-2, 3):
+        frustum(m, lambda p, k=k: (k * 0.02 + p[0], -0.09 + p[2], -0.06 - p[1]), 0.008, 0.0, 0.04, 4, (1.0, 0.92, 0.88, 1),
+                bottom_cap=(1.0, 0.92, 0.88, 1))
+    return m
+
+
+def mole_star():
+    """The rare star nose: pink fingers around the nose (origin at the head's middle)."""
+    m = Mesh()
+    for k in range(10):
+        a = TAU * k / 10
+        frustum(m, lambda p, a=a: (math.cos(a) * (0.012 + p[1]) + p[0] * 0.3, 0.022 + math.sin(a) * (0.012 + p[1]), -0.18 + p[2] * 0.3),
+                0.007, 0.004, 0.035, 5, MOLE_PINK, bottom_cap=MOLE_PINK)
+    return m
+
+
+# ---------------------------------------------------------------- the west (src/core/west.cpp)
+
+WHEAT = (0.93, 0.78, 0.36, 1)
+CABBAGE = (0.46, 0.70, 0.32, 1)
+HAY = (0.90, 0.78, 0.40, 1)
+APPLE = (0.88, 0.18, 0.16, 1)
+LOG_WOOD = (0.55, 0.38, 0.22, 1)
+CANVAS = (0.86, 0.80, 0.66, 1)
+EARTH = (0.50, 0.38, 0.26, 1)
+WHITEWASH = (0.95, 0.94, 0.90, 1)
+STRIPE_RED = (0.78, 0.20, 0.18, 1)
+METEOR = (0.16, 0.14, 0.18, 1)
+VEIN = (0.85, 0.55, 1.0, 1)
+
+
+def cart(upright):
+    """The merchant's cart: a box on two wheels, its shafts in front (-X).
+    Overturned: lying on its side, a wheel up, its load spilled. Fits about
+    3 x 1.5 x 1.9 m (collision: half 1.5 x 0.75 x 0.95)."""
+    m = Mesh()
+    parts = Mesh()
+    box(parts, (0.2, 0.75, 0), (1.1, 0.06, 0.7), PLANKS)  # floor
+    for z in (-0.7, 0.7):
+        box(parts, (0.2, 1.0, z), (1.1, 0.25, 0.04), shade(PLANKS, 0.9))
+    box(parts, (1.28, 1.0, 0), (0.04, 0.25, 0.7), shade(PLANKS, 0.9))
+    for z in (-0.35, 0.35):
+        box(parts, (-1.3, 0.62, z), (0.6, 0.03, 0.03), TIMBER)  # shafts
+    for z in (-0.82, 0.82):  # wheels
+        frustum(parts, lambda p, z=z: (0.25 + p[0], 0.55 + p[2], z + (p[1] - 0.04) * (1 if z > 0 else -1)),
+                0.55, 0.55, 0.08, 12, TIMBER, top_cap=shade(PLANKS, 0.8), bottom_cap=shade(PLANKS, 0.8))
+    if upright:
+        for k in range(3):  # its goods
+            box(parts, (-0.4 + 0.45 * k, 0.95, -0.25 + 0.2 * (k % 2)), (0.2, 0.15, 0.2), CANVAS)
+        m = parts
+    else:
+        # Turned onto its side (rotated about X), resting on the ground.
+        for i in range(0, len(parts.positions), 3):
+            tri = [parts.positions[i + j] for j in range(3)]
+            rot = [(x, 0.82 + z * 0.98 - (y - 0.75) * 0.2, -(y - 0.75) * 0.98 - z * 0.2) for x, y, z in tri]
+            m.tri(rot[0], rot[1], rot[2], parts.colors[i])
+        for k in range(3):  # spilled sacks
+            blob(m, (-0.6 + 0.6 * k, 0.15, -1.0 - 0.2 * k), (0.25, 0.15, 0.2), 0.1, 3100 + k, solid(CANVAS))
+    return m
+
+
+def goods():
+    """One of the merchant's bundles: a tied sack (about 0.6 m)."""
+    m = Mesh()
+    blob(m, (0, 0.22, 0), (0.24, 0.22, 0.2), 0.08, 3110, jitter(CANVAS, 3110, 0.06))
+    frustum(m, translate(0, 0.4, 0), 0.06, 0.09, 0.12, 8, shade(CANVAS, 0.9))
+    frustum(m, translate(0, 0.42, 0), 0.068, 0.068, 0.03, 8, (0.62, 0.22, 0.20, 1))
+    return m
+
+
+def bridge():
+    """A wooden bridge along X, 10.8 m long, 2.8 wide: its deck on y = 0, its
+    railings above, posts going down 3 m (into the stream's bed)."""
+    m = Mesh()
+    for k in range(27):
+        x = -5.4 + 0.2 + 0.4 * k
+        box(m, (x, -0.06, 0), (0.19, 0.06, 1.4), shade(PLANKS, 0.92 + 0.14 * hash01(3120, k)))
+    for z in (-1.3, 1.3):
+        box(m, (0, -0.16, z), (5.4, 0.08, 0.08), TIMBER)  # beams
+        box(m, (0, 0.95, z), (5.3, 0.05, 0.05), PLANKS)  # handrail
+        for k in range(7):
+            x = -5.2 + 10.4 * k / 6
+            box(m, (x, 0.45, z), (0.07, 0.5, 0.07), TIMBER)
+            if k in (2, 4):
+                box(m, (x, -1.6, z), (0.1, 1.5, 0.1), TIMBER)  # piles
+    return m
+
+
+def farmhouse():
+    """The farm's house: 7.2 x 6 m, stone below and timber above, ridge at
+    6.6 m along X, its door at -Z (collision: half 3.6 x 3.1 x 3.0)."""
+    m = Mesh()
+    hx, hz = 3.6, 3.0
+    box(m, (0, 1.2, 0), (hx, 1.2, hz), STONE)
+    box(m, (0, 3.6, 0), (hx + 0.1, 1.2, hz + 0.1), PLASTER)
+    for x in (-hx, -1.2, 1.2, hx):
+        box(m, (x, 3.6, -hz - 0.12), (0.08, 1.2, 0.04), TIMBER)
+        box(m, (x, 3.6, hz + 0.12), (0.08, 1.2, 0.04), TIMBER)
+    box(m, (0, 2.4, 0), (hx + 0.15, 0.08, hz + 0.15), TIMBER)
+    gable_walls(m, hx + 0.1, hz + 0.1, 4.8, 6.6, PLASTER)
+    gable_roof(m, hx + 0.1, hz + 0.1, 4.8, 6.6, 0.4, ROOF_RED)
+    door(m, (0, 1.0, -hz), 0.5, 1.0, (0, 0, -1))
+    for x in (-2.2, 2.2):
+        window(m, (x, 1.4, -hz), 0.4, 0.38, (0, 0, -1))
+        window(m, (x, 1.4, hz), 0.4, 0.38, (0, 0, 1))
+    for x in (-2.0, 0.0, 2.0):
+        window(m, (x, 3.7, -hz - 0.1), 0.36, 0.36, (0, 0, -1))
+        window(m, (x, 3.7, hz + 0.1), 0.36, 0.36, (0, 0, 1))
+    for sx in (-1, 1):
+        window(m, (sx * hx, 1.4, 0), 0.4, 0.38, (sx, 0, 0))
+    box(m, (-2.0, 6.0, 0.9), (0.38, 1.2, 0.38), DARK_STONE)  # chimney
+    # A porch roof over the door.
+    m.quad_facing((-1.2, 2.6, -hz - 1.0), (1.2, 2.6, -hz - 1.0), (1.2, 3.0, -hz), (-1.2, 3.0, -hz), ROOF_RED, (0, 1, -1))
+    for x in (-1.1, 1.1):
+        box(m, (x, 1.3, -hz - 0.95), (0.06, 1.3, 0.06), TIMBER)
+    return m
+
+
+def barn():
+    """The barn: 9 x 7.2 m, red planks, big doors at -Z, ridge at 6.8 m (collision: half 4.5 x 3.4 x 3.6)."""
+    m = Mesh()
+    hx, hz, wall = 4.5, 3.6, 4.0
+    red = (0.66, 0.22, 0.18, 1)
+    box(m, (0, wall / 2, 0), (hx, wall / 2, hz), red)
+    for k in range(10):
+        x = -hx + 0.45 + 0.9 * k
+        box(m, (x, wall / 2, -hz - 0.02), (0.02, wall / 2, 0.02), shade(red, 0.75))
+        box(m, (x, wall / 2, hz + 0.02), (0.02, wall / 2, 0.02), shade(red, 0.75))
+    gable_walls(m, hx, hz, wall, 6.8, red)
+    gable_roof(m, hx, hz, wall, 6.8, 0.4, ROOF_SLATE)
+    box(m, (0, 1.5, -hz - 0.04), (1.5, 1.5, 0.04), WHITEWASH)  # the doors' frame
+    for sx in (-1, 1):
+        box(m, (sx * 0.73, 1.45, -hz - 0.08), (0.7, 1.4, 0.04), shade(red, 0.85))
+        for d in (-1, 1):  # white crosses
+            m.quad_facing((sx * 0.73 - 0.6, 0.15 + (0 if d > 0 else 2.7), -hz - 0.12), (sx * 0.73 - 0.5, 0.15 + (0 if d > 0 else 2.7), -hz - 0.12),
+                          (sx * 0.73 + 0.6, 2.85 - (0 if d > 0 else 2.7), -hz - 0.12), (sx * 0.73 + 0.5, 2.85 - (0 if d > 0 else 2.7), -hz - 0.12),
+                          WHITEWASH, (0, 0, -1))
+    box(m, (0, 4.6, -hz - 0.05), (0.5, 0.45, 0.04), DOOR)  # the hayloft
+    return m
+
+
+def fruit_tree():
+    """An apple tree: a short trunk, a round crown with red apples (scaled by the game)."""
+    m = Mesh()
+    frustum(m, identity, 0.2, 0.15, 1.5, 7, BARK, open_ends=True, flat=True)
+    for k, (x, y, z, r) in enumerate(((0, 2.1, 0, 1.15), (0.6, 1.9, 0.3, 0.75), (-0.55, 1.95, -0.25, 0.8), (0.1, 2.6, -0.2, 0.7))):
+        blob(m, (x, y, z), (r, r * 0.85, r), 0.12, 3130 + k, jitter(LEAVES, 3130 + k, 0.08))
+    for k in range(14):
+        a = TAU * hash01(3140, k)
+        y = 1.6 + 1.0 * hash01(3141, k)
+        r = 1.05 * math.sqrt(max(0.1, 1 - ((y - 2.1) / 1.1) ** 2))
+        blob(m, (r * math.cos(a), y, r * math.sin(a)), (0.08, 0.08, 0.08), 0.0, 3150 + k, solid(APPLE), detail=0)
+    return m
+
+
+def crops(cabbages):
+    """A field patch fitting [-1, 1] x [0, h] x [-1, 1] (scaled by the game):
+    rows of wheat, or of cabbages."""
+    m = Mesh()
+    box(m, (0, 0.01, 0), (1.0, 0.01, 1.0), shade(EARTH, 0.95))
+    rows = 6
+    for r in range(rows):
+        z = -1 + (r + 0.5) * 2 / rows
+        box(m, (0, 0.03, z), (0.98, 0.02, 0.07), shade(EARTH, 0.8))
+        for k in range(10):
+            x = -0.95 + 1.9 * (k + 0.5) / 10 + 0.03 * hash01(3160 + r, k)
+            if cabbages:
+                blob(m, (x, 0.07, z), (0.075, 0.06, 0.06), 0.1, 3170 + r * 10 + k, jitter(CABBAGE, 3170 + k, 0.1), detail=0)
+            else:
+                frustum(m, translate(x, 0.0, z), 0.04, 0.03, 0.55, 4, shade(WHEAT, 0.85 + 0.2 * hash01(3180 + r, k)), flat=True)
+                box(m, (x, 0.6, z), (0.025, 0.07, 0.025), WHEAT)
+    return m
+
+
+def haystack():
+    """A round stack of hay, radius 0.9, 1.4 m high."""
+    m = Mesh()
+    blob(m, (0, 0.55, 0), (0.95, 0.8, 0.95), 0.08, 3190, jitter(HAY, 3190, 0.1), lambda p: (p[0], max(p[1], -0.55), p[2]))
+    return m
+
+
+def windmill():
+    """The mill: a stone tower (radius 2.6 down below, 2.0 at 8 m), a wooden cap
+    up to 10 m; its sails (windmill_sails) turn at local (0, 7.0, -2.9). Door at -Z."""
+    m = Mesh()
+    segments = 12
+    rows = 8
+    for row in range(rows):
+        y0 = row * 1.0
+        stone_ring(m, y0, 1.0, 2.6 - 0.075 * row, 2.6 - 0.075 * (row + 1), segments, 3200 + row, STONE,
+                   phase=(row % 2) * TAU / 24)
+    frustum(m, translate(0, 8.0, 0), 2.15, 0.0, 2.2, segments, ROOF_RED, bottom_cap=shade(ROOF_RED, 0.5))
+    box(m, (0, 7.0, -2.25), (0.35, 0.35, 0.6), TIMBER)  # the axle's housing
+    door(m, (0, 1.0, -2.55), 0.5, 1.0, (0, 0, -1))
+    for y in (3.5, 5.5):
+        window(m, (0, y, -2.45 + 0.075 * y), 0.3, 0.3, (0, 0, -1))
+    return m
+
+
+def windmill_sails():
+    """Four sails around the hub (origin), in the XY plane facing -Z, 5.2 m long."""
+    m = Mesh()
+    blob(m, (0, 0, -0.1), (0.3, 0.3, 0.25), 0.0, 3210, solid(TIMBER), detail=1)
+    for k in range(4):
+        a = TAU * k / 4 + math.pi / 4
+        c, s_ = math.cos(a), math.sin(a)
+
+        def at(u, v, w=-0.15):
+            return (u * c - v * s_, u * s_ + v * c, w)
+        m.quad_facing(at(0.2, -0.08), at(5.2, -0.08), at(5.2, 0.08), at(0.2, 0.08), TIMBER, (0, 0, -1))
+        m.quad_facing(at(0.2, -0.08, -0.13), at(5.2, -0.08, -0.13), at(5.2, 0.08, -0.13), at(0.2, 0.08, -0.13), TIMBER, (0, 0, 1))
+        # The sail cloth on its lattice.
+        m.quad_facing(at(1.2, 0.1, -0.17), at(5.1, 0.1, -0.17), at(5.1, 0.95, -0.17), at(1.2, 0.85, -0.17), CANVAS, (0, 0, -1))
+        m.quad_facing(at(1.2, 0.1, -0.16), at(5.1, 0.1, -0.16), at(5.1, 0.95, -0.16), at(1.2, 0.85, -0.16), shade(CANVAS, 0.8), (0, 0, 1))
+        for t in range(5):
+            u = 1.3 + 0.95 * t
+            m.quad_facing(at(u, 0.08, -0.19), at(u + 0.05, 0.08, -0.19), at(u + 0.05, 0.92, -0.19), at(u, 0.92, -0.19), TIMBER, (0, 0, -1))
+    return m
+
+
+def cabin():
+    """The woodcutter's log cabin: 6 x 5 m, walls 2.4 m, its ridge at 4.2 m
+    along X (owls perch there), its door at -Z (collision: half 3.0 x 2.1 x 2.5)."""
+    m = Mesh()
+    hx, hz, wall = 3.0, 2.5, 2.4
+    for k in range(8):
+        y = 0.15 + k * 0.3
+        c = shade(LOG_WOOD, 0.9 + 0.15 * (k % 2))
+        frustum(m, lambda p, y=y: (p[1] - hx - 0.15, y + p[2], -hz + p[0]), 0.15, 0.15, 2 * hx + 0.3, 8, c)
+        frustum(m, lambda p, y=y: (p[1] - hx - 0.15, y + p[2], hz + p[0]), 0.15, 0.15, 2 * hx + 0.3, 8, c)
+        frustum(m, lambda p, y=y: (-hx + p[0], y + 0.15 + p[2], p[1] - hz - 0.15), 0.15, 0.15, 2 * hz + 0.3, 8, c)
+        frustum(m, lambda p, y=y: (hx + p[0], y + 0.15 + p[2], p[1] - hz - 0.15), 0.15, 0.15, 2 * hz + 0.3, 8, c)
+    box(m, (0, wall / 2, 0), (hx - 0.1, wall / 2, hz - 0.1), shade(LOG_WOOD, 0.8))
+    gable_walls(m, hx, hz, wall, 4.2, LOG_WOOD)
+    gable_roof(m, hx, hz, wall, 4.2, 0.45, (0.42, 0.34, 0.24, 1))
+    door(m, (0, 0.95, -hz - 0.12), 0.45, 0.95, (0, 0, -1))
+    for x in (-1.8, 1.8):
+        window(m, (x, 1.4, -hz - 0.12), 0.35, 0.32, (0, 0, -1))
+    box(m, (2.0, 3.6, 0.8), (0.3, 0.9, 0.3), DARK_STONE)
+    return m
+
+
+def tent():
+    """The trainer's tent: an A-frame 2.8 m wide, 1.8 m high, 3.2 long along Z, open at -Z."""
+    m = Mesh()
+    hz = 1.6
+    for side in (-1, 1):
+        m.quad_facing((side * 1.4, 0, -hz), (side * 1.4, 0, hz), (0, 1.8, hz), (0, 1.8, -hz), CANVAS, (side, 0.6, 0))
+        m.quad_facing((side * 1.38, 0, -hz), (side * 1.38, 0, hz), (0, 1.77, hz), (0, 1.77, -hz), shade(CANVAS, 0.6), (-side, -0.6, 0))
+    m.tri((-1.4, 0, hz), (1.4, 0, hz), (0, 1.8, hz), shade(CANVAS, 0.9))
+    m.tri((1.4, 0, hz), (-1.4, 0, hz), (0, 1.8, hz), shade(CANVAS, 0.9))
+    m.tri((-1.38, 0.01, -hz), (0, 1.75, -hz + 0.05), (1.38, 0.01, -hz), (0.20, 0.17, 0.15, 1))  # dark inside
+    for z in (-hz - 0.05, hz + 0.05):
+        box(m, (0, 0.9, z), (0.04, 0.95, 0.04), TIMBER)
+    box(m, (0, 0.02, 0), (1.3, 0.02, hz - 0.05), (0.45, 0.30, 0.25, 1))
+    return m
+
+
+def campfire():
+    """A ring of stones (radius 0.55) and crossed logs; its flames: campfire_fire."""
+    m = Mesh()
+    for k in range(9):
+        a = TAU * k / 9
+        blob(m, (0.48 * math.cos(a), 0.08, 0.48 * math.sin(a)), (0.12, 0.09, 0.1), 0.15, 3220 + k, jitter(STONE, 3220 + k, 0.12), detail=0)
+    for k in range(3):
+        a = TAU * k / 3
+        frustum(m, lambda p, a=a: (math.cos(a) * p[1] * 0.9 + p[0], 0.06 + p[1] * 0.3, math.sin(a) * p[1] * 0.9 + p[2]),
+                0.05, 0.04, 0.42, 6, BARK)
+    box(m, (0, 0.02, 0), (0.3, 0.02, 0.3), (0.15, 0.12, 0.1, 1))
+    return m
+
+
+def campfire_fire():
+    m = Mesh()
+    for k, (x, z, h) in enumerate(((0.0, 0.0, 0.6), (0.12, 0.05, 0.4), (-0.1, 0.08, 0.45), (0.05, -0.12, 0.35))):
+        frustum(m, translate(x, 0.08, z), 0.12, 0.0, h, 6, FLAME if k % 2 else EMBER)
+    return m
+
+
+def woodpile():
+    """Logs stacked along X, 2.8 x 1.1 x 0.9 m."""
+    m = Mesh()
+    for row, n in enumerate((4, 3, 2)):
+        for k in range(n):
+            z = -0.27 * (n - 1) + 0.54 * k
+            y = 0.2 + row * 0.33
+            frustum(m, lambda p, y=y, z=z: (p[1] - 1.4, y + p[2], z * 0.8 + p[0]), 0.18, 0.18, 2.8, 8,
+                    shade(LOG_WOOD, 0.9 + 0.1 * hash01(3230 + row, k)), top_cap=WOOD, bottom_cap=WOOD)
+    return m
+
+
+def hollow_tree():
+    """The giant hollow tree: a trunk of radius 4.2 up to its crown at 12 m (a
+    floor of thick branches where one stands, a trapdoor in the middle), a
+    ring of leaves around it, a door in its trunk at -Z."""
+    m = Mesh()
+    segments = 18
+    rings = 8
+    for r in range(rings):
+        y0, y1 = 12.0 * r / rings, 12.0 * (r + 1) / rings
+        ra = 4.6 - 0.5 * r / rings + (0.6 if r == 0 else 0.0)
+        rb = 4.6 - 0.5 * (r + 1) / rings
+        for i in range(segments):
+            a0, a1 = TAU * i / segments, TAU * (i + 1) / segments
+            wob = lambda a, rr: rr * (1 + 0.05 * math.sin(5 * a + r))
+            b0 = (wob(a0, ra) * math.cos(a0), y0, wob(a0, ra) * math.sin(a0))
+            b1 = (wob(a1, ra) * math.cos(a1), y0, wob(a1, ra) * math.sin(a1))
+            t0 = (wob(a0, rb) * math.cos(a0), y1, wob(a0, rb) * math.sin(a0))
+            t1 = (wob(a1, rb) * math.cos(a1), y1, wob(a1, rb) * math.sin(a1))
+            m.quad(b0, t0, t1, b1, shade(BARK, 0.85 + 0.2 * hash01(3240 + r, i)), ROUND)
+    # The crown's floor and its rim.
+    frustum(m, translate(0, 11.9, 0), 4.3, 4.3, 0.1, segments, shade(BARK, 1.1), top_cap=shade(WOOD, 0.75))
+    box(m, (0, 12.02, 0), (0.55, 0.03, 0.55), DOOR)
+    for z in (-0.3, 0.3):
+        box(m, (0, 12.06, z), (0.5, 0.01, 0.04), METAL)
+    # Roots at its foot.
+    for k in range(7):
+        a = TAU * (k + 0.3) / 7
+        frustum(m, lambda p, a=a: (math.cos(a) * (4.2 + p[1]) + p[0], 0.6 - p[1] * 0.45, math.sin(a) * (4.2 + p[1]) + p[2]),
+                0.5, 0.1, 1.6, 6, BARK, flat=True)
+    # Branches out of the crown, and the leaves: a ring around the floor, open over it.
+    for k in range(8):
+        a = TAU * (k + 0.5) / 8
+        frustum(m, lambda p, a=a: (math.cos(a) * (3.6 + p[1]) + p[0], 11.4 + p[1] * 0.6, math.sin(a) * (3.6 + p[1]) + p[2]),
+                0.5, 0.25, 3.5, 6, BARK, flat=True)
+        r = 6.4 + 0.6 * hash01(3250, k)
+        blob(m, (r * math.cos(a), 13.6 + 0.8 * hash01(3251, k), r * math.sin(a)), (2.6, 1.9, 2.6), 0.14, 3260 + k,
+             jitter(LEAVES, 3260 + k, 0.08))
+    # The door: dark inside, an arch of bark.
+    box(m, (0, 1.3, -4.62), (0.72, 1.3, 0.12), CAVE_DARK)
+    frustum(m, lambda p: (p[0], 2.6 + p[2], -4.6 - p[1]), 0.72, 0.72, 0.12, 10, CAVE_DARK)
+    return m
+
+
+def burrow():
+    """A mound of earth (about 4.4 x 1.5 m) with a hole at -Z: the burrow's way in."""
+    m = Mesh()
+    blob(m, (0, 0.2, 0), (2.3, 1.3, 2.3), 0.08, 3270,
+         lambda n, face: shade(GRASS_BASE, 1.2) if n[1] > 0.55 else jitter(EARTH, 3270, 0.1)(n, face),
+         lambda p: (p[0], max(p[1], -0.2), p[2]))
+    frustum(m, lambda p: (p[0], 0.62 + p[2] * 1.1, -2.0 - p[1]), 0.62, 0.55, 0.3, 12, CAVE_DARK)
+    for k in range(5):
+        a = math.pi + 0.5 + k * 0.5
+        blob(m, (0.9 * math.cos(a) * 1.1, 0.05, -2.2 + 0.25 * math.sin(a)), (0.25, 0.12, 0.2), 0.2, 3280 + k,
+             jitter(EARTH, 3280 + k, 0.1), detail=0)
+    return m
+
+
+def lighthouse():
+    """The lighthouse: white with red bands, radius 2.6 down below, 2.05 at its
+    gallery (12.4 m: walked on, with a railing), the lantern's room on it (its
+    light: lighthouse_lamp), a cap up to 15.2 m. Door at -Z."""
+    m = Mesh()
+    segments = 16
+    bands = 8
+    for b in range(bands):
+        y0, y1 = 12.4 * b / bands, 12.4 * (b + 1) / bands
+        r0, r1 = 2.6 - 0.55 * b / bands, 2.6 - 0.55 * (b + 1) / bands
+        frustum(m, translate(0, y0, 0), r0, r1, y1 - y0, segments, STRIPE_RED if b % 2 else WHITEWASH)
+    frustum(m, translate(0, 12.2, 0), 2.65, 2.65, 0.2, segments, DARK_STONE, top_cap=shade(DARK_STONE, 1.2))
+    for i in range(20):  # the railing
+        a = TAU * i / 20
+        box(m, (2.55 * math.cos(a), 12.85, 2.55 * math.sin(a)), (0.03, 0.45, 0.03), METAL)
+    frustum(m, translate(0, 13.28, 0), 2.56, 2.56, 0.05, 20, METAL, open_ends=True)
+    # The lantern's room: glass panes (lit at night) between iron frames, a red cap.
+    frustum(m, translate(0, 12.4, 0), 1.3, 1.3, 1.7, 8, LIT_GLASS, top_cap=METAL, bottom_cap=METAL)
+    for i in range(8):
+        a = TAU * (i + 0.5) / 8
+        box(m, (1.32 * math.cos(a), 13.25, 1.32 * math.sin(a)), (0.04, 0.85, 0.04), METAL)
+    frustum(m, translate(0, 14.1, 0), 1.5, 0.0, 1.1, 8, STRIPE_RED, bottom_cap=METAL)
+    blob(m, (0, 15.25, 0), (0.12, 0.12, 0.12), 0.0, 3290, solid(METAL), detail=0)
+    door(m, (0, 1.1, -2.58), 0.55, 1.1, (0, 0, -1))
+    for y, z in ((5.0, -1.0), (8.5, -1.0), (6.8, 1.0)):  # small windows up the stair, front and back
+        r = 2.6 - 0.55 * y / 12.4 - 0.02
+        window(m, (0, y, z * r), 0.22, 0.3, (0, 0, z))
+    return m
+
+
+def lighthouse_lamp():
+    """The lantern's light (made to glow by the game), at the lantern room's middle."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (0.45, 0.45, 0.45), 0.0, 3295, solid(LANTERN), detail=1)
+    return m
+
+
+def menhir():
+    """A tall standing stone, unit height (scaled by the game), about 0.9 m wide."""
+    m = Mesh()
+    blob(m, (0, 0.5, 0), (0.42, 0.55, 0.32), 0.1, 3300, jitter(RUIN_STONE, 3300, 0.12),
+         lambda p: (p[0] * (1 - 0.35 * max(p[1], 0) / 0.55), max(p[1], -0.5), p[2] * (1 - 0.3 * max(p[1], 0) / 0.55)))
+    for k in range(4):
+        box(m, (0.0, 0.25 + 0.17 * k, -0.3), (0.05, 0.04, 0.02), RUNE if k % 2 else RUNE_VIOLET)
+    blob(m, (0.2, 0.15, 0.15), (0.2, 0.15, 0.15), 0.2, 3301, jitter(MOSS, 3301, 0.1), detail=0)
+    return m
+
+
+def meteorite():
+    """The black stone fallen from the sky (radius about 0.9, scaled by the
+    game), cracked with glowing violet veins (the game makes them glow)."""
+    m = Mesh()
+    blob(m, (0, 0.6, 0), (0.95, 0.75, 0.9), 0.18, 3310,
+         lambda n, face: VEIN[:3] + (LIT_AT_NIGHT,) if hash01(3311, face) < 0.12 else shade(METEOR, 0.85 + 0.3 * hash01(3312, face)),
+         lambda p: (p[0], max(p[1], -0.5), p[2]), detail=2)
+    return m
+
+
+# ---------------------------------------------------------------- over heads, effects
+
+def icon_bolt():
+    """A lightning bolt (an aggressive monster), about 0.34 m high: tinted red and glowing."""
+    m = Mesh()
+    pts = [(0.06, 0.25, 0), (-0.06, 0.06, 0), (0.04, 0.06, 0), (-0.07, -0.12, 0)]
+    tube(m, pts, 0.035, WHITE)
+    frustum(m, lambda p: (-0.07 + p[0] * 1.0 - p[1] * 0.3, -0.12 - p[1], p[2]), 0.05, 0.0, 0.08, 6, WHITE, bottom_cap=WHITE)
+    return m
+
+
+def icon_coin():
+    """A coin seen edge-on as it turns (a shop)."""
+    m = Mesh()
+    frustum(m, lambda p: (p[0], 0.1 + p[2], p[1] - 0.025), 0.12, 0.12, 0.05, 16, WHITE)
+    box(m, (0, 0.1, -0.03), (0.02, 0.07, 0.01), WHITE)
+    return m
+
+
+def icon_farm():
+    """A little house with a paw (the farm's monsters)."""
+    m = Mesh()
+    box(m, (0, 0.05, 0), (0.12, 0.08, 0.04), WHITE)
+    m.tri((-0.16, 0.13, 0.045), (0.16, 0.13, 0.045), (0, 0.27, 0.045), WHITE)
+    m.tri((0.16, 0.13, -0.045), (-0.16, 0.13, -0.045), (0, 0.27, -0.045), WHITE)
+    m.quad_facing((-0.16, 0.13, -0.045), (-0.16, 0.13, 0.045), (0, 0.27, 0.045), (0, 0.27, -0.045), WHITE, (-1, 1, 0))
+    m.quad_facing((0.16, 0.13, -0.045), (0.16, 0.13, 0.045), (0, 0.27, 0.045), (0, 0.27, -0.045), WHITE, (1, 1, 0))
+    return m
+
+
+def gust():
+    """A gust of wind (an air monster's throw), flying along -Z: swirling
+    streaks around its way, fading at their ends. Transparent, tinted by the game."""
+    m = Mesh(transparent=True, double_sided=True)
+    for s in range(3):
+        phase = TAU * s / 3
+        steps = 18
+        for k in range(steps):
+            t0, t1 = k / steps, (k + 1) / steps
+            def point(t, out):
+                a = phase + t * TAU * 1.3
+                r = (0.18 + 0.22 * t) + out
+                return (r * math.cos(a), r * math.sin(a), 0.5 - 1.3 * t)
+            alpha = lambda t: max(0.0, math.sin(math.pi * t)) * 0.8
+            a0, a1 = point(t0, -0.03), point(t1, -0.03)
+            b0, b1 = point(t0, 0.03), point(t1, 0.03)
+            cols = [(1, 1, 1, alpha(t0)), (1, 1, 1, alpha(t1)), (1, 1, 1, alpha(t1)), (1, 1, 1, alpha(t0))]
+            m.tri(a0, a1, b1, None, colors=[cols[0], cols[1], cols[2]], normal=(0, 1, 0))
+            m.tri(a0, b1, b0, None, colors=[cols[0], cols[2], cols[3]], normal=(0, 1, 0))
+    return m
+
+
 def all_models():
     models = {
         "cube": cube(),
@@ -2568,6 +3227,54 @@ def all_models():
         "step": step(),
         "hatch": hatch(),
         "door_glow": door_glow(),
+        "raccoon_body": raccoon_body(),
+        "raccoon_head": raccoon_head(),
+        "raccoon_ear": raccoon_ear(),
+        "raccoon_tail": raccoon_tail(),
+        "raccoon_leg": raccoon_leg(),
+        "owl_body": owl_body(),
+        "owl_wing": owl_wing(),
+        "owl_leg": owl_leg(),
+        "owl_tufts": owl_tufts(),
+        "sheep_body": sheep_body(),
+        "sheep_head": sheep_head(),
+        "sheep_ear": sheep_ear(),
+        "sheep_tail": sheep_tail(),
+        "sheep_leg": sheep_leg(),
+        "sheep_horns": sheep_horns(),
+        "mole_body": mole_body(),
+        "mole_head": mole_head(),
+        "mole_ear": mole_ear(),
+        "mole_tail": mole_tail(),
+        "mole_leg": mole_leg(),
+        "mole_star": mole_star(),
+        "cart": cart(False),
+        "cart_up": cart(True),
+        "goods": goods(),
+        "bridge": bridge(),
+        "farmhouse": farmhouse(),
+        "barn": barn(),
+        "fruit_tree": fruit_tree(),
+        "crops_wheat": crops(False),
+        "crops_cabbage": crops(True),
+        "haystack": haystack(),
+        "windmill": windmill(),
+        "windmill_sails": windmill_sails(),
+        "cabin": cabin(),
+        "tent": tent(),
+        "campfire": campfire(),
+        "campfire_fire": campfire_fire(),
+        "woodpile": woodpile(),
+        "hollow_tree": hollow_tree(),
+        "burrow": burrow(),
+        "lighthouse": lighthouse(),
+        "lighthouse_lamp": lighthouse_lamp(),
+        "menhir": menhir(),
+        "meteorite": meteorite(),
+        "icon_bolt": icon_bolt(),
+        "icon_coin": icon_coin(),
+        "icon_farm": icon_farm(),
+        "gust": gust(),
     }
     for v in range(4):
         models[f"rock{v}"] = rock(v)
@@ -2586,7 +3293,7 @@ def all_models():
         models[f"mountain{v}"] = mountain(v)
     # The characters' parts are soft (their lumps are smooth); the rest keeps its facets.
     soft = ("player_", "companion_", "slime_", "mushroom_", "bird_", "villager_", "hair_", "hat_", "crow_", "fish_",
-            "eye", "horn", "bulb", "spark_", "axolotl_", "cristi_")
+            "eye", "horn", "bulb", "spark_", "axolotl_", "cristi_", "raccoon_", "owl_", "sheep_", "mole_")
     for name, mesh in models.items():
         mesh.finish(soft=name.startswith(soft))
     return models

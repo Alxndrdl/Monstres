@@ -152,6 +152,25 @@
       background: rgba(10, 12, 26, 0.6); padding: 16px;
     }
     #release-dialog[hidden] { display: none; }
+    #farm-panel {
+      position: fixed; inset: 0; z-index: 7; display: flex; align-items: center; justify-content: center;
+      background: rgba(10, 12, 26, 0.6); padding: 16px;
+    }
+    #farm-panel[hidden] { display: none; }
+    .farm-window { width: min(720px, 100%); max-height: 100%; overflow: auto; padding: 14px 16px; background: #1c2033; }
+    .farm-title { margin: 0 0 4px; font-size: 18px; font-weight: 700; color: #f2c94c; }
+    .farm-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
+    .farm-columns h3 { margin: 0 0 6px; font-size: 14px; }
+    .farm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px;
+      max-height: min(46vh, 340px); overflow: auto; }
+    .farm-list button { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 4px 8px;
+      border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.05); color: inherit; cursor: pointer; }
+    .farm-list button[aria-pressed="true"] { border-color: #f2c94c; background: rgba(242, 201, 76, 0.18); }
+    .farm-list img { width: 40px; height: 40px; }
+    .farm-list small { display: block; opacity: 0.75; }
+    .farm-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .bag-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .bag-icon { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; }
     .release-window {
       width: min(380px, 100%); max-height: 100%; overflow: auto; padding: 16px 18px; text-align: center;
       border-color: rgba(255, 130, 110, 0.7); background: #1c2033;
@@ -962,6 +981,7 @@
       <div class="tabs" role="tablist">
         <button id="tab-button-character" role="tab" type="button" aria-controls="tab-character" data-tab="character">Personnage</button>
         <button id="tab-button-team" role="tab" type="button" aria-controls="tab-team" data-tab="team">Équipe</button>
+        <button id="tab-button-bag" role="tab" type="button" aria-controls="tab-bag" data-tab="bag">Sac</button>
         <button id="tab-button-spells" role="tab" type="button" aria-controls="tab-spells" data-tab="spells">Sorts</button>
         <button id="tab-button-quests" role="tab" type="button" aria-controls="tab-quests" data-tab="quests">Quêtes</button>
         <button id="tab-button-bestiary" role="tab" type="button" aria-controls="tab-bestiary" data-tab="bestiary">Bestiaire</button>
@@ -990,6 +1010,16 @@
             <ul id="team-list" class="bestiary-list"></ul>
           </div>
           <article id="team-detail" class="bestiary-detail" aria-live="polite"></article>
+        </div>
+      </section>
+
+      <section id="tab-bag" class="tab-panel split" role="tabpanel" aria-labelledby="tab-button-bag" hidden>
+        <div class="bestiary">
+          <div class="team-side">
+            <p class="facts" id="bag-coins"></p>
+            <ul id="bag-list" class="bestiary-list"></ul>
+          </div>
+          <article id="bag-detail" class="bestiary-detail" aria-live="polite"></article>
         </div>
       </section>
 
@@ -1169,6 +1199,23 @@
       <div class="release-actions">
         <button type="button" class="button" id="release-cancel">Garder</button>
         <button type="button" class="button danger" id="release-confirm">Relâcher</button>
+      </div>
+    </div>
+  </div>
+  <!-- The farm's monsters, with Capucine (dialogue.js): swapped with the team's. -->
+  <div id="farm-panel" role="dialog" aria-modal="true" aria-labelledby="farm-title" hidden>
+    <div class="panel farm-window">
+      <p class="farm-title" id="farm-title">Les monstres de l’exploitation</p>
+      <p class="facts" id="farm-hint">Choisis un monstre de ton équipe et un monstre de l’exploitation pour les échanger.</p>
+      <div class="farm-columns">
+        <section><h3>Ton équipe</h3><ul id="farm-team" class="farm-list"></ul></section>
+        <section><h3 id="farm-kept-title">À l’exploitation</h3><ul id="farm-kept" class="farm-list"></ul></section>
+      </div>
+      <div class="farm-actions">
+        <button type="button" class="button" id="farm-swap" disabled>Échanger</button>
+        <button type="button" class="button" id="farm-leave" disabled>Laisser ici</button>
+        <button type="button" class="button" id="farm-take" disabled>Reprendre</button>
+        <button type="button" class="button" id="farm-close">Fermer</button>
       </div>
     </div>
   </div>

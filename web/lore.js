@@ -175,11 +175,84 @@ window.MonstresLore = {
         elemental: { name: 'Cristi d’or', description: 'Une fourrure dorée et des cristaux de lumière : il brille comme un trésor.' },
       },
     },
+    raccoon: {
+      name: 'Chipou', kind: 'Chapardeur masqué',
+      description: 'Un raton gris au masque noir, gourmand et sans gêne. Les Chipou raflent les pommes des vergers ' +
+        'et les œufs des poulaillers, puis filent en ricanant. En bande, ils deviennent agressifs : gare à qui les dérange !',
+      habitat: 'Exploitation, terres sauvages, bois de l’Ouest',
+      genes: { coat: 'Pelage', tail: 'Queue', ears: 'Oreilles' },
+      variants: {
+        'coat.grey': { name: 'Pelage gris', description: 'Gris cendre, avec son masque noir de voleur.' },
+        'coat.rust': { name: 'Pelage roux', description: 'Roux comme une feuille d’automne.' },
+        'coat.silver': { name: 'Pelage argenté', description: 'Un gris d’argent qui brille sous la lune.' },
+        'tail.ringed': { name: 'Queue rayée', description: 'Une queue annelée de gris et de noir.' },
+        'tail.bushy': { name: 'Queue touffue', description: 'Une énorme queue en panache : il s’en sert de couverture.' },
+        'ears.round': { name: 'Oreilles rondes', description: 'Deux oreilles rondes bordées de blanc.' },
+        'ears.tufted': { name: 'Oreilles en pinceau', description: 'Des oreilles hautes terminées par un pinceau de poils.' },
+        chromatic: { name: 'Chipou pie', description: 'Noir et blanc, comme une pie : un voleur de grand chemin.' },
+        elemental: { name: 'Chipou doré', description: 'Un pelage d’or : on dit qu’il ne vole que des choses qui brillent.' },
+      },
+    },
+    owl: {
+      name: 'Hulou', kind: 'Chouette du grand arbre',
+      description: 'Une chouette ronde aux grands yeux d’ambre, perchée au sommet de l’arbre creux du bois de l’Ouest. ' +
+        'Elle s’envole au moindre bruit, en faisant tourbillonner le vent sous ses ailes.',
+      habitat: 'Cime de l’arbre creux, bois de l’Ouest',
+      genes: { plumage: 'Plumage', tufts: 'Aigrettes', eyes: 'Yeux' },
+      variants: {
+        'plumage.brown': { name: 'Plumage brun', description: 'Brun moucheté, comme l’écorce du grand arbre.' },
+        'plumage.snowy': { name: 'Plumage neigeux', description: 'Presque blanc : on la croirait venue des montagnes.' },
+        'plumage.tawny': { name: 'Plumage fauve', description: 'Un fauve chaud, couleur de feuilles mortes.' },
+        'tufts.tufts': { name: 'Aigrettes', description: 'Deux touffes de plumes dressées comme des oreilles.' },
+        'tufts.none': { name: 'Tête ronde', description: 'Une tête toute ronde, sans aigrettes.' },
+        'eyes.amber': { name: 'Yeux d’ambre', description: 'De grands yeux couleur de miel.' },
+        'eyes.blue': { name: 'Yeux bleus', description: 'Des yeux bleu glacier, très rares.' },
+        chromatic: { name: 'Hulou cendrée', description: 'Grise comme la brume du matin.' },
+        elemental: { name: 'Hulou de nuit', description: 'Sombre comme une nuit sans lune : son vent est un vent d’ombre.' },
+      },
+    },
+    sheep: {
+      name: 'Laini', kind: 'Mouton nuage',
+      description: 'Une boule de laine sur quatre pattes, douce comme un nuage. Les Laini vivent en troupeau ' +
+        'avec le berger Basile ; quelques-uns broutent librement dans les collines.',
+      habitat: 'Troupeau du berger, collines',
+      genes: { wool: 'Laine', horns: 'Cornes', fleece: 'Toison' },
+      variants: {
+        'wool.white': { name: 'Laine blanche', description: 'Blanche comme un nuage d’été.' },
+        'wool.black': { name: 'Laine noire', description: 'Un mouton noir : il y en a un dans chaque troupeau.' },
+        'wool.pink': { name: 'Laine rose', description: 'Une laine rose bonbon, introuvable ailleurs.' },
+        'horns.none': { name: 'Sans cornes', description: 'Une tête toute douce, sans cornes.' },
+        'horns.curled': { name: 'Cornes enroulées', description: 'Deux belles cornes enroulées en spirale.' },
+        'fleece.fluffy': { name: 'Toison épaisse', description: 'Une bonne épaisseur de laine.' },
+        'fleece.cloud': { name: 'Toison nuage', description: 'Tellement de laine qu’on ne voit presque plus ses pattes.' },
+        chromatic: { name: 'Laini d’or', description: 'Une toison dorée, comme dans les vieilles légendes.' },
+        elemental: { name: 'Laini d’orage', description: 'Sa laine bleutée crépite : gare à l’électricité statique !' },
+      },
+    },
+    mole: {
+      name: 'Taupi', kind: 'Taupe fouisseuse',
+      description: 'Une petite taupe au pelage de velours, presque aveugle, au museau rose et aux grosses pattes ' +
+        'pour creuser. Les Taupi creusent des galeries interminables sous les champs et dans le terrier de l’Ouest.',
+      habitat: 'Terrier, champs de l’exploitation',
+      genes: { fur: 'Pelage', claws: 'Griffes', nose: 'Museau' },
+      variants: {
+        'fur.brown': { name: 'Pelage brun', description: 'Un velours brun foncé, couleur de terre.' },
+        'fur.grey': { name: 'Pelage gris', description: 'Gris ardoise, doux comme de la soie.' },
+        'fur.golden': { name: 'Pelage doré', description: 'Une taupe dorée : les mineurs la disent porte-bonheur.' },
+        'claws.small': { name: 'Petites griffes', description: 'Des pattes de fouisseuse, déjà bien solides.' },
+        'claws.big': { name: 'Grandes griffes', description: 'D’énormes pattes avant : elle creuse plus vite qu’on ne marche.' },
+        'nose.pink': { name: 'Museau rose', description: 'Un petit museau rose qui frétille sans arrêt.' },
+        'nose.star': { name: 'Museau étoilé', description: 'Une étoile de petits doigts roses autour du nez : très rare.' },
+        chromatic: { name: 'Taupi de lune', description: 'Toute blanche, elle ne sort que les nuits de pleine lune.' },
+        elemental: { name: 'Taupi de braise', description: 'Rouge comme une braise : elle a creusé trop près du feu de la terre.' },
+      },
+    },
   },
   // The three monsters to start a game with (kStarters), and their element.
   starterElements: { companion: 'fire', spark: 'electric', axolotl: 'water' },
   // Order of the species in the game (Species in src/core/world.hpp).
-  speciesOrder: ['companion', 'slime', 'mushroom', 'bird', 'villager', 'crow', 'fish', 'spark', 'axolotl', 'cristi'],
+  speciesOrder: ['companion', 'slime', 'mushroom', 'bird', 'villager', 'crow', 'fish', 'spark', 'axolotl', 'cristi',
+    'raccoon', 'owl', 'sheep', 'mole'],
 
   elements: {
     fire: { name: 'Feu', color: '#ff9a5a' },
@@ -255,7 +328,7 @@ window.MonstresLore = {
     spores: { name: 'Spores', description: 'Un nuage de spores serré, soufflé vers l’ennemi.' },
     spore_cloud: { name: 'Nuage de spores', description: 'Il secoue son chapeau : des spores partout autour de lui.' },
     peck: { name: 'Coup de bec', description: 'Un coup de bec vif et précis.' },
-    feather: { name: 'Plume tranchante', description: 'Il lance une plume dure comme une lame.' },
+    feather: { name: 'Rafale', description: 'Il bat des ailes et lance une rafale de vent tourbillonnante.' },
     gust: { name: 'Bourrasque', description: 'Il bat des ailes de toutes ses forces : le vent repousse tout.' },
     shade: { name: 'Ombre', description: 'Une boule d’ombre qui glace ce qu’elle touche.' },
     flock: { name: 'Nuée', description: 'Des plumes noires tourbillonnent autour de lui.' },
@@ -289,13 +362,53 @@ window.MonstresLore = {
       name: 'Prisme', byElement: { light: 'Prisme solaire' },
       description: 'Son cristal s’embrase : la magie jaillit en éclats tout autour de lui.',
     },
+    swipe: { name: 'Chaparde', description: 'Un coup de patte vif : il chipe tout ce qui dépasse.' },
+    pilfer: {
+      name: 'Pomme volée', byElement: { light: 'Pièce d’or' },
+      description: 'Il lance de toutes ses forces ce qu’il vient de voler.',
+    },
+    smoke_bomb: {
+      name: 'Écran de fumée', byElement: { light: 'Éclat aveuglant' },
+      description: 'Un nuage noir explose autour de lui, le temps de filer.',
+    },
+    talon: { name: 'Serres', description: 'Elle fond sur l’ennemi, serres en avant.' },
+    squall: {
+      name: 'Coup de vent', byElement: { shadow: 'Vent d’ombre' },
+      description: 'Ses ailes lancent une bourrasque tourbillonnante droit sur l’ennemi. On dit qu’elle ferait tourner un moulin.',
+    },
+    hoot: {
+      name: 'Hululement', byElement: { shadow: 'Cri de la nuit' },
+      description: 'Un cri qui fait trembler l’air tout autour d’elle.',
+    },
+    ram: { name: 'Coup de tête', description: 'Il fonce tête baissée dans sa laine.' },
+    fluff: {
+      name: 'Boule de laine', byElement: { electric: 'Laine électrique' },
+      description: 'Une boule de laine bien tassée, lancée de loin.',
+    },
+    wool_wave: {
+      name: 'Vague de laine', byElement: { electric: 'Orage de laine' },
+      description: 'Il s’ébroue : un nuage de laine déferle tout autour de lui.',
+    },
+    scratch: { name: 'Griffure', description: 'Un coup de ses grosses griffes de fouisseuse.' },
+    clod: {
+      name: 'Motte de terre', byElement: { fire: 'Motte de braise' },
+      description: 'Elle creuse et lance une motte de terre sur l’ennemi.',
+    },
+    tremor: {
+      name: 'Secousse', byElement: { fire: 'Éruption' },
+      description: 'Elle frappe le sol : la terre tremble tout autour d’elle.',
+    },
   },
   // Doors (interior.hpp): what the panel says near one. Houses by their kind.
   doors: {
     cave: 'Grotte aux Cristaux',
     tower: 'Tour des ruines',
     roof: 'Toit de la tour',
-    house: { cottage: 'Maison', chimney: 'Grande maison', hut: 'Hutte' },
+    house: { cottage: 'Maison', chimney: 'Grande maison', hut: 'Hutte', farmhouse: 'Ferme de Capucine', cabin: 'Cabane du bûcheron' },
+    burrow: 'Terrier',
+    hollowTree: 'Arbre creux',
+    lighthouse: 'Phare',
+    roofs: { tower: 'Toit de la tour', hollowTree: 'Cime de l’arbre creux', lighthouse: 'Galerie du phare' },
     actions: { enter: 'Entrer', leave: 'Sortir', climb: 'Monter', descend: 'Descendre' },
   },
   // Every monster's fourth move.
@@ -317,6 +430,9 @@ window.MonstresLore = {
     coast: 'Côte des Embruns',
     hills: 'Contreforts du Nord',
     plains: 'Terres sauvages',
+    farm: 'Exploitation de Capucine',
+    woods: 'Bois de l’Ouest',
+    crater: 'Cratère de l’Étoile',
   },
   // The regions of the continent (src/core/continent.hpp), for the map. Not
   // reachable yet: names to refine.
@@ -335,7 +451,20 @@ window.MonstresLore = {
   // Teleporters, by place (src/core: TeleporterId).
   teleporters: {
     village: 'Village', ruins: 'Ruines de la Tour', forest: 'Forêt des Murmures', cave: 'Grotte aux Cristaux',
-    castle: 'Château de Corbeval',
+    castle: 'Château de Corbeval', farm: 'Exploitation de Capucine', menhirs: 'Cercle des Menhirs',
+  },
+  // The west's places (west.hpp), for the map.
+  westPlaces: {
+    cart: 'Charrette d’Anselme', bridge: 'Pont du Ruisseau', farm: 'Exploitation', mill: 'Moulin', pasture: 'Bergerie',
+    burrow: 'Terrier', woods: 'Bois de l’Ouest', cabin: 'Cabane du bûcheron', camp: 'Camp de Romane',
+    hollowTree: 'Arbre creux', lighthouse: 'Phare', menhirs: 'Cercle des Menhirs', crater: 'Cratère de l’Étoile',
+  },
+  // The bag's items (src/core: Item).
+  items: {
+    coin: { name: 'Pièces', one: 'pièce', description: 'La monnaie du pays. Le marchand Anselme en veut contre ses potions.' },
+    manaPotion: { name: 'Potion de mana', one: 'potion', description: 'Un flacon bleu qui pétille : rend 15 points de mana à ton bâton.' },
+    strangeStone: { name: 'Pierre étrange', one: 'pierre', description: 'Un colis d’Isidore pour l’exploitation de Capucine : une pierre tiède qui vibre doucement, et une lettre scellée.' },
+    goods: { name: 'Marchandises', one: 'ballot', description: 'Les ballots tombés de la charrette d’Anselme.' },
   },
 
   // The villagers with a name (Creature::npc), and what they say (web/dialogue.js).
@@ -357,6 +486,23 @@ window.MonstresLore = {
     9: { name: 'Isidore', mentor: true, chatter: ['Un bon magicien écoute ses monstres autant qu’ils l’écoutent.',
       'La tour en ruine, au sud… J’y ai appris la magie, il y a bien longtemps.',
       'Les orages font sortir les Zapou de leurs terriers. On les voit courir sur les collines.'] },
+    10: { name: 'Anselme', merchant: true, chatter: ['Des potions, des potions ! Fraîches du matin !',
+      'J’ai vendu des potions jusqu’à la Capitale, tu sais. Mais ici, au moins, on prend le temps de vivre.'] },
+    11: { name: 'Capucine', chatter: ['Mes vaches sont parties à la Capitale ; je garde les monstres des magiciens, maintenant. C’est bien plus amusant.',
+      'Les pommes de mon verger sont les meilleures de l’Ouest. Les Chipou le savent bien, hélas.'] },
+    12: { name: 'Violette', healer: true, chatter: ['Odette, au village ? C’est ma cousine ! C’est elle qui m’a tout appris.',
+      'Le lait de Laini, ça soigne tout. Enfin… presque tout.'] },
+    13: { name: 'Basile', chatter: ['Un bon berger connaît chacun de ses moutons par son nom. J’en ai vingt-trois… euh, huit.',
+      'Quand le vent souffle de la mer, les Laini deviennent tout frisés.'] },
+    14: { name: 'Firmin', chatter: ['Ce bois est vieux comme le monde. L’arbre creux, au milieu, était déjà géant quand mon grand-père était petit.',
+      'Il y a des chouettes, tout là-haut, sur l’arbre creux. On y monte par l’intérieur, à ce qu’on dit.'] },
+    15: { name: 'Romane', trainer: true, chatter: ['Je campe ici pour m’entraîner loin de tout. Le bois de l’Ouest regorge de monstres coriaces !',
+      'Ma Hulou vient du sommet de l’arbre creux. Je l’ai attrapée après trois jours d’attente !'] },
+    16: { name: 'Lucien', chatter: ['Mon moulin tourne depuis cent ans… enfin, il tournait.',
+      'Sans vent, pas de farine. Sans farine, pas de pain. Sans pain, pas de Lucien heureux.'] },
+    17: { name: 'Yvon', chatter: ['Une nuit, j’ai vu une étoile tomber au sud. Le lendemain, il y avait un cratère, et des cristaux qui brillent.',
+      'Le cercle de menhirs, au nord… Les anciens disaient qu’il permettait de voyager en un clin d’œil.',
+      'Mon phare guide les bateaux depuis quarante ans. Monte voir la vue, si tu n’as pas le vertige !'] },
   },
   // What the other villagers say about the quests (any of them, see web/dialogue.js).
   rumors: {
@@ -378,6 +524,9 @@ window.MonstresLore = {
       'Si tu veux te mesurer à un vrai dresseur, va voir Bastien, à l’entrée du village.'],
     teleportersDone: ['Gaspard raconte à tout le monde que tu as disparu dans un éclair de lumière !',
       'Alors ces cercles de pierres mènent d’un endroit à l’autre ? Quelle merveille !'],
+    west: ['À l’ouest, la route mène à l’exploitation de Capucine, et plus loin jusqu’au phare.',
+      'Un marchand a versé sa charrette sur la route de l’ouest. Le pauvre…',
+      'On dit que des Chipou rôdent autour du verger de Capucine.'],
   },
   // The quests (src/core/quests.hpp): the journal, in the grimoire.
   quests: {
@@ -431,6 +580,48 @@ window.MonstresLore = {
         tell: 'Revenir voir Isidore',
       },
       done: 'Isidore est content de toi. La suite de ton apprentissage viendra bientôt…',
+    },
+    merchant: {
+      title: 'La charrette renversée', giver: 10, xp: 40,
+      summary: 'Anselme, un marchand ambulant, a versé sa charrette sur la route de l’ouest. Ses ballots de marchandises ' +
+        'se sont éparpillés tout autour.',
+      steps: { goods: 'Ramasser les ballots tombés de la charrette', tell: 'Les rapporter à Anselme' },
+      done: 'La charrette est de nouveau sur ses roues. Anselme vend maintenant ses potions de mana.',
+    },
+    delivery: {
+      title: 'La pierre étrange', giver: 9, xp: 60, main: true,
+      summary: 'Isidore t’a confié un colis : une pierre étrange et une lettre, à livrer à Capucine, la propriétaire ' +
+        'de l’exploitation agricole, à l’ouest. Suis la route qui part du sentier, près du départ.',
+      steps: { stone: 'Porter la pierre étrange à Capucine, à l’exploitation', given: 'La lui remettre' },
+      done: 'La pierre est une pierre de transfert, liée à ta magie : les monstres capturés au-delà de six seront envoyés à l’exploitation.',
+    },
+    transfer: {
+      title: 'Essai de transfert', giver: 11, xp: 50, main: true,
+      summary: 'Capucine veut vérifier que la pierre de transfert fonctionne : capture un monstre alors que ton équipe ' +
+        'est complète (six monstres), puis viens le récupérer auprès d’elle.',
+      steps: { sent: 'Capturer un monstre avec une équipe complète', took: 'Récupérer un monstre auprès de Capucine', tell: 'En parler à Capucine' },
+      done: 'Le transfert fonctionne ! Capucine garde tes monstres, et tu peux les échanger quand tu veux.',
+    },
+    orchard: {
+      title: 'Les pillards du verger', giver: 11, xp: 150, main: true,
+      summary: 'Une bande de Chipou agressifs pille le verger de Capucine. Ils attaquent dès qu’on s’approche. ' +
+        'Si tu perds ou si tu fuis, ta magie te ramènera à l’exploitation.',
+      steps: { beaten: 'Battre les Chipou du verger', tell: 'Prévenir Capucine' },
+      done: 'Le verger est sauvé ! Capucine t’en sera reconnaissante longtemps.',
+    },
+    shepherd: {
+      title: 'Les agneaux perdus', giver: 13, xp: 60,
+      summary: 'Trois agneaux du berger Basile se sont égarés dans les collines. Approche-toi d’eux : ils te suivront ' +
+        'jusqu’à la bergerie.',
+      steps: { lambs: 'Ramener les agneaux dans l’enclos', tell: 'Le dire à Basile' },
+      done: 'Le troupeau est au complet. Pour te remercier, Basile t’a confié un Laini.',
+    },
+    mill: {
+      title: 'Le moulin arrêté', giver: 16, xp: 50,
+      summary: 'Le vent est tombé et les ailes du moulin de Lucien sont coincées. Un monstre de vent, qui vole, pourrait ' +
+        'les relancer : pendant un entraînement, sans viser ton magicien, lance son attaque à distance dans les ailes.',
+      steps: { turning: 'Relancer les ailes du moulin', tell: 'Le dire à Lucien' },
+      done: 'Les ailes tournent de nouveau. Lucien va pouvoir moudre son grain.',
     },
   },
 

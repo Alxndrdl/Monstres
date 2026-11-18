@@ -40,6 +40,9 @@ float steepest_slope(const World& w, float half_size) {
       const float x = static_cast<float>(i) * cell - rules::kReliefHalfSize;
       const float z = static_cast<float>(j) * cell - rules::kReliefHalfSize;
       if (in_cave_hill(w.cave, x, z, 3.0f)) continue;
+      // Around the lake, the ground flattened to its shore can drop steeply into
+      // a hollow of the hills (a few worlds, seed 9); the lake is no way up.
+      if (w.village.lake.radius_x > 0 && lake_distance(w.village.lake, x, z) < 2.2f) continue;
       steepest = std::max({steepest, std::fabs(m.at(i + 1, j) - m.at(i, j)) / cell,
                            std::fabs(m.at(i, j + 1) - m.at(i, j)) / cell,
                            std::fabs(m.at(i + 1, j + 1) - m.at(i, j)) / (cell * std::sqrt(2.0f))});

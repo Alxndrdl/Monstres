@@ -182,6 +182,18 @@ window.monstres = {
   healTeam: (npc) => monstresCommand('healTeam', npc),
   // Through the door the player stands at (in, out, up, down: interior.hpp).
   door: () => monstresCommand('door', 0),
+  // The bag (web/menu.js): its items; drink a mana potion; throw some away
+  // (count 0: all; never a quest's).
+  bag: () => JSON.parse(UTF8ToString(_monstres_bag_json())),
+  useItem: (item) => monstresCommand('useItem', item),
+  discard: (item, count = 0) => monstresCommand('discard', item + 256 * count),
+  // The merchant (Anselme, once his cart stands again): what he sells; buy one.
+  shop: () => JSON.parse(UTF8ToString(_monstres_shop_json())),
+  buy: (item) => monstresCommand('buy', item),
+  // The farm (Capucine): the team and the monsters kept there; swap team[slot]
+  // with farm[kept] (slot -1: take it back; kept -1: leave team[slot] there).
+  farm: () => JSON.parse(UTF8ToString(_monstres_farm_json())),
+  farmSwap: (slot, kept) => monstresCommand('farmSwap', (slot < 0 ? 7 : slot) + 8 * (kept < 0 ? 8191 : kept)),
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),
   holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),

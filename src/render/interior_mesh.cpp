@@ -44,6 +44,11 @@ constexpr Color kWindow{0.75f, 0.85f, 0.95f, kLitAtNightAlpha};
 constexpr Color kRock{0.36f, 0.34f, 0.38f, 1};
 constexpr Color kRockFloor{0.42f, 0.39f, 0.37f, 1};
 constexpr Color kRockDark{0.20f, 0.18f, 0.24f, 1};
+constexpr Color kEarth{0.45f, 0.33f, 0.22f, 1};
+constexpr Color kEarthFloor{0.50f, 0.38f, 0.26f, 1};
+constexpr Color kEarthDark{0.30f, 0.22f, 0.15f, 1};
+constexpr Color kBark{0.40f, 0.28f, 0.18f, 1};
+constexpr Color kWhitewash{0.88f, 0.87f, 0.83f, 1};
 
 // ---- The cave: its surface on a grid (surface nets) ----------------------------
 
@@ -112,7 +117,10 @@ MeshData cave_mesh(const Interior& in) {
     const Vec3 n = surface_normal(in, p);
     const float grain = value_noise(in.noise + 7, p.x + p.y * 0.7f, p.z - p.y * 0.4f, 1.3f);
     const float streak = value_noise(in.noise + 8, p.x * 0.3f, p.y * 2.5f + p.z * 0.3f, 1.0f);
-    Color col = n.y > 0.6f ? mixc(kRock, kRockFloor, std::min(1.0f, (n.y - 0.6f) * 4)) : n.y < -0.5f ? kRockDark : kRock;
+    // The burrow: earth, not rock (roots in its ceiling).
+    const bool earth = in.kind == PlaceKind::Burrow;
+    const Color rock = earth ? kEarth : kRock, floor = earth ? kEarthFloor : kRockFloor, dark = earth ? kEarthDark : kRockDark;
+    Color col = n.y > 0.6f ? mixc(rock, floor, std::min(1.0f, (n.y - 0.6f) * 4)) : n.y < -0.5f ? dark : rock;
     col = shade(col, 0.82f + 0.3f * grain + 0.12f * (streak - 0.5f));
     out.vertex(p, n, col);
   }
@@ -291,6 +299,18 @@ MeshData room_mesh(const World& w) {
     look = {shade(kStone, 0.95f), kStone, kStone, shade(kStone, 0.6f), shade(kStone, 0.55f), true, true};
     door_width = 1.24f;
     door_height = 2.5f;
+  } else if (in.kind == PlaceKind::HollowTree) {  // inside the trunk: wood all around
+    look = {shade(kPlanks, 0.8f), kBark, shade(kBark, 0.85f), shade(kBark, 0.6f), shade(kBark, 0.5f), true, false};
+    door_width = 1.24f;
+    door_height = 2.5f;
+  } else if (in.kind == PlaceKind::Lighthouse) {
+    look = {shade(kStone, 0.9f), kWhitewash, shade(kStone, 0.85f), shade(kStone, 0.6f), shade(kWhitewash, 0.7f), true, true};
+    door_width = 1.24f;
+    door_height = 2.5f;
+  } else if (building == ObjectKind::Cabin) {
+    look = {shade(kPlanks, 0.9f), shade(kBark, 1.3f), kBark, kTimber, shade(kPlanks, 0.75f), false, false};
+  } else if (building == ObjectKind::Farmhouse) {
+    look.low = shade(kStone, 0.9f);
   } else if (building == ObjectKind::HouseHut) {
     look = {shade(kMud, 0.9f), kMud, shade(kMud, 0.75f), kTimber, kThatch, true, false};
   } else if (building == ObjectKind::HouseChimney) {
@@ -306,7 +326,7 @@ MeshData room_mesh(const World& w) {
 
 MeshData build_interior_mesh(const World& w) {
   if (!inside(w)) return {};
-  return w.interior.kind == PlaceKind::Cave ? cave_mesh(w.interior) : room_mesh(w);
+  return w.interior.rounding > 0 ? cave_mesh(w.interior) : room_mesh(w);  // the cave, the burrow
 }
 
 void build_interior_list(const World& w, DrawList& list) {

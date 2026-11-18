@@ -3,6 +3,7 @@
 
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/west.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -39,6 +40,14 @@ constexpr Moves kMoves[] = {
       {"geyser", Burst, true, 18, kBig, 2.8f}}},  // Axolotl
     {{{"tumble", Melee, false, 7, kQuick, 0.8f}, {"shard", Projectile, true, 13, kSpecial, 12.0f},
       {"prism", Burst, true, 19, kBig, 3.0f}}},  // Cristi
+    {{{"swipe", Melee, false, 7, kQuick, 0.85f}, {"pilfer", Projectile, true, 13, kSpecial, 11.0f},
+      {"smoke_bomb", Burst, true, 18, kBig, 3.0f}}},  // Raccoon
+    {{{"talon", Melee, false, 7, kQuick, 0.9f}, {"squall", Projectile, true, 14, kSpecial, 13.0f},
+      {"hoot", Burst, true, 17, kBig, 3.4f}}},  // Owl
+    {{{"ram", Melee, false, 7, kQuick, 0.85f}, {"fluff", Projectile, true, 11, kSpecial, 10.0f},
+      {"wool_wave", Burst, true, 19, kBig, 3.0f}}},  // Sheep
+    {{{"scratch", Melee, false, 7, kQuick, 0.8f}, {"clod", Projectile, true, 13, kSpecial, 11.0f},
+      {"tremor", Burst, true, 20, kBig, 3.2f}}},  // Mole
 };
 static_assert(std::size(kMoves) == kSpeciesCount);
 
@@ -63,6 +72,10 @@ constexpr Temper kTempers[] = {
     {4.5f, 0.7f, 3.0f, 12, 1.2f, 2.0f},   // Spark: quick, darts in and out
     {3.0f, 0.7f, 3.0f, 28, 0.95f, 2.0f},  // Axolotl: patient, sprays from close by
     {4.0f, 0.7f, 3.0f, 18, 1.1f, 2.0f},   // Cristi: scuttles around, throws its shards
+    {4.5f, 0.7f, 3.5f, 10, 1.2f, 2.0f},   // Raccoon: snatches and darts away, dodges well
+    {5.0f, 0.7f, 4.0f, 14, 1.0f, 3.4f},   // Owl: hovers high, swoops, throws gusts
+    {2.5f, 0.7f, 2.5f, 36, 0.9f, 2.0f},   // Sheep: charges head first, rarely dodges
+    {3.0f, 0.7f, 3.0f, 26, 0.95f, 2.0f},  // Mole: stubborn, throws clods
 };
 static_assert(std::size(kTempers) == kSpeciesCount);
 constexpr float kLeapSpeed = 1.9f;  // a slime leaping at its foe: this much faster
@@ -146,9 +159,12 @@ Element move_element(const Move& m, Species species, const Genes& genes) {
   return m.elemental ? creature_elements(species, genes).first : Element::Normal;
 }
 
-int rival_index(const World& w) {
+// The monster of trainer `n` (0: the one fighting now, or Bastien's).
+int rival_index(const World& w, uint8_t n = 0) {
+  if (n == 0) n = w.battle.rival.npc ? w.battle.rival.npc : npc::kBastien;
   for (size_t i = 1; i < w.creatures.size(); ++i) {
-    if (w.creatures[i].tag == Tag::Rival) return static_cast<int>(i);
+    const Creature& c = w.creatures[i];
+    if (c.tag == Tag::Rival && (c.npc == n || (c.npc == 0 && n == npc::kBastien))) return static_cast<int>(i);
   }
   return -1;
 }
@@ -186,7 +202,7 @@ void restore_rival(World& w) {
   if (i < 0) return;
   Creature& c = w.creatures[static_cast<size_t>(i)];
   uint8_t count = 0;
-  const RivalMonster& first = rival_team(npc::kBastien, count)[0];
+  const RivalMonster& first = rival_team(c.npc ? c.npc : npc::kBastien, count)[0];
   c.species = first.species;
   c.genes = first.genes;
   c.level = first.level;
@@ -252,6 +268,10 @@ void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
   b.outcome = outcome;
   b.outcome_tick = w.tick;
   b.outcome_xp = xp;
+  // Against an aggressive monster: lost or fled, the magician is sent back to the farm.
+  const bool forced = b.forced;
+  b.forced = false;
+  if (forced && (outcome == BattleOutcome::Defeat || outcome == BattleOutcome::Fled)) rescue(w);
 }
 
 // A monster beaten once, or let go by the player, gives nothing when beaten or caught again.
@@ -323,6 +343,8 @@ void beat(World& w, size_t k) {
     ++b.beaten;
   } else {
     count_beaten(w, f);
+    raider_down(w, c);
+    if (c.tag == Tag::Raider) c.tag = Tag::None;  // beaten: it gives up the raid
     c.beaten = true;  // after its reward: the next time, none
     uint16_t& n = w.beaten_count[static_cast<size_t>(c.species)];
     n = static_cast<uint16_t>(std::min(n + 1, 65535));
@@ -624,7 +646,7 @@ void release(World& w, size_t slot) {
   const float limit = rules::kWorldHalfSize - 2.0f;
   c.home = {std::clamp(c.body.pos.x + ax * 10, -limit, limit), std::clamp(c.body.pos.z + az * 10, -limit, limit)};
   c.target = c.home;
-  c.mind = c.species == Species::Crow ? Mind::Fly : Mind::Flee;
+  c.mind = flies(c.species) ? Mind::Fly : Mind::Flee;
   c.target_y = w.ground.height(c.home.x, c.home.z);
   c.timer = 5 * rules::kTicksPerSecond;
   bool beam = !out;
@@ -731,7 +753,7 @@ Monster starting_companion(const Genes& genes) {
 }
 
 bool owned(const World& w, const Creature& c) {
-  return c.tag == Tag::Rival ||
+  return c.tag == Tag::Rival || c.tag == Tag::Flock || c.tag == Tag::Lamb || c.tag == Tag::Boarder ||
          (c.tag == Tag::LostPiou && w.quests[static_cast<size_t>(QuestId::LostPiou)].stage == QuestStage::Done);
 }
 
@@ -772,7 +794,7 @@ int foe_slot(const World& w, size_t index) {
 
 bool can_capture(const World& w) {
   const Foe* t = battle_target(w);
-  return t && w.battle.rival.npc == 0 && t->hp > 0 && w.team.size() < rules::kTeamSize &&
+  return t && w.battle.rival.npc == 0 && t->hp > 0 && (w.team.size() < rules::kTeamSize || farm_open(w)) &&
          uint32_t{t->hp} * 100u <= uint32_t{t->max_hp} * rules::kCaptureHpPercent;
 }
 
@@ -783,11 +805,27 @@ const std::array<RivalMonster, kRivalTeamSize>& rival_team(uint8_t n, uint8_t& c
       {Species::Slime, Genes{}, 5, 0, false},
       {},
   }};
+  // Romane, camping in the woods: three of the west's.
+  static const std::array<RivalMonster, kRivalTeamSize> kRomane = {{
+      {Species::Owl, Genes{}, 8, 0, false},
+      {Species::Raccoon, Genes{}, 9, 0, false},
+      {Species::Spark, Genes{}, 10, 0, false},
+  }};
+  if (n == npc::kRomane) {
+    count = 3;
+    return kRomane;
+  }
   count = n == npc::kBastien ? 2 : 0;
   return kBastien;
 }
 
-bool rival_arena(const World& w, Vec2& center, Vec2& axis) {
+bool rival_arena(const World& w, uint8_t trainer, Vec2& center, Vec2& axis) {
+  if (trainer == npc::kRomane) {  // in her camp's clearing, south of the fire
+    if (!w.west.valid()) return false;
+    center = {w.west.camp.x, w.west.camp.z + 2.5f};
+    axis = {1, 0};
+    return true;
+  }
   if (w.village.lake.radius_x <= 0) return false;
   const Vec2 vc = w.village.center;
   const float away = w.village.lake.center.x > vc.x ? -1.0f : 1.0f;  // from the lake
@@ -836,7 +874,7 @@ bool can_challenge(const World& w, uint8_t n) {
   uint8_t count = 0;
   rival_team(n, count);
   const Monster* a = active_monster(w);
-  return count > 0 && w.battle.phase == BattlePhase::None && a && a->hp > 0 && near_npc(w, n) && rival_index(w) > 0;
+  return count > 0 && w.battle.phase == BattlePhase::None && a && a->hp > 0 && near_npc(w, n) && rival_index(w, n) > 0;
 }
 
 bool battle_forward(const World& w, float& fx, float& fz) {
@@ -916,7 +954,7 @@ const char* cannot_cast(const World& w, size_t slot) {
 }
 
 bool can_heal_team(const World& w, uint8_t n) {
-  return n == npc::kOdette && w.battle.phase == BattlePhase::None && near_npc(w, n);
+  return (n == npc::kOdette || n == npc::kViolette) && w.battle.phase == BattlePhase::None && near_npc(w, n);
 }
 
 namespace {
@@ -969,8 +1007,8 @@ void engage(World& w, size_t index) {
 // A trainer's battle: both sides walk to their places (see battle_prepare).
 void challenge(World& w, uint8_t n) {
   Vec2 center, axis;
-  const int i = rival_index(w);
-  if (i <= 0 || !rival_arena(w, center, axis)) return;
+  const int i = rival_index(w, n);
+  if (i <= 0 || !rival_arena(w, n, center, axis)) return;
   // The player's side: the one closer to it.
   if ((w.player.pos.x - center.x) * axis.x + (w.player.pos.z - center.z) * axis.z > 0) axis = {-axis.x, -axis.z};
   Battle b = fresh_battle(w.battle, BattlePhase::Prepare);
@@ -988,6 +1026,7 @@ void challenge(World& w, uint8_t n) {
   const Vec2 side{-axis.z, axis.x};
   r.player_spot = {center.x - axis.x * (half + 2.0f) + side.x * 3.0f, center.z - axis.z * (half + 2.0f) + side.z * 3.0f};
   r.trainer_spot = {center.x + axis.x * (half + 2.0f) + side.x * 3.0f, center.z + axis.z * (half + 2.0f) + side.z * 3.0f};
+  w.battle.rival.npc = n;  // whose monster restore_rival dresses
   restore_rival(w);
   Creature& c = w.creatures[static_cast<size_t>(i)];
   c.mind = Mind::Battle;
@@ -996,6 +1035,30 @@ void challenge(World& w, uint8_t n) {
 }
 
 }  // namespace
+
+void force_battle(World& w, size_t index) {
+  if (index == 0 || index >= w.creatures.size() || w.battle.phase != BattlePhase::None) return;
+  const Monster* a = active_monster(w);
+  if (!a || a->hp == 0) {  // the first one standing comes out
+    size_t slot = w.team.size();
+    for (size_t k = 0; k < w.team.size() && slot == w.team.size(); ++k) {
+      if (w.team[k].hp > 0) slot = k;
+    }
+    if (slot == w.team.size()) {  // no one to fight: away to the farm
+      rescue(w);
+      return;
+    }
+    if (w.active >= 0) {  // the knocked out one goes back in first
+      const Monster& out = w.team[static_cast<size_t>(w.active)];
+      w.went_in = {w.tick, false, out.species, out.genes, companion(w).body};
+      w.active = -1;
+      companion(w).mind = Mind::Idle;
+    }
+    summon(w, slot);
+  }
+  engage(w, index);
+  w.battle.forced = true;
+}
 
 void battle_command(World& w, const Input& in) {
   Battle& b = w.battle;
@@ -1016,7 +1079,11 @@ void battle_command(World& w, const Input& in) {
     case Command::QuestAccept:
     case Command::QuestGive:
     case Command::QuestComplete:
-      break;  // quests.cpp
+    case Command::UseItem:
+    case Command::Discard:
+    case Command::Buy:
+    case Command::FarmSwap:
+      break;  // quests.cpp, west.cpp
     case Command::Cast: {
       if (in.target >= kSpellSlots || cannot_cast(w, in.target)) break;
       const SpellId s = current_spells(w)[in.target];
@@ -1123,13 +1190,16 @@ void battle_command(World& w, const Input& in) {
       uint16_t& n = w.captured_count[static_cast<size_t>(e.species)];
       n = static_cast<uint16_t>(std::min(n + 1, 65535));
       if (e.tag == Tag::Giant) w.quests[static_cast<size_t>(QuestId::GiantChampi)].progress |= kGiantCaught;
+      raider_down(w, e);
+      if (m.tag == Tag::Raider) m.tag = Tag::None;
       capture(w, f.index);
       w.went_in = {w.tick, true, e.species, e.genes, e.body};  // runes, then into the crystal
       count_beaten(w, f);
       drop_foe(w, k);
       remove_creature(w, f.index);
       if (b.foes.empty()) end_battle(w, BattleOutcome::Captured, b.won_xp);
-      w.team.push_back(m);
+      if (w.team.size() < rules::kTeamSize) w.team.push_back(m);
+      else send_to_farm(w, m);  // the transfer stone: the team is full
       break;
     }
   }
@@ -1146,7 +1216,7 @@ Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {
   }
 
   // A flying companion climbs while the jump is held, and slowly comes down.
-  if (companion(w).species == Species::Crow) {
+  if (flies(companion(w).species)) {
     f.lift = in.jump_held ? std::min(f.lift + 3.0f * rules::kDt, rules::kFlyLiftMax)
                           : std::max(f.lift - 2.0f * rules::kDt, 0.0f);
   }
@@ -1227,7 +1297,7 @@ Steer battle_foe(World& w, size_t k) {
   const Temper& temper = species_temper(e.species);
   const bool stays = holds_its_place(e.species);  // a fish in the lake
   Steer s;
-  s.fly = e.species == Species::Crow;
+  s.fly = flies(e.species);
   s.lift = temper.lift;
   if (!active_monster(w) || b.phase != BattlePhase::Fight) return s;  // no one to fight: it waits
 
@@ -1413,6 +1483,15 @@ void battle_resolve(World& w) {
     p.pos.y += p.dir_y * rules::kProjectileSpeed * rules::kDt;
     p.pos.z += p.dir_z * rules::kProjectileSpeed * rules::kDt;
     bool gone = p.ticks == 0 || --p.ticks == 0 || p.pos.y < w.ground.height(p.pos.x, p.pos.z);
+    // Training, a wind monster's throw into the mill's sails: they turn again.
+    if (!gone && training(w) && p.from_ally && has_ally) {
+      const Elements e = creature_elements(ally_c.species, ally_c.genes);
+      if ((e.first == Element::Air || e.second == Element::Air) && push_sails(w, p.pos)) {
+        b.impacts.push_back({p.pos, Element::Air, w.tick});
+        b.projectiles.erase(b.projectiles.begin() + static_cast<std::ptrdiff_t>(i));
+        continue;
+      }
+    }
     const auto touches = [&](const Side& t) {
       const float tx = t.body->pos.x - p.pos.x, tz = t.body->pos.z - p.pos.z;
       const float r = t.shape.half_width + 0.3f;
@@ -1486,12 +1565,16 @@ void battle_resolve(World& w) {
 
   if (b.foes.empty() && !(r.npc && rival_left)) {
     uint32_t xp = b.won_xp;
-    if (r.npc) {  // only the first victory against a trainer gives experience
+    if (r.npc) {  // only the first victory against a trainer gives experience (and coins)
       uint32_t levels = 0;
       for (uint8_t k = 0; k < r.count; ++k) levels += r.team[k].level;
-      xp = w.rival_wins == 0 ? rules::kRivalXpPerLevel * levels : 0;
+      uint8_t& wins = r.npc == npc::kRomane ? w.romane_wins : w.rival_wins;
+      xp = wins == 0 ? rules::kRivalXpPerLevel * levels : 0;
       if (xp == 0) b.no_xp = NoXp::Trainer;
-      if (w.rival_wins < 255) ++w.rival_wins;
+      if (wins == 0) w.bag[static_cast<size_t>(Item::Coin)] += 4 * levels;
+      if (wins < 255) ++wins;
+    } else {
+      w.bag[static_cast<size_t>(Item::Coin)] += (b.won_xp + 3) / 4;  // what the beaten ones dropped
     }
     ++w.battles_won;
     end_battle(w, BattleOutcome::Victory, xp);

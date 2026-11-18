@@ -1,5 +1,7 @@
 #include "monstres/render/landscape.hpp"
 
+#include "monstres/core/west.hpp"
+
 #include "monstres/render/scene.hpp"
 #include "scene_util.hpp"
 
@@ -34,13 +36,25 @@ void scale_for(const Object& o, Instance& in) {
     case ObjectKind::Crystal: in.sx = in.sy = in.sz = s.x; break;
     case ObjectKind::Rug:   in.sx = s.x; in.sz = s.z; break;
     case ObjectKind::Step:  in.sx = s.x; in.sy = s.y; in.sz = s.z; break;  // its base on the ground
+    case ObjectKind::FruitTree:
+    case ObjectKind::Meteorite: in.sx = in.sy = in.sz = s.x; break;
+    case ObjectKind::Menhir: in.sx = in.sz = 1; in.sy = s.y; break;  // unit height
+    case ObjectKind::Crops: {  // fits [-1, 1]: its half extents along X and Z (turned with it)
+      const bool turned = (o.yaw >> 14) & 1;
+      in.sx = turned ? s.z : s.x;
+      in.sy = 1;
+      in.sz = turned ? s.x : s.z;
+      break;
+    }
+    case ObjectKind::Bridge: in.sx = in.sy = in.sz = 1; in.y += 2 * s.y; break;  // its deck on top of its box
     default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
   }
 }
 
 float wind_for(ObjectKind kind) {
   switch (kind) {
-    case ObjectKind::Tree: return 0.25f;
+    case ObjectKind::Tree:
+    case ObjectKind::FruitTree: return 0.25f;
     case ObjectKind::Pine: return 0.15f;
     case ObjectKind::Bush: return 0.35f;
     default:               return 0;
@@ -149,6 +163,19 @@ LandscapeCache::Item make_item(const World& w, const Object& o) {
     case ObjectKind::Bed: shadow(0.75f, 1.3f, yaw, 0.6f); break;
     case ObjectKind::Shelf: shadow(0.8f, 0.35f, yaw, 0.5f); break;
     case ObjectKind::Hearth: shadow(1.0f, 0.5f, yaw, 0.5f); break;
+    case ObjectKind::Farmhouse: shadow(4.8f, 4.2f, yaw, 0.7f); break;
+    case ObjectKind::Barn: shadow(5.8f, 4.8f, yaw, 0.7f); break;
+    case ObjectKind::FruitTree: shadow(1.6f * s.x, 1.6f * s.x, 0); break;
+    case ObjectKind::Haystack: shadow(1.3f, 1.3f, 0, 0.7f); break;
+    case ObjectKind::Windmill: shadow(3.6f, 3.6f, 0, 0.75f); break;
+    case ObjectKind::Cabin: shadow(4.0f, 3.4f, yaw, 0.7f); break;
+    case ObjectKind::Tent: shadow(1.9f, 2.1f, yaw, 0.6f); break;
+    case ObjectKind::Woodpile: shadow(1.8f, 0.8f, yaw, 0.6f); break;
+    case ObjectKind::HollowTree: shadow(8.0f, 8.0f, 0, 0.8f); break;
+    case ObjectKind::Burrow: shadow(2.8f, 2.8f, 0, 0.5f); break;
+    case ObjectKind::Lighthouse: shadow(3.6f, 3.6f, 0, 0.75f); break;
+    case ObjectKind::Menhir: shadow(0.7f, 0.7f, 0, 0.7f); break;
+    case ObjectKind::Meteorite: shadow(1.3f * s.x, 1.3f * s.x, 0, 0.7f); break;
     default: break;
   }
   return item;
@@ -194,6 +221,13 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
   const float z = -kDecorationHalfSize + (static_cast<float>(j) + rand01(w.seed, 2000 + ui, uj));
   const float on_path = distance_to_path(w.path, x, z, 2 * rules::kPathHalfWidth) / rules::kPathHalfWidth;
   if (on_path < 0.75f) return;
+  // The west's road, its stream's water and its fields.
+  if (w.west.valid()) {
+    if (distance_to_road(w.west.road, x, z, 2 * rules::kRoadHalfWidth) < 0.75f * rules::kRoadHalfWidth) return;
+    if (distance_to_stream(w.west.stream, x, z, rules::kStreamWater + 1.0f) < rules::kStreamWater + 0.3f) return;
+    const float cx = x - w.west.crater.x, cz = z - w.west.crater.z;  // the crater's scorched bowl
+    if (cx * cx + cz * cz < rules::kCraterRadius * rules::kCraterRadius * 0.8f) return;
+  }
   if (obstacles.covered(x, z, 0.05f)) return;
   if (w.ground.normal(x, z).y < 0.8f) return;  // bare rock on cliffs
   if (in_lake(w.village.lake, x, z, 0.6f)) return;
@@ -387,7 +421,11 @@ const LandscapeCache::Chunk& LandscapeCache::chunk(const World& w, int cx, int c
     const float x0 = chunk_start(cx), z0 = chunk_start(cz);
     Obstacles obstacles({x0 + landscape::kChunk / 2, z0 + landscape::kChunk / 2}, landscape::kChunk / 2 + 2);
     const Box area{{x0 - 2, -1e9f, z0 - 2}, {x0 + landscape::kChunk + 2, 1e9f, z0 + landscape::kChunk + 2}};
-    for_objects_near(w, area, [&](uint32_t, const Box& b) { obstacles.add(b); });
+    for_objects_near(w, area, [&](uint32_t k, const Box& b) {
+      const Object& o = w.objects[k];
+      // The fields: no grass among the crops (walked through: no box of their own).
+      obstacles.add(o.kind == ObjectKind::Crops ? Box{o.pos - o.size, o.pos + o.size} : b);
+    });
     const auto first = [](float start) {
       return std::clamp(static_cast<int>(std::ceil(start + kDecorationHalfSize)), 0, kGrassCells);
     };

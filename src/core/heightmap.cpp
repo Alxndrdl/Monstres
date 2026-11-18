@@ -1,6 +1,7 @@
 #include "monstres/core/heightmap.hpp"
 
 #include "monstres/core/continent.hpp"
+#include "monstres/core/west.hpp"
 #include "monstres/core/world.hpp"
 
 #include <algorithm>
@@ -47,14 +48,55 @@ float add_knoll(float h, Vec2 center, float x, float z, float top, float height,
   return h + knoll + (top - (h + knoll)) * flat;
 }
 
+// The heights the west's places are leveled at (see make_heightmap).
+struct WestTops {
+  float farm = 0, mill = 0, pasture = 0, burrow = 0, lighthouse = 0, menhirs = 0, crater = 0, cart = 0;
+  float camp = 0, hollow = 0, cabin = 0;
+};
+
+// Leveled ground of radius `flat` at `top`, blending back into h out to `outer`.
+float level_at(float h, Vec2 c, float x, float z, float top, float flat, float outer) {
+  const float dx = x - c.x, dz = z - c.z;
+  const float d2 = dx * dx + dz * dz;
+  if (d2 >= outer * outer) return h;
+  const float k = 1 - smooth(flat, outer, std::sqrt(d2));
+  return h + (top - h) * k;
+}
+
+float shape_west(const WestLayout& west, const WestTops& t, float x, float z, float h) {
+  h = level_at(h, west.cart, x, z, t.cart, 4.0f, 10.0f);
+  h = level_at(h, west.farm, x, z, t.farm, rules::kFarmRadius, rules::kFarmRadius + 18.0f);
+  h = level_at(h, west.mill, x, z, t.mill, rules::kMillRadius, rules::kMillKnoll + 6.0f);
+  h = level_at(h, west.pasture, x, z, t.pasture, rules::kPastureRadius - 4.0f, rules::kPastureRadius + 10.0f);
+  h = level_at(h, west.burrow, x, z, t.burrow, 5.0f, rules::kBurrowRadius + 6.0f);
+  h = level_at(h, west.camp, x, z, t.camp, rules::kCampRadius - 2.0f, rules::kCampRadius + 6.0f);
+  h = level_at(h, west.hollow_tree, x, z, t.hollow, 6.0f, rules::kHollowClearing + 6.0f);
+  h = level_at(h, west.cabin, x, z, t.cabin, 5.0f, rules::kCabinClearing + 6.0f);
+  h = level_at(h, west.lighthouse, x, z, t.lighthouse, 6.5f, rules::kLighthouseRadius + 24.0f);
+  h = level_at(h, west.menhirs, x, z, t.menhirs, rules::kMenhirsRadius - 2.0f, rules::kMenhirsRadius + 20.0f);
+  // The crater: its rim around a bowl, the ground leveled around it.
+  h = level_at(h, west.crater, x, z, t.crater, rules::kCraterRim, rules::kCraterRim + 14.0f);
+  const float cx = x - west.crater.x, cz = z - west.crater.z;
+  const float r2 = cx * cx + cz * cz;
+  if (r2 < (rules::kCraterRim + 2) * (rules::kCraterRim + 2)) {
+    const float r = std::sqrt(r2), R = rules::kCraterRadius;
+    if (r < R) h -= rules::kCraterDepth * (1 - (r / R) * (r / R)) - 1.4f * smooth(R * 0.6f, R, r);
+    else h += 1.4f * (1 - smooth(R, rules::kCraterRim, r));  // the rim
+  }
+  return h;
+}
+
 // knoll_top, castle_top: heights of the flat tops of the knolls (see make_heightmap);
 // land: the continent's height there (0 in the valley).
-float relief(uint64_t seed, const Path& path, const Places& places, float knoll_top, float castle_top, float x,
-             float z, float land) {
+float relief(uint64_t seed, const Path& path, const Places& places, float knoll_top, float castle_top,
+             const WestTops& tops, float x, float z, float land) {
   const VillageLayout& village = places.village;
   const RuinsLayout& ruins = places.ruins;
   // Three octaves of hills; the smallest bumps fade out along the path.
-  const float near_path = 1 - smooth(1.5f, 7.0f, distance_to_path(path, x, z, 7.0f));
+  float near_path = 1 - smooth(1.5f, 7.0f, distance_to_path(path, x, z, 7.0f));
+  if (places.west && places.west->valid()) {
+    near_path = std::max(near_path, 1 - smooth(1.5f, 7.0f, distance_to_road(places.west->road, x, z, 7.0f)));
+  }
   float h = hills(seed, x, z) + (value_noise(seed + 42, x, z, 6.0f) - 0.5f) * 0.8f * (1 - near_path);
 
   if (ruins.radius > 0) {
@@ -80,10 +122,16 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
     h += rise * (1 - passage);
   }
 
+  // The stream runs down a gentle valley of its own: the hills flatten around it.
+  if (places.west && places.west->valid()) {
+    const float d = distance_to_stream(places.west->stream, x, z, 40.0f);
+    h *= 0.15f + 0.85f * smooth(8.0f, 40.0f, d);
+  }
   // The hills fade out towards the edge of the relief, where the continent's
   // ground (drawn far away from its own grid) takes over: both then meet exactly.
   const float edge = std::max(std::fabs(x), std::fabs(z));
   h = h * (1 - smooth(rules::kReliefHalfSize - 80, rules::kReliefHalfSize - 8, edge)) + land;
+  if (places.west && places.west->valid()) h = shape_west(*places.west, tops, x, z, h);
 
   if (village.lake.radius_x > 0) {
     // Flat village and shore, at y = 0.
@@ -96,6 +144,52 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
     if (lake_depth > 0) h = -kLakeDepth * std::min(1.0f, lake_depth * 2.5f);
   }
   return h;
+}
+
+}  // namespace
+
+namespace {
+
+// The stream's water goes down from its spring (never up): its level at each
+// point is below the ground all along before it, then its bed is dug under it,
+// its banks sloping back up to the ground around.
+void carve_stream(Heightmap& m, WestLayout& west) {
+  Stream& s = west.stream;
+  s.level.assign(s.points.size(), 0.0f);
+  float level = 1e9f;
+  for (size_t i = 0; i < s.points.size(); ++i) {
+    level = std::min(level, m.height(s.points[i].x, s.points[i].z) - 0.7f);
+    s.level[i] = std::max(level, rules::kSeaLevel - 0.6f);
+  }
+  if (s.points.empty()) return;
+  float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
+  for (const Vec2& p : s.points) {
+    x0 = std::min(x0, p.x);
+    x1 = std::max(x1, p.x);
+    z0 = std::min(z0, p.z);
+    z1 = std::max(z1, p.z);
+  }
+  constexpr float kBank = 0.6f;  // the banks' steepest slope
+  const float reach = rules::kStreamChannel + 30.0f;  // the banks rise back to the highest ground around
+  const auto index = [](float v) {
+    return std::clamp(static_cast<int>(std::floor((v + rules::kReliefHalfSize) / Heightmap::kCellSize)), 0,
+                      Heightmap::kPoints - 1);
+  };
+  for (int i = index(x0 - reach); i <= std::min(index(x1 + reach) + 1, Heightmap::kPoints - 1); ++i) {
+    for (int j = index(z0 - reach); j <= std::min(index(z1 + reach) + 1, Heightmap::kPoints - 1); ++j) {
+      const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
+      const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
+      float water = 0;
+      const float d = distance_to_stream(s, x, z, reach, &water);
+      if (d >= reach) continue;
+      float& h = m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)];
+      const float bed = water - rules::kStreamDepth;
+      if (h <= bed) continue;
+      // Its bed, then banks no steeper than kBank up to the ground.
+      const float t = std::max(0.0f, d - (rules::kStreamWater - 0.3f));
+      h = std::min(h, bed + kBank * t);
+    }
+  }
 }
 
 }  // namespace
@@ -169,15 +263,44 @@ Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) 
     const float c = land[static_cast<size_t>(i * kLand + j + 1)], d = land[static_cast<size_t>((i + 1) * kLand + j + 1)];
     return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * tz;
   };
+  // The west's places are leveled at the height of their middle.
+  WestTops tops;
+  WestLayout* west = places.west && places.west->valid() ? places.west : nullptr;
+  if (west) {
+    const auto natural = [&](Vec2 p) {
+      const float edge = std::max(std::fabs(p.x), std::fabs(p.z));
+      return hills(seed, p.x, p.z) * (1 - smooth(rules::kReliefHalfSize - 80, rules::kReliefHalfSize - 8, edge)) +
+             land_at(p.x, p.z);
+    };
+    tops.cart = natural(west->cart);
+    tops.farm = natural(west->farm);
+    tops.mill = natural(west->mill) + rules::kMillRise;
+    tops.pasture = natural(west->pasture);
+    tops.burrow = natural(west->burrow);
+    tops.camp = natural(west->camp);
+    tops.hollow = natural(west->hollow_tree);
+    tops.cabin = natural(west->cabin);
+    tops.lighthouse = std::max(natural(west->lighthouse), rules::kSeaLevel + 1.0f) + rules::kLighthouseRise;
+    tops.menhirs = natural(west->menhirs);
+    tops.crater = natural(west->crater);
+  }
+  const Places with_tops{places.village, places.ruins, places.cave, places.castle, west};
   for (int i = 0; i < Heightmap::kPoints; ++i) {
     for (int j = 0; j < Heightmap::kPoints; ++j) {
       const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
       const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
       m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] =
-          relief(seed, path, places, knoll_top, castle_top, x, z, land_at(x, z));
+          relief(seed, path, with_tops, knoll_top, castle_top, tops, x, z, land_at(x, z));
     }
   }
+  if (west) carve_stream(m, *west);
   return m;
+}
+
+float natural_height(uint64_t seed, float x, float z) {
+  const float edge = std::max(std::fabs(x), std::fabs(z));
+  return hills(seed, x, z) * (1 - smooth(rules::kReliefHalfSize - 80, rules::kReliefHalfSize - 8, edge)) +
+         continent_height(seed, x, z);
 }
 
 }  // namespace monstres

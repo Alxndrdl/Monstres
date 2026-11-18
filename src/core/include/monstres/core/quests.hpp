@@ -48,6 +48,14 @@ inline constexpr uint8_t kGiantLevel = 8, kGiantAlphaLevel = 5, kGiantEscortLeve
 inline constexpr uint32_t kCombatWizardXp = 30, kCombatMonsterXp = 20;
 inline constexpr uint32_t kHealingWizardXp = 25, kHealingMonsterXp = 15;
 inline constexpr uint32_t kMainPart1WizardXp = 100, kMainPart1MonsterXp = 60;
+// The west's quests (west.hpp): experience, and coins (and potions) in the bag.
+inline constexpr uint32_t kMerchantWizardXp = 40, kMerchantMonsterXp = 25, kMerchantCoins = 40, kMerchantPotions = 2;
+inline constexpr uint32_t kDeliveryWizardXp = 60, kDeliveryMonsterXp = 30;
+inline constexpr uint32_t kTransferWizardXp = 50, kTransferMonsterXp = 30, kTransferCoins = 20;
+inline constexpr uint32_t kOrchardWizardXp = 150, kOrchardMonsterXp = 90, kOrchardCoins = 80, kOrchardPotions = 3;
+inline constexpr uint32_t kShepherdWizardXp = 60, kShepherdMonsterXp = 40;
+inline constexpr uint8_t kShepherdGiftLevel = 5;
+inline constexpr uint32_t kMillWizardXp = 50, kMillMonsterXp = 30, kMillCoins = 50, kMillPotions = 1;
 }  // namespace rules
 
 // The quests of the main quest's first part.
@@ -63,6 +71,7 @@ inline constexpr uint8_t kGiantRewarded = 2;  // the quest's experience was give
 inline constexpr uint8_t kHealedMonster = 1;
 // The main quest's: the parts done.
 inline constexpr uint8_t kMainPart1Done = 1;
+inline constexpr uint8_t kMainPart2Done = 2;  // the orchard saved (the main quest's second part, in the west)
 
 // While Odette's quest is on: a Heal spell was cast on a hurt monster (battle.cpp).
 void healed_monster(World& world);
@@ -94,11 +103,18 @@ std::array<Creature, 5> make_giant_group(const World& world, uint32_t visit);
 
 // What a villager has for the player, shown over its head and on the map:
 // a quest to take (?), a quest going on (!), healing (+), battles (x).
-enum NpcMark : uint8_t { kMarkNewQuest = 1, kMarkQuest = 2, kMarkHeal = 4, kMarkFight = 8 };
+// The west adds: a shop (the merchant), the farm's monsters (Capucine).
+enum NpcMark : uint8_t { kMarkNewQuest = 1, kMarkQuest = 2, kMarkHeal = 4, kMarkFight = 8, kMarkShop = 16, kMarkFarm = 32 };
 uint8_t npc_marks(const World& world, uint8_t npc);
 
-// The villager who gives a quest.
+// The villager who gives a quest, and the one it is told to (the strange
+// stone: Capucine, at the farm).
 uint8_t quest_giver(QuestId quest);
+uint8_t quest_receiver(QuestId quest);
+// Whether a quest can be taken (the main quest's parts, one after the other).
+bool quest_available(const World& world, QuestId quest);
+// The monster the shepherd gives (a Laini of his flock), the same each time.
+Monster shepherd_gift(const World& world);
 // Whether a quest's steps are all done (it can be reported).
 bool quest_ready(const World& world, QuestId quest);
 

@@ -22,6 +22,8 @@ TEST_CASE("new_game builds a valid world") {
       const float height = b.max.y - b.min.y;
       CHECK(b.min.y == Approx(o.pos.y));
       if (o.kind == ObjectKind::Collider) continue;  // raised: the roof of a gate or a cave
+      // The west's bridge spans the stream; its fields are walked through, flat on the ground.
+      if (o.kind == ObjectKind::Bridge || o.kind == ObjectKind::Crops) continue;
       CHECK(o.pos.y < w.ground.height(o.pos.x, o.pos.z));
       CHECK(o.pos.y >= w.ground.height(o.pos.x, o.pos.z) - 0.05f - 0.4f * height - 1e-4f);
       for (float x : {b.min.x, b.max.x}) {

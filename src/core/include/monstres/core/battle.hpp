@@ -183,7 +183,12 @@ const std::array<RivalMonster, kRivalTeamSize>& rival_team(uint8_t npc, uint8_t&
 
 // Where a trainer's battle takes place: its middle, and the line between the
 // two sides (unit vector), outside the village. False if this world has no village.
-bool rival_arena(const World& world, Vec2& center, Vec2& axis);
+bool rival_arena(const World& world, uint8_t trainer, Vec2& center, Vec2& axis);
+
+// An aggressive monster (creatures[index], west.hpp) attacks: a battle starts,
+// the first team member standing coming out if needed (none: the magician is
+// sent back to the farm). Lost or fled, it sends the magician to the farm.
+void force_battle(World& world, size_t index);
 
 // The foe aimed at, or nullptr (free move, or no battle).
 const Foe* battle_target(const World& world);

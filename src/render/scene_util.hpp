@@ -27,7 +27,8 @@ inline float lerp(float a, float b, float t) { return a + (b - a) * t; }
 inline float material_for(MeshId id, float material) {
   return id == MeshId::Sparkle || id == MeshId::RuneCircle || id == MeshId::Crystal || id == MeshId::Bolt ||
                  id == MeshId::Rain || id == MeshId::Snow || id == MeshId::RainShaft || id == MeshId::HearthFire ||
-                 id == MeshId::CristiCrystal || id == MeshId::DoorGlow
+                 id == MeshId::CristiCrystal || id == MeshId::DoorGlow || id == MeshId::CampfireFire ||
+                 id == MeshId::LighthouseLamp || id == MeshId::Gust
              ? kGlowing
              : material;
 }

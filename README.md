@@ -429,6 +429,70 @@ la quête ne rapportent plus d'expérience.
 Un monstre déjà battu une fois, ou relâché, ne rapporte plus d'expérience,
 ni en le battant de nouveau ni en le capturant (et même relâché ensuite).
 
+## L'Ouest, jusqu'à la mer
+
+Règles dans `src/core/west.hpp` / `west.cpp`, tirées de la graine
+(`make_west_layout`, non sauvegardé). Entre la vallée et la mer :
+
+- **La route** part du sentier juste au nord du départ (un panneau à la
+  bifurcation) et file vers l'ouest jusqu'à la porte du phare, en longeant
+  l'avant de l'exploitation. **Le ruisseau** descend des collines du nord,
+  passe sous la route (un pont de bois), puis tourne vers la mer : son eau
+  descend toujours, dans un lit creusé, aux berges douces (relief aplani
+  autour de lui, `carve_stream` dans `heightmap.cpp`). On peut y patauger.
+- **La charrette d'Anselme**, renversée au bord de la route : ses trois
+  ballots sont éparpillés autour. Les ramasser (en passant dessus), les lui
+  rapporter : la charrette se redresse et il vend des potions de mana
+  (15 pièces). Récompense : 40 pièces, 2 potions, 40 XP / 25.
+- **L'exploitation de Capucine** : sa ferme (on y entre), la grange, le puits,
+  un enclos où paissent les monstres qu'on y laisse, un verger de pommiers et
+  des champs de blé et de choux, un téléporteur. Violette, la soigneuse, y
+  soigne l'équipe et rend le mana, comme Odette.
+- **Le moulin** sur sa butte : ses ailes sont coincées. Pendant un
+  entraînement, une attaque à distance d'un monstre de vent (élément air :
+  Hulou, Croa) lancée sans viser le magicien dans les ailes les relance
+  (`push_sails`) ; elles tournent ensuite pour toujours. Lucien, le meunier :
+  50 pièces, une potion, 50 XP / 30.
+- **La bergerie** de Basile, son enclos et son troupeau de Laini. Trois agneaux
+  se sont égarés dans les collines (35 à 60 m) : s'en approcher (3 m) les fait
+  suivre le magicien ; entrés dans l'enclos, ils rejoignent le troupeau. Basile
+  donne alors un Laini (niveau 5) : dans l'équipe, ou à l'exploitation si
+  l'équipe est pleine (pas avant la pierre de transfert : il attend).
+- **Le terrier** (on y entre) : des galeries basses creusées dans la terre,
+  et des Taupi.
+- **Le bois de l'Ouest** : la cabane de Firmin le bûcheron (on y entre), le camp
+  de Romane, une dresseuse (Hulou niveau 8, Chipou 9, Zapou 10 : sa première
+  victoire rapporte expérience et pièces), et l'**arbre creux** géant : un
+  escalier monte à l'intérieur jusqu'à une trappe, et dehors sur sa cime, où
+  se perchent les Hulou.
+- **Le phare** (on y entre, on monte jusqu'à sa galerie ; sa lanterne éclaire
+  la mer la nuit) et son gardien Yvon ; **le cercle des menhirs**, un
+  téléporteur au milieu ; **le cratère de l'Étoile**, où une météorite noire
+  aux veines violettes est tombée, entourée de cristaux (Cristi, Zapou).
+
+**La suite de la quête principale** : Isidore confie au magicien une
+« pierre étrange » (objet de quête, dans le sac : on ne peut pas la jeter)
+à livrer à Capucine. La lettre qui l'accompagne l'explique : c'est une pierre
+de transfert liée à la magie du magicien. Désormais, un monstre capturé alors
+que l'équipe compte déjà six monstres est envoyé à l'exploitation
+(`World::farm`, au plus 500). Capucine demande ensuite d'essayer : capturer un
+monstre avec une équipe complète, puis le reprendre auprès d'elle (son menu :
+échanger un monstre de l'équipe avec un de l'exploitation, en laisser un, en
+reprendre un ; `Command::FarmSwap`). Enfin, une bande de Chipou agressifs
+pille son verger (un alpha niveau 8 et quatre niveau 6).
+
+**Monstres agressifs** (`Tag::Raider`) : un éclair rouge tourne au-dessus
+d'eux (pas sur la carte). À moins de 6 m, ils forcent le combat (le premier
+monstre en forme de l'équipe sort au besoin). Perdre ce combat, ou fuir,
+renvoie le magicien à l'exploitation, près de Violette (une note le dit) ;
+sans aucun monstre en forme, il y est renvoyé tout de suite.
+
+**Le sac** (onglet « Sac » du grimoire, touche I) : pièces, potions de mana
+(boire : +15 mana), et objets de quête (la pierre étrange, les ballots
+d'Anselme). Les pièces viennent des combats gagnés (environ le quart de
+l'expérience) et des quêtes. Tout ce qui n'est pas un objet de quête peut être
+jeté (un, ou tout).
+
 ## Modèles 3D
 
 Les modèles sont des fichiers glTF binaires (`assets/models/*.glb`) : le jeu
@@ -524,6 +588,10 @@ laquelle il est entré (pas de carte de l'intérieur pour l'instant).
 - **Les sauvegardes** : une partie sauvegardée dedans enregistre le monde du
   dehors tel qu'il a été laissé, puis l'intérieur et la place du joueur
   (version 22) : au chargement, on se retrouve au même endroit.
+- **L'Ouest** (version 23) : le terrier (galeries de terre, comme la grotte),
+  l'arbre creux et le phare (de hautes salles rondes avec un escalier jusqu'à
+  une trappe, comme la tour : dehors sur la cime, ou sur la galerie), la
+  ferme de Capucine et la cabane du bûcheron (des pièces meublées).
 
 ## Espèces
 
@@ -532,7 +600,13 @@ Monstres : Pompon (renard des braises, feu), Gloubi (gelée, eau), Champi
 (poisson, eau), Zapou (hérisson aux piquants lumineux, électricité : collines, ruines, grotte,
 château), Ploufi (axolotl, eau : bords de l'eau, côte, forêt) et Cristi
 (boule de poils bleu nuit aux grands yeux et aux oreilles pointues, des cristaux
-magiques plantés dans le dos, arcane : seulement dans la grotte aux Cristaux).
+magiques plantés dans le dos, arcane : la grotte aux Cristaux, et le cratère
+de l'Ouest), Chipou (raton masqué, ombre : l'exploitation, les terres sauvages,
+le bois de l'Ouest ; les pillards du verger), Hulou (chouette, air : perchée
+sur la cime de l'arbre creux et le toit de la cabane, elle s'envole quand on
+approche et vole en combat, comme Croa), Laini (mouton nuage, normal : le
+troupeau de Basile, et un peu dans les collines) et Taupi (taupe, nature : le
+terrier, les champs).
 Les Cristis attendent immobiles par terre, sur les parois ou au plafond, à
 peine distincts des cristaux ; ils détalent quand on s'approche (3 m) et se
 laissent tomber au sol pour combattre. Quand le joueur dirige un Cristi en
@@ -939,6 +1013,11 @@ sauvegarde est lu sans construire son monde (`peek_save`,
 Version 22 : Cristi (le bestiaire et les compteurs comptent 10 espèces) et
 l'endroit où se trouve le joueur (dehors, ou dans un intérieur : sa porte et sa
 place).
+
+Version 23 : l'Ouest (14 espèces, 12 quêtes, 7 téléporteurs, trois intérieurs
+de plus), le sac, les monstres laissés à l'exploitation et les victoires
+contre Romane. Les sauvegardes plus anciennes se chargent : les villageois de
+l'Ouest arrivent, le sac et l'exploitation sont vides.
 
 ## Sécurité
 

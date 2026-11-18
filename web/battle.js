@@ -122,6 +122,10 @@
     const doors = LORE.doors;
     if (d.place === 'cave') return doors.cave;
     if (d.place === 'tower') return d.action === 'climb' ? doors.roof : doors.tower;
+    if (d.place === 'hollowTree' || d.place === 'lighthouse') {
+      return d.action === 'climb' ? doors.roofs[d.place] : doors[d.place];
+    }
+    if (d.place === 'burrow') return doors.burrow;
     return doors.house[d.building] || doors.house.cottage;
   }
 

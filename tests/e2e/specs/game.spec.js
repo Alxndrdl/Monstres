@@ -36,7 +36,7 @@ test('the game starts in a 3D world', async ({ page }) => {
   expect(s.creatures[0].species).toBe('companion');
   const bySpecies = {};
   for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
-  expect(bySpecies.villager).toBe(9);  // with Isidore, the old magician
+  expect(bySpecies.villager).toBe(17);  // with Isidore, the old magician, and the west's eight
   expect(bySpecies.companion).toBeGreaterThanOrEqual(1);  // the companion (and now and then a wild Pompon)
   expect(bySpecies.crow).toBeGreaterThan(0);
   expect(bySpecies.fish).toBeGreaterThan(0);
@@ -575,7 +575,7 @@ test.describe('grimoire', () => {
     await expect(menu).toBeHidden();
     await page.locator('#menu-button').click();
     await expect(menu).toBeVisible();
-    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Sorts', 'Quêtes', 'Bestiaire', 'Carte']);
+    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Sac', 'Sorts', 'Quêtes', 'Bestiaire', 'Carte']);
     const tick = (await state(page)).tick;
     await page.waitForTimeout(500);
     expect((await state(page)).tick).toBe(tick);  // paused
@@ -603,8 +603,9 @@ test.describe('grimoire', () => {
     await page.locator('#menu-button').click();
     await page.getByRole('tab', { name: 'Bestiaire' }).click();
     const entries = page.locator('.bestiary-entry');
-    await expect(entries).toHaveCount(9);  // villagers are not monsters
-    await expect(entries.locator('strong')).toHaveText(['Pompon', 'Gloubi', 'Champi', 'Piou', 'Croa', 'Bloup', 'Zapou', 'Ploufi', 'Cristi']);
+    await expect(entries).toHaveCount(13);  // villagers are not monsters
+    await expect(entries.locator('strong')).toHaveText(['Pompon', 'Gloubi', 'Champi', 'Piou', 'Croa', 'Bloup', 'Zapou', 'Ploufi', 'Cristi',
+      'Chipou', 'Hulou', 'Laini', 'Taupi']);
     await page.locator('.bestiary-entry[data-species="mushroom"]').click();
     const detail = page.locator('#bestiary-detail');
     await expect(detail.locator('h2')).toHaveText('Champi');
@@ -1377,4 +1378,79 @@ test('at the cave\'s mouth, "Entrer" leads inside in a fade to black, "Sortir" b
   await expect(context).toContainText('Sortir');
   await context.getByRole('menuitem', { name: 'Sortir' }).click();
   await expect.poll(async () => (await state(page)).player.place).toBe('outside');
+});
+
+test.describe('the west', () => {
+  // Next to villager `npc`, its dialogue open.
+  async function talkTo(page, npc) {
+    const i = await page.evaluate((n) => {
+      const m = window.monstres;
+      for (let i = 1; i < m.state().creatures.length; i++) {
+        m.select(i);
+        const c = m.selected();
+        if (c && c.npc === n) { m.teleport(c.x + 1.2, c.z); m.step(1); return i; }
+      }
+      return -1;
+    }, npc);
+    expect(i).toBeGreaterThan(0);
+    await page.evaluate((i) => { window.monstres.select(i); window.monstresDialogue.open(window.monstres.selected()); }, i);
+  }
+
+  test('Anselme\'s bundles found, his cart up again: he sells potions, kept in the bag', async ({ page }) => {
+    await openGame(page, '?seed=5&new&frozen');
+    await talkTo(page, 10);
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Anselme');
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('charrette');
+    await page.locator('#accept-quest').click();
+    // The three bundles, picked up as the magician walks by.
+    const spots = await page.evaluate(() => window.monstres.quests().find((q) => q.id === 'merchant').steps.spots);
+    expect(spots.length).toBe(3);
+    for (const s of spots) await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(12); }, [s.x, s.z]);
+    expect((await page.evaluate(() => window.monstres.bag())).items.find((it) => it.id === 'goods').count).toBe(3);
+    await talkTo(page, 10);
+    await page.locator('#complete-quest').click();
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('potions');
+    // His shop.
+    await talkTo(page, 10);
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('pièces la fiole');
+    await page.locator('#buy-potion').click();
+    await expect.poll(async () => (await page.evaluate(() => window.monstres.bag())).items.find((it) => it.id === 'manaPotion').count).toBe(3);
+    // The bag, in the grimoire.
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await expect(page.locator('#tab-bag')).toBeVisible();
+    await expect(page.locator('#bag-coins')).toContainText('25 pièces');
+    await page.locator('#bag-manaPotion').click();
+    await expect(page.locator('#bag-detail')).toContainText('Potion de mana');
+    await expect(page.locator('#bag-drink')).toBeDisabled();  // its mana is full
+    await page.locator('#bag-discard-one').click();
+    await expect.poll(async () => (await page.evaluate(() => window.monstres.bag())).items.find((it) => it.id === 'manaPotion').count).toBe(2);
+  });
+
+  test('the farm: Capucine, Violette the healer; the farm\'s panel lists the team', async ({ page }) => {
+    await openGame(page, '?seed=5&new&frozen');
+    await talkTo(page, 11);
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Capucine');
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('exploitation');
+    await talkTo(page, 12);
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Violette');
+    await expect(page.locator('#dialogue .dialogue-text')).toContainText('pleine forme');
+    await page.evaluate(() => window.monstresDialogue.openFarm());
+    await expect(page.locator('#farm-panel')).toBeVisible();
+    await expect(page.locator('#farm-team li')).toHaveCount(1);
+    await expect(page.locator('#farm-kept')).toContainText('Personne');
+    await expect(page.locator('#farm-swap')).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#farm-panel')).toBeHidden();
+  });
+
+  test('Romane, in the woods, offers a battle; the map shows the west', async ({ page }) => {
+    await openGame(page, '?seed=5&new&frozen');
+    await talkTo(page, 15);
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Romane');
+    await expect(page.locator('#challenge')).toBeVisible();
+    const map = await page.evaluate(() => window.monstres.map().west);
+    expect(map.road.length).toBeGreaterThan(100);
+    expect(map.farm.length).toBe(2);
+  });
 });

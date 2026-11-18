@@ -63,6 +63,8 @@ TEST_CASE("every wild species appears") {
     for (const Creature& c : cached_game(seed).creatures) ++counts[static_cast<int>(c.species)];
   }
   counts[static_cast<int>(Species::Cristi)] += 1;  // only inside the crystal cave (test_interiors.cpp)
+  // The west's, far from the start (test_west.cpp).
+  for (Species s : {Species::Owl, Species::Mole, Species::Sheep, Species::Raccoon}) counts[static_cast<int>(s)] += 1;
   for (int count : counts) CHECK(count > 0);
 }
 

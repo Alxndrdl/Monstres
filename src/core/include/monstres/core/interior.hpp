@@ -114,5 +114,7 @@ void map_way_out(Interior& in, const std::vector<Object>& objects);
 // ceiling; scuttle away from the player; drop to the floor to fight.
 void spawn_cristis(World& world);
 void step_cristi(World& world, Creature& c);
+// Taupis in the burrow, digging around its dens.
+void spawn_moles(World& world);
 
 }  // namespace monstres
