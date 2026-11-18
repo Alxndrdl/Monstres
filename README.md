@@ -1053,17 +1053,28 @@ de sauvegarde importé, les paramètres d'URL et ce que la page envoie au jeu.
 
 ## Tests
 
+Trois paliers, selon le moment :
+
 ```bash
-scripts/test.sh --quick    # rapide : natif optimisé + site + Chromium seul
-scripts/test.sh            # complet : sanitizers, WebAssembly, trois navigateurs
-scripts/test.sh --no-e2e   # sans les navigateurs
-ctest --preset native-release         # tous les tests natifs, en quelques secondes
+scripts/test.sh --only battle   # pendant le travail : les tests d'un sujet (natifs et Chromium)
+scripts/test.sh --quick         # avant un commit : natif optimisé + site + Chromium seul
+scripts/test.sh                 # avant un push : sanitizers, WebAssembly, trois navigateurs
+scripts/test.sh --no-e2e        # sans les navigateurs (se combine avec les autres)
+ctest --preset native-release         # tous les tests natifs, en une demi-minute
 ctest --preset native-debug -L unit   # une seule catégorie : unit, functional, regression
 ctest --preset native-debug -R world  # un seul fichier (unit_world)
 ```
 
+`--only MOT` lance les fichiers natifs dont le nom contient le mot
+(`unit_battle`…), les cas dont le titre le contient, et les tests navigateur
+dont le titre le contient (Chromium).
+
 Chaque fichier de tests est un test ctest à part : ctest les lance côte à
-côte (7 au plus, réglé dans `CMakePresets.json`). Les sanitizers (ASan, UBSan)
+côte (7 au plus, réglé dans `CMakePresets.json`), les plus longs d'abord.
+Les découper davantage ne gagne rien : chaque processus génère à nouveau ses
+mondes, ce qui coûte le plus cher. ccache, s'il est installé, est utilisé
+pour les compilations natives ; la version avec sanitizers est compilée en
+`-O1`, comme ils le conseillent. Les sanitizers (ASan, UBSan)
 rendent le jeu environ 40 fois plus lent : sous eux, les plus longues parties
 aléatoires sont raccourcies (`kSanitized`, `tests/support/test_helpers.hpp`)
 et les mondes générés sont mis en cache par graine (`cached_game`) ; la

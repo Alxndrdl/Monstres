@@ -34,7 +34,7 @@ TEST_CASE("a world survives serialize + deserialize unchanged") {
 }
 
 TEST_CASE("every new world can be saved and loaded back") {
-  for (uint64_t seed = 0; seed < 25; ++seed) {
+  for (uint64_t seed = 0; seed < (kSanitized ? 8 : 25); ++seed) {  // sanitizers: memory errors, not seeds
     CAPTURE(seed);
     const World& w = cached_game(seed);
     LoadError error = LoadError::None;
@@ -200,16 +200,18 @@ TEST_CASE("a save with absurd speeds or targets is rejected") {
 // An imported file may be anything: whatever is read is either refused, or
 // a world that can be played, shown and saved again (run with the
 // sanitizers, this finds what a damaged file could break).
-TEST_CASE("damaged saves are refused or load into a world that works") {
+namespace {
+// Damage `count` copies of a save at random (from `seed`): refused, or a world that works.
+void check_damaged_saves(uint64_t seed, int count) {
   const World game = some_game();
   const std::vector<uint8_t> good = serialize(game);
   // Most of a save is its objects: two times out of three, the damage is
   // after them (creatures, team, bestiary, quests...), where more is checked.
   const size_t after_objects = kFirstObject + (game.objects.size() - game.wild_objects) * kObjectSize;
   REQUIRE(after_objects < good.size());
-  Rng rng(7);
+  Rng rng(seed);
   int loaded = 0;
-  for (int k = 0; k < 36; ++k) {  // a load builds the wilds again: not too many
+  for (int k = 0; k < count; ++k) {
     std::vector<uint8_t> bytes = good;
     const size_t from = k % 3 == 0 ? 8 : after_objects;  // never the magic and the version
     const uint32_t changes = 1 + rng.below(3);
@@ -229,6 +231,12 @@ TEST_CASE("damaged saves are refused or load into a world that works") {
     CHECK(serialize(*w).size() > after_objects / 2);
   }
   CHECK(loaded > 0);
+}
+}  // namespace
+
+// A load builds the wilds again: not too many.
+TEST_CASE("damaged saves are refused or load into a world that works") {
+  check_damaged_saves(7, kSanitized ? 18 : 36);  // sanitizers: half (each one builds a world again)
 }
 
 TEST_CASE("a save can be looked at without building its world") {

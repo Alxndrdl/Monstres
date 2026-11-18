@@ -10,7 +10,9 @@
 
 #include <doctest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 #include <filesystem>
 #include <sstream>
 
@@ -46,24 +48,42 @@ TEST_CASE("the current version has a reference save") {
                 ": run with MONSTRES_UPDATE_GOLDEN=1 to create it");
 }
 
-TEST_CASE("every past save still loads to the same state") {
+namespace {
+
+// Every past save (sorted by name), every `parts`-th from `part`. Each loads to its .expected state
+// (or is refused as it says), and its teleporters stand on the ground
+// (version 14 saves patched by an earlier build had them at height 0, under
+// the hills: v15_buried_teleporters.sav is one, played on).
+void check_past_saves(size_t part, size_t parts) {
   const fs::path dir = fs::path(MONSTRES_TEST_DATA_DIR) / "saves";
   if (!fs::exists(dir)) return;
+  std::vector<fs::path> saves;
   for (const auto& entry : fs::directory_iterator(dir)) {
-    if (entry.path().extension() != ".sav") continue;
-    CAPTURE(entry.path().filename().string());
+    if (entry.path().extension() == ".sav") saves.push_back(entry.path());
+  }
+  std::sort(saves.begin(), saves.end());
+  for (size_t k = part; k < saves.size(); k += parts) {
+    const fs::path& path = saves[k];
+    CAPTURE(path.filename().string());
 
-    fs::path expected_path = entry.path();
+    fs::path expected_path = path;
     expected_path.replace_extension(".expected");
 
     // The .expected file holds either the state summary, or
     // "rejected <error>" for saves that must be refused cleanly.
     LoadError error = LoadError::None;
-    const auto world = deserialize(read_bytes(entry.path()), &error);
+    const auto world = deserialize(read_bytes(path), &error);
     // The list of saves shows what loads, and only that (peek_save).
-    const auto peek = peek_save(read_bytes(entry.path()));
+    const auto peek = peek_save(read_bytes(path));
     CHECK(peek.has_value() == world.has_value());
     if (peek && world) CHECK(peek->seed == world->seed);
+    if (world && !world->ground.empty()) {
+      for (const Object& o : world->objects) {
+        if (o.kind != ObjectKind::Teleporter) continue;
+        CAPTURE(int{o.variant});
+        CHECK(std::abs(o.pos.y - world->ground.height(o.pos.x, o.pos.z)) < 0.1f);
+      }
+    }
     const std::string actual =
         world ? summary(*world) : std::string("rejected ") + load_error_name(error) + "\n";
     if (update_golden()) {  // the .sav files themselves are never rewritten
@@ -76,20 +96,8 @@ TEST_CASE("every past save still loads to the same state") {
   }
 }
 
-TEST_CASE("teleporters stand on the ground in every save") {
-  // Version 14 saves patched by an earlier build had their teleporters at
-  // height 0, under the hills (v15_buried_teleporters.sav is one, played on).
-  const fs::path dir = fs::path(MONSTRES_TEST_DATA_DIR) / "saves";
-  if (!fs::exists(dir)) return;
-  for (const auto& entry : fs::directory_iterator(dir)) {
-    if (entry.path().extension() != ".sav") continue;
-    CAPTURE(entry.path().filename().string());
-    const auto world = deserialize(read_bytes(entry.path()));
-    if (!world || world->ground.empty()) continue;
-    for (const Object& o : world->objects) {
-      if (o.kind != ObjectKind::Teleporter) continue;
-      CAPTURE(int{o.variant});
-      CHECK(std::abs(o.pos.y - world->ground.height(o.pos.x, o.pos.z)) < 0.1f);
-    }
-  }
+}  // namespace
+
+TEST_CASE("every past save still loads to the same state, its teleporters on the ground") {
+  check_past_saves(0, 1);
 }

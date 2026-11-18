@@ -10,6 +10,14 @@ option(MONSTRES_BUILD_TESTS "Build the test executables" ON)
 option(MONSTRES_WERROR      "Treat warnings as errors"   OFF)
 option(MONSTRES_SANITIZERS  "Native only: ASan + UBSan"   OFF)
 
+# ccache, if installed: rebuilding what was already built once (another
+# preset, a reconfigure, back to an older version) takes seconds. Native
+# builds only (Emscripten keeps its own cache).
+find_program(MONSTRES_CCACHE ccache)
+if(MONSTRES_CCACHE AND NOT EMSCRIPTEN AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
+  set(CMAKE_CXX_COMPILER_LAUNCHER "${MONSTRES_CCACHE}")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(MonstresOptions)
 include(Dependencies)

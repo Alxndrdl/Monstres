@@ -264,8 +264,8 @@ test.describe('saves', () => {
     expect(await state(page)).toEqual(before);
   });
 
-  test('three slots: a new game with a name and a seed, played, left and removed', async ({ page }) => {
-    test.setTimeout(150000);  // two characters created, and a reload
+  test('three slots: the game played, and a new game with a name and a seed', async ({ page }) => {
+    test.setTimeout(90000);  // a character created
     await openGame(page, '?seed=42&new');
     await page.locator('#settings-button').click();
     await page.locator('#saves-open').click();
@@ -297,15 +297,25 @@ test.describe('saves', () => {
     await createCharacter(page, { name: 'Zoéd', seed: '1234' });
     expect(await page.evaluate(() => window.monstres.wizard().name)).toBe('Zoéd');
     expect((await state(page)).player).toMatchObject({ x: 0, z: 0 });
-    const world = await page.evaluate(() => window.monstres.map().path.slice(0, 6));
-
-    // The same seed in the third slot: the same world.
     await page.locator('#settings-button').click();
     await page.locator('#saves-open').click();
     await expect(slots.nth(1)).toContainText('Zoéd');
     await expect(slots.nth(1)).toContainText('en cours');
-    await slots.nth(2).locator('.save-new').click();
-    await createCharacter(page, { name: 'Léo', seed: '1234' });
+  });
+
+  test('three slots: the same seed, the same world; left, reloaded and removed', async ({ page }) => {
+    test.setTimeout(90000);  // a reload
+    await openGame(page, '?seed=42&new');
+    // Two new games (the creation itself: the test above), with the same seed.
+    const world = await page.evaluate(async () => {
+      const m = window.monstres;
+      await m.newGame(1, 'Zoéd', '1234');
+      m.skipIntro();
+      const path = m.map().path.slice(0, 6);
+      await m.newGame(2, 'Léo', '1234');
+      m.skipIntro();
+      return path;
+    });
     expect(await page.evaluate(() => window.monstres.map().path.slice(0, 6))).toEqual(world);
 
     // The name is shown on the character sheet, and cannot be changed there.
@@ -325,6 +335,7 @@ test.describe('saves', () => {
     expect(list[1].seed).toBe('1234');
 
     // The second one is removed, after a confirmation.
+    const slots = page.locator('#saves-list .save-slot');
     await page.locator('#settings-button').click();
     await page.locator('#saves-open').click();
     await slots.nth(1).locator('.save-delete').click();
@@ -884,16 +895,19 @@ test.describe('battles', () => {
     // A mistake: the bar moves towards the escape.
     await seal.locator('.rune').nth((s0.order[0] + 1) % 6).click();
     await expect(seal.locator('.seal-text')).toContainText('Raté');
-    // Then the right orders, until it is caught.
-    for (let round = 0; round < 6; round++) {
-      s0 = await untilInput();
-      if (!s0) break;
-      for (const k of s0.order) await seal.locator('.rune').nth(k).click();
-      expect((await page.evaluate(() => window.monstres.battle().seal || {})).stage || 'none').not.toBe('wrong');
-    }
+    // The right order: towards the capture (the rest of the seal: test_battle.cpp).
+    s0 = await untilInput();
+    for (const k of s0.order) await seal.locator('.rune').nth(k).click();
+    await expect(seal.locator('.seal-text')).toContainText('Bravo');
+    expect((await page.evaluate(() => window.monstres.battle().seal)).power).toBe(35);
+    // The seal held from here on (as if the next rounds were right).
     await page.evaluate(() => {
       const m = window.monstres;
-      for (let i = 0; i < 400 && m.battle().seal; i++) m.step(1);
+      for (let i = 0; i < 2000 && m.battle().seal; i++) {
+        const s = m.battle().seal;
+        if (s.stage === 'input') m.rune(s.order[s.done]);
+        else m.step(1);
+      }
     });
     await expect(seal).toBeHidden();
     await expect(page.locator('#battle-banner')).toContainText('Piou capturé');
