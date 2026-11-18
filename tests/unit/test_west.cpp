@@ -9,6 +9,7 @@
 #include "monstres/core/west.hpp"
 #include "test_helpers.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 using namespace monstres;
@@ -486,4 +487,133 @@ TEST_CASE("inside the burrow, the hollow tree and the lighthouse") {
   REQUIRE(enter(ObjectKind::Farmhouse));
   CHECK(w.place.kind == PlaceKind::House);
   CHECK(w.objects.size() > 5);
+}
+
+namespace {
+// Walks the whole land, square after square (update_population at each
+// spot); `look` is called at each one.
+template <typename F>
+void walk_land(World& w, F look) {
+  const float edge = rules::kWorldHalfSize - 30.0f;
+  for (float x = -edge; x <= edge; x += 40.0f) {
+    for (float z = -edge; z <= edge; z += 40.0f) {
+      put_player(w, {x, z});
+      if (look(w)) return;
+    }
+  }
+}
+}  // namespace
+
+TEST_CASE("after the orchard, other aggressive monsters roam: a few, never close to a safe place") {
+  World w = cached_game(13);
+  size_t before = 0;
+  walk_land(w, [&](const World& v) {
+    for (const Creature& c : v.creatures) before += c.tag == Tag::Raider ? 1 : 0;
+    return false;
+  });
+  CHECK(before == 0);  // the orchard's raiders were not called yet
+  quest(w, QuestId::Orchard).stage = QuestStage::Done;
+  size_t seen = 0, most = 0;
+  walk_land(w, [&](const World& v) {
+    size_t now = 0;
+    for (const Creature& c : v.creatures) {
+      if (c.tag != Tag::Raider || c.species == Species::Villager) continue;
+      ++now;
+      CHECK(monster_stats(c.species).is_monster);
+      CHECK(far_from_safety(v, c.home.x, c.home.z));
+    }
+    seen += now;
+    most = std::max(most, now);
+    return false;
+  });
+  CHECK(seen > 0);
+  CHECK(most <= rules::kRoamingRaiders);
+  CHECK(far_from_safety(w, farm_rescue_spot(w.west).x, farm_rescue_spot(w.west).z) == false);
+}
+
+TEST_CASE("trainers passing by offer battles; aggressive ones start them, and send the magician back to the farm") {
+  World w = cached_game(14);
+  const auto find = [](const World& v) {
+    for (size_t i = 1; i < v.creatures.size(); ++i) {
+      if (v.creatures[i].species == Species::Villager && npc::wanderer(v.creatures[i].npc)) return static_cast<int>(i);
+    }
+    return -1;
+  };
+  walk_land(w, [&](const World& v) { return find(v) > 0; });
+  CHECK(find(w) < 0);  // not before Bastien's lesson
+  quest(w, QuestId::Combat).stage = QuestStage::Done;
+  walk_land(w, [&](const World& v) { return find(v) > 0; });
+  const int t = find(w);
+  REQUIRE(t > 0);
+  Creature& trainer = w.creatures[static_cast<size_t>(t)];
+  const uint8_t n = trainer.npc;
+  CHECK_FALSE(in_village(w.village, trainer.body.pos.x, trainer.body.pos.z));
+  // Its team, its first monster beside it.
+  uint8_t count = 0;
+  const auto& team = rival_team(w, n, count);
+  CHECK(count >= 1);
+  CHECK(count <= kRivalTeamSize);
+  bool beside = false;
+  for (const Creature& c : w.creatures) beside = beside || (c.tag == Tag::Rival && c.npc == n && c.species == team[0].species);
+  CHECK(beside);
+  CHECK(creature_json(w, t).find("\"wanderer\":true") != std::string::npos);
+  // Not saved: they pass by.
+  const auto loaded = deserialize(serialize(w));
+  REQUIRE(loaded);
+  CHECK(find(*loaded) < 0);
+
+  // A peaceful one: the battle's icon; talked to, a battle; beaten, no more.
+  trainer.tag = Tag::None;
+  go_to_npc(w, n);
+  CHECK((npc_marks(w, n) & kMarkFight) != 0);
+  REQUIRE(can_challenge(w, n));
+  step(w, command(Command::Challenge, n));
+  REQUIRE(w.battle.phase == BattlePhase::Prepare);
+  CHECK(w.battle.rival.npc == n);
+  CHECK_FALSE(w.battle.forced);
+  for (int k = 0; k < 20 * rules::kTicksPerSecond && w.battle.phase == BattlePhase::Prepare; ++k) {
+    step(w, command(Command::Ready));
+  }
+  REQUIRE(w.battle.phase == BattlePhase::Fight);
+  for (RivalMonster& m : w.battle.rival.team) m.hp = 0;
+  for (Foe& f : w.battle.foes) f.hp = 0;
+  for (int k = 0; k < 10 && w.battle.phase != BattlePhase::None; ++k) step(w, Input{});
+  CHECK(w.battle.outcome == BattleOutcome::Victory);
+  CHECK(w.battle.outcome_xp > 0);
+  CHECK(w.creatures[static_cast<size_t>(npc_index(w, n))].beaten);
+  CHECK((npc_marks(w, n) & kMarkFight) == 0);
+  CHECK_FALSE(can_challenge(w, n));
+
+  // An aggressive one: coming close starts the battle; forfeiting it sends the magician to the farm.
+  Creature& again = w.creatures[static_cast<size_t>(npc_index(w, n))];
+  again.beaten = false;
+  again.tag = Tag::Raider;
+  CHECK((npc_marks(w, n) & kMarkFight) == 0);  // the bolt instead
+  CHECK_FALSE(can_challenge(w, n));
+  for (RivalMonster& m : w.wanderers[n - npc::kWanderer].team) m.hp = 0;
+  w.rescue_tick = 0;
+  const Vec3 p = again.body.pos;
+  put_player(w, {p.x + 2.0f, p.z});
+  step(w, Input{});
+  REQUIRE(w.battle.phase == BattlePhase::Prepare);
+  CHECK(w.battle.forced);
+  CHECK(w.battle.rival.npc == n);
+  step(w, command(Command::Flee));
+  CHECK(w.battle.phase == BattlePhase::None);
+  CHECK(w.battle.outcome == BattleOutcome::Forfeit);
+  CHECK(flat({w.player.pos.x, w.player.pos.z}, farm_rescue_spot(w.west)) < 1.0f);
+}
+
+TEST_CASE("the monsters kept at the farm are cared for: their hit points full") {
+  World w = cached_game(11);
+  Monster hurt = any_monster(Species::Spark, 7);
+  hurt.hp = 1;
+  send_to_farm(w, hurt);
+  REQUIRE(w.farm.size() == 1);
+  CHECK(w.farm[0].hp == monster_fight_stats(w.farm[0]).hp);
+  // Loaded hurt (an older save): cared for all the same.
+  w.farm[0].hp = 2;
+  const auto loaded = deserialize(serialize(w));
+  REQUIRE(loaded);
+  CHECK(loaded->farm[0].hp == monster_fight_stats(loaded->farm[0]).hp);
 }

@@ -200,11 +200,12 @@ void write_world(Writer& out, const World& w) {
     out.u16(o.yaw);
     out.u8(o.variant);
   }
-  // The farm's grazing monsters are drawn again from World::farm (not saved).
-  out.u32(static_cast<uint32_t>(std::count_if(w.creatures.begin(), w.creatures.end(),
-                                              [](const Creature& c) { return c.tag != Tag::Boarder; })));
+  // The farm's grazing monsters are drawn again from World::farm, the
+  // trainers passing by come no more (not saved).
+  const auto kept = [](const Creature& c) { return c.tag != Tag::Boarder && !npc::wanderer(c.npc); };
+  out.u32(static_cast<uint32_t>(std::count_if(w.creatures.begin(), w.creatures.end(), kept)));
   for (const Creature& c : w.creatures) {
-    if (c.tag == Tag::Boarder) continue;
+    if (!kept(c)) continue;
     out.u8(static_cast<uint8_t>(c.species));
     write_body(out, c.body);
     out.u8(static_cast<uint8_t>(c.mind));
@@ -257,7 +258,7 @@ void write_world(Writer& out, const World& w) {
   }
   out.u8(w.rival_wins);
   for (SpellId sp : w.combat_spells) out.u8(static_cast<uint8_t>(sp));
-  for (SpellId sp : w.adventure_spells) out.u8(static_cast<uint8_t>(sp));
+  for (size_t k = 0; k < 2; ++k) out.u8(static_cast<uint8_t>(w.adventure_spells[k]));  // the others: at the end
   out.u16(w.detect_ticks);
   out.u8(static_cast<uint8_t>(kSpeciesCount));
   for (size_t s = 0; s < kSpeciesCount; ++s) {
@@ -290,6 +291,9 @@ std::vector<uint8_t> serialize(const World& w) {
     out.f32(w.player.facing_x);
     out.f32(w.player.facing_z);
   }
+  // Version 24: the adventure spells past the first two, the capture spells.
+  for (size_t k = 2; k < kAdventureSlots; ++k) out.u8(static_cast<uint8_t>(w.adventure_spells[k]));
+  for (SpellId sp : w.capture_spells) out.u8(static_cast<uint8_t>(sp));
   return out.take();
 }
 
@@ -327,6 +331,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_new_forest = version >= 21;  // the bigger forest and its clearing
   const bool with_places = version >= 22;      // inside a cave, a house, the tower; Cristi
   const bool with_west = version >= 23;        // the west: its species, quests, places; the bag, the farm
+  const bool with_capture = version >= 24;     // four adventure spells, the capture spells
   // Species in the bestiary and the counts: two more from version 19.
   const size_t species_saved = with_west     ? kSpeciesCount
                                : with_places ? kSpeciesCountV22
@@ -527,18 +532,19 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     }
   }
   if (with_rival && !in.u8(w.rival_wins)) return fail(error, LoadError::Corrupt);
+  // A spell slot: a spell of its kind, or none.
+  const auto read_spells = [&](std::span<SpellId> slots, bool SpellInfo::*kind) {
+    for (SpellId& sp : slots) {
+      uint8_t v = 0;
+      if (!in.u8(v) || v >= kSpellCount) return false;
+      sp = static_cast<SpellId>(v);
+      if (sp != SpellId::None && !(spell_info(sp).*kind)) return false;
+    }
+    return true;
+  };
   if (with_spells) {
-    const auto read_spells = [&](std::array<SpellId, kSpellSlots>& slots, bool combat) {
-      for (SpellId& sp : slots) {
-        uint8_t v = 0;
-        if (!in.u8(v) || v >= kSpellCount) return false;
-        sp = static_cast<SpellId>(v);
-        const SpellInfo& info = spell_info(sp);
-        if (sp != SpellId::None && !(combat ? info.combat : info.adventure)) return false;
-      }
-      return true;
-    };
-    if (!read_spells(w.combat_spells, true) || !read_spells(w.adventure_spells, false)) {
+    if (!read_spells(w.combat_spells, &SpellInfo::combat) ||
+        !read_spells(std::span(w.adventure_spells).first(2), &SpellInfo::adventure)) {
       return fail(error, LoadError::Corrupt);
     }
   }
@@ -566,6 +572,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     for (Monster& m : w.farm) {
       if (!read_monster(m)) return fail(error, LoadError::Corrupt);
     }
+    heal_farm(w);  // cared for there
   }
   // Where the player is: inside a cave, a house, the tower (version 22).
   uint8_t place = 0;
@@ -581,6 +588,10 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
         return fail(error, LoadError::Corrupt);
       }
     }
+  }
+  if (with_capture && (!read_spells(std::span(w.adventure_spells).subspan(2), &SpellInfo::adventure) ||
+                       !read_spells(w.capture_spells, &SpellInfo::capture))) {
+    return fail(error, LoadError::Corrupt);
   }
   if (in.remaining() != 0) return fail(error, LoadError::Corrupt);
   if (!whole) return w;

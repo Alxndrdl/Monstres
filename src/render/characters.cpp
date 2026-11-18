@@ -1191,6 +1191,18 @@ void lie_knocked_out(DrawList& list, const std::array<size_t, kMeshCount>& befor
 // Over a villager's head (`top`: how high it is): what it has for the player,
 // side by side, bobbing and turning slowly so that they are seen from anywhere.
 void add_marks(DrawList& list, const World& w, const Creature& c, float top, float time) {
+  if (c.tag == Tag::Raider) {  // an aggressive trainer: the aggressive monsters' red bolt
+    Instance bolt;
+    bolt.x = c.body.pos.x;
+    bolt.y = c.body.pos.y + top + 0.35f + 0.06f * std::sin(time * 3.0f + static_cast<float>(c.id));
+    bolt.z = c.body.pos.z;
+    bolt.rotation = quat_yaw(time * 1.8f + static_cast<float>(c.id));
+    bolt.sx = bolt.sy = bolt.sz = 1.4f;
+    const float flash = 0.85f + 0.15f * std::sin(time * 9.0f);
+    bolt.tint = {2.6f * flash, 0.35f, 0.25f, 1};
+    bolt.material = kGlowing;
+    list.batches[static_cast<size_t>(MeshId::IconBolt)].push_back(bolt);
+  }
   const uint8_t marks = npc_marks(w, c.npc);
   if (!marks) return;
   struct Icon {

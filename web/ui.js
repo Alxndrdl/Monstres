@@ -292,7 +292,7 @@
       }
     }
     if (person) delete fields.name.dataset.shown;
-    setText(fields.kind, person ? 'Villageois' : '');
+    setText(fields.kind, !person ? '' : c.wanderer ? (c.aggressive ? 'Dresseur agressif' : 'Dresseur de passage') : 'Villageois');
     const look = `${c.index}/${c.look}`;
     if (look !== shownLook) {
       shownLook = look;

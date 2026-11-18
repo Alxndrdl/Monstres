@@ -120,7 +120,7 @@ TEST_CASE("Mercy lasts until the battle ends, and does nothing in training") {
 
 TEST_CASE("Detection: for a minute, the closest very rare monster within 50 m") {
   World w = arena();
-  w.adventure_spells = {SpellId::Detect, SpellId::None};
+  w.adventure_spells = {SpellId::Detect, SpellId::None, SpellId::None, SpellId::None};
   Creature rare;
   rare.species = Species::Bird;
   rare.genes.form = Form::Alpha;

@@ -8,6 +8,7 @@
 
 #include <doctest.h>
 
+#include <algorithm>
 #include <cmath>
 
 using namespace monstres;
@@ -294,6 +295,34 @@ TEST_CASE("Cristi climbs anything outside too: up a rock's side and onto its top
   CHECK(highest < 2.1f);
 }
 
+TEST_CASE("a Cristi steered in a training jumps on the spot, then climbs again") {
+  World w;
+  w.rng = Rng(1);
+  Creature cristi;
+  cristi.species = Species::Cristi;
+  cristi.body.pos = {0, 0, 1};
+  add_creature(w, cristi);
+  Monster m = starting_companion({});
+  m.species = Species::Cristi;
+  m.hp = monster_fight_stats(m).hp;
+  w.team = {m};
+  Input train;
+  train.command = Command::Train;
+  step(w, train);
+  REQUIRE(w.battle.phase == BattlePhase::Training);
+  Input jump;
+  jump.jump = true;
+  step(w, jump);
+  float highest = 0;
+  for (int t = 0; t < rules::kTicksPerSecond; ++t) {
+    step(w, Input{});
+    highest = std::max(highest, w.creatures[0].body.pos.y);
+  }
+  CHECK(highest > 0.3f);  // up in the air
+  CHECK(w.creatures[0].body.on_ground);  // and down again
+  CHECK(w.creatures[0].body.pos.y < 0.05f);
+}
+
 TEST_CASE("wild Cristis wait still, and scuttle away when the player comes close") {
   World w = at_cave();
   door(w);
@@ -314,7 +343,7 @@ TEST_CASE("wild Cristis wait still, and scuttle away when the player comes close
 
 TEST_CASE("the Way out spell, free, leads back to the door from the far end of the cave, round its walls") {
   World w = at_cave();
-  w.adventure_spells = {SpellId::WayOut, SpellId::None};
+  w.adventure_spells = {SpellId::WayOut, SpellId::None, SpellId::None, SpellId::None};
   CHECK(std::string(cannot_cast(w, 0)) == "outside");
   door(w);
   REQUIRE(inside(w));

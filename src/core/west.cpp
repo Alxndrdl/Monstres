@@ -1044,7 +1044,8 @@ void west_step(World& w) {
         std::fabs(c.body.pos.y - w.player.pos.y) > 2.5f) {
       continue;
     }
-    force_battle(w, i);
+    if (c.species == Species::Villager) force_challenge(w, c.npc);  // an aggressive trainer
+    else force_battle(w, i);
     return;
   }
 }
@@ -1086,14 +1087,39 @@ bool push_sails(World& w, Vec3 p) {
   return true;
 }
 
+bool far_from_safety(const World& w, float x, float z) {
+  const float d2 = rules::kRaiderSafeDistance * rules::kRaiderSafeDistance;
+  const auto far = [&](Vec2 p) { return (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) > d2; };
+  if (w.west.valid() && !far(farm_rescue_spot(w.west))) return false;
+  if (in_village(w.village, x, z, rules::kRaiderSafeDistance)) return false;
+  for (const Object& o : w.objects) {
+    if (o.kind == ObjectKind::Teleporter && !far({o.pos.x, o.pos.z})) return false;
+  }
+  return true;
+}
+
+bool roaming_raider(const World& w, float x, float z, uint32_t roll) {
+  if (roll >= rules::kRoamingChance || w.quests[static_cast<size_t>(QuestId::Orchard)].stage != QuestStage::Done) {
+    return false;
+  }
+  uint32_t roaming = 0;
+  for (const Creature& c : w.creatures) roaming += c.tag == Tag::Raider && c.species != Species::Villager ? 1 : 0;
+  return roaming < rules::kRoamingRaiders && far_from_safety(w, x, z);
+}
+
 void raider_down(World& w, const Creature& c) {
   if (c.tag != Tag::Raider) return;
   QuestState& q = w.quests[static_cast<size_t>(QuestId::Orchard)];
   if (q.stage == QuestStage::Active && q.progress < rules::kRaiders) ++q.progress;
 }
 
+void heal_farm(World& w) {
+  for (Monster& m : w.farm) m.hp = monster_fight_stats(m).hp;
+}
+
 void send_to_farm(World& w, const Monster& m) {
   if (w.farm.size() < rules::kMaxFarm) w.farm.push_back(m);
+  heal_farm(w);
   QuestState& q = w.quests[static_cast<size_t>(QuestId::Transfer)];
   if (q.stage == QuestStage::Active) q.progress = static_cast<uint8_t>(q.progress | kSentToFarm);
 }
@@ -1143,6 +1169,7 @@ void west_command(World& w, const Input& in) {
     }
     case Command::FarmSwap: {
       if (!farm_open(w) || !near_npc(w, npc::kCapucine) || w.battle.phase != BattlePhase::None) break;
+      heal_farm(w);  // those taken back come out healed
       const size_t slot = in.target % 8, kept = in.target / 8;
       QuestState& q = w.quests[static_cast<size_t>(QuestId::Transfer)];
       const auto took = [&]() {
@@ -1170,6 +1197,7 @@ void west_command(World& w, const Input& in) {
         w.team.erase(w.team.begin() + static_cast<std::ptrdiff_t>(slot));
         if (w.active > static_cast<int>(slot)) --w.active;
       }
+      heal_farm(w);  // and those left there are cared for
       break;
     }
     default: break;

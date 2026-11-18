@@ -1,8 +1,9 @@
-// The magician's spells, on the page: two buttons beside the attacks (the
-// adventure spells; in a battle or training, the combat ones), keys R and G,
-// the magician's mana above them, and the "Sorts" tab of the grimoire, where
-// they are chosen (out of battles). The rules are in the game
-// (src/core/battle.cpp).
+// The magician's spells, on the page: out of battles, the four adventure
+// spells where the attacks are in a battle; in a battle or training, the two
+// combat ones beside the attacks; capturing, the four capture ones in a
+// square at the bottom right, over the mana (#seal-tools). Keys R, G, V, X.
+// Also the "Sorts" tab of the grimoire, where they are chosen (out of
+// battles). The rules are in the game (src/core/battle.cpp).
 (() => {
   'use strict';
 
@@ -28,6 +29,22 @@
     wayOut: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round" aria-hidden="true"><path d="M4 20c4 0 4-5 8-5s4-5 8-5"/><path d="M16 3h5v7"/>' +
       '<circle cx="4" cy="20" r="1.2"/></svg>',
+    // The capture spells: the series again, a guard, a boost, another series, halfway, the next rune.
+    replay: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v5h5"/></svg>',
+    guard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/>' +
+      '<path d="M12 8v5M10 10.5h4"/></svg>',
+    boost: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M6 13l6-6 6 6M6 19l6-6 6 6"/></svg>',
+    newOrder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4"/>' +
+      '<path d="M18 4l3 3-3 3M18 14l3 3-3 3"/></svg>',
+    steady: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="6" rx="3"/><path d="M12 5v14"/></svg>',
+    hint: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/>' +
+      '<circle cx="12" cy="12" r="3"/></svg>',
   };
   const WHY = {
     cooldown: 'en recharge',
@@ -38,20 +55,27 @@
     active: 'déjà actif',
     training: 'inutile à l’entraînement',
     outside: 'seulement dans une grotte ou un bâtiment',
+    notNow: 'pas maintenant',
+    steady: 'déjà à mi-chemin ou plus',
   };
   const spellName = (id) => (LORE.spells[id] || { name: id }).name;
 
-  // ---- The two buttons ----
-  const buttons = [$('spell-0'), $('spell-1')];
+  // ---- The buttons: four by the jump (adventure; the first two in a
+  // battle), four in a square at the bottom right while capturing ----
+  const KEYS = { KeyR: 0, KeyG: 1, KeyV: 2, KeyX: 3 };
+  const KEY_NAMES = ['R', 'G', 'V', 'X'];
+  const padButtons = [0, 1, 2, 3].map((k) => $(`spell-${k}`));
+  const sealButtons = [0, 1, 2, 3].map((k) => $(`seal-spell-${k}`));
+  let buttons = padButtons;  // the ones shown now
   let shown = '';
-  buttons.forEach((button, slot) => {
+  for (const button of [...padButtons, ...sealButtons]) {
+    const slot = Number(button.dataset.slot);
     button.addEventListener('pointerdown', (event) => {
       event.preventDefault();  // no focus
       if (game && !button.disabled) game.cast(slot);
     });
     button.addEventListener('click', (event) => event.preventDefault());
-  });
-  const KEYS = { KeyR: 0, KeyG: 1 };
+  }
   const typing = (event) => event.target instanceof HTMLElement &&
     (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName));
   window.addEventListener('keydown', (event) => {
@@ -59,78 +83,89 @@
     if (!(event.code in KEYS)) return;
     if (window.MonstresMenu && window.MonstresMenu.isOpen()) return;
     const button = buttons[KEYS[event.code]];
-    if (button.hidden || button.disabled) return;
+    if (!button || button.hidden || button.disabled) return;
     event.preventDefault();
     game.cast(KEYS[event.code]);
     button.classList.add('pressed');
     setTimeout(() => button.classList.remove('pressed'), 120);
   });
 
-  // The magician's mana, above the spells.
-  const mana = $('mana');
+  // The magician's mana: above the spells; capturing, under the capture spells.
+  const manas = [$('mana'), $('seal-mana')];
   let manaShown = '';
   function renderMana(s) {
     const key = `${s.manaNow}/${s.manaMax}`;
     if (key === manaShown) return;
     manaShown = key;
-    mana.querySelector('.mana-fill').style.width = `${s.manaMax ? (100 * s.manaNow) / s.manaMax : 0}%`;
-    setText(mana.querySelector('.mana-text'), key);
-    mana.classList.toggle('low', s.manaNow < 6);
-    mana.title = `Mana : ${s.manaNow} / ${s.manaMax}`;
-    mana.setAttribute('aria-label', mana.title);
+    for (const mana of manas) {
+      mana.querySelector('.mana-fill').style.width = `${s.manaMax ? (100 * s.manaNow) / s.manaMax : 0}%`;
+      setText(mana.querySelector('.mana-text'), key);
+      mana.classList.toggle('low', s.manaNow < 6);
+      mana.title = `Mana : ${s.manaNow} / ${s.manaMax}`;
+      mana.setAttribute('aria-label', mana.title);
+    }
   }
 
   function render() {
     const s = game.spells();
     renderMana(s);
-    const key = s.now.map((x) => x.id).join();
+    buttons = s.capturing ? sealButtons : padButtons;
+    const key = `${s.capturing}/${s.now.map((x) => x.id).join()}`;
     if (key !== shown) {
       shown = key;
-      s.now.forEach((x, i) => {
-        const button = buttons[i];
+      for (const button of s.capturing ? padButtons : sealButtons) button.hidden = true;
+      buttons.forEach((button, i) => {
+        const x = s.now[i] || { id: 'none' };
         button.hidden = x.id === 'none';
         button.dataset.spell = x.id;
         button.querySelector('.spell-icon').innerHTML = ICONS[x.id] || '';
+        const name = button.querySelector('.spell-name');
+        if (name) name.textContent = x.id === 'none' ? '' : spellName(x.id);
       });
     }
     s.now.forEach((x, i) => {
       const button = buttons[i];
-      if (button.hidden) return;
+      if (!button || button.hidden) return;
       const active = x.why === 'active';
       button.disabled = !!x.why;
       button.classList.toggle('active', active);
       button.classList.toggle('no-mana', x.why === 'mana');
       button.style.setProperty('--cd', x.cooldownTotal && !(active && x.id === 'mercy') ? x.cooldown / x.cooldownTotal : 0);
       const label = `${spellName(x.id)} · ${x.mana} mana${x.why ? ` (${WHY[x.why] || x.why})` : ''}`;
+      const cost = button.querySelector('.spell-cost');
+      if (cost) setText(cost, x.mana ? `${x.mana}` : '');
       button.title = label;
       button.setAttribute('aria-label', label);
     });
   }
 
-  // ---- The grimoire's tab: the four slots on the left; on the right, the
-  // chosen slot's spell, and a button to change it (the spells it can hold;
-  // one already in the other slot is greyed: choosing it swaps them).
-  const SLOTS = [  // the order on screen: adventure first (the most used)
-    { slot: 2, kind: 'adventure', key: 'R' }, { slot: 3, kind: 'adventure', key: 'G' },
-    { slot: 0, kind: 'combat', key: 'R' }, { slot: 1, kind: 'combat', key: 'G' },
-  ];
-  const KIND = { adventure: 'Aventure', combat: 'Combat' };
+  // ---- The grimoire's tab: the slots on the left; on the right, the chosen
+  // slot's spell, and a button to change it (the spells it can hold; one
+  // already in another slot of its kind is greyed: choosing it swaps them).
+  // Command::EquipSpell's slots: 0, 1 combat; 2 to 5 adventure; 6 to 9 capture.
+  const FIRST = { combat: 0, adventure: 2, capture: 6 };
+  const SLOTS = ['adventure', 'combat', 'capture'].flatMap((kind) =>  // adventure first (the most used)
+    [0, 1, 2, 3].slice(0, kind === 'combat' ? 2 : 4).map((index) => ({ slot: FIRST[kind] + index, kind, index, key: KEY_NAMES[index] })));
+  const KIND = { adventure: 'Aventure', combat: 'Combat', capture: 'Capture' };
+  const KIND_OF = { adventure: 'd’aventure', combat: 'de combat', capture: 'de capture' };
   let chosen = 2;        // slot shown on the right
   let editing = false;   // choosing its new spell
   let candidate = null;  // the spell picked in the list (its id, 'none' to empty the slot)
 
-  const slotSpell = (s, x) => (x.kind === 'combat' ? s.combat : s.adventure)[x.slot % 2];
+  const slotSpell = (s, x) => s[x.kind][x.index];
+  const costText = (k) => (k.perRune ? `${k.mana} mana par rune restante` : `${k.mana} mana`);
   const icon = (id) => el('span', { className: `spell-badge ${id}`, innerHTML: ICONS[id] || '' });
 
   function spellFacts(id) {
     if (id === 'none') return [el('p', { className: 'facts', textContent: 'Aucun sort : le bouton n’apparaît pas.' })];
     const known = game.spells().known.find((k) => k.id === id) || {};
-    const kinds = known.combat && known.adventure ? 'combat et aventure' : known.combat ? 'combat seulement' : 'aventure seulement';
-    const wait = id === 'mercy' ? 'jusqu’à la fin du combat' : id === 'detect' || id === 'wayOut' ? 'dure 1 min'
-      : `recharge ${known.cooldown} s`;
+    const kinds = known.capture ? 'pendant une capture'
+      : known.combat && known.adventure ? 'combat et aventure' : known.combat ? 'combat seulement' : 'aventure seulement';
+    const wait = known.capture ? '' : id === 'mercy' ? ' · jusqu’à la fin du combat'
+      : id === 'detect' || id === 'wayOut' ? ' · dure 1 min' : ` · recharge ${known.cooldown} s`;
     return [
       el('p', { textContent: (LORE.spells[id] || {}).text || '' }),
-      el('p', { className: 'facts', textContent: `Coût : ${known.mana} mana · ${wait} · ${kinds}` }),
+      el('p', { className: 'facts', textContent: `Coût : ${costText(known)}${wait} · ${kinds}` }),
     ];
   }
 
@@ -141,15 +176,15 @@
     // The slots.
     const list = $('spell-list');
     const items = [];
-    for (const kind of ['adventure', 'combat']) {
-      items.push(el('li', { className: 'quest-section', textContent: `Sorts ${kind === 'combat' ? 'de combat' : 'd’aventure'}` }));
+    for (const kind of ['adventure', 'combat', 'capture']) {
+      items.push(el('li', { className: 'quest-section', textContent: `Sorts ${KIND_OF[kind]}` }));
       for (const y of SLOTS.filter((z) => z.kind === kind)) {
         const id = slotSpell(s, y);
         const button = el('button', { type: 'button', className: 'bestiary-entry spell-entry', id: `spell-slot-${y.slot}` }, [
           icon(id),
           el('span', {}, [el('strong', { textContent: id === 'none' ? 'Vide' : spellName(id) }),
             el('small', { textContent: `${KIND[kind]} · touche ${y.key}${id === 'none' ? '' :
-              ` · ${(s.known.find((k) => k.id === id) || {}).mana} mana`}` })]),
+              ` · ${costText(s.known.find((k) => k.id === id) || {})}`}` })]),
         ]);
         button.dataset.spell = id;
         if (y.slot === chosen) button.setAttribute('aria-current', 'true');
@@ -178,21 +213,21 @@
     });
     const head = el('div', { className: 'spell-head' }, [icon(id),
       el('div', {}, [el('h2', { textContent: id === 'none' ? 'Emplacement vide' : spellName(id) }),
-        el('p', { className: 'facts', textContent: `Sort ${x.kind === 'combat' ? 'de combat' : 'd’aventure'} · touche ${x.key}` })]),
+        el('p', { className: 'facts', textContent: `Sort ${KIND_OF[x.kind]} · touche ${x.key}` })]),
       edit]);
     const body = [head];
     if (!editing) {
       body.push(...spellFacts(id));
       if (!s.editable) body.push(el('p', { className: 'facts', textContent: 'Les sorts se changent hors combat.' }));
     } else {
-      // The spells this slot can hold; the one in the other slot of this kind is greyed (it would swap).
-      const other = slotSpell(s, SLOTS.find((y) => y.kind === x.kind && y.slot !== x.slot));
+      // The spells this slot can hold; those in the other slots of this kind are greyed (they would swap).
+      const others = SLOTS.filter((y) => y.kind === x.kind && y.slot !== x.slot).map((y) => slotSpell(s, y));
       const options = [{ id: 'none', value: 0 }, ...s.known.filter((k) => k[x.kind])];
       body.push(el('p', { className: 'facts', textContent: 'Choisis le sort de cet emplacement :' }));
       body.push(el('ul', { className: 'spell-choices' }, options.map((o) => {
         const button = el('button', { type: 'button', className: 'bestiary-entry spell-choice', id: `spell-choice-${o.id}` }, [
           icon(o.id), el('strong', { textContent: o.id === 'none' ? 'Aucun' : spellName(o.id) })]);
-        button.classList.toggle('taken', o.id !== 'none' && o.id === other);
+        button.classList.toggle('taken', o.id !== 'none' && others.includes(o.id));
         button.classList.toggle('current', o.id === id);
         if (o.id === candidate) button.setAttribute('aria-current', 'true');
         button.addEventListener('click', () => {
@@ -203,8 +238,8 @@
       })));
       if (candidate) {
         body.push(...spellFacts(candidate));
-        if (candidate !== 'none' && candidate === other) {
-          body.push(el('p', { className: 'facts', textContent: 'Déjà dans l’autre emplacement : les deux seront échangés.' }));
+        if (candidate !== 'none' && others.includes(candidate)) {
+          body.push(el('p', { className: 'facts', textContent: 'Déjà dans un autre emplacement : les deux seront échangés.' }));
         }
         const value = candidate === 'none' ? 0 : options.find((o) => o.id === candidate).value;
         const ok = el('button', { type: 'button', className: 'button primary', id: 'spell-confirm',

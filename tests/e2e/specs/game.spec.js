@@ -889,9 +889,14 @@ test.describe('battles', () => {
     // The seal: a circle of runes around it, lit in an order to touch again.
     const seal = page.locator('#seal');
     await expect(seal).toBeVisible();
-    await expect(seal.locator('.seal-title')).toHaveText('Capture · Piou');
-    await expect(seal.locator('.rune')).toHaveCount(6);
+    await expect(seal.locator('.seal-title')).toHaveText('Capture · Piou · 50 %');
+    const runes = (await page.evaluate(() => window.monstres.battle().seal)).runes;
+    expect(runes).toBeGreaterThanOrEqual(4);
+    await expect(seal.locator('.rune')).toHaveCount(runes);
     await expect(page.locator('#action-capture')).toBeHidden();  // the rest waits
+    // The capture spells, in a square over the mana.
+    await expect(page.locator('#seal-tools .seal-spell:not([hidden])')).toHaveCount(4);
+    await expect(page.locator('#seal-mana')).toBeVisible();
     const untilInput = () => page.evaluate(() => {
       const m = window.monstres;
       for (let i = 0; i < 400 && m.battle().seal && m.battle().seal.stage !== 'input'; i++) m.step(1);
@@ -899,15 +904,19 @@ test.describe('battles', () => {
     });
     let s0 = await untilInput();
     expect(s0.bar).toBe(50);
-    await expect(seal.locator('.seal-text')).toContainText('touche les runes dans le même ordre (0/5)');
+    await expect(seal.locator('.seal-text')).toContainText(`touche les runes dans le même ordre (0/${s0.length})`);
+    // The Hint spell: the next rune shows.
+    await page.locator('#seal-spell-3').dispatchEvent('pointerdown');
+    await page.evaluate(() => window.monstres.step(1));
+    await expect(seal.locator('.rune.hint')).toHaveCount(1);
     // A mistake: the bar moves towards the escape.
-    await seal.locator('.rune').nth((s0.order[0] + 1) % 6).click();
+    await seal.locator('.rune').nth((s0.order[0] + 1) % runes).click();
     await expect(seal.locator('.seal-text')).toContainText('Raté');
-    // The right order: towards the capture (the rest of the seal: test_battle.cpp).
+    // The right order: each rune towards the capture (the rest of the seal: test_battle.cpp).
     s0 = await untilInput();
     for (const k of s0.order) await seal.locator('.rune').nth(k).click();
-    await expect(seal.locator('.seal-text')).toContainText('Bravo');
-    expect((await page.evaluate(() => window.monstres.battle().seal)).power).toBe(35);
+    await expect(seal.locator('.seal-text')).toContainText('Série réussie');
+    expect((await page.evaluate(() => window.monstres.battle().seal)).power).toBe(10 + 5 * s0.length);
     // The seal held from here on (as if the next rounds were right).
     await page.evaluate(() => {
       const m = window.monstres;
@@ -1088,10 +1097,10 @@ test.describe('the bigger world', () => {
 
   test('spells: chosen in the grimoire, cast with a button; Odette heals the team', async ({ page }) => {
     await openGame(page, '?seed=3&new&frozen');
-    // The grimoire's tab: the adventure and combat slots; the first adventure one is shown.
+    // The grimoire's tab: the adventure, combat and capture slots; the first adventure one is shown.
     await page.keyboard.press('p');
     await expect(page.locator('#tab-spells')).toBeVisible();
-    await expect(page.locator('.spell-entry')).toHaveCount(4);
+    await expect(page.locator('.spell-entry')).toHaveCount(4 + 2 + 4);
     await expect(page.locator('#spell-slot-2')).toHaveAttribute('aria-current', 'true');
     await expect(page.locator('#spell-detail h2')).toHaveText('Soin');
     // Emptied (the menu stops time: it happens at once).
@@ -1100,7 +1109,7 @@ test.describe('the bigger world', () => {
     await page.locator('#spell-choice-none').click();
     await page.locator('#spell-confirm').click();
     await expect(page.locator('#spell-slot-2')).toHaveAttribute('data-spell', 'none');
-    expect((await page.evaluate(() => window.monstres.spells())).adventure).toEqual(['none', 'none']);
+    expect((await page.evaluate(() => window.monstres.spells())).adventure).toEqual(['none', 'none', 'none', 'none']);
     // The combat ones: heal in the second slot swaps with the shield (greyed: already chosen).
     await page.locator('#spell-slot-1').click();
     await page.locator('#spell-edit').click();

@@ -332,6 +332,16 @@ bool very_rare(Species species, const Genes& genes) {
   return false;
 }
 
+Rarity rarest(Species species, const Genes& genes) {
+  if (very_rare(species, genes)) return Rarity::VeryRare;
+  Rarity r = Rarity::Common;
+  const Genetics& g = genetics(species);
+  for (size_t i = 0; i < g.gene_count; ++i) {
+    if (genes.allele[i] < g.genes[i].count) r = std::max(r, g.genes[i].alleles[genes.allele[i]].rarity);
+  }
+  return r;
+}
+
 int detect_rare(const World& w) {
   if (w.detect_ticks == 0) return -1;
   int best = -1;

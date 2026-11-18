@@ -7,6 +7,7 @@
 #include "monstres/core/save.hpp"
 #include "test_helpers.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -125,24 +126,38 @@ TEST_CASE("the shield: for a second, no hit lands; then 5 s before the next one"
   CHECK(battle_json(w).find("\"shield\":0") != std::string::npos);
 }
 
-TEST_CASE("spells are chosen out of battles: combat ones, adventure ones") {
+TEST_CASE("spells are chosen out of battles: combat ones, adventure ones, capture ones") {
+  using Adventure = std::array<SpellId, kAdventureSlots>;
   World w = arena();
-  CHECK(w.combat_spells == std::array<SpellId, kSpellSlots>{SpellId::Heal, SpellId::Shield});
-  CHECK(w.adventure_spells == std::array<SpellId, kSpellSlots>{SpellId::Heal, SpellId::None});
-  // The shield is not an adventure spell.
-  step(w, command(Command::EquipSpell, 3 * 16 + static_cast<uint16_t>(SpellId::Shield)));
+  CHECK(w.combat_spells == std::array<SpellId, kCombatSlots>{SpellId::Heal, SpellId::Shield});
+  CHECK(w.adventure_spells == Adventure{SpellId::Heal, SpellId::None, SpellId::None, SpellId::None});
+  CHECK(w.capture_spells ==
+        std::array<SpellId, kCaptureSlots>{SpellId::Replay, SpellId::Guard, SpellId::Boost, SpellId::Hint});
+  const auto equip = [&](uint16_t slot, SpellId spell) {
+    step(w, command(Command::EquipSpell, static_cast<uint16_t>(slot * 16 + static_cast<uint16_t>(spell))));
+  };
+  // The shield is not an adventure spell, nor a capture one.
+  equip(3, SpellId::Shield);
   CHECK(w.adventure_spells[1] == SpellId::None);
-  // Heal in the second adventure slot: it moves there (no twice the same).
-  step(w, command(Command::EquipSpell, 3 * 16 + static_cast<uint16_t>(SpellId::Heal)));
-  CHECK(w.adventure_spells == std::array<SpellId, kSpellSlots>{SpellId::None, SpellId::Heal});
+  equip(6, SpellId::Shield);
+  CHECK(w.capture_spells[0] == SpellId::Replay);
+  // Heal in the fourth adventure slot: it moves there (no twice the same).
+  equip(5, SpellId::Heal);
+  CHECK(w.adventure_spells == Adventure{SpellId::None, SpellId::None, SpellId::None, SpellId::Heal});
+  equip(2, SpellId::Detect);
+  CHECK(w.adventure_spells[0] == SpellId::Detect);
+  // A capture spell: New order in the last capture slot, Hint goes.
+  equip(9, SpellId::NewOrder);
+  CHECK(w.capture_spells[3] == SpellId::NewOrder);
+  CHECK(spells_json(w).find("\"capture\":[\"replay\",\"guard\",\"boost\",\"newOrder\"]") != std::string::npos);
   // Swapping the combat ones.
-  step(w, command(Command::EquipSpell, 0 * 16 + static_cast<uint16_t>(SpellId::Shield)));
-  CHECK(w.combat_spells == std::array<SpellId, kSpellSlots>{SpellId::Shield, SpellId::Heal});
+  equip(0, SpellId::Shield);
+  CHECK(w.combat_spells == std::array<SpellId, kCombatSlots>{SpellId::Shield, SpellId::Heal});
   // Not during a battle; training uses the combat spells.
   step(w, command(Command::Train));
   REQUIRE(w.battle.phase == BattlePhase::Training);
-  CHECK(current_spells(w) == w.combat_spells);
-  step(w, command(Command::EquipSpell, 0 * 16 + static_cast<uint16_t>(SpellId::Heal)));
+  CHECK(std::ranges::equal(current_spells(w), w.combat_spells));
+  equip(0, SpellId::Heal);
   CHECK(w.combat_spells[0] == SpellId::Shield);
   CHECK(spells_json(w).find("\"inCombat\":true") != std::string::npos);
   // Saved.
@@ -151,6 +166,7 @@ TEST_CASE("spells are chosen out of battles: combat ones, adventure ones") {
   REQUIRE(loaded);
   CHECK(loaded->combat_spells == w.combat_spells);
   CHECK(loaded->adventure_spells == w.adventure_spells);
+  CHECK(loaded->capture_spells == w.capture_spells);
 }
 
 TEST_CASE("training: the magician can be aimed at, or not") {

@@ -293,6 +293,15 @@ window.MonstresLore = {
     wayOut: { name: 'Fil d’Ariane', text: 'Dans une grotte ou un bâtiment, pendant 1 minute, la lumière de ton bâton ' +
       'montre le chemin vers l’entrée par laquelle tu es venu : elle suit les tunnels et contourne les parois, ' +
       'pas juste la direction de la sortie. Gratuit.' },
+    // The capture spells (during a capture: the circle of runes).
+    replay: { name: 'Écho', text: 'Les runes de la série se rallument dans l’ordre : reprends-la depuis la première. ' +
+      'Celles déjà validées ne font pas avancer la jauge une seconde fois.' },
+    guard: { name: 'Protection', text: 'Une erreur dans la série en cours ne fait rien perdre à la jauge de capture.' },
+    boost: { name: 'Emprise', text: 'Chaque rune juste de la série en cours fait avancer la jauge moitié plus.' },
+    newOrder: { name: 'Nouvelle série', text: 'Une autre série de runes, tout de suite, sans rien perdre.' },
+    steady: { name: 'Apaisement', text: 'Le monstre se calme : la jauge revient à mi-chemin, 50 %. ' +
+      'Seulement si elle est en dessous.' },
+    hint: { name: 'Indice', text: 'La prochaine rune à toucher se met à briller.' },
   },
   // Builds of the monsters (Form in src/core/world.hpp): variants of every species.
   builds: {
@@ -503,6 +512,11 @@ window.MonstresLore = {
     17: { name: 'Yvon', chatter: ['Une nuit, j’ai vu une étoile tomber au sud. Le lendemain, il y avait un cratère, et des cristaux qui brillent.',
       'Le cercle de menhirs, au nord… Les anciens disaient qu’il permettait de voyager en un clin d’œil.',
       'Mon phare guide les bateaux depuis quarante ans. Monte voir la vue, si tu n’as pas le vertige !'] },
+    // Trainers passing by (npc::kWanderer...): met now and then in the wilds.
+    18: { name: 'Hugo', trainer: true, wanderer: true, chatter: ['Je fais le tour du pays avec mes monstres.'] },
+    19: { name: 'Maëlle', trainer: true, wanderer: true, chatter: ['Les routes sont plus sûres avec un bon compagnon.'] },
+    20: { name: 'Théo', trainer: true, wanderer: true, chatter: ['Je cherche des adversaires dignes de ce nom.'] },
+    21: { name: 'Lou', trainer: true, wanderer: true, chatter: ['Mes monstres et moi, on ne recule devant rien.'] },
   },
   // What the other villagers say about the quests (any of them, see web/dialogue.js).
   rumors: {

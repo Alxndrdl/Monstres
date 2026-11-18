@@ -110,7 +110,7 @@ inline bool seal(World& w, int mistakes = 0) {
     if (s.stage == SealStage::Input) {
       t.command = Command::Rune;
       const uint8_t right = s.order[s.done];
-      t.target = mistakes > 0 ? static_cast<uint16_t>((right + 1) % kSealRunes) : right;
+      t.target = mistakes > 0 ? static_cast<uint16_t>((right + 1) % s.runes) : right;
       if (mistakes > 0) --mistakes;
     }
     step(w, t);

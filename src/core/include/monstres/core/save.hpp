@@ -108,7 +108,11 @@ namespace monstres {
 //      monsters left at the farm (u16 count, each as a team member). The
 //      farm's grazing monsters are not saved. Before: the west's villagers
 //      come, the bag and the farm are empty.
-inline constexpr uint32_t kSaveVersion = 23;
+//  24  four adventure spells and four capture spells: at the very end, the
+//      adventure spells of slots 2 and 3, then the capture spells (u8 SpellId
+//      each). Before: those adventure slots are empty, the capture spells are
+//      the first ones.
+inline constexpr uint32_t kSaveVersion = 24;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

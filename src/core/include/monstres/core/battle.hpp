@@ -3,6 +3,7 @@
 #include "monstres/core/world.hpp"
 
 #include <array>
+#include <span>
 
 namespace monstres {
 
@@ -42,17 +43,25 @@ inline constexpr uint16_t kCompanionStartLevel = 3;
 inline constexpr float kEngageDistance = 15.0f;     // from the player to the monster
 inline constexpr float kBattleLeash = 25.0f;        // companion this far from the enemy: the battle ends
 inline constexpr uint16_t kCaptureHpPercent = 25;   // weakened: at most this much of its hit points left
-// Capturing (Battle::seal): the bar starts halfway; the whole order touched
-// moves it towards the capture, a mistake towards the escape.
-inline constexpr uint8_t kSealStart = 50;
-inline constexpr uint8_t kSealGain = 25;
-inline constexpr uint8_t kSealLoss = 40;
+// Capturing (Battle::seal), per mille: the bar starts halfway; each rune
+// touched right moves it towards the capture, a mistake towards the escape.
+inline constexpr uint16_t kSealFull = 1000;
+inline constexpr uint16_t kSealStart = 500;
+inline constexpr uint8_t kSealGain = 50;          // +5 % a rune
+inline constexpr uint8_t kSealGainVeryRare = 40;  // +4 % for a very rare monster
+inline constexpr uint16_t kSealLoss = 400;        // -40 % a mistake
+// Runes around the circle, and in a series: by level, then more for rare ones.
+inline constexpr uint8_t kSealLowLevel = 3, kSealMidLevel = 6;
+inline constexpr uint8_t kSealRunesLow = 4, kSealRunesMid = 5, kSealRunesHigh = 6;  // a series: one less
+inline constexpr uint8_t kSealRareExtra = 1, kSealVeryRareExtra = 2;  // more runes, and more in a series
 inline constexpr uint16_t kSealGlideTicks = 60;   // the camera glides to the monster first
-inline constexpr uint16_t kSealPauseTicks = 30;   // before the next rounds
+inline constexpr uint16_t kSealPauseTicks = 30;   // before the next series
 inline constexpr uint16_t kSealRuneTicks = 39;    // one rune after the other...
 inline constexpr uint16_t kSealLitTicks = 30;     // ...lit this long
-inline constexpr uint16_t kSealResultTicks = 50;  // the bar moves
+inline constexpr uint16_t kSealBarTicks = 20;     // the bar moves
+inline constexpr uint16_t kSealResultTicks = 45;  // after a series, or a mistake
 inline constexpr uint16_t kSealEndTicks = 70;     // caught or escaped, then the battle goes on
+inline constexpr uint16_t kSealSteadyPower = 500;  // the Steady spell: back to halfway
 inline constexpr float kFleeArrival = 2.0f;         // the companion is back next to the player
 inline constexpr uint16_t kFleeMaxTicks = 8 * rules::kTicksPerSecond;
 inline constexpr uint16_t kDodgeTicks = 12;         // 0.2 s
@@ -60,8 +69,8 @@ inline constexpr float kDodgeSpeed = 15.6f;         // m/s
 inline constexpr float kBattlePace = 0.8f;          // monsters run this much slower in a fight (easier to follow)
 inline constexpr uint16_t kBurstCharge = rules::kTicksPerSecond;  // a burst gathers this long before it hits
 inline constexpr uint16_t kDodgeCooldown = 36;
-inline constexpr uint16_t kParryTicks = 18;         // 0.3 s guard
-inline constexpr uint16_t kParryCooldown = 42;
+inline constexpr uint16_t kParryTicks = 30;         // 0.5 s guard
+inline constexpr uint16_t kParryCooldown = 90;      // 2 s from the guard to the next one
 inline constexpr uint16_t kStunTicks = 70;          // an enemy whose attack was parried
 inline constexpr float kProjectileSpeed = 13.0f;
 inline constexpr uint16_t kImpactTicks = 30;        // where a projectile stopped is remembered this long (drawing)
@@ -98,17 +107,30 @@ inline constexpr uint16_t kWizardManaPerLevel = 5;  // see wizard_stats
 // Way out (adventure, free): inside a cave or a building, for a minute, the
 // staff's crystal points the way back to the door one came in by, along the
 // way (round the walls, through the tunnels), not straight at it.
-// Two combat spells and two adventure spells are chosen out of battles
-// (Command::EquipSpell); training uses the combat ones.
+// The capture spells (while sealing, see seal_step; those marked "a rune"
+// cost their mana for each rune left to touch in the series):
+// Replay: the series lights up again, to be touched from its first rune (the
+// ones already right do not move the bar twice); a rune.
+// Guard: a mistake in this series takes nothing from the bar; a rune.
+// Boost: each rune of this series moves the bar half again as much; a rune.
+// New order: another series at once, nothing lost.
+// Steady: the bar back to halfway (when below it).
+// Hint: the next rune to touch is shown.
+// Two combat spells, four adventure spells and four capture spells are
+// chosen out of battles (Command::EquipSpell); training uses the combat ones.
 struct SpellInfo {
   const char* id;  // names and texts in web/lore.js (spells)
-  bool combat, adventure;
+  bool combat, adventure, capture;
+  bool per_rune;   // capture: its mana for each rune left in the series
   uint16_t cooldown;
   uint16_t mana;   // what casting it costs
 };
 const SpellInfo& spell_info(SpellId spell);
-// The spells that can be cast now (a battle or training: the combat ones).
-const std::array<SpellId, kSpellSlots>& current_spells(const World& world);
+// The spells that can be cast now (capturing: the capture ones; a battle or
+// training: the combat ones; else the adventure ones).
+std::span<const SpellId> current_spells(const World& world);
+// What casting `spell` costs now (a capture spell: by the runes left).
+uint16_t spell_cost(const World& world, SpellId spell);
 // Why spell slot `slot` cannot be cast now (nullptr: it can).
 const char* cannot_cast(const World& world, size_t slot);
 
@@ -187,26 +209,36 @@ const char* engage_check_name(EngageCheck check);
 bool can_capture(const World& world);
 
 // Capturing (Command::Capture starts it, Battle::seal): the camera glides to
-// the foe, a circle of kSealRunes runes around it; kSealLength of them light
-// up one after the other (never the same twice in a row), then the player
-// touches them in that order (Command::Rune). The bar starts at kSealStart:
-// the whole order right moves it kSealGain towards the capture (100), a
-// mistake kSealLoss towards the escape (0); each round shows a new order.
-// Caught, it goes into the crystal; escaped, it runs away (the battle goes
-// on with the others, or ends). Meanwhile the world holds still: step() only
-// calls seal_step.
+// the foe, a circle of runes around it (4 up to level 3, 5 up to level 6, else
+// 6; one more for a rare monster, two for a very rare one); a series of them
+// (one less) light up one after the other (never the same twice in a row),
+// then the player touches them in that order (Command::Rune). The bar starts
+// at kSealStart: each rune right moves it kSealGain towards the capture
+// (kSealFull; kSealGainVeryRare for a very rare monster), a mistake kSealLoss
+// towards the escape (0) and a new series starts; a whole series right, too.
+// The capture spells help (Command::Cast). Caught, it goes into the crystal;
+// escaped, it runs away (the battle goes on with the others, or ends).
+// Meanwhile the world holds still: step() only calls seal_step.
 bool sealing(const World& world);
 void seal_step(World& world, const Input& in);
 // The rune lit now (Show), or -1; and how far into its light (0..1).
 int seal_lit(const World& world, float* glow = nullptr);
-// The bar, 0..100, as drawn now (moving after a round).
+// The bar, 0..100 %, as drawn now (it moves after each rune).
 float seal_bar(const World& world);
 
 // Can the player challenge the trainer `npc` now (close to it, a monster out, no battle)?
 bool can_challenge(const World& world, uint8_t npc);
 
-// The trainer's team (Bastien's): the first one stands beside him.
-const std::array<RivalMonster, kRivalTeamSize>& rival_team(uint8_t npc, uint8_t& count);
+// A trainer's team (Bastien's, Romane's, or one passing by): the first one
+// stands beside it. `count`: 0 if `npc` has none.
+const std::array<RivalMonster, kRivalTeamSize>& rival_team(const World& world, uint8_t npc, uint8_t& count);
+
+// A trainer passing by (npc::kWanderer...) offers a battle; an aggressive one
+// (its villager tagged Raider: the aggressive monsters' bolt over its head)
+// starts it as soon as the player comes close (rules::kAggroDistance), and
+// losing it, or forfeiting, sends the magician back to the farm (west.hpp).
+// Beaten, it offers no more.
+void force_challenge(World& world, uint8_t npc);
 
 // Where a trainer's battle takes place: its middle, and the line between the
 // two sides (unit vector), outside the village. False if this world has no village.

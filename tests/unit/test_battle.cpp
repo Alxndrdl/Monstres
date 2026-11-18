@@ -721,10 +721,14 @@ void touch_round(World& w, bool wrong) {
   until_input(w);
   const Seal& s = w.battle.seal;
   if (wrong) {
-    step(w, command(Command::Rune, static_cast<uint16_t>((s.order[0] + 1) % kSealRunes)));
+    step(w, command(Command::Rune, static_cast<uint16_t>((s.order[s.done] + 1) % s.runes)));
     return;
   }
-  for (size_t i = 0; i < kSealLength; ++i) step(w, command(Command::Rune, s.order[i]));
+  for (size_t i = s.done; i < s.length; ++i) step(w, command(Command::Rune, s.order[i]));
+}
+void touch_one(World& w) {
+  until_input(w);
+  step(w, command(Command::Rune, w.battle.seal.order[w.battle.seal.done]));
 }
 void until_next_round(World& w) {
   for (int i = 0; i < 1000 && (w.battle.seal.stage == SealStage::Right || w.battle.seal.stage == SealStage::Wrong); ++i) {
@@ -749,8 +753,11 @@ TEST_CASE("capturing: a circle of runes, lit in an order to touch again; the wor
   CHECK(s.foe == 1);
   CHECK(s.power == rules::kSealStart);
   CHECK_FALSE(can_capture(w));  // once is enough
-  for (size_t i = 0; i < kSealLength; ++i) {
-    CHECK(s.order[i] < kSealRunes);
+  // Level 2, nothing rare: four runes, three in a series.
+  CHECK(s.runes == rules::kSealRunesLow);
+  CHECK(s.length == s.runes - 1);
+  for (size_t i = 0; i < s.length; ++i) {
+    CHECK(s.order[i] < s.runes);
     if (i > 0) CHECK(s.order[i] != s.order[i - 1]);  // never twice in a row
   }
   // The runes light up one after the other, in that order.
@@ -761,8 +768,8 @@ TEST_CASE("capturing: a circle of runes, lit in an order to touch again; the wor
     const int lit = seal_lit(w);
     if (lit >= 0 && (seen.empty() || seen.back() != lit)) seen.push_back(lit);  // never twice in a row
   }
-  REQUIRE(seen.size() == kSealLength);
-  for (size_t i = 0; i < kSealLength; ++i) CHECK(seen[i] == s.order[i]);
+  REQUIRE(seen.size() == s.length);
+  for (size_t i = 0; i < s.length; ++i) CHECK(seen[i] == s.order[i]);
   CHECK(s.stage == SealStage::Input);
   CHECK(s.power == rules::kSealStart);
   // Nothing else moved, and time stood still (but the world's ticks, for the drawing).
@@ -779,40 +786,160 @@ TEST_CASE("capturing: a circle of runes, lit in an order to touch again; the wor
   CHECK(json.find("\"seal\":{\"stage\":\"input\"") != std::string::npos);
 }
 
-TEST_CASE("capturing: the order right moves the bar towards the capture, a mistake towards the escape") {
+TEST_CASE("capturing: each rune right moves the bar towards the capture, a mistake towards the escape") {
   World w = arena();
   engage(w);
   w.battle.foes[0].hp = 1;
   step(w, command(Command::Capture));
+  const Seal& s = w.battle.seal;
+  const int gain = rules::kSealGain;  // 5 %
+  touch_one(w);
+  CHECK(s.power == rules::kSealStart + gain);
+  CHECK(s.stage == SealStage::Input);
   touch_round(w, false);
-  CHECK(w.battle.seal.stage == SealStage::Right);
-  CHECK(w.battle.seal.power == rules::kSealStart + rules::kSealGain);  // 75
-  const auto first = w.battle.seal.order;
+  CHECK(s.stage == SealStage::Right);
+  const int after = rules::kSealStart + s.length * gain;  // 65 %
+  CHECK(s.power == after);
+  const auto first = s.order;
   until_next_round(w);
-  CHECK(w.battle.seal.stage == SealStage::Show);
-  CHECK(w.battle.seal.round == 1);
-  CHECK(w.battle.seal.done == 0);
-  CHECK(w.battle.seal.order != first);  // a new order (this seed)
+  CHECK(s.stage == SealStage::Show);
+  CHECK(s.round == 1);
+  CHECK(s.done == 0);
+  CHECK(s.order != first);  // a new series (this seed)
+  // A mistake in the middle: -40 %, and a new series.
+  touch_one(w);
   touch_round(w, true);
-  CHECK(w.battle.seal.stage == SealStage::Wrong);
-  CHECK(w.battle.seal.power == 75 - rules::kSealLoss);  // 35
+  CHECK(s.stage == SealStage::Wrong);
+  CHECK(s.power == after + gain - rules::kSealLoss);
   until_next_round(w);
-  touch_round(w, false);
-  CHECK(w.battle.seal.power == 60);
-  until_next_round(w);
-  touch_round(w, false);
-  CHECK(w.battle.seal.power == 85);
-  until_next_round(w);
-  touch_round(w, false);
-  CHECK(w.battle.seal.power == 100);
-  until_next_round(w);
-  CHECK(w.battle.seal.stage == SealStage::Caught);
+  CHECK(s.stage == SealStage::Show);
+  CHECK(s.round == 2);
+  // The bar is drawn moving to it.
+  CHECK(battle_json(w).find("\"power\":3") != std::string::npos);
+  // Then all right until it is full.
+  for (int k = 0; k < 20 && s.stage != SealStage::Caught; ++k) {
+    const int before = s.power;
+    touch_one(w);
+    CHECK(s.power == std::min<int>(before + gain, rules::kSealFull));
+    if (s.stage == SealStage::Right) until_next_round(w);
+  }
+  CHECK(s.stage == SealStage::Caught);
   CHECK(w.team.size() == 1);  // not yet: it glows first
   run(w, Input{}, rules::kSealEndTicks);
   CHECK_FALSE(sealing(w));
   CHECK(w.team.size() == 2);
   CHECK(w.battle.outcome == BattleOutcome::Captured);
   CHECK(w.went_in.captured);
+}
+
+TEST_CASE("capturing: the runes of a series, by the monster's level and rarity") {
+  const auto sized = [](uint8_t level, bool rare, bool very_rare) {
+    World w = arena();
+    Creature& c = w.creatures[1];
+    c.level = level;
+    if (very_rare) c.genes.chromatic = true;
+    if (rare) {  // its rarest allele: a rare one
+      const Genetics& g = genetics(c.species);
+      for (size_t i = 0; i < g.gene_count; ++i) {
+        for (uint8_t a = 0; a < g.genes[i].count; ++a) {
+          if (g.genes[i].alleles[a].rarity == Rarity::Rare) c.genes.allele[i] = a;
+        }
+      }
+      REQUIRE(rarest(c.species, c.genes) == Rarity::Rare);
+    }
+    engage(w);
+    w.battle.foes[0].hp = 1;
+    step(w, command(Command::Capture));
+    REQUIRE(sealing(w));
+    return w.battle.seal;
+  };
+  CHECK(sized(3, false, false).runes == 4);
+  CHECK(sized(3, false, false).length == 3);
+  CHECK(sized(6, false, false).runes == 5);
+  CHECK(sized(6, false, false).length == 4);
+  CHECK(sized(7, false, false).runes == 6);
+  CHECK(sized(7, false, false).length == 5);
+  CHECK(sized(7, false, false).gain == rules::kSealGain);
+  const Seal rare = sized(2, true, false);
+  CHECK(rare.runes == 5);
+  CHECK(rare.length == 4);
+  CHECK(rare.gain == rules::kSealGain);
+  const Seal very = sized(9, false, true);
+  CHECK(very.runes == 8);
+  CHECK(very.length == 7);
+  CHECK(very.gain == rules::kSealGainVeryRare);  // +4 % a rune
+}
+
+TEST_CASE("capturing: the capture spells") {
+  World w = arena();
+  engage(w);
+  w.battle.foes[0].hp = 1;
+  w.wizard.mana = 200;
+  w.capture_spells = {SpellId::Replay, SpellId::Guard, SpellId::Boost, SpellId::Hint};
+  step(w, command(Command::Capture));
+  const Seal& s = w.battle.seal;
+  const int gain = rules::kSealGain;
+  // Not while the series is shown (but Guard and Boost).
+  CHECK(std::string(cannot_cast(w, 0)) == "notNow");
+  CHECK(cannot_cast(w, 1) == nullptr);
+  CHECK(std::ranges::equal(current_spells(w), w.capture_spells));
+  until_input(w);
+  // Hint: the next rune shown; 2 mana.
+  uint16_t mana = w.wizard.mana;
+  step(w, command(Command::Cast, 3));
+  CHECK(s.hint == s.order[0]);
+  CHECK(w.wizard.mana == mana - 2);
+  CHECK(std::string(cannot_cast(w, 3)) == "active");
+  touch_one(w);
+  CHECK(s.hint == kNoRune);
+  CHECK(s.power == rules::kSealStart + gain);
+  // Replay: one rune left... the series shown again, from its first rune; a mana a rune left.
+  mana = w.wizard.mana;
+  step(w, command(Command::Cast, 0));
+  CHECK(w.wizard.mana == mana - (s.length - 1));
+  CHECK(s.stage == SealStage::Show);
+  CHECK(s.done == 0);
+  touch_one(w);
+  CHECK(s.power == rules::kSealStart + gain);  // that one was right already: not twice
+  // Boost: half again as much; two mana a rune left.
+  mana = w.wizard.mana;
+  step(w, command(Command::Cast, 2));
+  CHECK(s.boost);
+  CHECK(w.wizard.mana == mana - 2 * (s.length - 1));
+  touch_one(w);
+  CHECK(s.power == rules::kSealStart + gain + gain * 3 / 2);
+  // Guard: a mistake costs nothing; a new series all the same, the spells over.
+  step(w, command(Command::Cast, 1));
+  CHECK(s.guard);
+  const uint16_t held = s.power;
+  touch_round(w, true);
+  CHECK(s.stage == SealStage::Wrong);
+  CHECK(s.power == held);
+  until_next_round(w);
+  CHECK_FALSE(s.guard);
+  CHECK_FALSE(s.boost);
+  // A mistake without it.
+  touch_round(w, true);
+  CHECK(s.power == held - rules::kSealLoss);
+  until_next_round(w);
+  // Steady: back to halfway; New order: another series at once.
+  w.capture_spells = {SpellId::Steady, SpellId::NewOrder, SpellId::None, SpellId::None};
+  until_input(w);
+  step(w, command(Command::Cast, 0));
+  CHECK(s.power == rules::kSealSteadyPower);
+  CHECK(std::string(cannot_cast(w, 0)) == "steady");  // not above halfway
+  const uint8_t round = s.round;
+  step(w, command(Command::Cast, 1));
+  CHECK(s.round == round + 1);
+  CHECK(s.stage == SealStage::Show);
+  // Not enough mana.
+  w.wizard.mana = 1;
+  until_input(w);
+  CHECK(std::string(cannot_cast(w, 1)) == "mana");
+  const std::string json = spells_json(w);
+  CHECK(json.find("\"capturing\":true") != std::string::npos);
+  CHECK(json.find("\"id\":\"newOrder\",\"cooldown\":0.0000,\"cooldownTotal\":0.0000,\"mana\":3,\"why\":\"mana\"") !=
+        std::string::npos);
 }
 
 TEST_CASE("capturing: two mistakes and the monster breaks free, the battle goes on without it") {
@@ -828,7 +955,7 @@ TEST_CASE("capturing: two mistakes and the monster breaks free, the battle goes 
   const uint16_t index = w.battle.foes[0].index;
   step(w, command(Command::Capture));
   touch_round(w, true);
-  CHECK(w.battle.seal.power == rules::kSealStart - rules::kSealLoss);  // 10
+  CHECK(w.battle.seal.power == rules::kSealStart - rules::kSealLoss);  // 10 %
   until_next_round(w);
   touch_round(w, true);
   CHECK(w.battle.seal.power == 0);

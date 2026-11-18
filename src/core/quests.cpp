@@ -261,6 +261,12 @@ uint8_t npc_marks(const World& w, uint8_t n) {
   }
   if (n == npc::kOdette || n == npc::kViolette) marks |= kMarkHeal;
   if (n == npc::kBastien || n == npc::kRomane) marks |= kMarkFight;
+  if (npc::wanderer(n)) {  // a trainer passing by: until beaten (an aggressive one: the bolt, not this)
+    const int i = npc_index(w, n);
+    if (i > 0 && !w.creatures[static_cast<size_t>(i)].beaten && w.creatures[static_cast<size_t>(i)].tag != Tag::Raider) {
+      marks |= kMarkFight;
+    }
+  }
   if (n == npc::kAnselme && w.quests[static_cast<size_t>(QuestId::Merchant)].stage == QuestStage::Done) marks |= kMarkShop;
   if (n == npc::kCapucine && farm_open(w)) marks |= kMarkFarm;
   return marks;

@@ -63,7 +63,7 @@ Contrôles :
 - glisser sur l'écran (doigt ou souris) : regarder autour de soi ;
 - bouton en bas à droite, ou Espace : sauter. Les petits obstacles (un rocher bas, une
   bûche, une souche, un buisson : jusqu'à 75 cm) ne bloquent pas : on monte dessus en marchant ;
-- boutons à droite du joystick, ou R et G : lancer ses sorts (voir Sorts) ;
+- boutons autour du saut, ou R, G, V et X : lancer ses sorts (voir Sorts) ;
 - toucher ou cliquer sur un monstre (ou un villageois) : sa fiche s'affiche en
   haut à gauche, l'essentiel seulement (un monstre : son nom, son niveau et à
   qui il est, « (à toi) » ou « (à Bastien) », sa famille, ses éléments, ses
@@ -93,7 +93,8 @@ Contrôles :
     couleur de sa rareté), taille, poids, âge, ses aptitudes en toile
     d'araignée (voir Variantes) et ses trois attaques ; « Relâcher » (confirmé
     une seconde fois) le rend à la nature : il sort du cristal et s'en va ;
-  - Sorts : les quatre emplacements et le sort de chacun (voir Sorts) ;
+  - Sorts : les dix emplacements (aventure, combat, capture) et le sort de
+    chacun (voir Sorts) ;
   - Quêtes (touche J) : le journal, les quêtes en cours puis terminées ;
     chacune avec qui l'a demandée, son histoire, ses étapes (cochées une fois
     faites) et sa récompense ;
@@ -486,14 +487,21 @@ que l'équipe compte déjà six monstres est envoyé à l'exploitation
 (`World::farm`, au plus 500). Capucine demande ensuite d'essayer : capturer un
 monstre avec une équipe complète, puis le reprendre auprès d'elle (son menu :
 échanger un monstre de l'équipe avec un de l'exploitation, en laisser un, en
-reprendre un ; `Command::FarmSwap`). Enfin, une bande de Chipou agressifs
-pille son verger (un alpha niveau 8 et quatre niveau 6).
+reprendre un ; `Command::FarmSwap`). Les monstres gardés à l'exploitation y
+sont soignés : leurs points de vie sont pleins (à leur arrivée, à chaque
+échange, au chargement). Enfin, une bande de Chipou agressifs pille son verger
+(un alpha niveau 8 et quatre niveau 6).
 
 **Monstres agressifs** (`Tag::Raider`) : un éclair rouge tourne au-dessus
 d'eux (pas sur la carte). À moins de 6 m, ils forcent le combat (le premier
 monstre en forme de l'équipe sort au besoin). Perdre ce combat, ou fuir,
 renvoie le magicien à l'exploitation, près de Violette (une note le dit) ;
-sans aucun monstre en forme, il y est renvoyé tout de suite.
+sans aucun monstre en forme, il y est renvoyé tout de suite. Une fois les
+pillards du verger tous battus (la quête terminée), d'autres monstres
+agressifs rôdent parfois (`roaming_raider`, `west.hpp`) : 5 % des nouveaux
+monstres sauvages au sol, trois à la fois au plus, jamais à moins de 45 m de
+l'exploitation (où le magicien revient), du village ni d'un téléporteur, pour
+ne pas retomber sur eux en boucle.
 
 **Le sac** (onglet « Sac » du grimoire, touche I) : pièces, potions de mana
 (boire : +15 mana), et objets de quête (la pierre étrange, les ballots
@@ -624,7 +632,8 @@ troncs, les maisons, les meubles, les parois et le plafond des intérieurs
 arêtes arrondies, fondues dans le sol). Pousser vers un mur le fait monter, il
 passe les angles et continue de l'autre côté, la tête en bas au plafond. La direction « en avant » suit la surface d'un
 angle à l'autre (`climb_steered`, `World::climb_forward`) et la caméra se
-retourne avec lui en douceur (`Camera::up`). Pompon,
+retourne avec lui en douceur (`Camera::up`). Au sol, il saute comme les
+autres (l'esquive sur place), puis se remet à grimper en retombant. Pompon,
 Zapou et Ploufi sont les trois compagnons qu'on peut choisir en début de
 partie ; Pompon se rencontre aussi, rarement, dans les prairies. Les
 caractéristiques, attaques et façons de combattre de chaque espèce sont dans
@@ -818,9 +827,10 @@ Boutons en bas à droite pendant un combat :
   corps, qu'on peut enchaîner (le monstre recule un peu puis bondit en avant),
   et deux attaques spéciales avec un temps de recharge (un projectile de son
   élément, une onde tout autour de lui) ;
-- à gauche de l'esquive, parer (F) : la prochaine attaque est bloquée, et un
-  ennemi dont le coup est paré reste étourdi un moment ; le monstre se met en
-  boule (pattes rentrées, tête baissée).
+- à gauche de l'esquive, parer (F, type Normal) : pendant 0,5 s la prochaine
+  attaque est bloquée, et un ennemi dont le coup est paré reste étourdi un
+  moment ; le monstre se met en boule (pattes rentrées, tête baissée) ;
+  recharge de 2 s.
 
 Ces quatre actions sont listées dans la fiche du monstre (Grimoire › Équipe),
 la parade en dernier.
@@ -850,13 +860,31 @@ tient le joystick (sans quoi le navigateur ne fait pas de clic).
 
 La capture est un sceau (`Battle::seal`, `battle.hpp`) : le monde se fige,
 la caméra glisse vers le monstre et le cadre de trois quarts, un cercle de
-six runes s'ouvre autour de lui (et un cercle magique de son élément à ses
-pieds). Cinq runes s'illuminent l'une après l'autre, de la couleur de son
-élément, jamais deux fois la même d'affilée ; le joueur les touche ensuite
-dans le même ordre (touches 1 à 6 au clavier). La barre du sceau, de « Fuite »
-à « Capture », part du milieu : l'ordre entier juste la pousse de 25 % vers la
-capture, une erreur de 40 % vers la fuite ; chaque manche montre un nouvel
-ordre. Le monstre se débat, plus fort après une erreur, moins à mesure que le
+runes s'ouvre autour de lui (et un cercle magique de son élément à ses
+pieds), entier à l'écran, sous la barre et à gauche des sorts. Le nombre de
+runes dépend du monstre : 4 jusqu'au niveau 3, 5 jusqu'au niveau 6, 6 au-delà ;
+une de plus s'il porte une variante rare, deux s'il est très rare. Une série
+de runes (une de moins que le cercle) s'illumine l'une après l'autre, de la
+couleur de son élément, jamais deux fois la même d'affilée ; le joueur les
+touche ensuite dans le même ordre (touches 1 à 8 au clavier). La barre du
+sceau, de « Fuite » à « Capture », part du milieu (son pourcentage est
+affiché) : chaque rune juste la pousse de 5 % vers la capture (4 % pour un
+monstre très rare) ; une erreur la fait reculer de 40 % et une nouvelle série
+commence ; une série finie aussi.
+
+Les sorts de capture (quatre emplacements, en carré en bas à droite, au-dessus
+du mana ; touches R, G, V, X) aident ; ceux marqués « par rune » coûtent leur
+mana pour chaque rune qui reste à toucher dans la série :
+- Écho (1 mana par rune) : la série se rallume, à reprendre depuis la
+  première ; les runes déjà validées ne font pas avancer la barre deux fois ;
+- Protection (2 mana par rune) : une erreur dans cette série ne fait rien perdre ;
+- Emprise (2 mana par rune) : chaque rune juste de cette série compte moitié
+  plus (7,5 %) ;
+- Nouvelle série (3 mana) : une autre série tout de suite, sans rien perdre ;
+- Apaisement (8 mana) : la barre revient à 50 % (seulement en dessous) ;
+- Indice (2 mana) : la prochaine rune à toucher brille en blanc.
+Par défaut : Écho, Protection, Emprise et Indice.
+Le monstre se débat, plus fort après une erreur, moins à mesure que le
 sceau se resserre. À 100 % il s'illumine et rejoint l'équipe (ou la ferme) ;
 à 0 % il se libère et s'enfuit (le combat continue avec les autres, ou se
 termine : « … s'est libéré »). Pendant le sceau, rien d'autre ne bouge, ni
@@ -905,10 +933,12 @@ une partie rechargée pendant un combat reprend sans lui.
 
 ### Sorts
 
-Le magicien lance des sorts. Onglet « Sorts » du grimoire (touche P) : deux
-sorts de combat (utilisés en combat et à l'entraînement) et deux sorts
-d'aventure (le reste du temps), qu'on change hors combat. Ils se lancent avec
-les deux boutons à côté des attaques (touches R et G), qui montrent leur
+Le magicien lance des sorts. Onglet « Sorts » du grimoire (touche P) : quatre
+sorts d'aventure (hors combat), deux sorts de combat (en combat et à
+l'entraînement) et quatre sorts de capture (pendant le sceau, voir Combats),
+qu'on change hors combat. Hors combat, les quatre sorts d'aventure prennent la
+place des attaques autour du saut (touches R, G, V, X) ; en combat, les deux
+sorts de combat restent à côté des attaques (R et G). Les boutons montrent leur
 recharge ; un sort qui dure brille tant qu'il agit.
 
 Chaque sort coûte du mana (en bas de l'écran, juste à droite des points de
@@ -955,6 +985,20 @@ règles s'affichent, et « Prêt ! » (`Command::Ready`) commence le combat :
 Après le combat, les monstres K.O. du joueur le restent (sort de soin ou
 Odette), et le Champi de Bastien revient à ses côtés. Une partie sauvegardée en plein
 combat reprend sans lui, le Champi à sa place.
+
+**Dresseurs de passage** (`npc::kWanderer`, `World::wanderers`) : une fois
+l'initiation de Bastien terminée, on croise parfois un dresseur dans la nature
+ou sur les routes (Hugo, Maëlle, Théo, Lou ; 4 % de chances chaque fois qu'un
+carré de la carte se peuple, deux à la fois au plus, jamais au village). Son
+équipe, d'un à trois monstres, vient des monstres du coin, un peu plus forts ;
+le premier se tient à côté de lui. Le plus souvent, il porte l'icône de combat
+(« Combattre » dans le menu, ou en lui parlant) ; le combat se joue là où on
+l'a rencontré, comme contre Bastien, et rapporte expérience et pièces. Un
+peu plus d'un sur trois est agressif : l'éclair rouge des monstres agressifs
+au-dessus de la tête, et le combat commence dès qu'on passe à moins de 6 m ;
+le perdre, ou déclarer forfait, renvoie à l'exploitation comme pour les
+monstres agressifs (et jamais près d'un endroit sûr, eux non plus). Battu, un
+dresseur ne propose plus de combat. Ils ne sont pas sauvegardés : ils passent.
 
 ## Performances
 
@@ -1042,6 +1086,10 @@ Version 23 : l'Ouest (14 espèces, 12 quêtes, 7 téléporteurs, trois intérieu
 de plus), le sac, les monstres laissés à l'exploitation et les victoires
 contre Romane. Les sauvegardes plus anciennes se chargent : les villageois de
 l'Ouest arrivent, le sac et l'exploitation sont vides.
+
+Version 24 : quatre sorts d'aventure et quatre sorts de capture. Les
+sauvegardes plus anciennes se chargent : les deux derniers emplacements
+d'aventure sont vides, les sorts de capture sont ceux par défaut.
 
 ## Sécurité
 

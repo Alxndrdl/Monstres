@@ -1105,12 +1105,84 @@ bool near_player(const World& w, float x, float z, float distance) {
   return dx * dx + dz * dz < distance * distance;
 }
 
+// Now and then, a trainer passing by in this square (once Bastien taught the
+// player to fight): its team drawn from what lives there, a little stronger;
+// some are aggressive (never close to a safe place, see west.hpp). Its own
+// draws: the rest of the square stays the same.
+void add_wanderer(World& w, int index, float x0, float z0) {
+  if (w.quests[static_cast<size_t>(QuestId::Combat)].stage != QuestStage::Done) return;
+  const auto k = static_cast<size_t>(index);
+  Rng rng(w.seed ^ 0x545241494E4552ULL, static_cast<uint64_t>(index) * 65536u + w.population.visits[k]);  // "TRAINER"
+  if (rng.below(100) >= rules::kWandererChance) return;
+  uint32_t here = 0;
+  int free_slot = -1;
+  for (uint8_t n = 0; n < npc::kWandererCount; ++n) {
+    if (npc_index(w, static_cast<uint8_t>(npc::kWanderer + n)) > 0) ++here;
+    else if (free_slot < 0) free_slot = n;
+  }
+  if (free_slot < 0 || here >= rules::kWanderersAtOnce) return;
+  const uint8_t n = static_cast<uint8_t>(npc::kWanderer + free_slot);
+  const float limit = rules::kWorldHalfSize - 4.0f;
+  for (int attempt = 0; attempt < 8; ++attempt) {
+    const float x = random_range(rng, x0 + 2, x0 + rules::kPopulationCell - 2);
+    const float z = random_range(rng, z0 + 2, z0 + rules::kPopulationCell - 2);
+    const bool aggressive = rng.below(100) < rules::kAggressiveWanderers;
+    const Zone zone = zone_at(w, x, z);
+    if (density_in(zone) == 0 || std::fabs(x) > limit || std::fabs(z) > limit ||
+        near_player(w, x, z, rules::kMonsterSpawnMinDistance + 6) || in_village(w.village, x, z, 8.0f) ||
+        in_lake(w.village.lake, x, z, 3.0f) || in_cave_hill(w.cave, x, z, 2.0f) || w.ground.sea(x, z) ||
+        (aggressive && !far_from_safety(w, x, z))) {
+      continue;
+    }
+    Creature t;
+    t.species = Species::Villager;
+    t.npc = n;
+    t.variant = static_cast<uint8_t>(rng.below(256));
+    t.body.pos = {x, w.ground.height(x, z), z};
+    t.home = {x, z};
+    t.timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
+    if (aggressive) t.tag = Tag::Raider;
+    if (inside_any_object(w, t.body, species_info(t.species).shape)) continue;
+    // Its team: one to three of the square's monsters.
+    Wanderer& team = w.wanderers[static_cast<size_t>(free_slot)];
+    team = {};
+    team.count = static_cast<uint8_t>(1 + rng.below(kRivalTeamSize));
+    for (uint8_t m = 0; m < team.count; ++m) {
+      Species sp = Species::Slime;
+      for (int tries = 0; tries < 8; ++tries) {
+        const Species s = species_in(zone, rng);
+        if (monster_stats(s).is_monster && s != Species::Fish) {
+          sp = s;
+          break;
+        }
+      }
+      RivalMonster& r = team.team[m];
+      r.species = sp;
+      r.genes = genetics(sp).gene_count > 0 ? roll_genes(sp, zone, rng) : Genes{};
+      r.level = static_cast<uint8_t>(std::min(99, level_in(zone, rng, x, z) + 1 + static_cast<int>(rng.below(2))));
+    }
+    add_creature(w, t);
+    // Its first monster, beside it.
+    Creature c;
+    c.species = team.team[0].species;
+    c.genes = team.team[0].genes;
+    c.level = team.team[0].level;
+    c.tag = Tag::Rival;
+    c.npc = n;
+    c.body.pos = {x + 1.0f, w.ground.height(x + 1.0f, z), z};
+    c.home = {x, z};
+    add_creature(w, c);
+    return;
+  }
+}
+
 // The wild monsters of one square, new ones every time it is lived in again.
 void populate_cell(World& w, int index) {
   float x0, z0;
   cell_rect(index, x0, z0);
   const auto k = static_cast<size_t>(index);
   Rng rng(w.seed ^ 0x504F50554C415445ULL, static_cast<uint64_t>(index) * 65536u + w.population.visits[k]);
+  Rng aggro(w.seed ^ 0x524F414D494E47ULL, static_cast<uint64_t>(index) * 65536u + w.population.visits[k]);  // "ROAMING"
   const float limit = rules::kWorldHalfSize - 3.0f;
   auto random_in_cell = [&](float& x, float& z) {
     x = random_range(rng, x0, x0 + rules::kPopulationCell);
@@ -1146,6 +1218,8 @@ void populate_cell(World& w, int index) {
     c.body.facing_z = sc.cos;
     c.timer = timer;
     if (inside_any_object(w, c.body, species_info(species).shape)) continue;
+    // After the orchard, now and then an aggressive one (its own draw: the others stay the same).
+    if (monster_stats(species).is_monster && roaming_raider(w, x, z, aggro.below(100))) c.tag = Tag::Raider;
     finish(c, zone);
   }
 
@@ -1197,6 +1271,8 @@ void populate_cell(World& w, int index) {
     finish(c, Zone::Woods);
     ++owls;
   }
+
+  add_wanderer(w, index, x0, z0);
 }
 
 }  // namespace
@@ -1264,7 +1340,7 @@ void keep_rival(World& w, uint8_t trainer) {
     if (c.npc == trainer) index = static_cast<int>(i);
   }
   uint8_t count = 0;
-  const RivalMonster& first = rival_team(trainer, count)[0];
+  const RivalMonster& first = rival_team(w, trainer, count)[0];
   if (index > 0) {
     Creature& c = w.creatures[static_cast<size_t>(index)];
     if (w.battle.rival.npc != trainer && (c.species != first.species || c.level != first.level)) {
@@ -1333,7 +1409,9 @@ void update_population(World& w) {
       for (size_t i = w.creatures.size(); i-- > 1;) {
         const Creature& c = w.creatures[i];
         const bool fighting = foe_slot(w, i) >= 0;
-        if (monster_stats(c.species).is_monster && !fighting && !owned(w, c) && cell_index(c.home.x, c.home.z) == index) {
+        const bool passing = npc::wanderer(c.npc) && w.battle.rival.npc != c.npc;  // a trainer passing by, and its monster
+        if (((monster_stats(c.species).is_monster && !owned(w, c)) || passing) && !fighting &&
+            cell_index(c.home.x, c.home.z) == index) {
           remove_creature(w, i);
         }
       }
@@ -2346,8 +2424,14 @@ void step(World& w, const Input& in) {
       c.body.facing_z = l > 1e-3f ? c.body.facing_z / l : -1.0f;
     }
     if (climbs && i == 0) {
-      // The joystick's way, along the wall or the ceiling it clings to.
       const Steer st = battle_ally(w, in, dir_x, dir_z);
+      // On the floor it jumps as the others do (and falls back before it climbs again).
+      if (!clinging(c.body) && (st.jump || !c.body.on_ground)) {
+        const SpeciesInfo& info = species_info(c.species);
+        move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
+        continue;
+      }
+      // The joystick's way, along the wall or the ceiling it clings to.
       const float f = st.dir_x * forward_x + st.dir_z * forward_z;
       const float r = -st.dir_x * forward_z + st.dir_z * forward_x;
       climb_steered(w, c.body, forward_x, forward_z, aimed, in.yaw, r, f, st.speed);

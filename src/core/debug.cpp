@@ -173,9 +173,13 @@ std::string creature_json(const World& w, int index) {
   }
   if (c.npc) {
     s += ",\"npc\":" + std::to_string(c.npc);
+    if (c.species == Species::Villager && npc::wanderer(c.npc)) {  // a trainer passing by
+      s += std::string(",\"wanderer\":true,\"beaten\":") + (c.beaten ? "true" : "false");
+      if (c.tag == Tag::Raider) s += ",\"aggressive\":true";
+    }
     s += std::string(",\"talk\":") + (near_npc(w, c.npc) ? "true" : "false");
     uint8_t rivals = 0;
-    rival_team(c.npc, rivals);
+    rival_team(w, c.npc, rivals);
     if (c.npc == npc::kOdette || c.npc == npc::kViolette) {
       s += std::string(",\"healer\":true,\"heal\":") + (can_heal_team(w, c.npc) ? "true" : "false");
     }
@@ -310,7 +314,7 @@ std::string wizard_json(const World& w) {
 
 std::string spells_json(const World& w) {
   const auto seconds = [](uint32_t ticks) { return num(static_cast<float>(ticks) / rules::kTicksPerSecond); };
-  const auto list = [](const std::array<SpellId, kSpellSlots>& slots) {
+  const auto list = [](std::span<const SpellId> slots) {
     std::string s = "[";
     for (size_t k = 0; k < slots.size(); ++k) {
       if (k) s += ',';
@@ -322,7 +326,9 @@ std::string spells_json(const World& w) {
   const bool combat = p == BattlePhase::Fight || p == BattlePhase::Training || p == BattlePhase::Prepare;
   std::string s = std::string("{\"inCombat\":") + (combat ? "true" : "false");
   s += std::string(",\"editable\":") + (p == BattlePhase::None ? "true" : "false");
-  s += ",\"combat\":" + list(w.combat_spells) + ",\"adventure\":" + list(w.adventure_spells);
+  s += std::string(",\"capturing\":") + (sealing(w) ? "true" : "false");
+  s += ",\"combat\":" + list(w.combat_spells) + ",\"adventure\":" + list(w.adventure_spells) +
+       ",\"capture\":" + list(w.capture_spells);
   s += ",\"known\":[";
   for (size_t i = 1; i < kSpellCount; ++i) {
     const SpellInfo& info = spell_info(static_cast<SpellId>(i));
@@ -330,11 +336,13 @@ std::string spells_json(const World& w) {
     s += std::string("{\"id\":\"") + info.id + "\",\"value\":" + std::to_string(i);
     s += std::string(",\"combat\":") + (info.combat ? "true" : "false");
     s += std::string(",\"adventure\":") + (info.adventure ? "true" : "false");
+    s += std::string(",\"capture\":") + (info.capture ? "true" : "false");
+    s += std::string(",\"perRune\":") + (info.per_rune ? "true" : "false");
     s += ",\"mana\":" + std::to_string(info.mana);
     s += ",\"cooldown\":" + seconds(info.cooldown) + "}";
   }
   s += "],\"now\":[";
-  const auto& now = current_spells(w);
+  const auto now = current_spells(w);
   for (size_t k = 0; k < now.size(); ++k) {
     const SpellInfo& info = spell_info(now[k]);
     const char* why = cannot_cast(w, k);
@@ -342,7 +350,7 @@ std::string spells_json(const World& w) {
     s += std::string("{\"slot\":") + std::to_string(k) + ",\"id\":\"" + info.id + "\"";
     s += ",\"cooldown\":" + seconds(w.spell_cooldowns[static_cast<size_t>(now[k])]);
     s += ",\"cooldownTotal\":" + seconds(info.cooldown);
-    s += ",\"mana\":" + std::to_string(info.mana);
+    s += ",\"mana\":" + std::to_string(spell_cost(w, now[k]));
     s += std::string(",\"why\":") + (why ? std::string("\"") + why + "\"" : "null") + "}";
   }
   s += "],\"castTick\":" + std::to_string(w.spell_tick) + ",\"cast\":\"" + spell_info(w.spell_cast).id + "\"";
@@ -955,15 +963,20 @@ std::string seal_json(const World& w) {
   std::string s = std::string("{\"stage\":\"") + kStages[static_cast<size_t>(e.stage)] + "\"";
   s += ",\"foe\":" + std::to_string(e.foe) + ",\"species\":\"" + species_name(c.species) + "\"";
   s += std::string(",\"element\":\"") + element_name(creature_elements(c.species, c.genes).first) + "\"";
-  s += ",\"runes\":" + std::to_string(kSealRunes) + ",\"length\":" + std::to_string(kSealLength);
-  s += ",\"power\":" + std::to_string(e.power) + ",\"bar\":" + std::to_string(seal_bar(w));
+  s += ",\"runes\":" + std::to_string(e.runes) + ",\"length\":" + std::to_string(e.length);
+  // In percents.
+  s += ",\"power\":" + num(e.power / 10.0f) + ",\"bar\":" + num(seal_bar(w));
+  s += ",\"gain\":" + num(e.gain / 10.0f) + ",\"loss\":" + num(rules::kSealLoss / 10.0f);
   s += ",\"lit\":" + std::to_string(lit) + ",\"glow\":" + std::to_string(glow);
-  s += ",\"done\":" + std::to_string(e.done) + ",\"round\":" + std::to_string(e.round);
-  s += ",\"touched\":" + (e.touched == 0xFF ? std::string("-1") : std::to_string(e.touched));
+  s += ",\"done\":" + std::to_string(e.done) + ",\"credited\":" + std::to_string(e.credited);
+  s += ",\"round\":" + std::to_string(e.round);
+  s += ",\"touched\":" + (e.touched == kNoRune ? std::string("-1") : std::to_string(e.touched));
+  s += ",\"hint\":" + (e.hint == kNoRune ? std::string("-1") : std::to_string(e.hint));
+  s += std::string(",\"guard\":") + (e.guard ? "true" : "false") + ",\"boost\":" + (e.boost ? "true" : "false");
   s += ",\"touchTick\":" + std::to_string(e.touch_tick) + ",\"timer\":" + std::to_string(e.timer);
   s += ",\"order\":[";
-  for (size_t i = 0; i < kSealLength; ++i) s += (i ? "," : "") + std::to_string(e.order[i]);
-  s += "],\"gain\":" + std::to_string(rules::kSealGain) + ",\"loss\":" + std::to_string(rules::kSealLoss);
+  for (size_t i = 0; i < e.length; ++i) s += (i ? "," : "") + std::to_string(e.order[i]);
+  s += "]";
   return s + "}";
 }
 }  // namespace

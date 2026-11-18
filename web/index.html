@@ -679,8 +679,15 @@
     .action.spell-button {
       position: absolute; width: 50px; height: 50px; overflow: hidden; border-color: rgba(140, 230, 160, 0.85);
     }
-    #spell-0 { left: -160px; top: -32px; }
-    #spell-1 { left: -150px; top: -94px; }
+    /* Out of battles: the four adventure spells where the attacks are (quick, specials, parry); in a
+       battle, the two combat ones beside them. */
+    #spell-0 { left: 19px; top: -99px; }
+    #spell-1 { left: -41px; top: -85px; }
+    #spell-2 { left: -85px; top: -41px; }
+    #spell-3 { left: -101px; top: 19px; }
+    .battle #spell-0 { left: -160px; top: -32px; }
+    .battle #spell-1 { left: -150px; top: -94px; }
+    .battle #spell-2, .battle #spell-3 { display: none; }
     .action.spell-button[hidden] { display: none; }
     .spell-button[data-spell="shield"] { border-color: rgba(242, 201, 76, 0.9); }
     .spell-button[data-spell="mercy"] { border-color: rgba(200, 225, 255, 0.9); }
@@ -694,10 +701,10 @@
     .fighter.ally { left: auto; right: calc(50% + 5px); transform: none; width: min(240px, 34vw, calc(50% - 194px)); }
     #mana { left: calc(50% + 5px); bottom: var(--edge-bottom); transform: none; width: min(200px, 28vw, calc(50% - 256px));
       border-color: rgba(140, 170, 255, 0.6); pointer-events: none; }
-    #mana .mana-bar > span { background: linear-gradient(90deg, #4f6cff, #8fb0ff); }
-    #mana .mana-text::before { content: '✦ '; color: #c8d6ff; }
+    #mana .mana-bar > span, #seal-mana .mana-bar > span { background: linear-gradient(90deg, #4f6cff, #8fb0ff); }
+    #mana .mana-text::before, #seal-mana .mana-text::before { content: '✦ '; color: #c8d6ff; }
     #mana[hidden] { display: none; }
-    #mana.low { border-color: rgba(255, 122, 107, 0.8); }
+    #mana.low, #seal-mana.low { border-color: rgba(255, 122, 107, 0.8); }
     .spell-button .spell-icon { position: relative; z-index: 1; display: grid; place-items: center; }
     .spell-button .spell-icon svg { width: 24px; height: 24px; }
     .spell-button .cooldown {
@@ -848,6 +855,29 @@
     #seal.input .rune:not(:disabled) { color: rgba(255, 255, 255, 0.9); border-color: rgba(255, 255, 255, 0.7); }
     #seal.caught .rune { color: #fff; border-color: #ffe08a; box-shadow: 0 0 18px #ffd25a; }
     #seal.escaped .seal-ring { opacity: 0; transform: translate(-50%, -50%) scale(1.5); transition-duration: 0.6s; }
+    /* The capture spells: a square at the bottom right, over the mana. */
+    #seal-tools {
+      position: absolute; right: var(--edge-right); bottom: var(--edge-bottom); width: 132px;
+      display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+    }
+    #seal-tools .seal-spells { display: grid; grid-template-columns: 58px 58px; gap: 10px; justify-content: center; }
+    #seal-tools .seal-spell {
+      position: relative; width: 58px; height: 58px; pointer-events: auto; touch-action: none;
+      border-color: rgba(200, 170, 255, 0.85);
+    }
+    #seal-tools .seal-spell[hidden] { display: grid; visibility: hidden; }  /* the square keeps its shape */
+    #seal-tools .spell-cost {
+      position: absolute; top: 1px; right: 4px; z-index: 2; font: 700 10px/1 system-ui, sans-serif; color: #c8d6ff;
+    }
+    #seal-tools .spell-cost:empty { display: none; }
+    #seal-tools .seal-spell.active { border-color: #ffe08a; box-shadow: 0 0 14px rgba(255, 224, 138, 0.8); }
+    #seal-mana { position: static; transform: none; width: auto; border-color: rgba(140, 170, 255, 0.6); }
+    #seal.caught #seal-tools, #seal.escaped #seal-tools { opacity: 0; transition: opacity 0.4s; }
+    /* The Hint spell: the next rune to touch, glowing white. */
+    #seal.input .rune.hint:not(:disabled) {
+      color: #fff; border-color: #fff; box-shadow: 0 0 16px #fff; animation: rune-hint 0.6s ease-in-out infinite alternate;
+    }
+    @keyframes rune-hint { to { transform: scale(1.15); box-shadow: 0 0 28px #fff, inset 0 0 12px #fff; } }
     #seal kbd { display: none; position: absolute; right: -6px; bottom: -6px; font-size: 10px; }
     .has-keyboard #seal kbd { display: block; }
     #battle-banner {
@@ -1138,10 +1168,12 @@
           <div id="map-legend" class="map-legend" role="note" hidden>
             <div><i style="color:#f2c94c">➤</i>Toi</div>
             <div><i style="color:#7fe0ff">●</i>Téléporteur</div>
-            <div><i style="color:#fff">?</i>Quête à prendre</div>
-            <div><i style="color:#f2c94c">!</i>Quête en cours</div>
+            <div><i style="color:#fff">!</i>Quête à prendre</div>
+            <div><i style="color:#f2c94c">!</i>Quête à rendre</div>
             <div><i style="color:#6fe07a">+</i>Soins</div>
             <div><i style="color:#ff6a5c">×</i>Combat</div>
+            <div><i style="color:#ffd34d">¤</i>Boutique</div>
+            <div><i style="color:#9be36a">⌂</i>Exploitation</div>
           </div>
         </div>
       </section>
@@ -1321,6 +1353,20 @@
       <p class="seal-text"><span aria-live="polite"></span><span class="seal-pips" aria-hidden="true"></span></p>
     </div>
     <div class="seal-ring closed"></div>
+    <!-- The capture spells, in a square over the magician's mana (spells.js). -->
+    <div id="seal-tools">
+      <div class="seal-spells">
+        <button id="seal-spell-0" class="action spell-button seal-spell" type="button" data-slot="0" hidden><span class="spell-icon"></span><span class="spell-cost"></span><kbd>R</kbd></button>
+        <button id="seal-spell-1" class="action spell-button seal-spell" type="button" data-slot="1" hidden><span class="spell-icon"></span><span class="spell-cost"></span><kbd>G</kbd></button>
+        <button id="seal-spell-2" class="action spell-button seal-spell" type="button" data-slot="2" hidden><span class="spell-icon"></span><span class="spell-cost"></span><kbd>V</kbd></button>
+        <button id="seal-spell-3" class="action spell-button seal-spell" type="button" data-slot="3" hidden><span class="spell-icon"></span><span class="spell-cost"></span><kbd>X</kbd></button>
+      </div>
+      <div id="seal-mana" class="fighter" role="meter" aria-label="Mana">
+        <div class="fighter-name"><strong>Mana</strong></div>
+        <div class="hp-bar mana-bar"><span class="mana-fill"></span></div>
+        <span class="hp-text mana-text"></span>
+      </div>
+    </div>
   </div>
   <div id="battle-banner" role="status" aria-live="polite" hidden></div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
@@ -1373,9 +1419,11 @@
              stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></svg>
         <span class="cooldown"></span><kbd>F</kbd>
       </button>
-      <!-- The magician's spells, beside the attacks (spells.js). -->
-      <button id="spell-0" class="action spell-button" type="button" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>R</kbd></button>
-      <button id="spell-1" class="action spell-button" type="button" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>G</kbd></button>
+      <!-- The magician's spells (spells.js): out of battles, where the attacks are; in a battle, beside them. -->
+      <button id="spell-0" class="action spell-button" type="button" data-slot="0" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>R</kbd></button>
+      <button id="spell-1" class="action spell-button" type="button" data-slot="1" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>G</kbd></button>
+      <button id="spell-2" class="action spell-button" type="button" data-slot="2" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>V</kbd></button>
+      <button id="spell-3" class="action spell-button" type="button" data-slot="3" hidden><span class="spell-icon"></span><span class="cooldown"></span><kbd>X</kbd></button>
     </div>
   </div>
 

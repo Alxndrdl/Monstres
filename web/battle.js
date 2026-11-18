@@ -525,7 +525,7 @@
       button.style.setProperty('--cd', f.cooldownTotals[i] ? left / f.cooldownTotals[i] : 0);
       button.classList.toggle('waiting', left > 0);
     });
-    parryButton.style.setProperty('--cd', Math.min(1, f.parryCooldown));  // about 1 s
+    parryButton.style.setProperty('--cd', Math.min(1, f.parryCooldown / 2));  // 2 s (rules::kParryTicks + kParryCooldown)
   }
 
   // ---- Damage numbers and the outcome ----
@@ -683,9 +683,10 @@
 
 
   // ---- Capturing: the circle of runes (Battle::seal, src/core/battle.cpp) ----
-  // The runes light up one after the other; then the player touches them in
-  // the same order (keys 1 to 6 too). The bar: the escape on the left, the
-  // capture on the right; it starts halfway.
+  // The runes of a series light up one after the other; then the player
+  // touches them in the same order (keys 1 to 8 too). The bar: the escape on
+  // the left, the capture on the right; it starts halfway, each rune right
+  // moves it a little. The capture spells: spells.js.
   const RUNE_GLYPHS = [
     'M12 3v18M12 9l6-5M12 14l6-5',
     'M7 21V3l10 6v12',
@@ -693,6 +694,8 @@
     'M12 3v18M12 4l-6 5M12 9l-6 5',
     'M6 3l12 18M18 3L6 21',
     'M12 3l7 9-7 9-7-9z',
+    'M6 21L12 3l6 18M8.5 14h7',
+    'M8 3v18h9M8 11h6',
   ];
   const sealLayer = $('seal');
   const sealRing = sealLayer.querySelector('.seal-ring');
@@ -700,6 +703,8 @@
   const sealText = sealLayer.querySelector('.seal-text > span');
   const sealFill = sealLayer.querySelector('.seal-fill');
   const sealPips = sealLayer.querySelector('.seal-pips');
+  const sealTop = sealLayer.querySelector('.seal-top');
+  const sealTools = $('seal-tools');
   const svgNs = 'http://www.w3.org/2000/svg';
   const svg = (tag, attrs, children = []) => {
     const node = document.createElementNS(svgNs, tag);
@@ -756,11 +761,12 @@
     game.rune(Number(k[2]) - 1);
   }, true);
 
+  const percent = (x) => `${x.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %`;
   const SEAL_TEXTS = {
-    show: () => 'Observe l’ordre des runes…',
-    input: (s) => `À toi : touche les runes dans le même ordre (${s.done}/${s.length})`,
-    right: (s) => `Bravo ! Le sceau se resserre (+${s.gain} %)`,
-    wrong: (s) => `Raté ! Il se débat (−${s.loss} %)`,
+    show: (s) => (s.done || s.credited ? 'Observe encore l’ordre des runes…' : 'Observe l’ordre des runes…'),
+    input: (s) => `À toi : touche les runes dans le même ordre (${s.done}/${s.length}) · +${percent(s.boost ? s.gain * 1.5 : s.gain)} par rune`,
+    right: (s) => (s.power >= 100 ? 'Le sceau est complet !' : 'Série réussie ! Une autre…'),
+    wrong: (s) => (s.guard ? 'Raté… mais ta protection tient : rien de perdu' : `Raté ! Il se débat (−${percent(s.loss)})`),
     caught: () => 'Le sceau est complet !',
     escaped: () => 'Il s’est libéré !',
   };
@@ -784,16 +790,22 @@
     const color = (LORE.elements[s.element] || { color: '#f2c94c' }).color;
     sealLayer.style.setProperty('--seal-color', color);
     sealLayer.className = s.stage;
-    // Around the monster, where it is drawn (the camera glides to it first).
+    // Around the monster, where it is drawn (the camera glides to it first),
+    // but whole on the screen: below the bar, left of the capture spells.
     const at = game.creatureOnScreen(s.foe);
     if (at) {
-      sealRing.style.left = `${at.x}px`;
-      sealRing.style.top = `${at.y}px`;
+      const r = sealRing.offsetWidth / 2 + 34;  // the runes stand out of the ring
+      const top = sealTop.getBoundingClientRect().bottom + 2;
+      const right = sealTools.getBoundingClientRect().left - 4;
+      const fit = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)));
+      sealRing.style.left = `${fit(at.x, r, right - r)}px`;
+      sealRing.style.top = `${fit(at.y, top + r, window.innerHeight - r)}px`;
     }
     // The ring opens once the camera is on the monster.
     sealRing.classList.toggle('closed', s.stage === 'show' && s.round === 0 && s.lit < 0 && s.timer < 40);
-    setText(sealTitle, `Capture · ${speciesName(s.species)}`);
-    setText(sealText, (SEAL_TEXTS[s.stage] || (() => ''))(s));
+    setText(sealTitle, `Capture · ${speciesName(s.species)} · ${percent(Math.round(Math.max(0, Math.min(100, s.bar)) * 2) / 2)}`);
+    const helped = [s.guard ? 'protégé' : '', s.boost ? 'renforcé' : ''].filter(Boolean).join(', ');
+    setText(sealText, (SEAL_TEXTS[s.stage] || (() => ''))(s) + (helped && s.stage !== 'wrong' ? ` · ${helped}` : ''));
     sealFill.style.width = `${Math.max(0, Math.min(100, s.bar))}%`;
     if (sealPips.childElementCount !== s.length) {
       sealPips.replaceChildren(...Array.from({ length: s.length }, () => el('i')));
@@ -806,6 +818,7 @@
       button.disabled = s.stage !== 'input';
       const lit = s.lit === k;
       button.classList.toggle('lit', lit);
+      button.classList.toggle('hint', s.stage === 'input' && s.hint === k);
       if (lit) button.style.setProperty('--glow', String(1 - s.glow * 0.5));
       if (touched && k === s.touched) {
         const kind = s.stage === 'wrong' ? 'bad' : 'good';

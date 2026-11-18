@@ -118,6 +118,8 @@ bool valid_genes(Species species, const Genes& genes);
 // Whether a monster carries something very rare: a very rare allele, a rare
 // form, or a build other than normal (what the Detection spell finds).
 bool very_rare(Species species, const Genes& genes);
+// The rarest thing a monster carries: VeryRare as very_rare() says, else its rarest allele.
+Rarity rarest(Species species, const Genes& genes);
 
 // The very rare monster closest to the player within rules::kDetectRadius
 // while the Detection spell lasts (its index in creatures), or -1. Not the

@@ -419,8 +419,9 @@
     }));
     // The fourth: every monster parries (rules::kParryTicks, kParryCooldown in battle.hpp).
     moves.append(el('li', { className: 'move' }, [
-      el('div', { className: 'move-head' }, [el('strong', { textContent: LORE.parry.name })]),
-      el('p', { className: 'facts', textContent: 'Défense · garde 0,3 s · recharge 1 s' }),
+      el('div', { className: 'move-head' }, [el('strong', { textContent: LORE.parry.name }),
+        el('span', { className: 'badge', textContent: LORE.elements.normal.name, style: `background:${LORE.elements.normal.color}` })]),
+      el('p', { className: 'facts', textContent: 'Défense · garde 0,5 s · recharge 2 s' }),
       el('p', { className: 'move-text', textContent: LORE.parry.description }),
     ]));
     $('team-detail').className = 'bestiary-detail member';
@@ -1134,8 +1135,9 @@
     window.dispatchEvent(new CustomEvent('monstres-object', { detail: { index: there ? there.object : -1 } }));
   });
 
-  // Opening the map: on the player, up close (to choose a teleporter: the whole playable area).
-  let fitPlayable = false;  // the next drawing shows the whole playable area
+  // Opening the map: on the player, up close (to choose a teleporter: all the
+  // known ones and the player, the farm's and the menhirs' far in the west too).
+  let fitPlayable = false;  // the next drawing shows them all
   let mapData = null;  // the world's map data (big: read again only when the map opens)
   function openMap(teleport) {
     mapData = null;
@@ -1315,7 +1317,16 @@
     mapBase();
     if (!canvas.clientWidth || !canvas.clientHeight) return;
     if (fitPlayable) {
-      scale = Math.min(canvas.clientWidth, canvas.clientHeight) / 320;
+      const p = mapPlayer();
+      const spots = [p, ...game.teleporters().list.filter((t) => t.known)];
+      const xs = spots.map((t) => t.x), zs = spots.map((t) => t.z);
+      const lo = { x: Math.min(...xs), z: Math.min(...zs) }, hi = { x: Math.max(...xs), z: Math.max(...zs) };
+      // Clear of the tools at the top and of the hint at the bottom (pixels), and 20 m around.
+      const side = 30, top = 70, bottom = 50, margin = 20;
+      scale = Math.min((canvas.clientWidth - 2 * side) / (hi.x - lo.x + 2 * margin),
+        (canvas.clientHeight - top - bottom) / (hi.z - lo.z + 2 * margin),
+        canvas.clientWidth / 320, canvas.clientHeight / 320);
+      center = { x: (lo.x + hi.x) / 2, z: (lo.z + hi.z) / 2 - (top - bottom) / 2 / scale };
       fitPlayable = false;
     }
     const view = currentView();

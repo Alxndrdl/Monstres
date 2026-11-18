@@ -83,8 +83,10 @@ enum class Command : uint8_t {
   Target,     // in a battle: aim at foes[Input::target] (kNoTarget: aim at no one, move freely)
   Challenge,  // a battle against the trainer Input::target (Npc), who offered it
   Ready,      // a trainer's battle: the player has read the rules, the fight starts
-  Cast,       // the magician casts its spell Input::target (0 or 1: combat spells in a battle, else adventure ones)
-  EquipSpell, // out of battles: spell slot Input::target / 16 (0, 1: combat; 2, 3: adventure) gets SpellId target % 16
+  Cast,       // the magician casts its spell Input::target (capturing: the capture ones; in a battle: the
+              // combat ones; else the adventure ones)
+  EquipSpell, // out of battles: spell slot Input::target / 16 (0, 1: combat; 2 to 5: adventure; 6 to 9:
+              // capture) gets SpellId target % 16
   HealTeam,   // the healer (Npc Input::target) heals the whole team, and wakes the knocked out
   Door,       // through the door the player stands at (interior.hpp: in, out, up to the tower's roof...)
   UseItem,    // the bag: use one Item Input::target (a mana potion)
@@ -97,9 +99,17 @@ enum class Command : uint8_t {
 inline constexpr size_t kCommandCount = static_cast<size_t>(Command::Rune) + 1;  // the last one
 
 // The magician's spells (see battle.hpp: what each does, where it can be cast).
-enum class SpellId : uint8_t { None, Heal, Shield, Mercy, Detect, WayOut, Count };
+// Replay to Hint: the capture spells (Battle::seal).
+enum class SpellId : uint8_t {
+  None, Heal, Shield, Mercy, Detect, WayOut,
+  Replay, Guard, Boost, NewOrder, Steady, Hint,
+  Count
+};
 inline constexpr size_t kSpellCount = static_cast<size_t>(SpellId::Count);
-inline constexpr size_t kSpellSlots = 2;  // combat spells, and adventure spells
+inline constexpr size_t kCombatSlots = 2;     // in a battle
+inline constexpr size_t kAdventureSlots = 4;  // out of battles (where the attacks are in a battle)
+inline constexpr size_t kCaptureSlots = 4;    // capturing
+inline constexpr size_t kSpellSlotCount = kCombatSlots + kAdventureSlots + kCaptureSlots;  // Command::EquipSpell
 inline constexpr uint16_t kNoTarget = 0xFFFF;
 
 // What the player does during one tick. Integers, so that replays and saved
@@ -490,6 +500,13 @@ struct RivalMonster {
 };
 inline constexpr size_t kRivalTeamSize = 3;
 
+// A trainer passing by (npc::kWanderer...): its team, drawn when it appears.
+struct Wanderer {
+  std::array<RivalMonster, kRivalTeamSize> team{};
+  uint8_t count = 0;  // 0: no one there
+  bool operator==(const Wanderer&) const = default;
+};
+
 // A trainer's battle: who, its team, and where both sides stand.
 struct Rival {
   uint8_t npc = 0;  // 0: a wild battle
@@ -503,30 +520,40 @@ struct Rival {
 };
 
 // Capturing (battle.hpp): a circle of runes around the foe; some light up
-// one after the other, the player touches them in the same order. The world
-// holds still meanwhile.
+// one after the other (a series), the player touches them in the same order.
+// The world holds still meanwhile.
 enum class SealStage : uint8_t {
   None,
   Show,     // the runes light up, one by one
   Input,    // the player touches them
-  Right,    // the whole order was touched: the seal tightens
+  Right,    // the whole series was touched (or the bar is full)
   Wrong,    // a mistake: the monster pulls away
   Caught,   // the seal is full: it goes into the crystal
   Escaped,  // it broke free: it runs away
 };
-inline constexpr size_t kSealRunes = 6;   // around the circle
-inline constexpr size_t kSealLength = 5;  // lit each round
+inline constexpr size_t kSealRunesMax = 8;   // around the circle (rules::kSealRunes...: by level and rarity)
+inline constexpr size_t kSealLengthMax = 7;  // in a series
+inline constexpr uint8_t kNoRune = 0xFF;
 struct Seal {
   SealStage stage = SealStage::None;
   uint16_t foe = 0;      // in World::creatures
-  uint8_t power = 0;     // 0: it breaks free, 100: caught
-  uint8_t before = 0;    // power before the last round (the bar moves from it)
-  std::array<uint8_t, kSealLength> order{};  // the runes to touch (never the same twice in a row)
-  uint8_t done = 0;      // touched right so far this round
-  uint8_t touched = 0xFF;  // the last rune touched (0xFF: none)
-  uint8_t round = 0;
+  uint16_t power = 0;    // per mille: 0 it breaks free, 1000 caught
+  uint16_t before = 0;   // power before the last change (the bar moves from it)
+  uint8_t runes = 0;     // around the circle
+  uint8_t length = 0;    // in a series
+  uint8_t gain = 0;      // per mille, for each rune touched right
+  std::array<uint8_t, kSealLengthMax> order{};  // the runes to touch (never the same twice in a row)
+  uint8_t done = 0;      // touched right so far in this series
+  uint8_t credited = 0;  // of them, those that moved the bar (shown again: not twice)
+  uint8_t touched = kNoRune;  // the last rune touched
+  uint8_t hint = kNoRune;     // the Hint spell: the next rune to touch, shown
+  uint8_t round = 0;     // series so far
+  bool glided = false;   // the camera came to the monster (the first show waits for it)
+  bool guard = false;    // the Guard spell: a mistake in this series costs nothing
+  bool boost = false;    // the Boost spell: each rune of this series moves the bar half again as much
   uint16_t timer = 0;    // ticks in this stage
   uint64_t touch_tick = 0;
+  uint64_t bar_tick = 0;  // the bar last moved
   bool operator==(const Seal&) const = default;
 };
 
@@ -604,7 +631,12 @@ inline constexpr uint8_t kFirmin = 14;    // the woodcutter, by his cabin
 inline constexpr uint8_t kRomane = 15;    // a trainer camping in the woods
 inline constexpr uint8_t kLucien = 16;    // the miller: his mill stopped turning
 inline constexpr uint8_t kYvon = 17;      // the lighthouse keeper
-inline constexpr uint8_t kLast = kYvon;
+inline constexpr uint8_t kLast = kYvon;  // the villagers saved
+// Trainers passing by (World::wanderers), met now and then in the wilds:
+// villager numbers kWanderer.. kWanderer + kWandererCount - 1. Not saved.
+inline constexpr uint8_t kWanderer = 18;
+inline constexpr uint8_t kWandererCount = 4;
+inline constexpr bool wanderer(uint8_t n) { return n >= kWanderer && n < kWanderer + kWandererCount; }
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
@@ -769,13 +801,17 @@ struct World {
   // The monsters left at the farm (west.hpp): caught with a full team once
   // the transfer stone is there, or left by the player; taken back from Capucine.
   std::vector<Monster> farm;
+  // Not saved: the trainers passing by, met in the wilds (npc::kWanderer...);
+  // the villager and its monster (Tag::Rival) are creatures.
+  std::array<Wanderer, npc::kWandererCount> wanderers{};
   uint64_t rescue_tick = 0;    // not saved: the magician was sent back to the farm (an aggressive monster won)
   // How many monsters of each species the player captured, beat (wild ones), let go.
   std::array<uint16_t, kSpeciesCount> captured_count{}, beaten_count{}, released_count{};
   uint32_t battles_won = 0;    // victories, wild monsters' and trainers'
   uint16_t detect_ticks = 0;   // the Detection spell: ticks left
-  std::array<SpellId, kSpellSlots> combat_spells{SpellId::Heal, SpellId::Shield};  // chosen out of battles
-  std::array<SpellId, kSpellSlots> adventure_spells{SpellId::Heal, SpellId::None};
+  std::array<SpellId, kCombatSlots> combat_spells{SpellId::Heal, SpellId::Shield};  // chosen out of battles
+  std::array<SpellId, kAdventureSlots> adventure_spells{SpellId::Heal, SpellId::None, SpellId::None, SpellId::None};
+  std::array<SpellId, kCaptureSlots> capture_spells{SpellId::Replay, SpellId::Guard, SpellId::Boost, SpellId::Hint};
   std::array<uint16_t, kSpellCount> spell_cooldowns{};  // not saved: ticks before each spell can be cast again
   uint64_t spell_tick = 0;     // not saved: the last spell cast, for the drawing
   SpellId spell_cast = SpellId::None;

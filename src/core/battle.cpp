@@ -202,7 +202,7 @@ void restore_rival(World& w) {
   if (i < 0) return;
   Creature& c = w.creatures[static_cast<size_t>(i)];
   uint8_t count = 0;
-  const RivalMonster& first = rival_team(c.npc ? c.npc : npc::kBastien, count)[0];
+  const RivalMonster& first = rival_team(w, c.npc ? c.npc : npc::kBastien, count)[0];
   c.species = first.species;
   c.genes = first.genes;
   c.level = first.level;
@@ -271,7 +271,9 @@ void end_battle(World& w, BattleOutcome outcome, uint32_t xp) {
   // Against an aggressive monster: lost or fled, the magician is sent back to the farm.
   const bool forced = b.forced;
   b.forced = false;
-  if (forced && (outcome == BattleOutcome::Defeat || outcome == BattleOutcome::Fled)) rescue(w);
+  if (forced && (outcome == BattleOutcome::Defeat || outcome == BattleOutcome::Fled || outcome == BattleOutcome::Forfeit)) {
+    rescue(w);
+  }
 }
 
 // A monster beaten once, or let go by the player, gives nothing when beaten or caught again.
@@ -798,7 +800,12 @@ bool can_capture(const World& w) {
          uint32_t{t->hp} * 100u <= uint32_t{t->max_hp} * rules::kCaptureHpPercent;
 }
 
-const std::array<RivalMonster, kRivalTeamSize>& rival_team(uint8_t n, uint8_t& count) {
+const std::array<RivalMonster, kRivalTeamSize>& rival_team(const World& w, uint8_t n, uint8_t& count) {
+  if (npc::wanderer(n)) {
+    const Wanderer& x = w.wanderers[n - npc::kWanderer];
+    count = x.count;
+    return x.team;
+  }
   // Bastien: a Champi beside him, a Gloubi in reserve.
   static const std::array<RivalMonster, kRivalTeamSize> kBastien = {{
       {Species::Mushroom, Genes{}, 4, 0, false},
@@ -820,6 +827,18 @@ const std::array<RivalMonster, kRivalTeamSize>& rival_team(uint8_t n, uint8_t& c
 }
 
 bool rival_arena(const World& w, uint8_t trainer, Vec2& center, Vec2& axis) {
+  if (npc::wanderer(trainer)) {  // where they met: between the player and the trainer
+    const int i = npc_index(w, trainer);
+    if (i < 0) return false;
+    const Vec3 t = w.creatures[static_cast<size_t>(i)].body.pos;
+    float dx = t.x - w.player.pos.x, dz = t.z - w.player.pos.z;
+    const float l = std::sqrt(dx * dx + dz * dz);
+    dx = l > 1e-3f ? dx / l : 1.0f;
+    dz = l > 1e-3f ? dz / l : 0.0f;
+    center = {(t.x + w.player.pos.x) / 2, (t.z + w.player.pos.z) / 2};
+    axis = {dx, dz};
+    return true;
+  }
   if (trainer == npc::kRomane) {  // in her camp's clearing, south of the fire
     if (!w.west.valid()) return false;
     center = {w.west.camp.x, w.west.camp.z + 2.5f};
@@ -872,8 +891,14 @@ bool rival_arena(const World& w, uint8_t trainer, Vec2& center, Vec2& axis) {
 
 bool can_challenge(const World& w, uint8_t n) {
   uint8_t count = 0;
-  rival_team(n, count);
+  rival_team(w, n, count);
   const Monster* a = active_monster(w);
+  if (npc::wanderer(n)) {  // beaten, it offers no more; an aggressive one does not ask
+    const int i = npc_index(w, n);
+    if (i < 0 || w.creatures[static_cast<size_t>(i)].beaten || w.creatures[static_cast<size_t>(i)].tag == Tag::Raider) {
+      return false;
+    }
+  }
   return count > 0 && w.battle.phase == BattlePhase::None && a && a->hp > 0 && near_npc(w, n) && rival_index(w, n) > 0;
 }
 
@@ -909,12 +934,19 @@ bool can_train(const World& w) {
 
 const SpellInfo& spell_info(SpellId spell) {
   static const SpellInfo kSpells[] = {
-      {"none", false, false, 0, 0},
-      {"heal", true, true, rules::kHealCooldown, 4},
-      {"shield", true, false, rules::kShieldCooldown, 3},
-      {"mercy", true, false, rules::kMercyCooldown, 5},
-      {"detect", false, true, rules::kDetectTicks, 6},
-      {"wayOut", false, true, rules::kWayOutTicks, 0},
+      //  id         combat adventure capture a rune  cooldown                mana
+      {"none", false, false, false, false, 0, 0},
+      {"heal", true, true, false, false, rules::kHealCooldown, 4},
+      {"shield", true, false, false, false, rules::kShieldCooldown, 3},
+      {"mercy", true, false, false, false, rules::kMercyCooldown, 5},
+      {"detect", false, true, false, false, rules::kDetectTicks, 6},
+      {"wayOut", false, true, false, false, rules::kWayOutTicks, 0},
+      {"replay", false, false, true, true, 0, 1},
+      {"guard", false, false, true, true, 0, 2},
+      {"boost", false, false, true, true, 0, 2},
+      {"newOrder", false, false, true, false, 0, 3},
+      {"steady", false, false, true, false, 0, 8},
+      {"hint", false, false, true, false, 0, 2},
   };
   static_assert(std::size(kSpells) == kSpellCount);
   const auto i = static_cast<size_t>(spell);
@@ -928,14 +960,56 @@ bool in_combat(const World& w) {
 }
 }  // namespace
 
-const std::array<SpellId, kSpellSlots>& current_spells(const World& w) {
-  return in_combat(w) ? w.combat_spells : w.adventure_spells;
+std::span<const SpellId> current_spells(const World& w) {
+  if (sealing(w)) return w.capture_spells;
+  if (in_combat(w)) return w.combat_spells;
+  return w.adventure_spells;
 }
 
+uint16_t spell_cost(const World& w, SpellId spell) {
+  const SpellInfo& info = spell_info(spell);
+  if (!info.per_rune) return info.mana;
+  const Seal& s = w.battle.seal;
+  return static_cast<uint16_t>(info.mana * (s.length > s.done ? s.length - s.done : 0));
+}
+
+namespace {
+// Why a capture spell cannot be cast now (nullptr: it can).
+const char* cannot_seal_cast(const World& w, SpellId spell) {
+  const Seal& s = w.battle.seal;
+  const bool show = s.stage == SealStage::Show, input = s.stage == SealStage::Input;
+  switch (spell) {
+    case SpellId::Guard:
+      if (s.guard) return "active";
+      if (!show && !input) return "notNow";
+      break;
+    case SpellId::Boost:
+      if (s.boost) return "active";
+      if (!show && !input) return "notNow";
+      break;
+    case SpellId::Hint:
+      if (!input) return "notNow";
+      if (s.hint != kNoRune) return "active";
+      break;
+    case SpellId::Steady:
+      if (s.power >= rules::kSealSteadyPower) return "steady";
+      if (!show && !input) return "notNow";
+      break;
+    default:  // Replay, NewOrder
+      if (!input) return "notNow";
+      break;
+  }
+  if (w.wizard.mana < spell_cost(w, spell)) return "mana";
+  return nullptr;
+}
+}  // namespace
+
 const char* cannot_cast(const World& w, size_t slot) {
-  if (slot >= kSpellSlots) return "none";
-  const SpellId s = current_spells(w)[slot];
+  const auto now = current_spells(w);
+  if (slot >= now.size()) return "none";
+  const SpellId s = now[slot];
   if (s == SpellId::None) return "none";
+  if (sealing(w)) return cannot_seal_cast(w, s);
   if (w.battle.phase == BattlePhase::Flee) return "fleeing";
   if ((s == SpellId::Mercy && w.battle.mercy) || (s == SpellId::Detect && w.detect_ticks > 0) ||
       (s == SpellId::WayOut && w.way_out_ticks > 0)) {
@@ -1014,7 +1088,7 @@ void challenge(World& w, uint8_t n) {
   Battle b = fresh_battle(w.battle, BattlePhase::Prepare);
   Rival& r = b.rival;
   r.npc = n;
-  r.team = rival_team(n, r.count);
+  r.team = rival_team(w, n, r.count);
   for (uint8_t k = 0; k < r.count; ++k) {
     r.team[k].hp = monster_fight_stats(r.team[k].species, r.team[k].level, r.team[k].genes).hp;
   }
@@ -1036,8 +1110,10 @@ void challenge(World& w, uint8_t n) {
 
 }  // namespace
 
-void force_battle(World& w, size_t index) {
-  if (index == 0 || index >= w.creatures.size() || w.battle.phase != BattlePhase::None) return;
+namespace {
+// Before a forced battle: the first team member standing comes out if needed.
+// False if no one can fight (the magician is sent back to the farm).
+bool ready_to_fight(World& w) {
   const Monster* a = active_monster(w);
   if (!a || a->hp == 0) {  // the first one standing comes out
     size_t slot = w.team.size();
@@ -1046,7 +1122,7 @@ void force_battle(World& w, size_t index) {
     }
     if (slot == w.team.size()) {  // no one to fight: away to the farm
       rescue(w);
-      return;
+      return false;
     }
     if (w.active >= 0) {  // the knocked out one goes back in first
       const Monster& out = w.team[static_cast<size_t>(w.active)];
@@ -1056,8 +1132,24 @@ void force_battle(World& w, size_t index) {
     }
     summon(w, slot);
   }
+  return true;
+}
+}  // namespace
+
+void force_battle(World& w, size_t index) {
+  if (index == 0 || index >= w.creatures.size() || w.battle.phase != BattlePhase::None) return;
+  if (!ready_to_fight(w)) return;
   engage(w, index);
   w.battle.forced = true;
+}
+
+void force_challenge(World& w, uint8_t n) {
+  uint8_t count = 0;
+  rival_team(w, n, count);
+  if (count == 0 || w.battle.phase != BattlePhase::None || rival_index(w, n) <= 0) return;
+  if (!ready_to_fight(w)) return;
+  challenge(w, n);
+  w.battle.forced = w.battle.phase == BattlePhase::Prepare;
 }
 
 namespace {
@@ -1090,16 +1182,20 @@ void capture_foe(World& w, size_t k) {
   else send_to_farm(w, m);  // the transfer stone: the team is full
 }
 
-// A new order of runes: never the same twice in a row.
+// A new series of runes (never the same twice in a row), shown; the spells
+// on the last one are over.
 void seal_order(World& w) {
   Seal& s = w.battle.seal;
-  Rng r(w.seed ^ (w.tick * 0x9E3779B97F4A7C15ULL), 0x5EA1u + s.foe);
-  s.order[0] = static_cast<uint8_t>(r.below(kSealRunes));
-  for (size_t i = 1; i < kSealLength; ++i) {
-    const uint32_t step = 1 + r.below(kSealRunes - 1);
-    s.order[i] = static_cast<uint8_t>((s.order[i - 1] + step) % kSealRunes);
+  Rng r(w.seed ^ (w.tick * 0x9E3779B97F4A7C15ULL), 0x5EA1u + s.foe + 977u * s.round);
+  s.order = {};
+  s.order[0] = static_cast<uint8_t>(r.below(s.runes));
+  for (size_t i = 1; i < s.length; ++i) {
+    const uint32_t step = 1 + r.below(s.runes - 1u);
+    s.order[i] = static_cast<uint8_t>((s.order[i - 1] + step) % s.runes);
   }
-  s.done = 0;
+  s.done = s.credited = 0;
+  s.hint = kNoRune;
+  s.guard = s.boost = false;
   s.timer = 0;
   s.stage = SealStage::Show;
 }
@@ -1109,13 +1205,59 @@ void start_seal(World& w) {
   Seal& s = b.seal;
   s = {};
   s.foe = b.foes[b.target].index;
+  const Creature& c = w.creatures[s.foe];
+  s.runes = c.level <= rules::kSealLowLevel   ? rules::kSealRunesLow
+            : c.level <= rules::kSealMidLevel ? rules::kSealRunesMid
+                                              : rules::kSealRunesHigh;
+  const Rarity rarity = rarest(c.species, c.genes);
+  const uint8_t extra = rarity == Rarity::VeryRare ? rules::kSealVeryRareExtra
+                        : rarity == Rarity::Rare   ? rules::kSealRareExtra
+                                                   : 0;
+  s.runes = static_cast<uint8_t>(s.runes + extra);
+  s.length = static_cast<uint8_t>(s.runes - 1);
+  s.gain = rarity == Rarity::VeryRare ? rules::kSealGainVeryRare : rules::kSealGain;
   s.power = s.before = rules::kSealStart;
   b.ally.state = FighterState::Ready;  // its burst, if gathering, is lost
   b.ally.state_ticks = 0;
   seal_order(w);
 }
 
-uint16_t seal_lead(const Seal& s) { return s.round == 0 ? rules::kSealGlideTicks : rules::kSealPauseTicks; }
+uint16_t seal_lead(const Seal& s) { return s.glided ? rules::kSealPauseTicks : rules::kSealGlideTicks; }
+
+// The bar moves to `power` (from where it is drawn now).
+void seal_move(World& w, int power) {
+  Seal& s = w.battle.seal;
+  s.before = static_cast<uint16_t>(std::lround(seal_bar(w) * 10));
+  s.power = static_cast<uint16_t>(std::clamp(power, 0, static_cast<int>(rules::kSealFull)));
+  s.bar_tick = w.tick;
+}
+
+// A capture spell (Command::Cast while sealing).
+void seal_cast(World& w, size_t slot) {
+  Seal& s = w.battle.seal;
+  if (slot >= kCaptureSlots || cannot_cast(w, slot)) return;
+  const SpellId spell = w.capture_spells[slot];
+  w.wizard.mana = static_cast<uint16_t>(w.wizard.mana - spell_cost(w, spell));
+  switch (spell) {
+    case SpellId::Replay:  // the same series again, from its first rune
+      s.done = 0;
+      s.hint = kNoRune;
+      s.timer = 0;
+      s.stage = SealStage::Show;
+      break;
+    case SpellId::Guard: s.guard = true; break;
+    case SpellId::Boost: s.boost = true; break;
+    case SpellId::NewOrder:
+      ++s.round;
+      seal_order(w);
+      break;
+    case SpellId::Steady: seal_move(w, rules::kSealSteadyPower); break;
+    case SpellId::Hint: s.hint = s.order[s.done]; break;
+    default: break;
+  }
+  w.spell_tick = w.tick;
+  w.spell_cast = spell;
+}
 
 // The sealed monster broke free: it runs away from the companion.
 void seal_escape(World& w, size_t k) {
@@ -1161,7 +1303,7 @@ void battle_command(World& w, const Input& in) {
     case Command::Rune:  // seal_step
       break;  // quests.cpp, west.cpp
     case Command::Cast: {
-      if (in.target >= kSpellSlots || cannot_cast(w, in.target)) break;
+      if (in.target >= current_spells(w).size() || cannot_cast(w, in.target)) break;
       const SpellId s = current_spells(w)[in.target];
       if (s == SpellId::Heal) {
         Monster& a = ally(w);
@@ -1184,19 +1326,27 @@ void battle_command(World& w, const Input& in) {
       break;
     }
     case Command::EquipSpell: {
-      const size_t slot = in.target / 16;
+      size_t slot = in.target / 16;
       const auto spell = static_cast<SpellId>(in.target % 16);
-      if (b.phase != BattlePhase::None || slot >= 2 * kSpellSlots || spell >= SpellId::Count) break;
-      const bool combat = slot < kSpellSlots;
+      if (b.phase != BattlePhase::None || slot >= kSpellSlotCount || spell >= SpellId::Count) break;
       const SpellInfo& info = spell_info(spell);
-      if (spell != SpellId::None && !(combat ? info.combat : info.adventure)) break;
-      auto& slots = combat ? w.combat_spells : w.adventure_spells;
-      const size_t k = slot % kSpellSlots;
-      // Already in the other slot: they swap.
-      for (SpellId& other : slots) {
-        if (spell != SpellId::None && other == spell) other = slots[k];
+      std::span<SpellId> slots = w.combat_spells;
+      bool fits = info.combat;
+      if (slot >= kCombatSlots + kAdventureSlots) {
+        slots = w.capture_spells;
+        fits = info.capture;
+        slot -= kCombatSlots + kAdventureSlots;
+      } else if (slot >= kCombatSlots) {
+        slots = w.adventure_spells;
+        fits = info.adventure;
+        slot -= kCombatSlots;
       }
-      slots[k] = spell;
+      if (spell != SpellId::None && !fits) break;
+      // Already in another slot: they swap.
+      for (SpellId& other : slots) {
+        if (spell != SpellId::None && other == spell) other = slots[slot];
+      }
+      slots[slot] = spell;
       break;
     }
     case Command::HealTeam:
@@ -1267,24 +1417,31 @@ void seal_step(World& w, const Input& in) {
     return;
   }
   ++s.timer;
+  if (in.command == Command::Cast) seal_cast(w, in.target);
   switch (s.stage) {
     case SealStage::Show:
-      if (s.timer >= seal_lead(s) + kSealLength * rules::kSealRuneTicks) {
+      if (s.timer >= seal_lead(s) + s.length * rules::kSealRuneTicks) {
         s.stage = SealStage::Input;
         s.timer = 0;
+        s.glided = true;
       }
       break;
     case SealStage::Input:
-      if (in.command != Command::Rune || in.target >= kSealRunes) break;
+      if (in.command != Command::Rune || in.target >= s.runes) break;
       s.touched = static_cast<uint8_t>(in.target);
       s.touch_tick = w.tick;
-      s.before = s.power;
+      s.hint = kNoRune;
       if (in.target != s.order[s.done]) {
-        s.power = static_cast<uint8_t>(s.power > rules::kSealLoss ? s.power - rules::kSealLoss : 0);
+        if (!s.guard) seal_move(w, s.power - rules::kSealLoss);
         s.stage = SealStage::Wrong;
         s.timer = 0;
-      } else if (++s.done == kSealLength) {
-        s.power = static_cast<uint8_t>(std::min(100, s.power + rules::kSealGain));
+        break;
+      }
+      if (++s.done > s.credited) {  // not twice for the same rune (Replay)
+        s.credited = s.done;
+        seal_move(w, s.power + (s.boost ? s.gain * 3 / 2 : s.gain));
+      }
+      if (s.done == s.length || s.power >= rules::kSealFull) {
         s.stage = SealStage::Right;
         s.timer = 0;
       }
@@ -1292,8 +1449,7 @@ void seal_step(World& w, const Input& in) {
     case SealStage::Right:
     case SealStage::Wrong:
       if (s.timer < rules::kSealResultTicks) break;
-      s.before = s.power;
-      if (s.power >= 100) {
+      if (s.power >= rules::kSealFull) {
         s.stage = SealStage::Caught;
         s.timer = 0;
       } else if (s.power == 0) {
@@ -1328,17 +1484,16 @@ int seal_lit(const World& w, float* glow) {
   const uint16_t t = static_cast<uint16_t>(s.timer - lead);
   const size_t i = t / rules::kSealRuneTicks;
   const uint16_t in = static_cast<uint16_t>(t % rules::kSealRuneTicks);
-  if (i >= kSealLength || in >= rules::kSealLitTicks) return -1;
+  if (i >= s.length || in >= rules::kSealLitTicks) return -1;
   if (glow) *glow = static_cast<float>(in) / rules::kSealLitTicks;
   return s.order[i];
 }
 
 float seal_bar(const World& w) {
   const Seal& s = w.battle.seal;
-  if (s.stage != SealStage::Right && s.stage != SealStage::Wrong) return s.power;
-  const float t = std::min(1.0f, static_cast<float>(s.timer) / (rules::kSealResultTicks * 0.6f));
+  const float t = std::min(1.0f, static_cast<float>(w.tick - s.bar_tick) / rules::kSealBarTicks);
   const float e = t * t * (3 - 2 * t);
-  return static_cast<float>(s.before) + (static_cast<float>(s.power) - s.before) * e;
+  return (static_cast<float>(s.before) + (static_cast<float>(s.power) - s.before) * e) / 10;
 }
 
 Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {
@@ -1704,11 +1859,16 @@ void battle_resolve(World& w) {
     if (r.npc) {  // only the first victory against a trainer gives experience (and coins)
       uint32_t levels = 0;
       for (uint8_t k = 0; k < r.count; ++k) levels += r.team[k].level;
-      uint8_t& wins = r.npc == npc::kRomane ? w.romane_wins : w.rival_wins;
+      uint8_t passing = 0;  // a trainer passing by: met once
+      uint8_t& wins = npc::wanderer(r.npc) ? passing : r.npc == npc::kRomane ? w.romane_wins : w.rival_wins;
       xp = wins == 0 ? rules::kRivalXpPerLevel * levels : 0;
       if (xp == 0) b.no_xp = NoXp::Trainer;
       if (wins == 0) w.bag[static_cast<size_t>(Item::Coin)] += 4 * levels;
       if (wins < 255) ++wins;
+      if (const int t = npc_index(w, r.npc); npc::wanderer(r.npc) && t > 0) {  // beaten: it offers no more
+        w.creatures[static_cast<size_t>(t)].beaten = true;
+        w.creatures[static_cast<size_t>(t)].tag = Tag::None;
+      }
     } else {
       w.bag[static_cast<size_t>(Item::Coin)] += (b.won_xp + 3) / 4;  // what the beaten ones dropped
     }

@@ -571,6 +571,22 @@
         `Trois contre toi : tu oses ?${why}`, [...offer, ['Une autre fois', close]]);
   }
 
+  // ---- A trainer passing by: a battle, once ----
+  function wanderer(c) {
+    const challenge = () => {
+      game.challenge(c.npc);
+      close();
+    };
+    if (c.beaten) {
+      show('Quel combat ! Tu m’as battu à la loyale. Je reprends la route… Peut-être qu’on se recroisera !');
+      return;
+    }
+    const offer = c.challenge ? [['Combattre !', challenge, 'challenge']] : [];
+    const why = c.challenge ? '' : ' Mais d’abord, fais sortir un monstre en forme.';
+    show(`Salut ! Je suis dresseur, je voyage de région en région. Un petit combat, ça te dit ?${why}`,
+      [...offer, ['Une autre fois', close]]);
+  }
+
   // ---- Lucien: the mill that stopped ----
   function lucien() {
     const q = quest('mill');
@@ -638,6 +654,7 @@
     else if (c.npc === BASILE) basile();
     else if (c.npc === ROMANE) romane(c);
     else if (c.npc === LUCIEN) lucien();
+    else if (c.wanderer) wanderer(c);
     else villager(c.npc);
     // Walking away ends the talk.
     clearInterval(watch);

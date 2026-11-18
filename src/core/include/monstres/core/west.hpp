@@ -34,7 +34,10 @@ namespace monstres {
 // Aggressive monsters (Tag::Raider) force a battle when the player comes
 // close (rules::kAggroDistance); losing it, or fleeing it, sends the
 // magician back to the farm (rescue): the team stays as it is (Violette
-// heals it).
+// heals it). Once the orchard's raiders are all beaten, other aggressive
+// monsters roam the land now and then (roaming_raider): a few at most, never
+// close to the farm, the village or a teleporter (no battle again and again
+// on coming back).
 
 namespace rules {
 inline constexpr float kRoadHalfWidth = 1.35f;
@@ -58,6 +61,13 @@ inline constexpr float kLighthouseGallery = 12.4f; // its gallery, around the la
 inline constexpr float kMillHub = 7.0f;            // the sails' hub, above the knoll
 inline constexpr float kSailReach = 5.2f;
 inline constexpr float kAggroDistance = 6.0f;      // an aggressive monster attacks from this close
+inline constexpr uint32_t kRoamingRaiders = 3;     // at most, at once (after the orchard)
+inline constexpr uint32_t kRoamingChance = 5;      // percent of the new wild monsters
+inline constexpr float kRaiderSafeDistance = 45.0f;  // from the farm's rescue spot, the village, a teleporter
+// Trainers passing by (World::wanderers, world.cpp): once Bastien taught the player to fight.
+inline constexpr uint32_t kWandererChance = 4;       // percent, each time a square is lived in again
+inline constexpr uint32_t kWanderersAtOnce = 2;
+inline constexpr uint32_t kAggressiveWanderers = 35;  // percent of them
 inline constexpr float kGoodsReach = 1.4f;         // the merchant's bundles are picked up from this close
 inline constexpr float kLambFollow = 3.0f;         // a lost lamb follows the player from this close
 inline constexpr uint32_t kGoods = 3, kLambs = 3, kFlock = 5, kRaiders = 5, kBoardersShown = 8;
@@ -129,6 +139,12 @@ bool mill_turning(const World& world);
 uint32_t raiders_left(const World& world);
 // The transfer stone is at the farm: caught with a full team, a monster goes there.
 bool farm_open(const World& world);
+// After the orchard: may a new wild monster at (x, z) be an aggressive one
+// (`roll`: 0..99, drawn for it)? Not too many, never close to a safe place.
+bool roaming_raider(const World& world, float x, float z, uint32_t roll);
+// Far enough from where the magician comes back, or arrives (the farm's
+// rescue spot, the village, the teleporters) for an aggressive one.
+bool far_from_safety(const World& world, float x, float z);
 
 // Creatures kept alive by the west, whenever their square is lived in (from
 // update_population): the shepherd's flock, his lost lambs, the orchard's
@@ -148,6 +164,9 @@ bool push_sails(World& world, Vec3 p);
 void raider_down(World& world, const Creature& creature);
 // A monster caught while the team is full: to the farm (battle.cpp).
 void send_to_farm(World& world, const Monster& monster);
+// The monsters kept at the farm are cared for: their hit points full (as
+// they arrive, are swapped, are loaded).
+void heal_farm(World& world);
 // The bag's commands (UseItem, Discard, Buy) and the farm's (FarmSwap).
 void west_command(World& world, const Input& input);
 
