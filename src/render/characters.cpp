@@ -1198,7 +1198,7 @@ void add_marks(DrawList& list, const World& w, const Creature& c, float top, flo
     MeshId mesh;
     Color glow;
   };
-  static constexpr Icon kIcons[] = {{kMarkNewQuest, MeshId::IconQuestion, {1.8f, 1.8f, 1.8f, 1}},
+  static constexpr Icon kIcons[] = {{kMarkNewQuest, MeshId::IconExclaim, {1.8f, 1.8f, 1.8f, 1}},
                                     {kMarkQuest, MeshId::IconExclaim, {2.1f, 1.6f, 0.35f, 1}},
                                     {kMarkHeal, MeshId::IconPlus, {0.45f, 2.0f, 0.55f, 1}},
                                     {kMarkFight, MeshId::IconCross, {2.2f, 0.38f, 0.32f, 1}},

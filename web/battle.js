@@ -11,6 +11,9 @@
   const { $, el, whenReady, setText, onTap } = window.MonstresUtil;
   const speciesName = (id) => (LORE.species[id] || { name: id }).name;
   const npcName = (n) => (LORE.npcs[n] || { name: 'Dresseur' }).name;
+  // A monster's name, then its level and whose it is: "Zapou niv. 5 (à toi)".
+  const ownerText = (c) => (c.owner === 0 ? ' (à toi)' : c.owner > 0 ? ` (à ${npcName(c.owner)})` : '');
+  const monsterTitle = (c) => [`${speciesName(c.species)} `, el('small', { textContent: `niv. ${c.level}${ownerText(c)}` })];
 
   let game = null;
   let selected = -1;  // creature touched (ui.js)
@@ -99,6 +102,15 @@
       'stroke-linejoin="round"><ellipse cx="12" cy="18" rx="8" ry="3"/><path d="M12 15V3M8 7l4-4 4 4"/></svg>',
     door: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M3 21h18"/><circle cx="14.5" cy="12.5" r="1"/></svg>',
+    // The villagers' icons (as over their heads): a quest, healing, the shop, the farm.
+    quest: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round">' +
+      '<path d="M12 4v10"/><circle cx="12" cy="19.5" r="0.6" fill="currentColor"/></svg>',
+    heal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round">' +
+      '<path d="M12 5v14M5 12h14"/></svg>',
+    shop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="5"/><path d="M12 9.5v5"/></svg>',
+    farm: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round"><path d="M3 11l9-7 9 7M5 9.5V21h14V9.5M10 21v-6h4v6"/></svg>',
   };
 
   // ---- Doors (interior.hpp): in a fade to black of 0.3 s ----
@@ -129,10 +141,11 @@
     return doors.house[d.building] || doors.house.cottage;
   }
 
-  const action = (id, label, enabled, onClick) => {
-    const button = el('button', { type: 'button', className: id, id: `action-${id}`, disabled: !enabled });
+  // icon: another one than the action's (a talk that gives a quest: its "!").
+  const action = (id, label, enabled, onClick, icon = id) => {
+    const button = el('button', { type: 'button', className: icon === id ? id : `${id} ${icon}`, id: `action-${id}`, disabled: !enabled });
     button.setAttribute('role', 'menuitem');
-    button.innerHTML = ICONS[id];
+    button.innerHTML = ICONS[icon === 'newQuest' ? 'quest' : icon];
     button.append(label);
     onTap(button, () => { if (game) onClick(); });  // also while the other hand moves the monster
     return button;
@@ -226,29 +239,34 @@
         const down = c.mind === 'knockedOut';
         key = `companion/${c.train}/${down}`;
         build = () => {
-          contextTitle.replaceChildren(`${speciesName(c.species)} `, el('small', { textContent: `niv. ${c.level}` }));
+          contextTitle.replaceChildren(...monsterTitle(c));
           contextActions.replaceChildren(action('train', 'S’entraîner', c.train, () => game.train()));
-          contextNote.textContent = down ? 'Il est K.O. : soigne-le (sort de soin) ou va voir Odette au village.'
-            : 'Contrôle-le comme en combat, contre ton magicien.';
+          contextNote.textContent = down ? 'Il est K.O. : soigne-le (sort de soin) ou va voir Odette au village.' : '';
         };
       } else if (c.tag === 'rival') {
         key = `rival-monster/${c.index}`;
         build = () => {
-          contextTitle.replaceChildren(`${speciesName(c.species)} `, el('small', { textContent: `niv. ${c.level}` }));
+          contextTitle.replaceChildren(...monsterTitle(c));
           contextActions.replaceChildren(action('fight', 'Combattre', false, () => {}));
-          contextNote.textContent = 'C’est le monstre de Bastien : parle-lui pour le défier.';
+          contextNote.textContent = `C’est le monstre de ${npcName(c.owner || 4)} : parle-lui pour le défier.`;
         };
       } else if (c.species === 'villager') {
-        key = `villager/${c.index}/${c.talk}`;
+        const marks = c.marks || [];
+        // A healer: something to heal (the team, the magician's mana)?
+        const w = marks.includes('heal') ? game.wizard() : null;
+        const heal = !!w && c.heal && (w.manaNow < w.mana || game.team().some((m) => m.hp < m.maxHp));
+        key = `villager/${c.index}/${c.talk}/${marks.join()}/${heal}/${c.challenge}`;
         build = () => {
           contextTitle.textContent = (LORE.npcs[c.npc] || { name: 'Villageois' }).name;
-          contextActions.replaceChildren(action('talk', 'Parler', !!c.talk, () => window.monstresDialogue.open(game.selected())));
-          contextNote.textContent = c.talk ? '' : 'Approche-toi pour lui parler.';
+          contextActions.replaceChildren(...villagerActions(c, marks, heal));
+          contextNote.textContent = !c.talk ? 'Approche-toi pour lui parler.'
+            : marks.includes('heal') && !heal ? 'Tes monstres sont en pleine forme, ton mana est plein.'
+              : marks.includes('fight') && !c.challenge ? 'Fais d’abord sortir un monstre en forme de ton cristal.' : '';
         };
       } else {
         key = `monster/${c.index}/${c.engage}`;
         build = () => {
-          contextTitle.replaceChildren(`${speciesName(c.species)} `, el('small', { textContent: `niv. ${c.level}` }));
+          contextTitle.replaceChildren(...monsterTitle(c));
           contextActions.replaceChildren(action('fight', 'Combattre', c.engage === 'ok', () => game.engage(c.index)));
           contextNote.textContent = ENGAGE_NOTES[c.engage] || '';
         };
@@ -260,6 +278,25 @@
     context.classList.toggle('in-battle', b.phase !== 'none');
     context.dataset.phase = b.phase;
     if (build) build();
+  }
+
+  // A villager's actions: the icons over its head, each one its button (a
+  // quest: talking, with its "!"; healing, the shop, a battle, the farm: done
+  // at once); talking for the others.
+  function villagerActions(c, marks, heal) {
+    const near = !!c.talk;
+    const talk = () => window.monstresDialogue.open(game.selected());
+    const buttons = [];
+    const quest = marks.includes('quest') ? 'quest' : marks.includes('newQuest') ? 'newQuest' : '';
+    if (quest) buttons.push(action('talk', 'Parler', near, talk, quest));
+    if (marks.includes('heal')) {
+      buttons.push(action('heal', 'Soigner', near && heal, () => game.healTeam(c.npc)));
+    }
+    if (marks.includes('shop')) buttons.push(action('shop', 'Boutique', near, () => window.monstresDialogue.open(game.selected(), 'shop')));
+    if (marks.includes('fight')) buttons.push(action('fight', 'Combattre', near && c.challenge, () => game.challenge(c.npc)));
+    if (marks.includes('farm')) buttons.push(action('farm', 'Mes monstres', near, () => window.monstresDialogue.openFarm()));
+    if (!buttons.length) buttons.push(action('talk', 'Parler', near, talk));
+    return buttons;
   }
 
   // ---- Hit points ----
@@ -626,7 +663,7 @@
     const NO_XP = {
       beaten: o.count > 1 ? 'Déjà battus : pas d’expérience cette fois.' : 'Déjà battu : pas d’expérience cette fois.',
       released: 'Il avait été relâché : pas d’expérience cette fois.',
-      trainer: `${trainer} ne donne de l’expérience qu’au premier combat gagné.`,
+      trainer: `${rival || 'Ce dresseur'} ne donne de l’expérience qu’au premier combat gagné.`,
     };
     let note = '';
     if (won && !o.xp) note = NO_XP[o.noXp] || '';

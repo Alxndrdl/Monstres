@@ -551,10 +551,8 @@
       item.dataset.species = e.species;
       if (e.species === chosen) item.setAttribute('aria-current', 'true');
       item.addEventListener('click', () => {
-        if (chosen !== e.species) {
-          chosenVariant = null;
-          habitatOpen = false;
-        }
+        if (chosen !== e.species) chosenVariant = null;  // its variants, or its habitat, stay open
+        if (!e.habitat.length) habitatOpen = false;
         chosen = e.species;
         prefs.set('bestiarySpecies', chosen);
         renderBestiary();
@@ -576,11 +574,12 @@
     const habitat = el('button', { type: 'button', className: 'dna-button habitat-button', id: 'habitat-button' }, [
       el('span', { textContent: '⌖' }),
       el('span', { textContent: 'Habitat' }),
-      el('small', { textContent: e.habitat.length ? 'sur la carte' : 'pas dans la nature' }),
+      ...(e.habitat.length ? [] : [el('small', { textContent: 'pas dans la nature' })]),
     ]);
     habitat.disabled = !e.habitat.length;
     habitat.addEventListener('click', () => {
       habitatOpen = true;
+      Object.assign(habitatView, { cx: 0, cz: 0, scale: 0 });
       renderBestiary();
     });
     const dna = el('button', { type: 'button', className: 'dna-button', id: 'dna-button' }, [
@@ -625,6 +624,7 @@
 
   // Where a species lives: the playable area's map, its zones blinking, in place of its card.
   let habitatLoop = 0;
+  const habitatView = { cx: 0, cz: 0, scale: 0 };  // 0: the whole playable area
   function renderHabitat(e) {
     const info = LORE.species[e.species];
     const back = el('button', { type: 'button', className: 'dna-back', textContent: '← Fiche' });
@@ -645,15 +645,35 @@
         ]),
       ]),
     );
-    // The whole playable area; its zones light up and fade, again and again.
+    // The whole playable area at first (zoom and move it as the map); its
+    // zones light up and fade, again and again. The view is kept from one
+    // species to the next.
+    const fit = () => Math.min(view.clientWidth, view.clientHeight) / (2 * mapBase().world) * 1.02;
+    const look = () => {
+      const world = mapBase().world;
+      const min = fit();
+      habitatView.scale = Math.min(MAX_SCALE, Math.max(min, habitatView.scale || min));
+      habitatView.cx = Math.min(world, Math.max(-world, habitatView.cx));
+      habitatView.cz = Math.min(world, Math.max(-world, habitatView.cz));
+      return habitatView;
+    };
+    panZoom(view, (factor, px, py) => {
+      const v = look();
+      const wx = v.cx + (px - view.clientWidth / 2) / v.scale, wz = v.cz + (py - view.clientHeight / 2) / v.scale;
+      v.scale = Math.min(MAX_SCALE, Math.max(fit(), v.scale * factor));
+      v.cx = wx - (px - view.clientWidth / 2) / v.scale;
+      v.cz = wz - (py - view.clientHeight / 2) / v.scale;
+    }, (dx, dy) => {
+      const v = look();
+      v.cx -= dx / v.scale;
+      v.cz -= dy / v.scale;
+    });
     cancelAnimationFrame(habitatLoop);
     const frame = (now) => {
       if (!view.isConnected || !isOpen()) return;
-      const data = mapBase();
-      const w = view.clientWidth, h = view.clientHeight;
-      const p = mapPlayer();
-      const scale = Math.min(w, h) / (2 * data.world) * 1.02;
-      drawMap(view, { cx: 0, cz: 0, scale, player: p }, { habitat: e, habitatAlpha: 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(now / 280)) });
+      const v = look();
+      drawMap(view, { cx: v.cx, cz: v.cz, scale: v.scale, player: mapPlayer() },
+        { habitat: e, habitatAlpha: 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(now / 280)) });
       habitatLoop = requestAnimationFrame(frame);
     };
     habitatLoop = requestAnimationFrame(frame);
@@ -782,6 +802,54 @@
     );
   }
 
+  // A map's gestures (the map, a species' habitat): the wheel zooms, dragging
+  // with one finger (or the mouse) moves it, two fingers zoom.
+  // zoom(factor, x, y): around that point of the canvas; pan(dx, dy): in pixels.
+  // Returns whether the last touch moved or zoomed it (then it is no click).
+  function panZoom(target, zoom, pan) {
+    target.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const rect = target.getBoundingClientRect();
+      zoom(Math.exp(-event.deltaY * 0.0015), event.clientX - rect.left, event.clientY - rect.top);
+    }, { passive: false });
+    const pointers = new Map();
+    let pinch = 0, moved = false;
+    target.addEventListener('pointerdown', (event) => {
+      target.setPointerCapture(event.pointerId);
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      moved = false;
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinch = Math.hypot(a.x - b.x, a.y - b.y);
+      }
+    });
+    target.addEventListener('pointermove', (event) => {
+      const last = pointers.get(event.pointerId);
+      if (!last) return;
+      const now = { x: event.clientX, y: event.clientY };
+      pointers.set(event.pointerId, now);
+      if (pointers.size === 1) {
+        const dx = now.x - last.x, dy = now.y - last.y;
+        moved = moved || Math.abs(dx) + Math.abs(dy) > 2;
+        pan(dx, dy);
+      } else if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        const rect = target.getBoundingClientRect();
+        if (pinch > 0) zoom(d / pinch, (a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top);
+        pinch = d;
+        moved = true;
+      }
+    });
+    const release = (event) => {
+      pointers.delete(event.pointerId);
+      if (pointers.size < 2) pinch = 0;
+    };
+    target.addEventListener('pointerup', release);
+    target.addEventListener('pointercancel', release);
+    return () => moved;
+  }
+
   // ---- The map: one map, from the playable area up close to the whole
   // continent (wheel, pinch, + and − buttons; drag to move it). Only the
   // land and the places: no creatures. ----
@@ -840,49 +908,11 @@
     center = null;
     renderMap();
   });
-  canvas.addEventListener('wheel', (event) => {
-    event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    zoomAt(Math.exp(-event.deltaY * 0.0015), event.clientX - rect.left, event.clientY - rect.top);
-  }, { passive: false });
-  // Dragging with one finger (or the mouse) moves the map; two fingers zoom.
-  const pointers = new Map();
-  let pinch = 0, moved = false;
-  canvas.addEventListener('pointerdown', (event) => {
-    canvas.setPointerCapture(event.pointerId);
-    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    moved = false;
-    if (pointers.size === 2) {
-      const [a, b] = [...pointers.values()];
-      pinch = Math.hypot(a.x - b.x, a.y - b.y);
-    }
+  const mapMoved = panZoom(canvas, zoomAt, (dx, dy) => {
+    const view = currentView();
+    center = { x: view.cx - dx / view.scale, z: view.cz - dy / view.scale };
+    renderMap();
   });
-  canvas.addEventListener('pointermove', (event) => {
-    const last = pointers.get(event.pointerId);
-    if (!last) return;
-    const now = { x: event.clientX, y: event.clientY };
-    pointers.set(event.pointerId, now);
-    if (pointers.size === 1) {
-      const dx = now.x - last.x, dy = now.y - last.y;
-      if (Math.abs(dx) + Math.abs(dy) > 0) moved = moved || Math.abs(dx) + Math.abs(dy) > 2;
-      const view = currentView();
-      center = { x: view.cx - dx / view.scale, z: view.cz - dy / view.scale };
-      renderMap();
-    } else if (pointers.size === 2) {
-      const [a, b] = [...pointers.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      const rect = canvas.getBoundingClientRect();
-      if (pinch > 0) zoomAt(d / pinch, (a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top);
-      pinch = d;
-      moved = true;
-    }
-  });
-  const release = (event) => {
-    pointers.delete(event.pointerId);
-    if (pointers.size < 2) pinch = 0;
-  };
-  canvas.addEventListener('pointerup', release);
-  canvas.addEventListener('pointercancel', release);
 
   new ResizeObserver(() => {
     if (isOpen() && current === 'map') renderMap();
@@ -1092,7 +1122,7 @@
 
   let teleportTargets = [];  // where to click on the map, in teleport mode
   canvas.addEventListener('click', (event) => {
-    if (!teleportMode || moved) return;
+    if (!teleportMode || mapMoved()) return;
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left, y = event.clientY - rect.top;
     const target = teleportTargets.find((t) => Math.hypot(t.x - x, t.y - y) < 18);
@@ -1237,7 +1267,7 @@
 
     // Around the player: what the villagers have for it (as over their heads).
     if (options.marks && k > 0.5) {
-      const ICONS = { newQuest: ['?', '#ffffff'], quest: ['!', '#f2c94c'], heal: ['+', '#6fe07a'], fight: ['×', '#ff6a5c'],
+      const ICONS = { newQuest: ['!', '#ffffff'], quest: ['!', '#f2c94c'], heal: ['+', '#6fe07a'], fight: ['×', '#ff6a5c'],
         shop: ['¤', '#ffd34d'], farm: ['⌂', '#9be36a'] };
       ctx.font = '800 12px system-ui, sans-serif';
       ctx.textAlign = 'center';

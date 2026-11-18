@@ -65,11 +65,17 @@ Contrôles :
   bûche, une souche, un buisson : jusqu'à 75 cm) ne bloquent pas : on monte dessus en marchant ;
 - boutons à droite du joystick, ou R et G : lancer ses sorts (voir Sorts) ;
 - toucher ou cliquer sur un monstre (ou un villageois) : sa fiche s'affiche en
-  haut à gauche (nom, famille, éléments, description, ses variantes, niveau,
-  ce qu'il fait, distance) et un anneau doré le marque au sol ; toucher
-  ailleurs ou × la ferme. Le menu contextuel, à droite, propose ce qu'on peut
-  faire avec lui : « Combattre » un monstre (voir Combats), « S'entraîner »
-  avec son propre compagnon ;
+  haut à gauche, l'essentiel seulement (un monstre : son nom, son niveau et à
+  qui il est, « (à toi) » ou « (à Bastien) », sa famille, ses éléments, ses
+  variantes ; un villageois : son nom et « Villageois » ; puis ce qu'il fait
+  et la distance) et un anneau doré le marque au sol ; toucher ailleurs ou ×
+  la ferme, un combat ou un entraînement qui commence aussi. Le menu
+  contextuel, à droite, propose ce qu'on peut faire avec lui : « Combattre »
+  un monstre (voir Combats), « S'entraîner » avec son propre compagnon ;
+  avec un villageois, chaque icône au-dessus de sa tête devient un bouton :
+  « Parler » avec le « ! » d'une quête, « + Soigner » (vert), « Boutique »
+  (une pièce, jaune), « Combattre » (l'épée, rouge), « Mes monstres » (la
+  ferme), faits directement ; « Parler » pour les autres ;
 - toucher un panneau du village (à moins de 25 m) : ce qui y est écrit, avec
   la direction (flèche, nord en haut) et la distance de chaque lieu du monde ;
 - toucher un villageois puis « Parler » (à moins de 5 m) : la discussion
@@ -97,7 +103,9 @@ Contrôles :
     aperçues, monstres capturés, dans l'équipe, battus, relâchés) ; le
     compteur ADN de la liste donne les variantes capturées au moins une
     fois ; le bouton « Habitat » montre à la place de sa fiche la carte de
-    la zone jouable, les zones où il vit clignotant ; le bouton
+    la zone jouable, les zones où il vit clignotant (molette, pincer et
+    glisser comme sur la carte ; toucher un autre monstre de la liste montre
+    son habitat à lui) ; le bouton
     « Variantes » montre toutes ses variantes : « ? » si jamais vue, grisée
     si aperçue (un monstre qui la porte est passé à moins de 20 m), en clair
     si capturée ; toucher une variante découverte affiche sa fiche à droite
@@ -108,8 +116,8 @@ Contrôles :
     la souris, sans pouvoir l'éloigner du continent ; ⌖ la recentre sur le
     joueur, une barre donne l'échelle ; ces outils sont posés sur la carte).
     De près les lieux de la zone jouable, de loin les régions du continent ;
-    les téléporteurs connus, et les icônes des villageois proches (« ? »,
-    « ! », « + », « × ») ; le bouton « Légende » affiche ou cache la légende ;
+    les téléporteurs connus, et les icônes des villageois proches (« ! »,
+    « + », « × »…) ; le bouton « Légende » affiche ou cache la légende ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (gérer les sauvegardes, voir
   Sauvegardes ; afficher les FPS et le détail du temps de calcul, voir Performances ; ces
@@ -376,10 +384,10 @@ Bastien, Odette, Félix, Rosalie et Anatole ; Isidore, le vieux magicien à la
 barbe blanche et à la robe violette, se tient sur la place.
 
 Au-dessus des villageois, des icônes lumineuses qui tournent disent ce
-qu'ils ont pour le joueur (`npc_marks`, `src/core/quests.cpp`) : « ? » blanc,
-une quête à prendre ; « ! » doré, une quête en cours ; « + » vert, des soins
+qu'ils ont pour le joueur (`npc_marks`, `src/core/quests.cpp`) : « ! » blanc,
+une quête à prendre ; « ! » doré, une quête à rendre ; « + » vert, des soins
 (Odette) ; « × » rouge, des combats (Bastien). Elles peuvent s'additionner
-(Odette avant son initiation : « ? » et « + »). La carte les montre aussi,
+(Odette avant son initiation : « ! » et « + »). La carte les montre aussi,
 pour les villageois à moins de 200 m du joueur.
 
 La quête principale, « L'apprenti du village » (Isidore) : sa première

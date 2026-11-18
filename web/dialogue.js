@@ -620,7 +620,8 @@
     show(pool[(k - 1) % pool.length] || 'Bonjour !', [['Encore un mot ?', () => villager(n)], ['Au revoir', close]]);
   }
 
-  function open(c) {
+  // what: 'shop' goes straight to Anselme's shop (the actions' menu, battle.js).
+  function open(c, what) {
     if (!game || !c || !c.npc) return;
     talking = { index: c.index, npc: c.npc };
     speaker.textContent = npcName(c.npc);
@@ -631,7 +632,7 @@
     else if (c.npc === BASTIEN) bastien(c);
     else if (c.npc === ODETTE) odette();
     else if (c.npc === ISIDORE) isidore();
-    else if (c.npc === ANSELME) anselme();
+    else if (c.npc === ANSELME) { if (what === 'shop') shop(); else anselme(); }
     else if (c.npc === CAPUCINE) capucine();
     else if (c.npc === VIOLETTE) violette();
     else if (c.npc === BASILE) basile();

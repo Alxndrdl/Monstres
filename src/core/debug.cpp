@@ -128,6 +128,9 @@ std::string to_json(const World& w) {
   return s;
 }
 
+// The villagers' icons (NpcMark), bit by bit.
+constexpr const char* kMarkNames[] = {"newQuest", "quest", "heal", "fight", "shop", "farm"};
+
 std::string creature_json(const World& w, int index) {
   if (index < 0 || static_cast<size_t>(index) >= w.creatures.size()) return "null";
   const Creature& c = w.creatures[static_cast<size_t>(index)];
@@ -158,6 +161,13 @@ std::string creature_json(const World& w, int index) {
     if (c.tag == Tag::Flock) s += ",\"tag\":\"flock\"";
     if (c.tag == Tag::Lamb) s += ",\"tag\":\"lamb\"";
     if (c.tag == Tag::Boarder) s += ",\"tag\":\"boarder\"";
+    // Whose it is: 0 the player's (the companion, those left at the farm), else a villager's.
+    const int owner = index == 0 || c.tag == Tag::Boarder ? 0
+                      : c.tag == Tag::Rival                ? (c.npc ? c.npc : npc::kBastien)
+                      : c.tag == Tag::Flock || c.tag == Tag::Lamb ? npc::kBasile
+                      : c.tag == Tag::LostPiou            ? npc::kMirabelle
+                                                          : -1;
+    if (owner >= 0) s += ",\"owner\":" + std::to_string(owner);
     if (const int k = foe_slot(w, static_cast<size_t>(index)); k >= 0) s += ",\"foe\":" + std::to_string(k);
     if (index == 0) s += std::string(",\"train\":") + (can_train(w) ? "true" : "false");
   }
@@ -172,6 +182,14 @@ std::string creature_json(const World& w, int index) {
     if (rivals) {
       s += std::string(",\"trainer\":true,\"challenge\":") + (can_challenge(w, c.npc) ? "true" : "false");
       s += ",\"wins\":" + std::to_string(c.npc == npc::kRomane ? w.romane_wins : w.rival_wins);
+    }
+    if (c.species == Species::Villager) {  // the icons over its head
+      const uint8_t m = npc_marks(w, c.npc);
+      s += ",\"marks\":[";
+      for (int k = 0, n = 0; k < 6; ++k) {
+        if (m & (1 << k)) s += std::string(n++ ? "," : "") + "\"" + kMarkNames[k] + "\"";
+      }
+      s += "]";
     }
     if (c.npc == npc::kAnselme) s += std::string(",\"shop\":") + (npc_marks(w, c.npc) & kMarkShop ? "true" : "false");
     if (c.npc == npc::kCapucine) s += std::string(",\"farm\":") + (farm_open(w) ? "true" : "false");
@@ -443,9 +461,8 @@ std::string marks_json(const World& w) {
     s += std::string(first ? "" : ",") + "{\"npc\":" + std::to_string(c.npc) + ",\"x\":" + num(c.body.pos.x) +
          ",\"z\":" + num(c.body.pos.z) + ",\"marks\":[";
     first = false;
-    const char* names[] = {"newQuest", "quest", "heal", "fight", "shop", "farm"};
     for (int k = 0, n = 0; k < 6; ++k) {
-      if (m & (1 << k)) s += std::string(n++ ? "," : "") + "\"" + names[k] + "\"";
+      if (m & (1 << k)) s += std::string(n++ ? "," : "") + "\"" + kMarkNames[k] + "\"";
     }
     s += "]}";
   }

@@ -288,7 +288,8 @@
     }
     #creature .name { margin: 0; font-size: 17px; font-weight: 700; }
     #creature .kind { margin: 0; font-size: 12px; color: #f2c94c; }
-    #creature .description { margin: 6px 0; font-size: 13px; }
+    #creature .name small { font-size: 13px; font-weight: 400; color: rgba(255, 255, 255, 0.75); }
+    #creature .kind:empty { display: none; }
     #creature .facts { margin: 0; font-size: 12px; color: rgba(255, 255, 255, 0.75); }
     #creature .tags { margin: 5px 0 0; }
     #creature .tags:empty, #creature .variants:empty { display: none; }
@@ -629,6 +630,17 @@
     .context-actions button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
     .context-actions button:disabled { opacity: 0.45; cursor: default; }
     .context-actions button.fight { border-color: rgba(255, 122, 107, 0.8); background: rgba(255, 122, 107, 0.2); }
+    /* A villager's icons (as over its head): a quest, healing, the shop, the farm. */
+    .context-actions button.newQuest svg { color: #fff; }
+    .context-actions button.quest { border-color: rgba(242, 201, 76, 0.9); }
+    .context-actions button.quest svg { color: #f2c94c; }
+    .context-actions button.heal { border-color: rgba(111, 224, 122, 0.85); background: rgba(111, 224, 122, 0.2); }
+    .context-actions button.heal svg { color: #6fe07a; }
+    .context-actions button.shop { border-color: rgba(255, 211, 77, 0.9); background: rgba(255, 211, 77, 0.2); }
+    .context-actions button.shop svg { color: #ffd34d; }
+    .context-actions button.fight svg { color: #ff7a6b; }
+    .context-actions button.farm { border-color: rgba(155, 227, 106, 0.85); background: rgba(155, 227, 106, 0.18); }
+    .context-actions button.farm svg { color: #9be36a; }
     .context-actions button.capture:not(:disabled) { border-color: rgba(242, 201, 76, 0.9); background: rgba(242, 201, 76, 0.22); }
     .context-actions svg { width: 18px; height: 18px; flex: none; }
     .context-note { margin: 0; font-size: 12px; color: rgba(255, 255, 255, 0.72); }
@@ -1144,7 +1156,6 @@
     <p class="name"></p>
     <p class="kind"></p>
     <div class="tags badges"></div>
-    <p class="description"></p>
     <p class="variants variant-list"></p>
     <p class="facts"></p>
     <button id="creature-close" type="button" aria-label="Fermer">×</button>

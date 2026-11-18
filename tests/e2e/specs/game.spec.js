@@ -566,8 +566,12 @@ test.describe('creature info', () => {
     expect(at).not.toBeNull();
     await page.mouse.click(at.x, at.y);
     await expect(panel).toBeVisible();
-    await expect(panel.locator('.name')).toHaveText('Pompon');
-    await expect(panel.locator('.facts')).toHaveText(/^Niveau 3 · T’attend · à 1 m$/);  // just behind the player
+    // The essentials: its name, its level and whose it is; no kind, no description.
+    await expect(panel.locator('.name')).toHaveText('Pompon niv. 3 (à toi)');
+    await expect(panel.locator('.kind')).toBeHidden();
+    await expect(panel.locator('.facts')).toHaveText(/^T’attend · à 1 m$/);  // just behind the player
+    await expect(page.locator('#context .context-title')).toHaveText('Pompon niv. 3 (à toi)');
+    await expect(page.locator('#context .context-note')).toBeHidden();
     await expect(panel.locator('.tags .badge')).toHaveText(['Bête', 'Feu']);
     await expect(panel.locator('.variants span')).toHaveText(['♂', 'Pelage de braise', 'Oreilles pointues', 'Une queue']);
     expect((await page.evaluate(() => window.monstres.selected())).index).toBe(0);
@@ -648,6 +652,10 @@ test.describe('grimoire', () => {
     await expect(page.locator('#bestiary-detail h2')).toHaveText('Habitat de Champi');
     await expect(page.locator('#habitat-map')).toBeVisible();
     await expect(page.locator('.habitat-legend')).toHaveText(/Toi.*Téléporteur.*Habitat/);
+    // Another species: its habitat at once.
+    await page.locator('.bestiary-entry[data-species="bird"]').click();
+    await expect(page.locator('#bestiary-detail h2')).toHaveText('Habitat de Piou');
+    await page.locator('.bestiary-entry[data-species="mushroom"]').click();
     await page.locator('#bestiary-detail .dna-back').click();
     await expect(page.locator('#bestiary-detail h2')).toHaveText('Champi');
     // The map tab: its tools over it, its legend shown on demand.
@@ -1503,6 +1511,38 @@ test.describe('the west', () => {
     await expect(page.locator('#farm-swap')).toBeDisabled();
     await page.keyboard.press('Escape');
     await expect(page.locator('#farm-panel')).toBeHidden();
+  });
+
+  test('a villager\'s icons are its buttons; a trainer\'s monster says whose it is', async ({ page }) => {
+    await openGame(page, '?seed=5&new&frozen');
+    // Next to villager `npc` (or the first monster with that tag), touched: its menu on the right.
+    const touch = (npc, tag) => page.evaluate(([npc, tag]) => {
+      const m = window.monstres;
+      for (let i = 1; i < m.state().creatures.length; i++) {
+        m.select(i);
+        const c = m.selected();
+        if (c && (tag ? c.tag === tag : c.npc === npc && c.species === 'villager')) {
+          m.teleport(c.x + 1.2, c.z);
+          m.step(1);
+          m.select(i);
+          window.dispatchEvent(new CustomEvent('monstres-selection', { detail: { index: i } }));
+          return m.selected();
+        }
+      }
+      return null;
+    }, [npc, tag]);
+    const odette = await touch(5);
+    expect(odette.marks).toContain('heal');
+    await expect(page.locator('#action-heal')).toBeVisible();
+    await expect(page.locator('#action-heal')).toBeDisabled();  // nothing to heal
+    await expect(page.locator('#context .context-note')).toContainText('pleine forme');
+    if (odette.marks.includes('newQuest')) await expect(page.locator('#action-talk')).toHaveClass(/newQuest/);
+    else await expect(page.locator('#action-talk')).toHaveCount(0);
+    await touch(4);
+    await expect(page.locator('#action-fight')).toBeVisible();
+    // Bastien's monster.
+    await touch(0, 'rival');
+    await expect(page.locator('#context .context-title')).toContainText('(à Bastien)');
   });
 
   test('Romane, in the woods, offers a battle; the map shows the west', async ({ page }) => {

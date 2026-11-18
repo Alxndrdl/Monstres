@@ -282,8 +282,9 @@ TEST_CASE("villagers show what they have for the player: quests to take or going
   add_characters(w, 0, list);
   CHECK(count(list, MeshId::IconPlus) == 2);   // Odette, and Violette at the farm
   CHECK(count(list, MeshId::IconCross) == 2);  // Bastien, and Romane in the woods
-  CHECK(count(list, MeshId::IconQuestion) >= 4);  // Mirabelle, Gaspard, Lison, Bastien, Odette
-  CHECK(count(list, MeshId::IconExclaim) == 0);
+  // A quest to take: a white "!" (Mirabelle, Gaspard, Lison, Bastien, Odette...); "?" no more.
+  CHECK(count(list, MeshId::IconExclaim) >= 4);
+  CHECK(count(list, MeshId::IconQuestion) == 0);
 }
 
 TEST_CASE("each species' habitat, and how common it is there") {

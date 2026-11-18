@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const { whenReady, prefs } = window.MonstresUtil;
+  const { whenReady, prefs, setText } = window.MonstresUtil;
   let game = null;
   whenReady((g) => {
     game = g;
@@ -249,7 +249,7 @@
     }
     if (c.species === 'crow') return c.mind === 'fly' ? 'Vole' : 'Perché';
     switch (c.mind) {
-      case 'follow': return 'Te suit';
+      case 'follow': return c.tag === 'rival' ? `Suit ${(LORE.npcs[c.owner] || { name: 'son maître' }).name}` : 'Te suit';
       case 'greet': return 'Te salue';
       case 'flee': return 'S’enfuit';
       case 'battle': return 'Se bat !';
@@ -263,7 +263,6 @@
   const fields = {
     name: panel.querySelector('.name'),
     kind: panel.querySelector('.kind'),
-    description: panel.querySelector('.description'),
     facts: panel.querySelector('.facts'),
     tags: panel.querySelector('.tags'),
     variants: panel.querySelector('.variants'),
@@ -273,17 +272,27 @@
 
   function update() {
     const c = game && game.selected();
-    if (!c) {
+    // A battle or a training that starts closes it.
+    if (!c || game.battle().phase !== 'none') {
       select(-1);
       return;
     }
-    const info = SPECIES[c.species] || { name: c.species, kind: '', description: '' };
-    fields.name.textContent = info.name;
-    const villager = c.npc && LORE.npcs[c.npc] ? LORE.npcs[c.npc].name : null;
-    fields.name.textContent = villager || info.name;
-    fields.kind.textContent = c.index === 0 ? `${info.kind} · ton compagnon`
-      : c.tag === 'lostPiou' ? `${info.kind} · le Piou de Mirabelle` : villager ? 'Villageois' : info.kind;
-    fields.description.textContent = info.description;
+    // The essentials: a villager's name and what it is; a monster's name,
+    // its level and whose it is ("niv. 5 (à toi)", as in the actions' menu).
+    const info = SPECIES[c.species] || { name: c.species };
+    const person = c.species === 'villager';
+    if (person) {
+      setText(fields.name, c.npc && LORE.npcs[c.npc] ? LORE.npcs[c.npc].name : info.name);
+    } else {
+      const owner = c.owner === 0 ? ' (à toi)' : c.owner > 0 ? ` (à ${(LORE.npcs[c.owner] || { name: '?' }).name})` : '';
+      const level = c.level ? `niv. ${c.level}${owner}` : '';
+      if (fields.name.dataset.shown !== `${info.name}/${level}`) {
+        fields.name.dataset.shown = `${info.name}/${level}`;
+        fields.name.replaceChildren(`${info.name} `, ...(level ? [Object.assign(document.createElement('small'), { textContent: level })] : []));
+      }
+    }
+    if (person) delete fields.name.dataset.shown;
+    setText(fields.kind, person ? 'Villageois' : '');
     const look = `${c.index}/${c.look}`;
     if (look !== shownLook) {
       shownLook = look;
@@ -315,9 +324,8 @@
       }));
     }
     const meters = Math.round(c.distance);
-    const level = c.level && c.species !== 'villager' ? `Niveau ${c.level} · ` : '';
     const released = c.released ? ' · relâché' : '';
-    fields.facts.textContent = `${level}${activity(c)}${released} · ${meters < 1 ? 'tout près' : `à ${meters} m`}`;
+    setText(fields.facts, `${activity(c)}${released} · ${meters < 1 ? 'tout près' : `à ${meters} m`}`);
   }
 
   function select(index) {
