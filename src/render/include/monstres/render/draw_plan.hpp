@@ -12,7 +12,8 @@ namespace monstres {
 // before the renderer issues them (no OpenGL: testable natively), following
 // RenderOptions (renderer.hpp).
 
-// From the bits the page sends: 1 depth_prepass, 2 deferred_lights, 4 deferred_shading.
+// From the bits the page sends: 1 deferred_shading, 2 lighter_grass,
+// 4 half_res_lights, 8 compact_gbuffer, 16 light_rects, 32 compact_instances.
 RenderOptions render_options_from_bits(int bits);
 
 // What the plan needs to know of a mesh.
@@ -40,8 +41,23 @@ struct DrawItem {
 // The draws of one pass (far or near lists; opaque or transparent meshes):
 // meshes in index order, each with the lists in order, then their visible
 // ranges (DrawList::visible).
+// What shrinks away with the distance (grass, small things, trees:
+// Instance::material kFade*), part by part, of the cached lists (computed
+// once a version): bit 0 something that does not, bits 1, 2, 3 kFadeNear,
+// kFadeFar, kFadeTree.
+struct ShrinkCache {
+  struct Entry {
+    uint32_t version = 0;
+    std::vector<std::vector<uint8_t>> parts;  // [mesh][part]
+  };
+  std::vector<std::pair<const DrawList*, Entry>> lists;
+  const std::vector<std::vector<uint8_t>>& of(const DrawList& list);
+};
+
+// `shrunk` (lighter grass): the parts of the cached lists whose things are
+// all shrunk away (beyond View::fade_*_end) are left out.
 void plan_draws(std::span<const DrawList* const> lists, std::span<const PlanMesh> meshes, bool far, bool transparent,
-                const View& view, std::vector<DrawItem>& out);
+                const View& view, std::vector<DrawItem>& out, ShrinkCache* shrunk = nullptr);
 
 // Instances above this, in a batch without parts, are not bounded one by one
 // (the draw is treated as reaching everything).
@@ -62,5 +78,20 @@ struct PixelRect {
   int x = 0, y = 0, w = 0, h = 0;
 };
 bool light_rect(const Mat4& view_projection, const PointLight& light, int width, int height, PixelRect& out);
+
+// An Instance in 40 bytes instead of 64 (RenderOptions::compact_instances):
+// the position in floats, the rotation in 16-bit fixed point, the scale,
+// the material and the tint in half floats. Read by the same shader.
+struct PackedInstance {
+  float x = 0, y = 0, z = 0, wind = 0;
+  int16_t rotation[4] = {};    // x, y, z, w times 32767
+  uint16_t scale[4] = {};      // sx, sy, sz, material (half floats)
+  uint16_t tint[4] = {};       // r, g, b, a (half floats)
+};
+static_assert(sizeof(PackedInstance) == 40, "uploaded as-is to the GPU");
+uint16_t to_half(float v);
+float from_half(uint16_t h);
+PackedInstance pack(const Instance& in);
+void pack(std::span<const Instance> in, std::vector<PackedInstance>& out);
 
 }  // namespace monstres

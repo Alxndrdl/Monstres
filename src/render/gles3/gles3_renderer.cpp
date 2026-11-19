@@ -73,13 +73,28 @@ void main() {
 }
 )";
 
+// The normal in two numbers (octahedral), for the compact G-buffer.
+constexpr const char* kOctahedral = R"(
+vec2 octahedral(vec3 n) {
+  n /= abs(n.x) + abs(n.y) + abs(n.z);
+  vec2 p = n.xy;
+  if (n.z < 0.0) p = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+  return p;
+}
+vec3 from_octahedral(vec2 e) {
+  vec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));
+  float t = max(-n.z, 0.0);
+  n.x += n.x >= 0.0 ? -t : t;
+  n.y += n.y >= 0.0 ? -t : t;
+  return normalize(n);
+}
+)";
+
 // Built with FADE (1: what stands in the camera's way may be discarded) and
 // MODE defined (mesh_fragment_shader): 0 the colors, the point lights in the
-// shader; 1 the depth pre-pass, no color; 2 the normals (light pre-pass);
-// 3 the colors, the point lights read from the light pre-pass's buffer;
-// 4 the G-buffer of deferred shading (color and kind, normal).
+// shader; 1 the G-buffer of deferred shading (color and kind, normal);
+// 2 the same, the normal in two bytes (compact G-buffer).
 constexpr const char* kMeshFragmentShader = R"(
-precision mediump float;
 #define MAX_LIGHTS 12
 in vec3 vNormal;
 in vec3 vWorld;
@@ -100,10 +115,8 @@ uniform vec3 uFogRange;  // start, half (distance for half of it), end
 uniform int uLightCount;
 uniform vec4 uLightPos[MAX_LIGHTS];    // xyz, radius
 uniform vec3 uLightColors[MAX_LIGHTS];
-uniform sampler2D uLightBuffer;  // MODE 3: the point lights' sum, times uLightBufferScale
-uniform float uLightBufferScale;
 layout(location = 0) out vec4 outColor;
-#if MODE == 4
+#if MODE != 0
 layout(location = 1) out vec4 outNormal;
 #endif
 void main() {
@@ -131,26 +144,22 @@ void main() {
     }
   }
 #endif
-#if MODE == 1
-  outColor = vec4(0.0);
-#else
   vec3 n = normalize(vNormal);
   if (!gl_FrontFacing) n = -n;  // double-sided meshes
-#if MODE == 2
-  outColor = vec4(n * 0.5 + 0.5, 1.0);
-#elif MODE == 4
+#if MODE != 0
   // The kind (alpha): 0.25 lit, 0.5 glowing, 0.75 a window lit at night (0: nothing there).
   float kind = vMaterial > 1.5 ? 0.5 : uOpaquePass && abs(vColor.a - 0.985) < 0.002 ? 0.75 : 0.25;
   outColor = vec4(vColor.rgb, kind);
+#if MODE == 2
+  outNormal = vec4(octahedral(n) * 0.5 + 0.5, 0.0, 1.0);
+#else
   outNormal = vec4(n * 0.5 + 0.5, 1.0);
+#endif
 #else
   float diffuse = max(dot(n, uLight), 0.0);
   // Ambient light: from the sky above, bounced from the ground below.
   vec3 light = mix(uAmbientGround, uAmbientSky, n.y * 0.5 + 0.5) + uLightColor * diffuse;
   // Lanterns, the staff, glowing monsters: soft lights fading with distance.
-#if MODE == 3
-  light += texelFetch(uLightBuffer, ivec2(gl_FragCoord.xy), 0).rgb * uLightBufferScale;
-#else
   for (int i = 0; i < MAX_LIGHTS; ++i) {
     if (i >= uLightCount) break;
     vec3 d = uLightPos[i].xyz - vWorld;
@@ -158,7 +167,6 @@ void main() {
     float fall = clamp(1.0 - dist / uLightPos[i].w, 0.0, 1.0);
     light += uLightColors[i] * fall * fall * (0.35 + 0.65 * max(dot(n, d / max(dist, 1e-3)), 0.0));
   }
-#endif
   vec3 color = vColor.rgb * light;
   float alpha = vColor.a;
   if (vMaterial > 1.5) {
@@ -181,31 +189,58 @@ void main() {
   float fog = max(1.0 - exp2(-max(d - uFogRange.x, 0.0) / uFogRange.y), smoothstep(uFogRange.z * 0.75, uFogRange.z, d));
   outColor = vec4(mix(color, uFog, fog), alpha);
 #endif
-#endif
 }
 )";
 
 // What a mesh program draws (MODE in the shader).
-enum Mode { kColor = 0, kDepth = 1, kNormals = 2, kColorLightBuffer = 3, kGBuffer = 4, kModes = 5 };
+enum Mode { kColor = 0, kGBuffer = 1, kGBufferCompact = 2, kModes = 3 };
 
 std::string mesh_fragment_shader(bool fade, int mode) {
-  return std::string("#version 300 es\n#define FADE ") + (fade ? "1" : "0") + "\n#define MODE " +
-         std::to_string(mode) + "\n" + kMeshFragmentShader;
+  return std::string("#version 300 es\nprecision mediump float;\n#define FADE ") + (fade ? "1" : "0") +
+         "\n#define MODE " + std::to_string(mode) + "\n" + kOctahedral + kMeshFragmentShader;
 }
 
-// ---- Deferred shading: the lighting of the G-buffer, over the whole screen -------
-// The same light as the forward shader (ambient, sun or moon, point lights,
-// windows at night, glowing things, fog), once per pixel. Where nothing near
-// and opaque was drawn (kind 0): left as it is (the sky, the far landscape).
+// ---- Deferred shading ---------------------------------------------------------------
+// Full-screen passes (one triangle, kSkyVertexShader) reading the G-buffer:
+// the depth (unit 3), color and kind (unit 4), normal (unit 5; COMPACT: two
+// bytes); the point lights' buffer (unit 6).
 
-constexpr const char* kComposeFragmentShader = R"(#version 300 es
-precision highp float;
-#define MAX_LIGHTS 12
+// What both read: where the pixel is, its normal.
+constexpr const char* kGBufferRead = R"(
 uniform highp sampler2D uDepth;
-uniform sampler2D uAlbedo;   // color, kind
 uniform sampler2D uNormals;
 uniform mat4 uInverseViewProjection;
-uniform vec2 uScreen;
+uniform vec2 uScreen;  // the G-buffer's pixels
+vec3 position_at(ivec2 p) {
+  float depth = texelFetch(uDepth, p, 0).r;
+  vec4 world = uInverseViewProjection * vec4((vec2(p) + 0.5) / uScreen * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+  return world.xyz / world.w;
+}
+vec3 normal_at(ivec2 p) {
+#if COMPACT
+  return from_octahedral(texelFetch(uNormals, p, 0).xy * 2.0 - 1.0);
+#else
+  return normalize(texelFetch(uNormals, p, 0).xyz * 2.0 - 1.0);
+#endif
+}
+float point_light(vec3 pos, vec3 n, vec4 at) {  // xyz, radius
+  vec3 d = at.xyz - pos;
+  float dist = length(d);
+  float fall = clamp(1.0 - dist / at.w, 0.0, 1.0);
+  return fall * fall * (0.35 + 0.65 * max(dot(n, d / max(dist, 1e-3)), 0.0));
+}
+)";
+
+// The lighting, into the image: the same light as the forward shader
+// (ambient, sun or moon, point lights, windows at night, glowing things,
+// fog), once per pixel. Where nothing near and opaque was drawn (kind 0):
+// left as it is (the sky, the far landscape). LIGHT_BUFFER: the point
+// lights read from their buffer (light_rects, half_res_lights) instead of a loop.
+constexpr const char* kComposeFragmentShader = R"(
+#define MAX_LIGHTS 12
+uniform sampler2D uAlbedo;
+uniform sampler2D uLightBuffer;
+uniform float uLightBufferScale;
 uniform vec3 uCamera;
 uniform vec3 uLight;
 uniform vec3 uLightColor;
@@ -222,22 +257,21 @@ void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec4 albedo = texelFetch(uAlbedo, p, 0);
   if (albedo.a < 0.1) discard;
-  float depth = texelFetch(uDepth, p, 0).r;
-  vec4 world = uInverseViewProjection * vec4(gl_FragCoord.xy / uScreen * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-  vec3 pos = world.xyz / world.w;
-  vec3 n = normalize(texelFetch(uNormals, p, 0).xyz * 2.0 - 1.0);
+  vec3 pos = position_at(p);
   vec3 color;
   if (albedo.a > 0.4 && albedo.a < 0.6) {
     color = albedo.rgb;  // glowing: its own light
   } else {
+    vec3 n = normal_at(p);
     vec3 light = mix(uAmbientGround, uAmbientSky, n.y * 0.5 + 0.5) + uLightColor * max(dot(n, uLight), 0.0);
+#if LIGHT_BUFFER
+    light += texture(uLightBuffer, gl_FragCoord.xy / uScreen).rgb * uLightBufferScale;
+#else
     for (int i = 0; i < MAX_LIGHTS; ++i) {
       if (i >= uLightCount) break;
-      vec3 d = uLightPos[i].xyz - pos;
-      float dist = length(d);
-      float fall = clamp(1.0 - dist / uLightPos[i].w, 0.0, 1.0);
-      light += uLightColors[i] * fall * fall * (0.35 + 0.65 * max(dot(n, d / max(dist, 1e-3)), 0.0));
+      light += uLightColors[i] * point_light(pos, n, uLightPos[i]);
     }
+#endif
     color = albedo.rgb * light;
     if (albedo.a > 0.6) color = mix(color, vec3(1.0, 0.78, 0.42) * 1.15, uNight);  // a window lit from inside
   }
@@ -247,6 +281,42 @@ void main() {
 }
 )";
 
+// The point lights into their buffer (uRatio: 1, or 2 for half the size):
+// LOOP, all of them over the whole buffer; else one (uOneLight), over its
+// rectangle, the draws added up (blending). Divided by the buffer's scale.
+constexpr const char* kLightsFragmentShader = R"(
+#define MAX_LIGHTS 12
+uniform int uRatio;
+uniform float uInverseScale;
+uniform int uLightCount;
+uniform vec4 uLightPos[MAX_LIGHTS];
+uniform vec3 uLightColors[MAX_LIGHTS];
+uniform vec4 uOnePos;
+uniform vec3 uOneColor;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy) * uRatio + (uRatio - 1) / 2;
+  if (texelFetch(uDepth, p, 0).r >= 1.0) discard;  // nothing near there
+  vec3 pos = position_at(p);
+  vec3 n = normal_at(p);
+#if LOOP
+  vec3 light = vec3(0.0);
+  for (int i = 0; i < MAX_LIGHTS; ++i) {
+    if (i >= uLightCount) break;
+    light += uLightColors[i] * point_light(pos, n, uLightPos[i]);
+  }
+#else
+  vec3 light = uOneColor * point_light(pos, n, uOnePos);
+#endif
+  outColor = vec4(light * uInverseScale, 1.0);
+}
+)";
+
+std::string screen_shader(const char* body, bool compact, const char* define, bool on) {
+  return std::string("#version 300 es\nprecision highp float;\n#define COMPACT ") + (compact ? "1" : "0") +
+         "\n#define " + define + (on ? " 1\n" : " 0\n") + kOctahedral + kGBufferRead + body;
+}
+
 // The finished image, copied to the screen.
 constexpr const char* kCopyFragmentShader = R"(#version 300 es
 precision mediump float;
@@ -255,34 +325,6 @@ out vec4 outColor;
 void main() { outColor = texelFetch(uImage, ivec2(gl_FragCoord.xy), 0); }
 )";
 
-// ---- Light pre-pass: each point light over the pixels it may reach --------------
-// One full-screen triangle (scissored to the light's rectangle); the
-// position of each pixel from the depth, its normal from the normals pass.
-// Added up (blending) into the light buffer, as the forward shader would.
-
-constexpr const char* kLightFragmentShader = R"(#version 300 es
-precision highp float;
-uniform highp sampler2D uDepth;
-uniform sampler2D uNormals;
-uniform mat4 uInverseViewProjection;
-uniform vec2 uScreen;       // pixels
-uniform vec4 uLightPos;     // xyz, radius
-uniform vec3 uLightColor;   // times the buffer's scale
-out vec4 outColor;
-void main() {
-  ivec2 p = ivec2(gl_FragCoord.xy);
-  float depth = texelFetch(uDepth, p, 0).r;
-  if (depth >= 1.0) discard;  // the sky
-  vec4 world = uInverseViewProjection * vec4(gl_FragCoord.xy / uScreen * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-  vec3 pos = world.xyz / world.w;
-  vec3 d = uLightPos.xyz - pos;
-  float dist = length(d);
-  float fall = clamp(1.0 - dist / uLightPos.w, 0.0, 1.0);
-  if (fall <= 0.0) discard;
-  vec3 n = normalize(texelFetch(uNormals, p, 0).xyz * 2.0 - 1.0);
-  outColor = vec4(uLightColor * fall * fall * (0.35 + 0.65 * max(dot(n, d / max(dist, 1e-3)), 0.0)), 1.0);
-}
-)";
 
 // ---- Sky: one full-screen triangle, gradient + sun -----------------------------
 
@@ -419,7 +461,7 @@ struct MeshProgram {
   GLint view_projection = -1, time = -1, wind = -1, eye = -1, time_fs = -1, light = -1, light_color = -1;
   GLint ambient_sky = -1, ambient_ground = -1, night = -1, fade_from = -1, fade_to = -1, opaque_pass = -1;
   GLint light_count = -1, light_pos = -1, light_colors = -1, fade_center = -1, fade_near = -1, fade_far = -1;
-  GLint fade_tree = -1, fog = -1, fog_range = -1, light_buffer = -1, light_buffer_scale = -1;
+  GLint fade_tree = -1, fog = -1, fog_range = -1;
   bool lights_known = false;  // which of the frame's lights it has (upload_lights)
   uint16_t lights = 0;
 
@@ -449,10 +491,6 @@ struct MeshProgram {
     fade_tree = at("uFadeTree");
     fog = at("uFog");
     fog_range = at("uFogRange");
-    light_buffer = at("uLightBuffer");
-    light_buffer_scale = at("uLightBufferScale");
-    glUseProgram(id);
-    glUniform1i(light_buffer, 2);  // texture unit 2 (light_pass)
     return true;
   }
 
@@ -489,6 +527,44 @@ struct MeshProgram {
   }
 };
 
+// A full-screen program of deferred shading and where its uniforms are.
+struct ScreenProgram {
+  GLuint id = 0;
+  GLint inverse = -1, screen = -1, camera = -1, light = -1, light_color = -1, ambient_sky = -1, ambient_ground = -1;
+  GLint night = -1, fog = -1, fog_range = -1, light_count = -1, light_pos = -1, light_colors = -1;
+  GLint buffer_scale = -1, ratio = -1, inverse_scale = -1, one_pos = -1, one_color = -1;
+
+  bool link(const std::string& fragment) {
+    id = monstres::link(kSkyVertexShader, fragment.c_str());
+    if (!id) return false;
+    const auto at = [&](const char* name) { return glGetUniformLocation(id, name); };
+    glUseProgram(id);
+    glUniform1i(at("uDepth"), 3);
+    glUniform1i(at("uAlbedo"), 4);
+    glUniform1i(at("uNormals"), 5);
+    glUniform1i(at("uLightBuffer"), 6);
+    inverse = at("uInverseViewProjection");
+    screen = at("uScreen");
+    camera = at("uCamera");
+    light = at("uLight");
+    light_color = at("uLightColor");
+    ambient_sky = at("uAmbientSky");
+    ambient_ground = at("uAmbientGround");
+    night = at("uNight");
+    fog = at("uFog");
+    fog_range = at("uFogRange");
+    light_count = at("uLightCount");
+    light_pos = at("uLightPos");
+    light_colors = at("uLightColors");
+    buffer_scale = at("uLightBufferScale");
+    ratio = at("uRatio");
+    inverse_scale = at("uInverseScale");
+    one_pos = at("uOnePos");
+    one_color = at("uOneColor");
+    return true;
+  }
+};
+
 class Gles3Renderer final : public Renderer {
 public:
   bool init(std::span<const MeshData> meshes) {
@@ -497,43 +573,22 @@ public:
         if (!programs_[fade][mode].link(mesh_fragment_shader(fade != 0, mode))) return false;
       }
     }
+    for (int compact = 0; compact < 2; ++compact) {
+      for (int k = 0; k < 2; ++k) {
+        if (!compose_[compact][k].link(screen_shader(kComposeFragmentShader, compact != 0, "LIGHT_BUFFER", k != 0)) ||
+            !lights_[compact][k].link(screen_shader(kLightsFragmentShader, compact != 0, "LOOP", k != 0))) {
+          return false;
+        }
+      }
+    }
     sky_program_ = link(kSkyVertexShader, kSkyFragmentShader);
-    light_program_ = link(kSkyVertexShader, kLightFragmentShader);
-    compose_program_ = link(kSkyVertexShader, kComposeFragmentShader);
     copy_program_ = link(kSkyVertexShader, kCopyFragmentShader);
-    if (!sky_program_ || !light_program_ || !compose_program_ || !copy_program_) return false;
-    // Deferred shading: its textures on units 3, 4, 5 (unit 2: the light buffer).
-    glUseProgram(compose_program_);
-    glUniform1i(glGetUniformLocation(compose_program_, "uDepth"), 3);
-    glUniform1i(glGetUniformLocation(compose_program_, "uAlbedo"), 4);
-    glUniform1i(glGetUniformLocation(compose_program_, "uNormals"), 5);
-    const auto cu = [&](const char* name) { return glGetUniformLocation(compose_program_, name); };
-    u_cp_inverse_ = cu("uInverseViewProjection");
-    u_cp_screen_ = cu("uScreen");
-    u_cp_camera_ = cu("uCamera");
-    u_cp_light_ = cu("uLight");
-    u_cp_light_color_ = cu("uLightColor");
-    u_cp_ambient_sky_ = cu("uAmbientSky");
-    u_cp_ambient_ground_ = cu("uAmbientGround");
-    u_cp_night_ = cu("uNight");
-    u_cp_fog_ = cu("uFog");
-    u_cp_fog_range_ = cu("uFogRange");
-    u_cp_light_count_ = cu("uLightCount");
-    u_cp_light_pos_ = cu("uLightPos");
-    u_cp_light_colors_ = cu("uLightColors");
+    if (!sky_program_ || !copy_program_) return false;
     glUseProgram(copy_program_);
     glUniform1i(glGetUniformLocation(copy_program_, "uImage"), 3);
-    glUseProgram(light_program_);
-    glUniform1i(glGetUniformLocation(light_program_, "uDepth"), 0);
-    glUniform1i(glGetUniformLocation(light_program_, "uNormals"), 1);
-    u_lp_inverse_ = glGetUniformLocation(light_program_, "uInverseViewProjection");
-    u_lp_screen_ = glGetUniformLocation(light_program_, "uScreen");
-    u_lp_pos_ = glGetUniformLocation(light_program_, "uLightPos");
-    u_lp_color_ = glGetUniformLocation(light_program_, "uLightColor");
-    // Light sums above 1 need a float buffer; else 8 bits, a quarter of the light.
+    // Point lights' sums above 1 need a float buffer; else 8 bits, a quarter of the light.
     const char* extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
     float_lights_ = extensions && std::strstr(extensions, "color_buffer_float") != nullptr;
-    light_buffer_scale_ = float_lights_ ? 1.0f : 4.0f;
     u_sky_moon_ = glGetUniformLocation(sky_program_, "uMoon");
     u_sky_night_ = glGetUniformLocation(sky_program_, "uNight");
     u_sky_inverse_ = glGetUniformLocation(sky_program_, "uInverseViewProjection");
@@ -548,7 +603,6 @@ public:
     glGenVertexArrays(1, &sky_vao_);
 
     glGenBuffers(1, &instance_vbo_);
-    glGenBuffers(1, &frame_vbo_);
     meshes_.resize(meshes.size());
     plan_meshes_.resize(meshes.size());
     for (size_t i = 0; i < meshes.size(); ++i) set_mesh(i, meshes[i]);
@@ -563,17 +617,19 @@ public:
     for (GpuMesh& m : meshes_) release(m);
     for (auto& [list, c] : cache_) glDeleteBuffers(static_cast<GLsizei>(c.buffers.size()), c.buffers.data());
     glDeleteBuffers(1, &instance_vbo_);
-    glDeleteBuffers(1, &frame_vbo_);
     glDeleteVertexArrays(1, &sky_vao_);
     for (auto& row : programs_) {
       for (MeshProgram& program : row) glDeleteProgram(program.id);
     }
-    glDeleteProgram(light_program_);
-    glDeleteProgram(compose_program_);
-    glDeleteProgram(copy_program_);
-    release_light_targets();
-    release_shading_targets();
+    for (int compact = 0; compact < 2; ++compact) {
+      for (int k = 0; k < 2; ++k) {
+        glDeleteProgram(compose_[compact][k].id);
+        glDeleteProgram(lights_[compact][k].id);
+      }
+    }
     glDeleteProgram(sky_program_);
+    glDeleteProgram(copy_program_);
+    release_shading_targets();
   }
 
   void set_mesh(size_t index, const MeshData& data) override {
@@ -686,14 +742,11 @@ public:
       for (MeshProgram& program : row) program.set_view(view);
     }
     glEnable(GL_DEPTH_TEST);
+    packed_ = options_.compact_instances;
     for (const DrawList* list : lists) {
       if (list->cached) update_cache(*list);
     }
-    upload_frame_instances(lists);
     view_ = &view;
-    // The light pre-pass, when there are lights to add (the near lists only:
-    // the far ones are beyond their reach).
-    deferred_ = !shading && options_.deferred_lights && light_count_ > 0 && light_pass(view, lists);
     // The far lists first, with their own depth range; then the near ones over them.
     const bool any_far = std::any_of(lists.begin(), lists.end(), [](const DrawList* l) { return l->far; });
     if (any_far) {
@@ -723,7 +776,7 @@ public:
       glBindTexture(GL_TEXTURE_2D, 0);
       glActiveTexture(GL_TEXTURE0);
       glEnable(GL_DEPTH_TEST);
-      if (profiling_) stats_.draw_calls += 2;  // the lighting, the copy
+      if (profiling_) ++stats_.draw_calls;
     } else {
       draw_lists(lists, false);
     }
@@ -733,193 +786,42 @@ public:
     glDisable(GL_BLEND);
   }
 
-  // ---- Deferred shading ------------------------------------------------------------
-  // 1. The near opaque things once, into the G-buffer: color and kind, normal, depth.
-  // 2. Their light, over the whole screen (kComposeFragmentShader), into the image.
-  // 3. The transparent ones over it, as usual (lit in their shader), against that depth.
-  void draw_shaded(const View& view, std::span<const DrawList* const> lists, int w, int h) {
-    // 1.
-    glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo_);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);  // the depth: that of the image (cleared after the far lists)
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
-    for (auto& row : programs_) {
-      for (MeshProgram& program : row) program.set_opaque_pass(true);
-    }
-    plan_draws(lists, plan_meshes_, false, false, view, items_);
-    issue(items_, kGBuffer);
-    glBindVertexArray(0);
-
-    // 2.
-    glBindFramebuffer(GL_FRAMEBUFFER, compose_fbo_);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
-    glUseProgram(compose_program_);
-    glUniformMatrix4fv(u_cp_inverse_, 1, GL_FALSE, view.inverse_view_projection.m);
-    glUniform2f(u_cp_screen_, static_cast<float>(w), static_cast<float>(h));
-    glUniform3f(u_cp_camera_, view.camera_x, view.camera_y, view.camera_z);
-    glUniform3f(u_cp_light_, view.light_x, view.light_y, view.light_z);
-    glUniform3f(u_cp_light_color_, view.light_color.r, view.light_color.g, view.light_color.b);
-    glUniform3f(u_cp_ambient_sky_, view.ambient_sky.r, view.ambient_sky.g, view.ambient_sky.b);
-    glUniform3f(u_cp_ambient_ground_, view.ambient_ground.r, view.ambient_ground.g, view.ambient_ground.b);
-    glUniform1f(u_cp_night_, view.night);
-    glUniform3f(u_cp_fog_, view.fog.r, view.fog.g, view.fog.b);
-    glUniform3f(u_cp_fog_range_, view.fog_start, view.fog_half, view.fog_end);
-    glUniform1i(u_cp_light_count_, static_cast<GLint>(light_count_));
-    if (light_count_ > 0) {
-      glUniform4fv(u_cp_light_pos_, static_cast<GLsizei>(light_count_), light_pos_);
-      glUniform3fv(u_cp_light_colors_, static_cast<GLsizei>(light_count_), light_colors_);
-    }
-    const GLuint inputs[] = {depth_texture_s_, albedo_texture_, gnormals_texture_};
-    for (int k = 0; k < 3; ++k) {
-      glActiveTexture(static_cast<GLenum>(GL_TEXTURE3 + k));
-      glBindTexture(GL_TEXTURE_2D, inputs[k]);
-    }
-    glBindVertexArray(sky_vao_);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    glBindVertexArray(0);
-    for (int k = 0; k < 3; ++k) {  // the depth is drawn into next: no texture left bound to it
-      glActiveTexture(static_cast<GLenum>(GL_TEXTURE3 + k));
-      glBindTexture(GL_TEXTURE_2D, 0);
-    }
-    glActiveTexture(GL_TEXTURE0);
-
-    // 3.
-    glBindFramebuffer(GL_FRAMEBUFFER, scene_fbo_);
-    glEnable(GL_DEPTH_TEST);
-    for (auto& row : programs_) {
-      for (MeshProgram& program : row) program.set_opaque_pass(false);
-    }
-    plan_draws(lists, plan_meshes_, false, true, view, items_);
-    glEnable(GL_BLEND);
-    glDepthMask(GL_FALSE);
-    issue(items_, kColor);
-    glBindVertexArray(0);
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
-  }
-
-  // Deferred shading's textures, at the size of the screen (made again when
-  // it changes). False when the device cannot draw into them.
-  bool make_shading_targets(int w, int h) {
-    if (shading_targets_failed_ || w <= 0 || h <= 0) return false;
-    if (scene_fbo_ && w == shading_w_ && h == shading_h_) return true;
-    release_shading_targets();
-    const auto texture = [&](GLuint& t, GLenum internal, GLenum format, GLenum type) {
-      glGenTextures(1, &t);
-      glBindTexture(GL_TEXTURE_2D, t);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internal), w, h, 0, format, type, nullptr);
-    };
-    texture(scene_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-    texture(albedo_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-    texture(gnormals_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-    texture(depth_texture_s_, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    bool ok = true;
-    const auto check = [&] { ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE; };
-    // The image and its depth (the sky, the far lists, the transparent ones).
-    glGenFramebuffers(1, &scene_fbo_);
-    glBindFramebuffer(GL_FRAMEBUFFER, scene_fbo_);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scene_texture_, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_s_, 0);
-    check();
-    // The G-buffer, with the same depth.
-    glGenFramebuffers(1, &gbuffer_fbo_);
-    glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo_);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, albedo_texture_, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gnormals_texture_, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_s_, 0);
-    const GLenum both[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-    glDrawBuffers(2, both);
-    check();
-    // The image without its depth (the lighting reads the depth).
-    glGenFramebuffers(1, &compose_fbo_);
-    glBindFramebuffer(GL_FRAMEBUFFER, compose_fbo_);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scene_texture_, 0);
-    check();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    if (!ok) {
-      release_shading_targets();
-      shading_targets_failed_ = true;
-      return false;
-    }
-    shading_w_ = w;
-    shading_h_ = h;
-    return true;
-  }
-
-  void release_shading_targets() {
-    const GLuint textures[] = {scene_texture_, albedo_texture_, gnormals_texture_, depth_texture_s_};
-    for (GLuint t : textures) {
-      if (t) glDeleteTextures(1, &t);
-    }
-    const GLuint fbos[] = {scene_fbo_, gbuffer_fbo_, compose_fbo_};
-    for (GLuint f : fbos) {
-      if (f) glDeleteFramebuffers(1, &f);
-    }
-    scene_texture_ = albedo_texture_ = gnormals_texture_ = depth_texture_s_ = 0;
-    scene_fbo_ = gbuffer_fbo_ = compose_fbo_ = 0;
-    shading_w_ = shading_h_ = 0;
-  }
-
   // The lists of one pass (far or near): opaque meshes first (depth writes
-  // on), then transparent ones (blended, no depth writes). With the depth
-  // pre-pass, the opaque ones twice: depth only, then the colors where it is equal.
+  // on), then transparent ones (blended, no depth writes).
   void draw_lists(std::span<const DrawList* const> lists, bool far) {
     for (bool transparent : {false, true}) {
-      plan_draws(lists, plan_meshes_, far, transparent, *view_, items_);
+      plan(lists, far, transparent);
       for (auto& row : programs_) {
         for (MeshProgram& program : row) program.set_opaque_pass(!transparent);  // fading edges are not lit windows
       }
       if (transparent) glEnable(GL_BLEND); else glDisable(GL_BLEND);
-      // Opaque things near, after the light pre-pass: their point lights from its buffer.
-      const Mode color = !transparent && !far && deferred_ ? kColorLightBuffer : kColor;
-      if (!transparent && options_.depth_prepass) {
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-        glDepthMask(GL_TRUE);
-        issue(items_, kDepth);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glDepthMask(GL_FALSE);
-        glDepthFunc(GL_LEQUAL);
-        issue(items_, color);
-        glDepthFunc(GL_LESS);
-      } else {
-        glDepthMask(transparent ? GL_FALSE : GL_TRUE);
-        issue(items_, color);
-      }
+      glDepthMask(transparent ? GL_FALSE : GL_TRUE);
+      issue(items_, kColor);
     }
     glBindVertexArray(0);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
   }
 
+  void plan(std::span<const DrawList* const> lists, bool far, bool transparent) {
+    plan_draws(lists, plan_meshes_, far, transparent, *view_, items_, options_.lighter_grass ? &shrink_cache_ : nullptr);
+  }
+
   // Issues the draws, setting the state when it changes only (each call
   // costs, in a browser).
-  // `lit_only`: only the draws some point light reaches. In kColorLightBuffer,
-  // the draws no light reaches are drawn in kColor (not in the light buffer:
-  // what is there is another surface's light).
-  void issue(const std::vector<DrawItem>& items, Mode mode, bool lit_only = false) {
+  void issue(const std::vector<DrawItem>& items, Mode mode) {
     const MeshProgram* program = nullptr;
     int culling = -1;  // not known yet
     GLuint vao = 0, buffer = 0;
-    const DrawList* uploaded_list = nullptr;  // what instance_vbo_ holds (without the frame's buffer)
+    const DrawList* uploaded_list = nullptr;  // what instance_vbo_ holds
     uint32_t uploaded_mesh = 0;
     for (const DrawItem& item : items) {
-      if (lit_only && item.lights == 0) continue;
-      const Mode used = mode == kColorLightBuffer && item.lights == 0 ? kColor : mode;
-      MeshProgram& p = programs_[item.fade ? 1 : 0][used];
+      MeshProgram& p = programs_[item.fade ? 1 : 0][mode];
       if (&p != program) {
         program = &p;
         glUseProgram(p.id);
       }
-      if (used == kColor) upload_lights(p, item.lights);
+      if (mode == kColor) upload_lights(p, item.lights);
       const GpuMesh& m = meshes_[item.mesh];
       const int cull = m.double_sided ? 0 : 1;
       if (cull != culling) {
@@ -930,23 +832,16 @@ public:
         vao = m.vao;
         glBindVertexArray(m.vao);
       }
-      const auto& instances = item.list->batches[item.mesh];
-      uint32_t base = 0;
       GLuint wanted;
       if (item.list->cached) {
         wanted = cache_[item.list].buffers[item.mesh];
-      } else if (const auto it = frame_offsets_.find(item.list); it != frame_offsets_.end()) {
-        wanted = frame_vbo_;
-        base = it->second[item.mesh];
       } else {
         wanted = instance_vbo_;
         if (uploaded_list != item.list || uploaded_mesh != item.mesh) {
           uploaded_list = item.list;
           uploaded_mesh = item.mesh;
           glBindBuffer(GL_ARRAY_BUFFER, instance_vbo_);
-          glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)),
-                       instances.data(), GL_STREAM_DRAW);
-          stats_.uploaded_bytes += instances.size() * sizeof(Instance);
+          upload_instances(item.list->batches[item.mesh], GL_STREAM_DRAW);
           buffer = instance_vbo_;
         }
       }
@@ -954,7 +849,7 @@ public:
         buffer = wanted;
         glBindBuffer(GL_ARRAY_BUFFER, wanted);
       }
-      point_instance_attributes(base + item.first_instance);
+      point_instance_attributes(item.first_instance, packed_);
       if (m.ebo) {
         glDrawElementsInstanced(GL_TRIANGLES, item.vertex_count, GL_UNSIGNED_INT,
                                 offset(static_cast<size_t>(item.first_vertex) * sizeof(uint32_t)),
@@ -976,25 +871,19 @@ public:
     }
   }
 
-  // Drawn twice, the batches of the lists not cached would be sent again:
-  // all of them at once instead, in one buffer for the frame.
-  void upload_frame_instances(std::span<const DrawList* const> lists) {
-    frame_offsets_.clear();
-    if (!options_.depth_prepass && !(options_.deferred_lights && light_count_ > 0)) return;
-    frame_instances_.clear();
-    for (const DrawList* list : lists) {
-      if (list->cached) continue;
-      std::vector<uint32_t>& offsets = frame_offsets_[list];
-      offsets.assign(list->batches.size(), 0);
-      for (size_t i = 0; i < list->batches.size(); ++i) {
-        offsets[i] = static_cast<uint32_t>(frame_instances_.size());
-        frame_instances_.insert(frame_instances_.end(), list->batches[i].begin(), list->batches[i].end());
-      }
+  // Sends instances into the buffer bound to GL_ARRAY_BUFFER: as they are,
+  // or packed (compact_instances).
+  void upload_instances(const std::vector<Instance>& instances, GLenum usage) {
+    if (packed_) {
+      pack(instances, packed_scratch_);
+      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(packed_scratch_.size() * sizeof(PackedInstance)),
+                   packed_scratch_.data(), usage);
+      stats_.uploaded_bytes += packed_scratch_.size() * sizeof(PackedInstance);
+    } else {
+      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)), instances.data(),
+                   usage);
+      stats_.uploaded_bytes += instances.size() * sizeof(Instance);
     }
-    glBindBuffer(GL_ARRAY_BUFFER, frame_vbo_);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(frame_instances_.size() * sizeof(Instance)),
-                 frame_instances_.data(), GL_STREAM_DRAW);
-    stats_.uploaded_bytes += frame_instances_.size() * sizeof(Instance);
   }
 
   // The lights of a draw (bit i: the frame's light i), sent to the program
@@ -1018,144 +907,219 @@ public:
     }
   }
 
-  // ---- Light pre-pass ------------------------------------------------------------
-  // 1. The normals and depth of the near opaque things some light reaches, into textures.
-  // 2. Each point light, over the pixels it may reach (light_rect), adds its
-  //    light there into the light buffer.
-  // 3. (draw_lists) The colors read it at their pixel instead of the light loop.
-  // False when the buffers cannot be made (then the lights stay in the shader).
-  bool light_pass(const View& view, std::span<const DrawList* const> lists) {
-    GLint previous = 0, viewport[4] = {};
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previous);
-    glGetIntegerv(GL_VIEWPORT, viewport);
-    const int w = viewport[2], h = viewport[3];
-    if (!make_light_targets(w, h)) return false;
-
-    // 1. Normals and depth.
-    glBindFramebuffer(GL_FRAMEBUFFER, normals_fbo_);
-    glViewport(0, 0, w, h);
+  // ---- Deferred shading ------------------------------------------------------------
+  // 1. The near opaque things once, into the G-buffer: color and kind, normal, depth.
+  // 2. (light_rects or half_res_lights) The point lights into their buffer.
+  // 3. All the light, over the whole screen (kComposeFragmentShader), into the image.
+  // 4. The transparent ones over it, as usual (lit in their shader), against that depth.
+  void draw_shaded(const View& view, std::span<const DrawList* const> lists, int w, int h) {
+    const int compact = shading_compact_ ? 1 : 0;
+    // 1.
+    glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo_);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);  // the depth: that of the image (cleared after the far lists)
+    glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
-    glClearColor(0.5f, 1.0f, 0.5f, 0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDisable(GL_BLEND);
     for (auto& row : programs_) {
       for (MeshProgram& program : row) program.set_opaque_pass(true);
     }
-    // Only what a light reaches: the rest is drawn once, without the light buffer.
-    plan_draws(lists, plan_meshes_, false, false, view, items_);
-    issue(items_, kNormals, true);
+    plan(lists, false, false);
+    issue(items_, compact ? kGBufferCompact : kGBuffer);
     glBindVertexArray(0);
 
-    // 2. The lights, added up.
-    glBindFramebuffer(GL_FRAMEBUFFER, light_fbo_);
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE);
-    glUseProgram(light_program_);
-    glUniformMatrix4fv(u_lp_inverse_, 1, GL_FALSE, view.inverse_view_projection.m);
-    glUniform2f(u_lp_screen_, static_cast<float>(w), static_cast<float>(h));
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, depth_texture_);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, normals_texture_);
-    glBindVertexArray(sky_vao_);
-    glEnable(GL_SCISSOR_TEST);
-    for (size_t i = 0; i < light_count_; ++i) {
-      const PointLight& l = view.lights[i];
-      PixelRect r;
-      if (!light_rect(view.view_projection, l, w, h, r)) continue;
-      glScissor(r.x, r.y, r.w, r.h);
-      glUniform4f(u_lp_pos_, l.x, l.y, l.z, l.radius);
-      const float k = 1.0f / light_buffer_scale_;
-      glUniform3f(u_lp_color_, l.color.r * k, l.color.g * k, l.color.b * k);
-      glDrawArrays(GL_TRIANGLES, 0, 3);
-      if (profiling_) ++stats_.draw_calls;
+    const GLuint inputs[] = {depth_texture_, albedo_texture_, gnormals_texture_};
+    for (int k = 0; k < 3; ++k) {
+      glActiveTexture(static_cast<GLenum>(GL_TEXTURE3 + k));
+      glBindTexture(GL_TEXTURE_2D, inputs[k]);
     }
-    glDisable(GL_SCISSOR_TEST);
-    glBindVertexArray(0);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_BLEND);
-    glEnable(GL_DEPTH_TEST);
-    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindVertexArray(sky_vao_);
+    const auto set_g = [&](const ScreenProgram& p) {
+      glUseProgram(p.id);
+      glUniformMatrix4fv(p.inverse, 1, GL_FALSE, view.inverse_view_projection.m);
+      glUniform2f(p.screen, static_cast<float>(w), static_cast<float>(h));
+    };
 
-    // 3. The light buffer, read by the colors (texture unit 2).
-    glActiveTexture(GL_TEXTURE2);
+    // 2.
+    const bool buffer = light_count_ > 0 && (options_.light_rects || options_.half_res_lights);
+    if (buffer) {
+      glBindFramebuffer(GL_FRAMEBUFFER, light_fbo_);
+      glViewport(0, 0, light_w_, light_h_);
+      glClear(GL_COLOR_BUFFER_BIT);
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_ONE, GL_ONE);
+      const ScreenProgram& p = lights_[compact][options_.light_rects ? 0 : 1];
+      set_g(p);
+      glUniform1i(p.ratio, shading_half_ ? 2 : 1);
+      glUniform1f(p.inverse_scale, 1.0f / light_buffer_scale_);
+      if (options_.light_rects) {
+        glEnable(GL_SCISSOR_TEST);
+        for (size_t i = 0; i < light_count_; ++i) {
+          const PointLight& l = view.lights[i];
+          PixelRect r;
+          if (!light_rect(view.view_projection, l, light_w_, light_h_, r)) continue;
+          glScissor(r.x, r.y, r.w, r.h);
+          glUniform4f(p.one_pos, l.x, l.y, l.z, l.radius);
+          glUniform3f(p.one_color, l.color.r, l.color.g, l.color.b);
+          glDrawArrays(GL_TRIANGLES, 0, 3);
+          if (profiling_) ++stats_.draw_calls;
+        }
+        glDisable(GL_SCISSOR_TEST);
+      } else {
+        glUniform1i(p.light_count, static_cast<GLint>(light_count_));
+        glUniform4fv(p.light_pos, static_cast<GLsizei>(light_count_), light_pos_);
+        glUniform3fv(p.light_colors, static_cast<GLsizei>(light_count_), light_colors_);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        if (profiling_) ++stats_.draw_calls;
+      }
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      glDisable(GL_BLEND);
+      glViewport(0, 0, w, h);
+    }
+
+    // 3. (the light buffer on unit 6 only now: it was drawn into)
+    glActiveTexture(GL_TEXTURE6);
     glBindTexture(GL_TEXTURE_2D, light_texture_);
     glActiveTexture(GL_TEXTURE0);
-    for (auto& row : programs_) {
-      glUseProgram(row[kColorLightBuffer].id);
-      glUniform1f(row[kColorLightBuffer].light_buffer_scale, light_buffer_scale_);
+    glBindFramebuffer(GL_FRAMEBUFFER, compose_fbo_);
+    const ScreenProgram& c = compose_[compact][buffer ? 1 : 0];
+    set_g(c);
+    glUniform3f(c.camera, view.camera_x, view.camera_y, view.camera_z);
+    glUniform3f(c.light, view.light_x, view.light_y, view.light_z);
+    glUniform3f(c.light_color, view.light_color.r, view.light_color.g, view.light_color.b);
+    glUniform3f(c.ambient_sky, view.ambient_sky.r, view.ambient_sky.g, view.ambient_sky.b);
+    glUniform3f(c.ambient_ground, view.ambient_ground.r, view.ambient_ground.g, view.ambient_ground.b);
+    glUniform1f(c.night, view.night);
+    glUniform3f(c.fog, view.fog.r, view.fog.g, view.fog.b);
+    glUniform3f(c.fog_range, view.fog_start, view.fog_half, view.fog_end);
+    glUniform1f(c.buffer_scale, light_buffer_scale_);
+    glUniform1i(c.light_count, static_cast<GLint>(light_count_));
+    if (light_count_ > 0) {
+      glUniform4fv(c.light_pos, static_cast<GLsizei>(light_count_), light_pos_);
+      glUniform3fv(c.light_colors, static_cast<GLsizei>(light_count_), light_colors_);
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
-    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-    return true;
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    if (profiling_) ++stats_.draw_calls;
+    glBindVertexArray(0);
+    for (int k = 0; k < 4; ++k) {  // the depth is drawn into next: no texture left bound to it
+      glActiveTexture(static_cast<GLenum>(GL_TEXTURE3 + k));
+      glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    glActiveTexture(GL_TEXTURE0);
+
+    // 4.
+    glBindFramebuffer(GL_FRAMEBUFFER, scene_fbo_);
+    glEnable(GL_DEPTH_TEST);
+    for (auto& row : programs_) {
+      for (MeshProgram& program : row) program.set_opaque_pass(false);
+    }
+    plan(lists, false, true);
+    glEnable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+    issue(items_, kColor);
+    glBindVertexArray(0);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
   }
 
-  // The light pre-pass's textures, at the size of the screen (made again
-  // when it changes). False when the device cannot draw into them.
-  bool make_light_targets(int w, int h) {
-    if (light_targets_failed_ || w <= 0 || h <= 0) return false;
-    if (normals_fbo_ && w == targets_w_ && h == targets_h_) return true;
-    release_light_targets();
-    const auto texture = [&](GLuint& t, GLenum internal, GLenum format, GLenum type) {
+  // Deferred shading's textures, at the size of the screen (made again when
+  // it or the options change). False when the device cannot draw into them.
+  bool make_shading_targets(int w, int h) {
+    if (shading_targets_failed_ || w <= 0 || h <= 0) return false;
+    const bool compact = options_.compact_gbuffer, half = options_.half_res_lights;
+    if (scene_fbo_ && w == shading_w_ && h == shading_h_ && compact == shading_compact_ && half == shading_half_) {
+      return true;
+    }
+    release_shading_targets();
+    const auto texture = [&](GLuint& t, GLenum internal, GLenum format, GLenum type, int tw, int th, GLint filter) {
       glGenTextures(1, &t);
       glBindTexture(GL_TEXTURE_2D, t);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internal), w, h, 0, format, type, nullptr);
+      glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internal), tw, th, 0, format, type, nullptr);
     };
-    texture(normals_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-    texture(depth_texture_, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT);
-    glGenFramebuffers(1, &normals_fbo_);
-    glBindFramebuffer(GL_FRAMEBUFFER, normals_fbo_);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, normals_texture_, 0);
+    texture(scene_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
+    texture(albedo_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
+    if (compact) {
+      texture(gnormals_texture_, GL_RG8, GL_RG, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
+    } else {
+      texture(gnormals_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
+    }
+    texture(depth_texture_, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, w, h, GL_NEAREST);
+    bool ok = true;
+    const auto check = [&] { ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE; };
+    // The image and its depth (the sky, the far lists, the transparent ones).
+    glGenFramebuffers(1, &scene_fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, scene_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scene_texture_, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_, 0);
-    bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    check();
+    // The G-buffer, with the same depth.
+    glGenFramebuffers(1, &gbuffer_fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, albedo_texture_, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gnormals_texture_, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_, 0);
+    const GLenum both[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, both);
+    check();
+    // The image without its depth (the lighting reads the depth).
+    glGenFramebuffers(1, &compose_fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, compose_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scene_texture_, 0);
+    check();
+    // The point lights' buffer (smoothed when it is half the size): floats if
+    // the device draws into them, else 8 bits for a quarter of the light.
+    light_w_ = half ? (w + 1) / 2 : w;
+    light_h_ = half ? (h + 1) / 2 : h;
     glGenFramebuffers(1, &light_fbo_);
     for (int attempt = 0; ok && attempt < 2; ++attempt) {
       if (light_texture_) glDeleteTextures(1, &light_texture_);
       light_texture_ = 0;
       if (float_lights_) {
-        texture(light_texture_, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT);
+        texture(light_texture_, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, light_w_, light_h_, GL_LINEAR);
       } else {
-        texture(light_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+        texture(light_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, light_w_, light_h_, GL_LINEAR);
       }
       glBindFramebuffer(GL_FRAMEBUFFER, light_fbo_);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, light_texture_, 0);
       if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) break;
       if (!float_lights_) ok = false;
       float_lights_ = false;  // then in 8 bits
-      light_buffer_scale_ = 4.0f;
     }
+    light_buffer_scale_ = float_lights_ ? 1.0f : 4.0f;
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (!ok) {
-      release_light_targets();
-      light_targets_failed_ = true;
+      release_shading_targets();
+      shading_targets_failed_ = true;
       return false;
     }
-    targets_w_ = w;
-    targets_h_ = h;
+    shading_w_ = w;
+    shading_h_ = h;
+    shading_compact_ = compact;
+    shading_half_ = half;
     return true;
   }
 
-  void release_light_targets() {
-    const GLuint textures[] = {normals_texture_, depth_texture_, light_texture_};
+  void release_shading_targets() {
+    const GLuint textures[] = {scene_texture_, albedo_texture_, gnormals_texture_, depth_texture_, light_texture_};
     for (GLuint t : textures) {
       if (t) glDeleteTextures(1, &t);
     }
-    if (normals_fbo_) glDeleteFramebuffers(1, &normals_fbo_);
-    if (light_fbo_) glDeleteFramebuffers(1, &light_fbo_);
-    normals_texture_ = depth_texture_ = light_texture_ = normals_fbo_ = light_fbo_ = 0;
-    targets_w_ = targets_h_ = 0;
+    const GLuint fbos[] = {scene_fbo_, gbuffer_fbo_, compose_fbo_, light_fbo_};
+    for (GLuint f : fbos) {
+      if (f) glDeleteFramebuffers(1, &f);
+    }
+    scene_texture_ = albedo_texture_ = gnormals_texture_ = depth_texture_ = light_texture_ = 0;
+    scene_fbo_ = gbuffer_fbo_ = compose_fbo_ = light_fbo_ = 0;
+    shading_w_ = shading_h_ = 0;
   }
 
   void end_frame() override {
@@ -1249,8 +1213,18 @@ private:
 
   // Instance attributes read from the buffer bound to GL_ARRAY_BUFFER.
   // From instance `first` on (WebGL2 has no base instance: the attributes
-  // point further into the buffer instead).
-  static void point_instance_attributes(uint32_t first = 0) {
+  // point further into the buffer instead). Packed (PackedInstance): the
+  // same four vectors for the shader, from smaller numbers.
+  static void point_instance_attributes(uint32_t first, bool packed) {
+    if (packed) {
+      constexpr GLsizei stride = sizeof(PackedInstance);
+      const size_t base = first * sizeof(PackedInstance);
+      glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride, offset(base + offsetof(PackedInstance, x)));
+      glVertexAttribPointer(4, 4, GL_SHORT, GL_TRUE, stride, offset(base + offsetof(PackedInstance, rotation)));
+      glVertexAttribPointer(5, 4, GL_HALF_FLOAT, GL_FALSE, stride, offset(base + offsetof(PackedInstance, scale)));
+      glVertexAttribPointer(6, 4, GL_HALF_FLOAT, GL_FALSE, stride, offset(base + offsetof(PackedInstance, tint)));
+      return;
+    }
     constexpr GLsizei stride = sizeof(Instance);
     const size_t offsets[] = {offsetof(Instance, x), offsetof(Instance, rotation), offsetof(Instance, sx),
                               offsetof(Instance, tint)};
@@ -1259,10 +1233,11 @@ private:
     }
   }
 
-  // Uploads a cached list once per version, one buffer per batch.
+  // Uploads a cached list once per version (and when the instances' format
+  // changes), one buffer per batch.
   void update_cache(const DrawList& list) {
     Cache& c = cache_[&list];
-    if (c.valid && c.version == list.version) return;
+    if (c.valid && c.version == list.version && c.packed == packed_) return;
     if (c.buffers.size() < list.batches.size()) {
       const size_t old = c.buffers.size();
       c.buffers.resize(list.batches.size());
@@ -1270,11 +1245,10 @@ private:
     }
     for (size_t i = 0; i < list.batches.size(); ++i) {
       glBindBuffer(GL_ARRAY_BUFFER, c.buffers[i]);
-      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(list.batches[i].size() * sizeof(Instance)),
-                   list.batches[i].data(), GL_STATIC_DRAW);
-      stats_.uploaded_bytes += list.batches[i].size() * sizeof(Instance);
+      upload_instances(list.batches[i], GL_STATIC_DRAW);
     }
     c.version = list.version;
+    c.packed = packed_;
     c.valid = true;
   }
 
@@ -1314,35 +1288,28 @@ private:
   }
 
   MeshProgram programs_[2][kModes];  // [fade][mode]
-  // The light pre-pass (light_pass).
-  GLuint light_program_ = 0;
-  GLint u_lp_inverse_ = -1, u_lp_screen_ = -1, u_lp_pos_ = -1, u_lp_color_ = -1;
-  GLuint normals_fbo_ = 0, light_fbo_ = 0, normals_texture_ = 0, depth_texture_ = 0, light_texture_ = 0;
-  int targets_w_ = 0, targets_h_ = 0;
-  bool float_lights_ = false, light_targets_failed_ = false, deferred_ = false;
+  // Deferred shading (draw_shaded): [compact G-buffer][light buffer / loop].
+  ScreenProgram compose_[2][2], lights_[2][2];
+  GLuint copy_program_ = 0;
+  GLuint scene_fbo_ = 0, gbuffer_fbo_ = 0, compose_fbo_ = 0, light_fbo_ = 0;
+  GLuint scene_texture_ = 0, albedo_texture_ = 0, gnormals_texture_ = 0, depth_texture_ = 0, light_texture_ = 0;
+  int shading_w_ = 0, shading_h_ = 0, light_w_ = 0, light_h_ = 0;
+  bool shading_compact_ = false, shading_half_ = false, shading_targets_failed_ = false;
+  bool float_lights_ = false;
   float light_buffer_scale_ = 4.0f;  // the light buffer holds the light divided by this
-  // Deferred shading (draw_shaded).
-  GLuint compose_program_ = 0, copy_program_ = 0;
-  GLint u_cp_inverse_ = -1, u_cp_screen_ = -1, u_cp_camera_ = -1, u_cp_light_ = -1, u_cp_light_color_ = -1;
-  GLint u_cp_ambient_sky_ = -1, u_cp_ambient_ground_ = -1, u_cp_night_ = -1, u_cp_fog_ = -1, u_cp_fog_range_ = -1;
-  GLint u_cp_light_count_ = -1, u_cp_light_pos_ = -1, u_cp_light_colors_ = -1;
-  GLuint scene_fbo_ = 0, gbuffer_fbo_ = 0, compose_fbo_ = 0;
-  GLuint scene_texture_ = 0, albedo_texture_ = 0, gnormals_texture_ = 0, depth_texture_s_ = 0;
-  int shading_w_ = 0, shading_h_ = 0;
-  bool shading_targets_failed_ = false;
   GLuint sky_program_ = 0;
   GLint u_sky_inverse_ = -1, u_sky_camera_ = -1, u_sky_sun_ = -1, u_sky_zenith_ = -1, u_sky_horizon_ = -1;
   GLint u_sky_cover_ = -1, u_sky_cloud_light_ = -1, u_sky_cloud_shade_ = -1, u_sky_cloud_shift_ = -1;
   GLint u_sky_moon_ = -1, u_sky_night_ = -1;
   RenderOptions options_;
+  bool packed_ = false;  // the instances sent packed this frame (compact_instances)
+  std::vector<PackedInstance> packed_scratch_;
   const View* view_ = nullptr;  // during draw()
   size_t light_count_ = 0;
   float light_pos_[kMaxPointLights * 4] = {}, light_colors_[kMaxPointLights * 3] = {};
   std::vector<PlanMesh> plan_meshes_;
   std::vector<DrawItem> items_;
-  GLuint frame_vbo_ = 0;  // the instances of the lists not cached, when drawn twice
-  std::vector<Instance> frame_instances_;
-  std::unordered_map<const DrawList*, std::vector<uint32_t>> frame_offsets_;
+  ShrinkCache shrink_cache_;
   GLuint sky_vao_ = 0;
   GLuint instance_vbo_ = 0;
   bool profiling_ = false;
@@ -1353,6 +1320,7 @@ private:
   std::vector<GpuMesh> meshes_;
   struct Cache {
     bool valid = false;
+    bool packed = false;
     uint32_t version = 0;
     std::vector<GLuint> buffers;
   };

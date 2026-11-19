@@ -36,6 +36,10 @@ inline constexpr float kTreeFadeStart = 160.0f, kTreeFadeEnd = 198.0f;
 inline constexpr float kGrassThinStart = 24.0f, kGrassThinLeast = 0.6f;
 // Beyond this (from the center), simpler tufts and flowers (one triangle a blade).
 inline constexpr float kGrassFullRadius = 22.0f;
+// Lighter grass (a trial, RenderOptions::lighter_grass): simpler tufts from
+// kLightGrassFullRadius, thinning from kLightGrassThinStart down to kLightGrassThinLeast.
+inline constexpr float kLightGrassFullRadius = 12.0f;
+inline constexpr float kLightGrassThinStart = 14.0f, kLightGrassThinLeast = 0.35f;
 
 // The world by chunks of kChunk meters (lined up with the objects' index):
 // what the landscape is made of is computed chunk by chunk, when first
@@ -51,6 +55,10 @@ inline constexpr int kSectors = 32;
 inline constexpr float kInnerBand = 40.0f;
 inline constexpr int kBins = 2 * kSectors;
 }  // namespace landscape
+
+// Whether build_landscape makes the lighter grass (off at first).
+void set_lighter_grass(bool on);
+bool lighter_grass();
 
 // Center of the detailed landscape for a player at (x, z).
 Vec2 landscape_center(float x, float z);

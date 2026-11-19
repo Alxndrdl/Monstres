@@ -1039,20 +1039,7 @@ qui peut écarter des pixels (`discard`) ; ailleurs, une variante sans, qui
 laisse la carte graphique rejeter tôt les pixels cachés.
 
 Essais de rendu (Paramètres → Debug → « Rendu (essais) », retenus par le
-navigateur), à comparer avec le temps de la carte graphique :
-- « Pré-passe de profondeur » : les opaques une première fois sans couleur,
-  puis en couleur là où la profondeur est égale : chaque pixel visible est
-  éclairé une seule fois, au prix d'une géométrie dessinée deux fois ;
-- « Lumières en pré-passe » (deferred lighting) : quand il y a des lumières,
-  les normales et la profondeur des opaques proches qu'une lumière atteint
-  (par leur boîte) sont dessinées dans des textures ; chaque lumière ajoute
-  ensuite sa lumière (même formule) sur le rectangle de l'écran qu'elle peut
-  atteindre, dans un tampon de lumière (16 bits flottants si l'appareil le
-  permet, sinon 8 bits pour un quart de la lumière) ; ces objets lisent le
-  tampon à leur pixel au lieu de la boucle, les autres sont dessinés une
-  seule fois, sans lumière ponctuelle. Les transparents et le paysage
-  lointain gardent la boucle. Le tampon n'a qu'un échantillon par pixel :
-  les contours (antialiasés) peuvent prendre un peu de la lumière voisine ;
+navigateur), à comparer avec le temps de la carte graphique et les FPS :
 - « Deferred shading complet » : toute l'image est dessinée hors de l'écran.
   Les opaques proches une seule fois, dans un G-buffer (couleur et sorte :
   éclairée, lumineuse, fenêtre allumée ; normale ; profondeur) ; puis une
@@ -1060,11 +1047,25 @@ navigateur), à comparer avec le temps de la carte graphique :
   lumières ponctuelles, fenêtres la nuit, brouillard) une fois par pixel ;
   les transparents par-dessus comme d'habitude ; l'image est enfin copiée à
   l'écran. Sans antialiasing (WebGL2 ne lit pas les textures
-  multi-échantillonnées) : contours crénelés. Prioritaire sur les deux
-  autres ; pas pour les portraits.
-Pré-passe de profondeur et lumières en pré-passe se combinent ; dessinés
-deux fois, les objets qui bougent sont envoyés au GPU en un seul bloc par
-image.
+  multi-échantillonnées) : contours crénelés. Pas pour les portraits ;
+- « Herbe allégée » : touffes simples dès 12 m (au lieu de 22) et
+  éclaircissement dès 14 m jusqu'à 35 % (au lieu de 24 m et 60 %) ; le
+  paysage est reconstruit quand on la coche. Et les morceaux de paysage
+  (herbe, petits objets, arbres) déjà entièrement rétrécis à zéro ne sont
+  plus dessinés du tout ;
+- « Lumières en demi-résolution » (deferred) : les lumières ponctuelles
+  dans un tampon de moitié la taille de l'écran (16 bits flottants si
+  l'appareil le permet, sinon 8 bits pour un quart de la lumière), lissé en
+  l'agrandissant ; les contours prennent un peu de la lumière voisine ;
+- « G-buffer compact » (deferred) : la normale sur deux octets
+  (octaédrique) au lieu de quatre ;
+- « Lumières par rectangle » (deferred) : chaque lumière n'est calculée que
+  sur le rectangle de l'écran qu'elle peut atteindre, ajoutée dans le tampon
+  de lumières, au lieu d'une boucle sur toutes pour chaque pixel ;
+- « Données d'instances compactes » : chaque objet envoyé au GPU tient en
+  40 octets au lieu de 64 (position en flottants, rotation en entiers 16
+  bits, échelle, matériau et teinte en demi-flottants), lu par le même
+  shader.
 
 ## Personnages et animations
 
