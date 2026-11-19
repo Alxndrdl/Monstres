@@ -249,20 +249,20 @@ struct Frame {
   int pixel_height = 0;
 };
 
-// Ways of drawing faster, to try (debug options of the settings menu); all
-// off, the draw calls are those of before, in the same order (draw_plan.hpp).
+// Ways of drawing, to try (debug options of the settings menu); both off,
+// one forward pass with the lights in the shader.
 struct RenderOptions {
-  // Two programs: the one that may discard pixels (what stands between the
-  // camera and the magician shows through) only for what is near that line,
-  // one without `discard` for the rest (keeps the GPU's early depth test).
-  bool split_fade = false;
-  // Opaque draws from the nearest to the farthest (hidden pixels skipped).
-  bool sort_opaque = false;
-  // Each draw gets only the lights that reach its box (shorter light loop).
-  bool cull_lights = false;
   // A pass writing depth only, then the colors where the depth is equal:
   // each visible pixel lit once.
   bool depth_prepass = false;
+  // Light pre-pass (deferred lighting): the normals of the opaque things
+  // into a texture, then each point light adds its light over the pixels
+  // within its reach; the colors read it there (no light loop).
+  bool deferred_lights = false;
+  // Deferred shading: the opaque things once, their color, kind and normal
+  // into textures; then all their light over the whole screen; the
+  // transparent ones over it. Drawn off screen without antialiasing.
+  bool deferred_shading = false;
   bool operator==(const RenderOptions&) const = default;
 };
 

@@ -390,46 +390,33 @@ struct PlanScene {
     view.camera_y = 1;
     view.camera_z = 0;
   }
-  std::vector<DrawItem> plan(const RenderOptions& o, bool transparent = false) const {
+  std::vector<DrawItem> plan(bool transparent = false) const {
     const DrawList* lists[] = {&list};
     std::vector<DrawItem> out;
-    plan_draws(lists, meshes, false, transparent, view, o, out);
+    plan_draws(lists, meshes, false, transparent, view, out);
     return out;
   }
 };
 
 }  // namespace
 
-TEST_CASE("draw plan: all options off, the draws of before, in mesh order, everything faded and lit") {
+TEST_CASE("draw plan: the draws in mesh order, then by visible range") {
   PlanScene s;
-  s.view.light_count = 2;
-  const auto items = s.plan({});
+  const auto items = s.plan();
   REQUIRE(items.size() == 8);  // meshes 0 and 2 (1 is transparent), 4 draws each
   for (size_t k = 0; k < items.size(); ++k) {
     CHECK(items[k].mesh == (k < 4 ? 0u : 2u));
     CHECK(items[k].first_instance == k % 4);
     CHECK(items[k].instance_count == 1);
     CHECK(items[k].vertex_count == 36);
-    CHECK(items[k].fade);
-    CHECK(items[k].lights == 0b11);
+    CHECK(items[k].bounded);
   }
-  const auto transparent = s.plan({}, true);
+  const auto transparent = s.plan(true);
   REQUIRE(transparent.size() == 4);
   CHECK(transparent[0].mesh == 1);
 }
 
-TEST_CASE("draw plan: sorted, the opaque draws go from the nearest to the farthest") {
-  PlanScene s;
-  RenderOptions o;
-  o.sort_opaque = true;
-  const auto items = s.plan(o);
-  REQUIRE(items.size() == 8);
-  for (size_t k = 1; k < items.size(); ++k) CHECK(items[k - 1].distance2 <= items[k].distance2);
-  CHECK(items.front().first_instance == 0);
-  CHECK(items.back().distance2 == Approx(34.5f * 34.5f + 4.5f * 4.5f));
-}
-
-TEST_CASE("draw plan: split, only what is near the camera's line may discard; never the transparent") {
+TEST_CASE("draw plan: only what is near the camera's line may discard; never the transparent") {
   PlanScene s;
   // From the camera to a point between the first two cubes of mesh 0 (only the first is near).
   s.view.fade_from_x = -5;
@@ -437,23 +424,18 @@ TEST_CASE("draw plan: split, only what is near the camera's line may discard; ne
   s.view.fade_to_x = 5;
   s.view.fade_to_y = 1;
   s.view.fade_radius = 1.5f;
-  RenderOptions o;
-  o.split_fade = true;
-  const auto items = s.plan(o);
-  for (const DrawItem& it : items) CHECK(it.fade == (it.mesh == 0 && it.first_instance == 0));
-  for (const DrawItem& it : s.plan(o, true)) CHECK_FALSE(it.fade);
+  for (const DrawItem& it : s.plan()) CHECK(it.fade == (it.mesh == 0 && it.first_instance == 0));
+  for (const DrawItem& it : s.plan(true)) CHECK_FALSE(it.fade);
   s.view.fade_radius = 0;  // nothing fades (portraits)
-  for (const DrawItem& it : s.plan(o)) CHECK_FALSE(it.fade);
+  for (const DrawItem& it : s.plan()) CHECK_FALSE(it.fade);
 }
 
-TEST_CASE("draw plan: lights per draw, each only where it reaches") {
+TEST_CASE("draw plan: each draw gets only the lights that reach it") {
   PlanScene s;
   s.view.light_count = 2;
-  s.view.lights[0] = {20, 1, 0, 3, {1, 1, 1, 1}};    // on the third cube of mesh 0
-  s.view.lights[1] = {0, 1, -5, 2, {1, 1, 1, 1}};    // on the last cube of mesh 2 (at x 0)
-  RenderOptions o;
-  o.cull_lights = true;
-  for (const DrawItem& it : s.plan(o)) {
+  s.view.lights[0] = {20, 1, 0, 3, {1, 1, 1, 1}};  // on the third cube of mesh 0
+  s.view.lights[1] = {0, 1, -5, 2, {1, 1, 1, 1}};  // on the last cube of mesh 2 (at x 0)
+  for (const DrawItem& it : s.plan()) {
     const uint16_t want = it.mesh == 0 && it.first_instance == 2 ? 0b01 : it.mesh == 2 && it.first_instance == 3 ? 0b10 : 0;
     CHECK(it.lights == want);
   }
@@ -465,23 +447,49 @@ TEST_CASE("draw plan: unculled batches are bounded by their instances; too many,
   s.list.visible.clear();
   s.view.light_count = 1;
   s.view.lights[0] = {100, 0, 0, 2, {1, 1, 1, 1}};  // reaches nothing
-  RenderOptions o;
-  o.cull_lights = true;
-  auto items = s.plan(o);
+  s.view.fade_radius = 1;
+  auto items = s.plan();
   REQUIRE(items.size() == 2);  // one draw per batch
   CHECK(items[0].bounded);
   CHECK(items[0].bounds.max_x >= 30.5f);
   CHECK(items[0].lights == 0);
   s.list.batches[0].assign(kMaxBoundedInstances + 1, make_instance(0, 0, 0, 0, 1, 1, 1));
-  items = s.plan(o);
+  items = s.plan();
   CHECK_FALSE(items[0].bounded);
-  CHECK(items[0].lights == 1);  // unknown: every light
+  CHECK(items[0].lights == 1);  // unknown: every light, and the program that discards
+  CHECK(items[0].fade);
+}
+
+TEST_CASE("draw plan: a light's rectangle on the screen") {
+  World w = cached_game(3);
+  const View v = view_at(w, 0.0f);
+  const int width = 844, height = 390;
+  // In front of the camera, some way off: a small rectangle within the screen.
+  const float fx = v.camera_x + (w.player.pos.x - v.camera_x) * 3, fz = v.camera_z + (w.player.pos.z - v.camera_z) * 3;
+  PointLight ahead{fx, w.player.pos.y + 1, fz, 2, {1, 1, 1, 1}};
+  PixelRect r;
+  REQUIRE(light_rect(v.view_projection, ahead, width, height, r));
+  CHECK(r.w > 0);
+  CHECK(r.w < width / 2);
+  CHECK(r.x >= 0);
+  CHECK(r.x + r.w <= width);
+  CHECK(r.y + r.h <= height);
+  // Around the camera: the whole screen.
+  PointLight around{v.camera_x, v.camera_y, v.camera_z, 5, {1, 1, 1, 1}};
+  REQUIRE(light_rect(v.view_projection, around, width, height, r));
+  CHECK(r.w == width);
+  CHECK(r.h == height);
+  // Behind the camera, small and far: nothing.
+  PointLight behind{v.camera_x - (fx - v.camera_x), v.camera_y, v.camera_z - (fz - v.camera_z), 1, {1, 1, 1, 1}};
+  CHECK_FALSE(light_rect(v.view_projection, behind, width, height, r));
 }
 
 TEST_CASE("render options from the page's bits") {
   CHECK(render_options_from_bits(0) == RenderOptions{});
-  const RenderOptions all = render_options_from_bits(15);
-  CHECK((all.split_fade && all.sort_opaque && all.cull_lights && all.depth_prepass));
-  CHECK(render_options_from_bits(4).cull_lights);
-  CHECK_FALSE(render_options_from_bits(4).sort_opaque);
+  CHECK(render_options_from_bits(1).depth_prepass);
+  CHECK_FALSE(render_options_from_bits(1).deferred_lights);
+  CHECK(render_options_from_bits(2).deferred_lights);
+  CHECK((render_options_from_bits(3).depth_prepass && render_options_from_bits(3).deferred_lights));
+  CHECK(render_options_from_bits(4).deferred_shading);
+  CHECK_FALSE(render_options_from_bits(3).deferred_shading);
 }

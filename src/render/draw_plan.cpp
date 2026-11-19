@@ -7,10 +7,9 @@ namespace monstres {
 
 RenderOptions render_options_from_bits(int bits) {
   RenderOptions o;
-  o.split_fade = (bits & 1) != 0;
-  o.sort_opaque = (bits & 2) != 0;
-  o.cull_lights = (bits & 4) != 0;
-  o.depth_prepass = (bits & 8) != 0;
+  o.depth_prepass = (bits & 1) != 0;
+  o.deferred_lights = (bits & 2) != 0;
+  o.deferred_shading = (bits & 4) != 0;
   return o;
 }
 
@@ -95,11 +94,10 @@ bool instances_bounds(std::span<const Instance> instances, const Aabb& mesh, Aab
 }  // namespace
 
 void plan_draws(std::span<const DrawList* const> lists, std::span<const PlanMesh> meshes, bool far, bool transparent,
-                const View& view, const RenderOptions& options, std::vector<DrawItem>& out) {
+                const View& view, std::vector<DrawItem>& out) {
   out.clear();
   const size_t light_count = std::min(view.light_count, kMaxPointLights);
   const uint16_t all_lights = static_cast<uint16_t>((1u << light_count) - 1);
-  const bool want_bounds = options.split_fade || options.sort_opaque || options.cull_lights;
 
   for (size_t i = 0; i < meshes.size(); ++i) {
     const PlanMesh& m = meshes[i];
@@ -121,7 +119,7 @@ void plan_draws(std::span<const DrawList* const> lists, std::span<const PlanMesh
         item.instance_count = count;
         item.first_vertex = first_vertex;
         item.vertex_count = vertex_count;
-        if (want_bounds) {
+        {
           Aabb box = empty_aabb();
           bool known;
           if (mesh_parts && vertex_count < m.vertex_count) {
@@ -137,10 +135,9 @@ void plan_draws(std::span<const DrawList* const> lists, std::span<const PlanMesh
           item.bounded = known && !box.empty();
           if (item.bounded) item.bounds = box;
         }
-        item.distance2 = item.bounded ? distance2_to_box(item.bounds, view.camera_x, view.camera_y, view.camera_z) : 0;
-        item.fade = !options.split_fade || (!transparent && (!item.bounded || near_fade_line(view, item.bounds)));
+        item.fade = !transparent && (!item.bounded || near_fade_line(view, item.bounds));
         item.lights = all_lights;
-        if (options.cull_lights && item.bounded) {
+        if (item.bounded) {
           item.lights = 0;
           for (size_t l = 0; l < light_count; ++l) {
             const PointLight& p = view.lights[l];
@@ -170,9 +167,37 @@ void plan_draws(std::span<const DrawList* const> lists, std::span<const PlanMesh
       }
     }
   }
-  if (options.sort_opaque && !transparent) {
-    std::stable_sort(out.begin(), out.end(), [](const DrawItem& a, const DrawItem& b) { return a.distance2 < b.distance2; });
+}
+
+bool light_rect(const Mat4& vp, const PointLight& l, int width, int height, PixelRect& out) {
+  out = {0, 0, width, height};
+  float lo_x = 1e30f, lo_y = 1e30f, hi_x = -1e30f, hi_y = -1e30f;
+  int behind = 0;
+  for (int k = 0; k < 8; ++k) {
+    const float x = l.x + ((k & 1) ? l.radius : -l.radius);
+    const float y = l.y + ((k & 2) ? l.radius : -l.radius);
+    const float z = l.z + ((k & 4) ? l.radius : -l.radius);
+    const float* m = vp.m;
+    const float cx = m[0] * x + m[4] * y + m[8] * z + m[12];
+    const float cy = m[1] * x + m[5] * y + m[9] * z + m[13];
+    const float cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+    if (cw < 0.05f) {
+      ++behind;
+      continue;
+    }
+    lo_x = std::min(lo_x, cx / cw);
+    hi_x = std::max(hi_x, cx / cw);
+    lo_y = std::min(lo_y, cy / cw);
+    hi_y = std::max(hi_y, cy / cw);
   }
+  if (behind == 8) return false;  // all of it behind the camera
+  if (behind > 0) return true;    // around the camera: the whole screen
+  if (hi_x < -1 || lo_x > 1 || hi_y < -1 || lo_y > 1) return false;
+  const auto px = [](float ndc, int size) { return (std::clamp(ndc, -1.0f, 1.0f) * 0.5f + 0.5f) * static_cast<float>(size); };
+  const int x0 = static_cast<int>(std::floor(px(lo_x, width))), x1 = static_cast<int>(std::ceil(px(hi_x, width)));
+  const int y0 = static_cast<int>(std::floor(px(lo_y, height))), y1 = static_cast<int>(std::ceil(px(hi_y, height)));
+  out = {x0, y0, x1 - x0, y1 - y0};
+  return out.w > 0 && out.h > 0;
 }
 
 }  // namespace monstres

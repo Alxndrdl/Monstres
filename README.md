@@ -1030,26 +1030,41 @@ trouvé trop lent. Paramètres → « Baisser la résolution quand le jeu
 ralentit » (activé par défaut) : décoché, l'image garde toujours sa
 résolution. Le panneau de détail montre la résolution du moment.
 
+Préparation des appels de dessin : `src/render/draw_plan.cpp` (sans OpenGL,
+testé), puis le moteur (`gles3_renderer.cpp`) les envoie. Chaque appel a sa
+boîte : il ne reçoit que les lumières dont la portée la touche (une boucle
+plus courte dans le shader), et seul ce qui est près de la ligne entre la
+caméra et le magicien (ce qui y passe devient transparent) utilise le shader
+qui peut écarter des pixels (`discard`) ; ailleurs, une variante sans, qui
+laisse la carte graphique rejeter tôt les pixels cachés.
+
 Essais de rendu (Paramètres → Debug → « Rendu (essais) », retenus par le
-navigateur) : quatre façons de dessiner plus vite, indépendantes, à comparer
-avec le temps de la carte graphique ; toutes décochées, le rendu est celui
-d'avant. `src/render/draw_plan.cpp` prépare les appels de dessin (sans
-OpenGL, testé) et le moteur (`gles3_renderer.cpp`) les envoie :
-- « Programme sans discard » : le shader qui peut écarter des pixels (ce qui
-  passe entre la caméra et le magicien devient transparent) seulement pour ce
-  qui est près de cette ligne ; ailleurs, une variante sans `discard`, qui
-  laisse la carte graphique rejeter tôt les pixels cachés ;
-- « Opaques triés » : du plus proche au plus loin (par la boîte de chaque
-  appel), les pixels cachés n'étant alors plus calculés ;
-- « Lumières triées par objet » : chaque appel ne reçoit que les lumières
-  dont la portée touche sa boîte (une boucle plus courte dans le shader) ;
+navigateur), à comparer avec le temps de la carte graphique :
 - « Pré-passe de profondeur » : les opaques une première fois sans couleur,
   puis en couleur là où la profondeur est égale : chaque pixel visible est
-  éclairé une seule fois, au prix d'une géométrie dessinée deux fois.
-Triés ou dessinés deux fois, les objets qui bougent sont envoyés au GPU en
-un seul bloc par image. Le premier et le troisième donnent la même
-image au pixel près ; le tri et la pré-passe peuvent changer quelques pixels
-là où deux surfaces se touchent.
+  éclairé une seule fois, au prix d'une géométrie dessinée deux fois ;
+- « Lumières en pré-passe » (deferred lighting) : quand il y a des lumières,
+  les normales et la profondeur des opaques proches qu'une lumière atteint
+  (par leur boîte) sont dessinées dans des textures ; chaque lumière ajoute
+  ensuite sa lumière (même formule) sur le rectangle de l'écran qu'elle peut
+  atteindre, dans un tampon de lumière (16 bits flottants si l'appareil le
+  permet, sinon 8 bits pour un quart de la lumière) ; ces objets lisent le
+  tampon à leur pixel au lieu de la boucle, les autres sont dessinés une
+  seule fois, sans lumière ponctuelle. Les transparents et le paysage
+  lointain gardent la boucle. Le tampon n'a qu'un échantillon par pixel :
+  les contours (antialiasés) peuvent prendre un peu de la lumière voisine ;
+- « Deferred shading complet » : toute l'image est dessinée hors de l'écran.
+  Les opaques proches une seule fois, dans un G-buffer (couleur et sorte :
+  éclairée, lumineuse, fenêtre allumée ; normale ; profondeur) ; puis une
+  passe sur tout l'écran calcule leur lumière (ambiance, soleil ou lune,
+  lumières ponctuelles, fenêtres la nuit, brouillard) une fois par pixel ;
+  les transparents par-dessus comme d'habitude ; l'image est enfin copiée à
+  l'écran. Sans antialiasing (WebGL2 ne lit pas les textures
+  multi-échantillonnées) : contours crénelés. Prioritaire sur les deux
+  autres ; pas pour les portraits.
+Pré-passe de profondeur et lumières en pré-passe se combinent ; dessinés
+deux fois, les objets qui bougent sont envoyés au GPU en un seul bloc par
+image.
 
 ## Personnages et animations
 

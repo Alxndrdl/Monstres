@@ -239,7 +239,7 @@ window.monstres = {
   profile: () => JSON.parse(UTF8ToString(_monstres_profile_json())),
   // Settings menu: lower the resolution when frames are slow (on by default).
   setAdaptiveResolution: (on) => _monstres_set_adaptive_resolution(on ? 1 : 0),
-  // Settings menu, debug: ways of drawing faster (bits: 1 split discard, 2 sort, 4 lights per draw, 8 depth pre-pass).
+  // Settings menu, debug: ways of drawing, to try (bits: 1 depth pre-pass, 2 light pre-pass, 4 deferred shading).
   setRenderOptions: (bits) => _monstres_set_render_options(bits),
 
   // Game menus (web/menu.js).
