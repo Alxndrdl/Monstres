@@ -1118,9 +1118,9 @@ int pick_object(const World& w, const View& view, float ndc_x, float ndc_y) {
   const Ray ray = screen_ray(view, ndc_x, ndc_y);
   int best = -1;
   float best_t = 2;
-  for (size_t i = 0; i < valley_objects(w).size(); ++i) {
+  const auto consider = [&](size_t i) {
     const Object& o = w.objects[i];
-    if (o.kind != ObjectKind::Sign && o.kind != ObjectKind::Teleporter) continue;
+    if (o.kind != ObjectKind::Sign && o.kind != ObjectKind::Teleporter) return;
     // A signpost's planks, wider than the post (easier to tap); a teleporter's circle and stones.
     const float r = o.kind == ObjectKind::Sign ? 0.7f : 2.0f;
     const float h = o.kind == ObjectKind::Sign ? 1.9f : 1.8f;
@@ -1130,7 +1130,16 @@ int pick_object(const World& w, const View& view, float ndc_x, float ndc_y) {
       best_t = t;
       best = static_cast<int>(i);
     }
-  }
+  };
+  const size_t valley = valley_objects(w).size();
+  for (size_t i = 0; i < valley; ++i) consider(i);
+  // The west's (the farm's and the standing stones' teleporters, its signposts):
+  // among the wilds' objects, those within reading distance only.
+  const Vec3& p = w.player.pos;
+  const Box around{{p.x - kReadDistance, -1e9f, p.z - kReadDistance}, {p.x + kReadDistance, 1e9f, p.z + kReadDistance}};
+  for_objects_near(w, around, [&](uint32_t k, const Box&) {
+    if (k >= valley) consider(k);  // one may come twice: the same answer
+  });
   if (best < 0) return -1;
   // Close enough to read it, and not hidden behind something.
   const Object& sign = w.objects[static_cast<size_t>(best)];

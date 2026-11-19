@@ -874,7 +874,7 @@
     #seal-mana { position: static; transform: none; width: auto; border-color: rgba(140, 170, 255, 0.6); }
     #seal.caught #seal-tools, #seal.escaped #seal-tools { opacity: 0; transition: opacity 0.4s; }
     /* The Hint spell: the next rune to touch, glowing white. */
-    #seal.input .rune.hint:not(:disabled) {
+    #seal.input .rune.next-rune:not(:disabled) {
       color: #fff; border-color: #fff; box-shadow: 0 0 16px #fff; animation: rune-hint 0.6s ease-in-out infinite alternate;
     }
     @keyframes rune-hint { to { transform: scale(1.15); box-shadow: 0 0 28px #fff, inset 0 0 12px #fff; } }
@@ -995,17 +995,6 @@
     }
     .action.pressed { background: var(--control-active); transform: scale(0.94); }
     .action svg { width: 40px; height: 40px; }
-
-    /* Keyboard hints: only on devices with a mouse and a keyboard. */
-    .hint {
-      display: none; font-size: 12px; white-space: nowrap;
-      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-    }
-    .has-keyboard .hint { display: block; }
-    .hint kbd {
-      font: inherit; font-weight: 600; padding: 0 4px; border-radius: 3px;
-      border: 1px solid rgba(255, 255, 255, 0.7); background: rgba(0, 0, 0, 0.2);
-    }
 
     /* The game is played in landscape on phones and tablets. */
     #rotate {

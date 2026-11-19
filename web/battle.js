@@ -818,7 +818,7 @@
       button.disabled = s.stage !== 'input';
       const lit = s.lit === k;
       button.classList.toggle('lit', lit);
-      button.classList.toggle('hint', s.stage === 'input' && s.hint === k);
+      button.classList.toggle('next-rune', s.stage === 'input' && s.hint === k);  // the spell "Indice"
       if (lit) button.style.setProperty('--glow', String(1 - s.glow * 0.5));
       if (touched && k === s.touched) {
         const kind = s.stage === 'wrong' ? 'bad' : 'good';

@@ -162,6 +162,17 @@ test.describe('on a phone in landscape', () => {
     await expect(page.locator('#rotate')).toBeHidden();
   });
 
+  test('the spell "Indice" keeps its icon (its name is not hidden like a keyboard hint)', async ({ page }) => {
+    await openGame(page, '?seed=3&new&frozen');
+    await page.locator('#menu-button').tap();
+    await page.locator('#tab-button-spells').tap();
+    // The fourth capture slot: Indice, by default.
+    const slot = page.locator('#spell-slot-9');
+    await expect(slot).toHaveAttribute('data-spell', 'hint');
+    await expect(slot.locator('.spell-badge')).toBeVisible();
+    await expect(slot.locator('.spell-badge svg')).toBeVisible();
+  });
+
   test('tapping the jump button jumps', async ({ page }) => {
     await openGame(page, '?seed=42&new');
     await page.locator('#jump').tap();
@@ -908,7 +919,8 @@ test.describe('battles', () => {
     // The Hint spell: the next rune shows.
     await page.locator('#seal-spell-3').dispatchEvent('pointerdown');
     await page.evaluate(() => window.monstres.step(1));
-    await expect(seal.locator('.rune.hint')).toHaveCount(1);
+    await expect(seal.locator('.rune.next-rune')).toHaveCount(1);
+    await expect(seal.locator('.rune.next-rune')).toBeVisible();
     // A mistake: the bar moves towards the escape.
     await seal.locator('.rune').nth((s0.order[0] + 1) % runes).click();
     await expect(seal.locator('.seal-text')).toContainText('Raté');

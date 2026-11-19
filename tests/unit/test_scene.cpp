@@ -315,3 +315,24 @@ TEST_CASE("the selected creature has a ring at its feet") {
   build_dynamic(w, 0, marked, 7);  // out of range: no ring, no crash
   CHECK(batch(marked, MeshId::Ripple).size() == batch(none, MeshId::Ripple).size());
 }
+
+TEST_CASE("every teleporter can be tapped, the west's too (the farm's, the standing stones')") {
+  for (TeleporterId id : {TeleporterId::Village, TeleporterId::Castle, TeleporterId::Farm, TeleporterId::Menhirs}) {
+    CAPTURE(static_cast<int>(id));
+    World w = cached_game(3);
+    Vec3 at;
+    REQUIRE(teleporter_position(w, id, at));
+    int index = -1;
+    for (size_t i = 0; i < w.objects.size(); ++i) {
+      if (w.objects[i].kind == ObjectKind::Teleporter && w.objects[i].variant == static_cast<uint8_t>(id)) index = static_cast<int>(i);
+    }
+    // Four meters south of it, looking north at it.
+    w.player.pos = {at.x, w.ground.height(at.x, at.z + 4), at.z + 4};
+    Camera cam;
+    cam.yaw = 0;
+    cam.pitch = 0.25f;
+    const View v = build_view(w, cam, 16.0f / 9.0f, 0);
+    const Vec3 middle = project(v.view_projection, {at.x, at.y + 0.6f, at.z});
+    CHECK(pick_object(w, v, middle.x, middle.y) == index);
+  }
+}
