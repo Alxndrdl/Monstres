@@ -14,6 +14,7 @@
 #include "monstres/core/weather.hpp"
 #include "monstres/core/world.hpp"
 #include "monstres/render/cull.hpp"
+#include "monstres/render/draw_plan.hpp"
 #include "monstres/render/models.hpp"
 #include "monstres/render/terrain_mesh.hpp"
 #include "monstres/render/far_terrain.hpp"
@@ -859,6 +860,12 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_profiling(int on) {
 EMSCRIPTEN_KEEPALIVE void monstres_set_adaptive_resolution(int on) {
   g_app->adaptive = on != 0;
   g_app->slow_since = g_app->fast_since = 0;
+  g_app->redraw = true;
+}
+
+// Settings menu, debug: ways of drawing faster, to compare (bits: RenderOptions, draw_plan.hpp).
+EMSCRIPTEN_KEEPALIVE void monstres_set_render_options(int bits) {
+  g_app->renderer->set_options(render_options_from_bits(bits));
   g_app->redraw = true;
 }
 

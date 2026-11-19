@@ -2,6 +2,7 @@
 // parts, the landscape by chunks, the ground by tiles.
 
 #include "monstres/render/cull.hpp"
+#include "monstres/render/draw_plan.hpp"
 #include "monstres/render/far_terrain.hpp"
 #include "monstres/render/scene.hpp"
 #include "monstres/render/terrain_mesh.hpp"
@@ -348,4 +349,139 @@ TEST_CASE("walking on, the landscape keeps up: never so far behind that grass wo
     build_landscape(w, scratch, built);
     for (size_t m = 0; m < kMeshCount; ++m) CHECK(list.batches[m].size() == scratch.batches[m].size());
   }
+}
+
+// ---- The plan of the draw calls (draw_plan.hpp) ----------------------------------
+
+namespace {
+
+// Three meshes of a 1 m cube (the second transparent), and a list with
+// cubes along +X, 10 m apart: mesh 0 near to far, mesh 2 far to near.
+struct PlanScene {
+  std::vector<PlanMesh> meshes;
+  DrawList list;
+  View view;
+  PlanScene() {
+    for (int i = 0; i < 3; ++i) {
+      PlanMesh m;
+      m.vertex_count = 36;
+      m.transparent = i == 1;
+      m.bounds = {-0.5f, 0, -0.5f, 0.5f, 1, 0.5f};
+      meshes.push_back(m);
+    }
+    list.batches.resize(3);
+    for (int k = 0; k < 4; ++k) {
+      list.batches[0].push_back(make_instance(10.0f * static_cast<float>(k), 0, 0, 0, 1, 1, 1));
+      list.batches[1].push_back(make_instance(10.0f * static_cast<float>(k), 0, 5, 0, 1, 1, 1));
+      list.batches[2].push_back(make_instance(10.0f * static_cast<float>(3 - k), 0, -5, 0, 1, 1, 1));
+    }
+    // Each instance its own part: one draw each (culled list, all in view).
+    list.parts.resize(3);
+    list.visible.resize(3);
+    for (size_t i = 0; i < 3; ++i) {
+      list.visible[i].all = false;
+      for (uint32_t k = 0; k < 4; ++k) {
+        const Instance& in = list.batches[i][k];
+        list.parts[i].push_back({{k, 1}, {in.x - 0.5f, in.y, in.z - 0.5f, in.x + 0.5f, in.y + 1, in.z + 0.5f}});
+        list.visible[i].instances.push_back({k, 1});
+      }
+    }
+    view.camera_x = -5;
+    view.camera_y = 1;
+    view.camera_z = 0;
+  }
+  std::vector<DrawItem> plan(const RenderOptions& o, bool transparent = false) const {
+    const DrawList* lists[] = {&list};
+    std::vector<DrawItem> out;
+    plan_draws(lists, meshes, false, transparent, view, o, out);
+    return out;
+  }
+};
+
+}  // namespace
+
+TEST_CASE("draw plan: all options off, the draws of before, in mesh order, everything faded and lit") {
+  PlanScene s;
+  s.view.light_count = 2;
+  const auto items = s.plan({});
+  REQUIRE(items.size() == 8);  // meshes 0 and 2 (1 is transparent), 4 draws each
+  for (size_t k = 0; k < items.size(); ++k) {
+    CHECK(items[k].mesh == (k < 4 ? 0u : 2u));
+    CHECK(items[k].first_instance == k % 4);
+    CHECK(items[k].instance_count == 1);
+    CHECK(items[k].vertex_count == 36);
+    CHECK(items[k].fade);
+    CHECK(items[k].lights == 0b11);
+  }
+  const auto transparent = s.plan({}, true);
+  REQUIRE(transparent.size() == 4);
+  CHECK(transparent[0].mesh == 1);
+}
+
+TEST_CASE("draw plan: sorted, the opaque draws go from the nearest to the farthest") {
+  PlanScene s;
+  RenderOptions o;
+  o.sort_opaque = true;
+  const auto items = s.plan(o);
+  REQUIRE(items.size() == 8);
+  for (size_t k = 1; k < items.size(); ++k) CHECK(items[k - 1].distance2 <= items[k].distance2);
+  CHECK(items.front().first_instance == 0);
+  CHECK(items.back().distance2 == Approx(34.5f * 34.5f + 4.5f * 4.5f));
+}
+
+TEST_CASE("draw plan: split, only what is near the camera's line may discard; never the transparent") {
+  PlanScene s;
+  // From the camera to a point between the first two cubes of mesh 0 (only the first is near).
+  s.view.fade_from_x = -5;
+  s.view.fade_from_y = 1;
+  s.view.fade_to_x = 5;
+  s.view.fade_to_y = 1;
+  s.view.fade_radius = 1.5f;
+  RenderOptions o;
+  o.split_fade = true;
+  const auto items = s.plan(o);
+  for (const DrawItem& it : items) CHECK(it.fade == (it.mesh == 0 && it.first_instance == 0));
+  for (const DrawItem& it : s.plan(o, true)) CHECK_FALSE(it.fade);
+  s.view.fade_radius = 0;  // nothing fades (portraits)
+  for (const DrawItem& it : s.plan(o)) CHECK_FALSE(it.fade);
+}
+
+TEST_CASE("draw plan: lights per draw, each only where it reaches") {
+  PlanScene s;
+  s.view.light_count = 2;
+  s.view.lights[0] = {20, 1, 0, 3, {1, 1, 1, 1}};    // on the third cube of mesh 0
+  s.view.lights[1] = {0, 1, -5, 2, {1, 1, 1, 1}};    // on the last cube of mesh 2 (at x 0)
+  RenderOptions o;
+  o.cull_lights = true;
+  for (const DrawItem& it : s.plan(o)) {
+    const uint16_t want = it.mesh == 0 && it.first_instance == 2 ? 0b01 : it.mesh == 2 && it.first_instance == 3 ? 0b10 : 0;
+    CHECK(it.lights == want);
+  }
+}
+
+TEST_CASE("draw plan: unculled batches are bounded by their instances; too many, not at all") {
+  PlanScene s;
+  s.list.parts.clear();
+  s.list.visible.clear();
+  s.view.light_count = 1;
+  s.view.lights[0] = {100, 0, 0, 2, {1, 1, 1, 1}};  // reaches nothing
+  RenderOptions o;
+  o.cull_lights = true;
+  auto items = s.plan(o);
+  REQUIRE(items.size() == 2);  // one draw per batch
+  CHECK(items[0].bounded);
+  CHECK(items[0].bounds.max_x >= 30.5f);
+  CHECK(items[0].lights == 0);
+  s.list.batches[0].assign(kMaxBoundedInstances + 1, make_instance(0, 0, 0, 0, 1, 1, 1));
+  items = s.plan(o);
+  CHECK_FALSE(items[0].bounded);
+  CHECK(items[0].lights == 1);  // unknown: every light
+}
+
+TEST_CASE("render options from the page's bits") {
+  CHECK(render_options_from_bits(0) == RenderOptions{});
+  const RenderOptions all = render_options_from_bits(15);
+  CHECK((all.split_fade && all.sort_opaque && all.cull_lights && all.depth_prepass));
+  CHECK(render_options_from_bits(4).cull_lights);
+  CHECK_FALSE(render_options_from_bits(4).sort_opaque);
 }

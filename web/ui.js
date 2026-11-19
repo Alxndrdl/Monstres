@@ -238,6 +238,21 @@
   });
   showFps(prefs.get('showFps', false) === true);
 
+  // ---- Debug: ways of drawing faster, to compare (kept between visits) ----
+  const renderChecks = [...document.querySelectorAll('.render-option')];
+  const sendRenderOptions = () => whenReady(() => {
+    const bits = renderChecks.reduce((b, c) => b | (c.checked ? Number(c.dataset.bit) : 0), 0);
+    if (typeof window.monstres.setRenderOptions === 'function') window.monstres.setRenderOptions(bits);
+  });
+  for (const check of renderChecks) {
+    check.checked = prefs.get(check.id, false) === true;
+    check.addEventListener('change', () => {
+      prefs.set(check.id, check.checked);
+      sendRenderOptions();
+    });
+  }
+  sendRenderOptions();
+
   // ---- Creature info ----
   const SPECIES = window.MonstresLore.species;  // web/lore.js
   const LORE = window.MonstresLore;

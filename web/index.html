@@ -1080,6 +1080,12 @@
       <input id="weather" type="range" min="0" max="8" step="1" value="0">
     </div>
     <p class="note">Une heure de jeu dure une minute : une journée, 24 minutes. La météo choisie vaut autour de toi ; « orage au loin » en met un droit devant.</p>
+    <h3>Rendu (essais)</h3>
+    <label><input id="render-split-fade" class="render-option" data-bit="1" type="checkbox"> Programme sans discard hors de la ligne de vue</label>
+    <label><input id="render-sort" class="render-option" data-bit="2" type="checkbox"> Opaques triés du plus proche au plus loin</label>
+    <label><input id="render-lights" class="render-option" data-bit="4" type="checkbox"> Lumières triées par objet</label>
+    <label><input id="render-prepass" class="render-option" data-bit="8" type="checkbox"> Pré-passe de profondeur</label>
+    <p class="note">À comparer avec « Détail du temps de calcul » (temps GPU), de nuit près des lanternes. Le rendu ne devrait pas changer.</p>
   </div>
 
   <div id="fps" hidden></div>

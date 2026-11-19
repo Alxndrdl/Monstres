@@ -123,7 +123,8 @@ Contrôles :
 - engrenage en haut à droite : paramètres (gérer les sauvegardes, voir
   Sauvegardes ; afficher les FPS et le détail du temps de calcul, voir Performances ; ces
   choix sont retenus par le navigateur) et options de debug : un curseur pour
-  choisir l'heure de la journée, « Figer l'heure », et un curseur de météo.
+  choisir l'heure de la journée, « Figer l'heure », un curseur de météo, et
+  des essais de rendu (voir Performances).
 
 Sur ordinateur, les touches sont rappelées sous le joystick et le bouton ;
 elles s'adaptent à la disposition du clavier quand le navigateur le permet.
@@ -1028,6 +1029,27 @@ redevient fluide ; elle ne remonte pas, pendant une demi-minute, à un palier
 trouvé trop lent. Paramètres → « Baisser la résolution quand le jeu
 ralentit » (activé par défaut) : décoché, l'image garde toujours sa
 résolution. Le panneau de détail montre la résolution du moment.
+
+Essais de rendu (Paramètres → Debug → « Rendu (essais) », retenus par le
+navigateur) : quatre façons de dessiner plus vite, indépendantes, à comparer
+avec le temps de la carte graphique ; toutes décochées, le rendu est celui
+d'avant. `src/render/draw_plan.cpp` prépare les appels de dessin (sans
+OpenGL, testé) et le moteur (`gles3_renderer.cpp`) les envoie :
+- « Programme sans discard » : le shader qui peut écarter des pixels (ce qui
+  passe entre la caméra et le magicien devient transparent) seulement pour ce
+  qui est près de cette ligne ; ailleurs, une variante sans `discard`, qui
+  laisse la carte graphique rejeter tôt les pixels cachés ;
+- « Opaques triés » : du plus proche au plus loin (par la boîte de chaque
+  appel), les pixels cachés n'étant alors plus calculés ;
+- « Lumières triées par objet » : chaque appel ne reçoit que les lumières
+  dont la portée touche sa boîte (une boucle plus courte dans le shader) ;
+- « Pré-passe de profondeur » : les opaques une première fois sans couleur,
+  puis en couleur là où la profondeur est égale : chaque pixel visible est
+  éclairé une seule fois, au prix d'une géométrie dessinée deux fois.
+Triés ou dessinés deux fois, les objets qui bougent sont envoyés au GPU en
+un seul bloc par image. Le premier et le troisième donnent la même
+image au pixel près ; le tri et la pré-passe peuvent changer quelques pixels
+là où deux surfaces se touchent.
 
 ## Personnages et animations
 

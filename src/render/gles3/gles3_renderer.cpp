@@ -1,5 +1,6 @@
 #include "gles3_renderer.hpp"
 
+#include "monstres/render/draw_plan.hpp"
 #include "monstres/render/models.hpp"
 
 #include <GLES3/gl3.h>
@@ -9,6 +10,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -39,6 +41,8 @@ out vec3 vWorld;
 out vec3 vToCamera;  // computed here: in the fragment shader, mediump may be 16 bits (phones)
 out vec4 vColor;
 out float vMaterial;
+// The same position in every program (the depth pre-pass, then the colors).
+invariant gl_Position;
 vec3 rotate(vec4 q, vec3 v) {
   return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
 }
@@ -69,7 +73,9 @@ void main() {
 }
 )";
 
-constexpr const char* kMeshFragmentShader = R"(#version 300 es
+// Built with FADE (1: what stands in the camera's way may be discarded) and
+// DEPTH_ONLY (1: the depth pre-pass, no color) defined (mesh_fragment_shader).
+constexpr const char* kMeshFragmentShader = R"(
 precision mediump float;
 #define MAX_LIGHTS 12
 in vec3 vNormal;
@@ -102,6 +108,7 @@ void main() {
   vec3 view = toCamera / length(toCamera);
   // What stands between the camera and what it looks at shows through: a
   // fine dither leaves most of its pixels out (not water, not glowing things).
+#if FADE
   if (uFadeFrom.w > 0.0 && uOpaquePass && vMaterial > -0.5 && vMaterial < 0.5) {
     vec3 ab = uFadeTo - uFadeFrom.xyz;
     float t = clamp(dot(vWorld - uFadeFrom.xyz, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
@@ -115,6 +122,10 @@ void main() {
       if (float(((c.x * 3 + c.y * 2) & 3) * 4 + k) / 16.0 >= keep) discard;
     }
   }
+#endif
+#if DEPTH_ONLY
+  outColor = vec4(0.0);
+#else
   vec3 n = normalize(vNormal);
   if (!gl_FrontFacing) n = -n;  // double-sided meshes
   float diffuse = max(dot(n, uLight), 0.0);
@@ -149,8 +160,14 @@ void main() {
   }
   float fog = max(1.0 - exp2(-max(d - uFogRange.x, 0.0) / uFogRange.y), smoothstep(uFogRange.z * 0.75, uFogRange.z, d));
   outColor = vec4(mix(color, uFog, fog), alpha);
+#endif
 }
 )";
+
+std::string mesh_fragment_shader(bool fade, bool depth_only) {
+  return std::string("#version 300 es\n#define FADE ") + (fade ? "1" : "0") + "\n#define DEPTH_ONLY " +
+         (depth_only ? "1" : "0") + "\n" + kMeshFragmentShader;
+}
 
 // ---- Sky: one full-screen triangle, gradient + sun -----------------------------
 
@@ -281,36 +298,90 @@ struct GpuMesh {
   bool double_sided = false;
 };
 
+// A variant of the mesh program (mesh_fragment_shader) and where its uniforms are.
+struct MeshProgram {
+  GLuint id = 0;
+  GLint view_projection = -1, time = -1, wind = -1, eye = -1, time_fs = -1, light = -1, light_color = -1;
+  GLint ambient_sky = -1, ambient_ground = -1, night = -1, fade_from = -1, fade_to = -1, opaque_pass = -1;
+  GLint light_count = -1, light_pos = -1, light_colors = -1, fade_center = -1, fade_near = -1, fade_far = -1;
+  GLint fade_tree = -1, fog = -1, fog_range = -1;
+  bool lights_known = false;  // which of the frame's lights it has (upload_lights)
+  uint16_t lights = 0;
+
+  bool link(const std::string& fragment) {
+    id = monstres::link(kMeshVertexShader, fragment.c_str());
+    if (!id) return false;
+    const auto at = [&](const char* name) { return glGetUniformLocation(id, name); };
+    view_projection = at("uViewProjection");
+    time = at("uTime");
+    wind = at("uWind");
+    eye = at("uEye");
+    time_fs = at("uTimeFs");
+    light = at("uLight");
+    light_color = at("uLightColor");
+    ambient_sky = at("uAmbientSky");
+    ambient_ground = at("uAmbientGround");
+    night = at("uNight");
+    fade_from = at("uFadeFrom");
+    fade_to = at("uFadeTo");
+    opaque_pass = at("uOpaquePass");
+    light_count = at("uLightCount");
+    light_pos = at("uLightPos");
+    light_colors = at("uLightColors");
+    fade_center = at("uFadeCenter");
+    fade_near = at("uFadeNear");
+    fade_far = at("uFadeFar");
+    fade_tree = at("uFadeTree");
+    fog = at("uFog");
+    fog_range = at("uFogRange");
+    return true;
+  }
+
+  // The uniforms of the frame (the near view's matrix).
+  void set_view(const View& v) {
+    glUseProgram(id);
+    glUniformMatrix4fv(view_projection, 1, GL_FALSE, v.view_projection.m);
+    glUniform1f(time, v.time);
+    glUniform1f(wind, 1.0f + 2.2f * v.wind);
+    glUniform3f(eye, v.camera_x, v.camera_y, v.camera_z);
+    glUniform1f(time_fs, v.time);
+    glUniform3f(light, v.light_x, v.light_y, v.light_z);
+    glUniform3f(light_color, v.light_color.r, v.light_color.g, v.light_color.b);
+    glUniform3f(ambient_sky, v.ambient_sky.r, v.ambient_sky.g, v.ambient_sky.b);
+    glUniform3f(ambient_ground, v.ambient_ground.r, v.ambient_ground.g, v.ambient_ground.b);
+    glUniform1f(night, v.night);
+    glUniform4f(fade_from, v.fade_from_x, v.fade_from_y, v.fade_from_z, v.fade_radius);
+    glUniform3f(fade_to, v.fade_to_x, v.fade_to_y, v.fade_to_z);
+    glUniform3f(fog, v.fog.r, v.fog.g, v.fog.b);
+    glUniform3f(fog_range, v.fog_start, v.fog_half, v.fog_end);
+    glUniform2f(fade_center, v.fade_x, v.fade_z);
+    glUniform2f(fade_near, v.fade_near_start, v.fade_near_end);
+    glUniform2f(fade_far, v.fade_far_start, v.fade_far_end);
+    glUniform2f(fade_tree, v.fade_tree_start, v.fade_tree_end);
+    lights_known = false;
+  }
+  void set_view_projection(const Mat4& m) {
+    glUseProgram(id);
+    glUniformMatrix4fv(view_projection, 1, GL_FALSE, m.m);
+  }
+  void set_opaque_pass(bool opaque) {
+    glUseProgram(id);
+    glUniform1i(opaque_pass, opaque ? 1 : 0);
+  }
+};
+
 class Gles3Renderer final : public Renderer {
 public:
   bool init(std::span<const MeshData> meshes) {
-    mesh_program_ = link(kMeshVertexShader, kMeshFragmentShader);
+    for (int fade = 0; fade < 2; ++fade) {
+      for (int depth = 0; depth < 2; ++depth) {
+        if (!programs_[fade][depth].link(mesh_fragment_shader(fade != 0, depth != 0))) return false;
+      }
+    }
     sky_program_ = link(kSkyVertexShader, kSkyFragmentShader);
-    if (!mesh_program_ || !sky_program_) return false;
-    u_view_projection_ = glGetUniformLocation(mesh_program_, "uViewProjection");
-    u_time_ = glGetUniformLocation(mesh_program_, "uTime");
-    u_wind_ = glGetUniformLocation(mesh_program_, "uWind");
-    u_eye_ = glGetUniformLocation(mesh_program_, "uEye");
-    u_time_fs_ = glGetUniformLocation(mesh_program_, "uTimeFs");
-    u_light_ = glGetUniformLocation(mesh_program_, "uLight");
-    u_light_color_ = glGetUniformLocation(mesh_program_, "uLightColor");
-    u_ambient_sky_ = glGetUniformLocation(mesh_program_, "uAmbientSky");
-    u_ambient_ground_ = glGetUniformLocation(mesh_program_, "uAmbientGround");
-    u_night_ = glGetUniformLocation(mesh_program_, "uNight");
-    u_fade_from_ = glGetUniformLocation(mesh_program_, "uFadeFrom");
-    u_fade_to_ = glGetUniformLocation(mesh_program_, "uFadeTo");
-    u_opaque_pass_ = glGetUniformLocation(mesh_program_, "uOpaquePass");
-    u_light_count_ = glGetUniformLocation(mesh_program_, "uLightCount");
-    u_light_pos_ = glGetUniformLocation(mesh_program_, "uLightPos");
-    u_light_colors_ = glGetUniformLocation(mesh_program_, "uLightColors");
-    u_fade_center_ = glGetUniformLocation(mesh_program_, "uFadeCenter");
-    u_fade_near_ = glGetUniformLocation(mesh_program_, "uFadeNear");
-    u_fade_far_ = glGetUniformLocation(mesh_program_, "uFadeFar");
-    u_fade_tree_ = glGetUniformLocation(mesh_program_, "uFadeTree");
+    if (!sky_program_) return false;
     u_sky_moon_ = glGetUniformLocation(sky_program_, "uMoon");
     u_sky_night_ = glGetUniformLocation(sky_program_, "uNight");
-    u_fog_ = glGetUniformLocation(mesh_program_, "uFog");
-    u_fog_range_ = glGetUniformLocation(mesh_program_, "uFogRange");
     u_sky_inverse_ = glGetUniformLocation(sky_program_, "uInverseViewProjection");
     u_sky_camera_ = glGetUniformLocation(sky_program_, "uCamera");
     u_sky_sun_ = glGetUniformLocation(sky_program_, "uSun");
@@ -323,7 +394,9 @@ public:
     glGenVertexArrays(1, &sky_vao_);
 
     glGenBuffers(1, &instance_vbo_);
+    glGenBuffers(1, &frame_vbo_);
     meshes_.resize(meshes.size());
+    plan_meshes_.resize(meshes.size());
     for (size_t i = 0; i < meshes.size(); ++i) set_mesh(i, meshes[i]);
 
     glFrontFace(GL_CCW);
@@ -336,18 +409,31 @@ public:
     for (GpuMesh& m : meshes_) release(m);
     for (auto& [list, c] : cache_) glDeleteBuffers(static_cast<GLsizei>(c.buffers.size()), c.buffers.data());
     glDeleteBuffers(1, &instance_vbo_);
+    glDeleteBuffers(1, &frame_vbo_);
     glDeleteVertexArrays(1, &sky_vao_);
-    glDeleteProgram(mesh_program_);
+    for (auto& row : programs_) {
+      for (MeshProgram& program : row) glDeleteProgram(program.id);
+    }
     glDeleteProgram(sky_program_);
   }
 
   void set_mesh(size_t index, const MeshData& data) override {
-    if (index >= meshes_.size()) meshes_.resize(index + 1);
+    if (index >= meshes_.size()) {
+      meshes_.resize(index + 1);
+      plan_meshes_.resize(index + 1);
+    }
     GpuMesh& m = meshes_[index];
     release(m);
     m.vertex_count = data.vertices.empty() ? 0 : static_cast<GLsizei>(data.draw_count());
     m.transparent = data.transparent;
     m.double_sided = data.double_sided;
+    PlanMesh& plan = plan_meshes_[index];
+    plan.vertex_count = m.vertex_count;
+    plan.transparent = m.transparent;
+    plan.bounds = empty_aabb();
+    for (size_t v = 0; v + 2 < data.vertices.size(); v += MeshData::kFloatsPerVertex) {
+      plan.bounds.add(data.vertices[v], data.vertices[v + 1], data.vertices[v + 2]);
+    }
     if (m.vertex_count == 0) return;
     stats_.uploaded_bytes += data.vertices.size() * sizeof(float) + data.indices.size() * sizeof(uint32_t);
 
@@ -388,6 +474,7 @@ public:
                  GL_STATIC_DRAW);
     glBindVertexArray(0);
     m.vertex_count = static_cast<GLsizei>(indices.size());
+    plan_meshes_[index].vertex_count = m.vertex_count;
     stats_.uploaded_bytes += indices.size() * sizeof(uint32_t);
   }
 
@@ -403,6 +490,8 @@ public:
     }
   }
 
+  void set_options(const RenderOptions& options) override { options_ = options; }
+
   void draw(const View& view, std::span<const DrawList* const> lists) override {
     if (view.sky) {
       draw_sky(view);
@@ -411,136 +500,183 @@ public:
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
-    glUseProgram(mesh_program_);
-    glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.view_projection.m);
-    glUniform1f(u_time_, view.time);
-    glUniform1f(u_wind_, 1.0f + 2.2f * view.wind);
-    glUniform3f(u_eye_, view.camera_x, view.camera_y, view.camera_z);
-    glUniform1f(u_time_fs_, view.time);
-    glUniform3f(u_light_, view.light_x, view.light_y, view.light_z);
-    glUniform3f(u_light_color_, view.light_color.r, view.light_color.g, view.light_color.b);
-    glUniform3f(u_ambient_sky_, view.ambient_sky.r, view.ambient_sky.g, view.ambient_sky.b);
-    glUniform3f(u_ambient_ground_, view.ambient_ground.r, view.ambient_ground.g, view.ambient_ground.b);
-    glUniform1f(u_night_, view.night);
-    glUniform4f(u_fade_from_, view.fade_from_x, view.fade_from_y, view.fade_from_z, view.fade_radius);
-    glUniform3f(u_fade_to_, view.fade_to_x, view.fade_to_y, view.fade_to_z);
-    {
-      const auto count = static_cast<GLsizei>(std::min(view.light_count, kMaxPointLights));
-      float pos[kMaxPointLights * 4] = {}, colors[kMaxPointLights * 3] = {};
-      for (GLsizei i = 0; i < count; ++i) {
-        const PointLight& l = view.lights[i];
-        const float p[] = {l.x, l.y, l.z, l.radius}, c[] = {l.color.r, l.color.g, l.color.b};
-        std::copy_n(p, 4, pos + 4 * i);
-        std::copy_n(c, 3, colors + 3 * i);
-      }
-      glUniform1i(u_light_count_, count);
-      if (count > 0) {
-        glUniform4fv(u_light_pos_, count, pos);
-        glUniform3fv(u_light_colors_, count, colors);
-      }
+    // The lights of the frame (each program gets those of each draw: upload_lights).
+    light_count_ = std::min(view.light_count, kMaxPointLights);
+    for (size_t i = 0; i < light_count_; ++i) {
+      const PointLight& l = view.lights[i];
+      const float p[] = {l.x, l.y, l.z, l.radius}, c[] = {l.color.r, l.color.g, l.color.b};
+      std::copy_n(p, 4, light_pos_ + 4 * i);
+      std::copy_n(c, 3, light_colors_ + 3 * i);
     }
-    glUniform3f(u_fog_, view.fog.r, view.fog.g, view.fog.b);
-    glUniform3f(u_fog_range_, view.fog_start, view.fog_half, view.fog_end);
-    glUniform2f(u_fade_center_, view.fade_x, view.fade_z);
-    glUniform2f(u_fade_near_, view.fade_near_start, view.fade_near_end);
-    glUniform2f(u_fade_far_, view.fade_far_start, view.fade_far_end);
-    glUniform2f(u_fade_tree_, view.fade_tree_start, view.fade_tree_end);
+    for (auto& row : programs_) {
+      for (MeshProgram& program : row) program.set_view(view);
+    }
     glEnable(GL_DEPTH_TEST);
     for (const DrawList* list : lists) {
       if (list->cached) update_cache(*list);
     }
+    upload_frame_instances(lists);
+    view_ = &view;
     // The far lists first, with their own depth range; then the near ones over them.
     const bool any_far = std::any_of(lists.begin(), lists.end(), [](const DrawList* l) { return l->far; });
     if (any_far) {
-      glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.far_view_projection.m);
+      for (auto& row : programs_) {
+        for (MeshProgram& program : row) program.set_view_projection(view.far_view_projection);
+      }
       draw_lists(lists, true);
       glDepthMask(GL_TRUE);
       glClear(GL_DEPTH_BUFFER_BIT);
-      glUniformMatrix4fv(u_view_projection_, 1, GL_FALSE, view.view_projection.m);
+      for (auto& row : programs_) {
+        for (MeshProgram& program : row) program.set_view_projection(view.view_projection);
+      }
     }
     draw_lists(lists, false);
+    view_ = nullptr;
     glBindVertexArray(0);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
   }
 
   // The lists of one pass (far or near): opaque meshes first (depth writes
-  // on), then transparent ones (blended, no depth writes).
+  // on), then transparent ones (blended, no depth writes). With the depth
+  // pre-pass, the opaque ones twice: depth only, then the colors where it is equal.
   void draw_lists(std::span<const DrawList* const> lists, bool far) {
     for (bool transparent : {false, true}) {
-      glDepthMask(transparent ? GL_FALSE : GL_TRUE);
+      plan_draws(lists, plan_meshes_, far, transparent, *view_, options_, items_);
+      for (auto& row : programs_) {
+        for (MeshProgram& program : row) program.set_opaque_pass(!transparent);  // fading edges are not lit windows
+      }
       if (transparent) glEnable(GL_BLEND); else glDisable(GL_BLEND);
-      glUniform1i(u_opaque_pass_, transparent ? 0 : 1);  // fading edges are not lit windows
-      // The state is set for the meshes drawn only (most of them are not, in
-      // one pass: each call costs, in a browser), and when it changes.
-      int culling = -1;  // not known yet
-      for (size_t i = 0; i < meshes_.size(); ++i) {
-        const GpuMesh& m = meshes_[i];
-        if (m.vertex_count == 0 || m.transparent != transparent) continue;
-        bool bound = false;
-        for (const DrawList* list : lists) {
-          if (list->far != far || i >= list->batches.size() || list->batches[i].empty()) continue;
-          const auto& instances = list->batches[i];
-          if (!bound) {
-            bound = true;
-            const int cull = m.double_sided ? 0 : 1;
-            if (cull != culling) {
-              culling = cull;
-              if (cull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
-            }
-            glBindVertexArray(m.vao);
-          }
-          if (list->cached) {
-            glBindBuffer(GL_ARRAY_BUFFER, cache_[list].buffers[i]);
-          } else {
-            glBindBuffer(GL_ARRAY_BUFFER, instance_vbo_);
-            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)),
-                         instances.data(), GL_STREAM_DRAW);
-            stats_.uploaded_bytes += instances.size() * sizeof(Instance);
-          }
-          const auto draw = [&](uint32_t first_instance, uint32_t instance_count, GLint first_vertex, GLsizei vertex_count) {
-            if (instance_count == 0 || vertex_count <= 0) return;
-            point_instance_attributes(first_instance);
-            if (m.ebo) {
-              glDrawElementsInstanced(GL_TRIANGLES, vertex_count, GL_UNSIGNED_INT,
-                                      offset(static_cast<size_t>(first_vertex) * sizeof(uint32_t)),
-                                      static_cast<GLsizei>(instance_count));
-            } else {
-              glDrawArraysInstanced(GL_TRIANGLES, first_vertex, vertex_count, static_cast<GLsizei>(instance_count));
-            }
-            if (profiling_) {
-              const uint64_t triangles = static_cast<uint64_t>(vertex_count / 3) * instance_count;
-              ++stats_.draw_calls;
-              stats_.instances += instance_count;
-              stats_.triangles += triangles;
-              // Beyond the models: the ground's tiles (terrain_mesh.hpp).
-              const auto group = static_cast<size_t>(i < kMeshCount ? mesh_group(static_cast<MeshId>(i)) : MeshGroup::Terrain);
-              if (group < kMeshGroups) stats_.triangles_by_group[group] += triangles;
-            }
-          };
-          const DrawList::Visible* v = i < list->visible.size() ? &list->visible[i] : nullptr;
-          if (!v || v->all) {
-            draw(0, static_cast<uint32_t>(instances.size()), 0, m.vertex_count);
-            continue;
-          }
-          // Culled (cull.hpp): the instances and parts of the mesh in view only.
-          for (const DrawRange& r : v->instances) {
-            const uint32_t count = std::min<uint32_t>(r.count, static_cast<uint32_t>(instances.size()) - std::min<uint32_t>(r.first, static_cast<uint32_t>(instances.size())));
-            if (v->vertices.empty()) {
-              draw(r.first, count, 0, m.vertex_count);
-              continue;
-            }
-            for (const DrawRange& part : v->vertices) {
-              const auto end = std::min<GLsizei>(static_cast<GLsizei>(part.first + part.count), m.vertex_count);
-              draw(r.first, count, static_cast<GLint>(part.first), end - static_cast<GLsizei>(part.first));
-            }
-          }
-        }
+      if (!transparent && options_.depth_prepass) {
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDepthMask(GL_TRUE);
+        issue(items_, true);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glDepthMask(GL_FALSE);
+        glDepthFunc(GL_LEQUAL);
+        issue(items_, false);
+        glDepthFunc(GL_LESS);
+      } else {
+        glDepthMask(transparent ? GL_FALSE : GL_TRUE);
+        issue(items_, false);
       }
     }
     glBindVertexArray(0);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+  }
+
+  // Issues the draws, setting the state when it changes only (each call
+  // costs, in a browser).
+  void issue(const std::vector<DrawItem>& items, bool depth_only) {
+    const MeshProgram* program = nullptr;
+    int culling = -1;  // not known yet
+    GLuint vao = 0, buffer = 0;
+    const DrawList* uploaded_list = nullptr;  // what instance_vbo_ holds (without the frame's buffer)
+    uint32_t uploaded_mesh = 0;
+    for (const DrawItem& item : items) {
+      MeshProgram& p = programs_[item.fade ? 1 : 0][depth_only ? 1 : 0];
+      if (&p != program) {
+        program = &p;
+        glUseProgram(p.id);
+      }
+      if (!depth_only) upload_lights(p, item.lights);
+      const GpuMesh& m = meshes_[item.mesh];
+      const int cull = m.double_sided ? 0 : 1;
+      if (cull != culling) {
+        culling = cull;
+        if (cull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+      }
+      if (m.vao != vao) {
+        vao = m.vao;
+        glBindVertexArray(m.vao);
+      }
+      const auto& instances = item.list->batches[item.mesh];
+      uint32_t base = 0;
+      GLuint wanted;
+      if (item.list->cached) {
+        wanted = cache_[item.list].buffers[item.mesh];
+      } else if (const auto it = frame_offsets_.find(item.list); it != frame_offsets_.end()) {
+        wanted = frame_vbo_;
+        base = it->second[item.mesh];
+      } else {
+        wanted = instance_vbo_;
+        if (uploaded_list != item.list || uploaded_mesh != item.mesh) {
+          uploaded_list = item.list;
+          uploaded_mesh = item.mesh;
+          glBindBuffer(GL_ARRAY_BUFFER, instance_vbo_);
+          glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)),
+                       instances.data(), GL_STREAM_DRAW);
+          stats_.uploaded_bytes += instances.size() * sizeof(Instance);
+          buffer = instance_vbo_;
+        }
+      }
+      if (wanted != buffer) {
+        buffer = wanted;
+        glBindBuffer(GL_ARRAY_BUFFER, wanted);
+      }
+      point_instance_attributes(base + item.first_instance);
+      if (m.ebo) {
+        glDrawElementsInstanced(GL_TRIANGLES, item.vertex_count, GL_UNSIGNED_INT,
+                                offset(static_cast<size_t>(item.first_vertex) * sizeof(uint32_t)),
+                                static_cast<GLsizei>(item.instance_count));
+      } else {
+        glDrawArraysInstanced(GL_TRIANGLES, item.first_vertex, item.vertex_count,
+                              static_cast<GLsizei>(item.instance_count));
+      }
+      if (profiling_) {
+        const uint64_t triangles = static_cast<uint64_t>(item.vertex_count / 3) * item.instance_count;
+        ++stats_.draw_calls;
+        stats_.instances += item.instance_count;
+        stats_.triangles += triangles;
+        // Beyond the models: the ground's tiles (terrain_mesh.hpp).
+        const size_t i = item.mesh;
+        const auto group = static_cast<size_t>(i < kMeshCount ? mesh_group(static_cast<MeshId>(i)) : MeshGroup::Terrain);
+        if (group < kMeshGroups) stats_.triangles_by_group[group] += triangles;
+      }
+    }
+  }
+
+  // Sorted or drawn twice, the batches of the lists not cached would be sent
+  // again and again: all of them at once instead, in one buffer for the frame.
+  void upload_frame_instances(std::span<const DrawList* const> lists) {
+    frame_offsets_.clear();
+    if (!options_.sort_opaque && !options_.depth_prepass) return;
+    frame_instances_.clear();
+    for (const DrawList* list : lists) {
+      if (list->cached) continue;
+      std::vector<uint32_t>& offsets = frame_offsets_[list];
+      offsets.assign(list->batches.size(), 0);
+      for (size_t i = 0; i < list->batches.size(); ++i) {
+        offsets[i] = static_cast<uint32_t>(frame_instances_.size());
+        frame_instances_.insert(frame_instances_.end(), list->batches[i].begin(), list->batches[i].end());
+      }
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, frame_vbo_);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(frame_instances_.size() * sizeof(Instance)),
+                 frame_instances_.data(), GL_STREAM_DRAW);
+    stats_.uploaded_bytes += frame_instances_.size() * sizeof(Instance);
+  }
+
+  // The lights of a draw (bit i: the frame's light i), sent to the program
+  // when they are not those it already has.
+  void upload_lights(MeshProgram& p, uint16_t mask) {
+    if (p.lights_known && p.lights == mask) return;
+    p.lights_known = true;
+    p.lights = mask;
+    float pos[kMaxPointLights * 4], colors[kMaxPointLights * 3];
+    GLsizei n = 0;
+    for (size_t i = 0; i < light_count_; ++i) {
+      if (!((mask >> i) & 1u)) continue;
+      std::copy_n(light_pos_ + 4 * i, 4, pos + 4 * n);
+      std::copy_n(light_colors_ + 3 * i, 3, colors + 3 * n);
+      ++n;
+    }
+    glUniform1i(p.light_count, n);
+    if (n > 0) {
+      glUniform4fv(p.light_pos, n, pos);
+      glUniform3fv(p.light_colors, n, colors);
+    }
   }
 
   void end_frame() override {
@@ -698,16 +834,20 @@ private:
     m.vbo = m.vao = m.ebo = 0;
   }
 
-  GLuint mesh_program_ = 0, sky_program_ = 0;
-  GLint u_time_fs_ = -1;
-  GLint u_view_projection_ = -1, u_time_ = -1, u_light_ = -1, u_fog_ = -1, u_fog_range_ = -1;
+  MeshProgram programs_[2][2];  // [fade][depth only]
+  GLuint sky_program_ = 0;
   GLint u_sky_inverse_ = -1, u_sky_camera_ = -1, u_sky_sun_ = -1, u_sky_zenith_ = -1, u_sky_horizon_ = -1;
-  GLint u_opaque_pass_ = -1, u_wind_ = -1, u_eye_ = -1;
   GLint u_sky_cover_ = -1, u_sky_cloud_light_ = -1, u_sky_cloud_shade_ = -1, u_sky_cloud_shift_ = -1;
-  GLint u_light_color_ = -1, u_ambient_sky_ = -1, u_ambient_ground_ = -1, u_night_ = -1;
-  GLint u_fade_from_ = -1, u_fade_to_ = -1;
-  GLint u_light_count_ = -1, u_light_pos_ = -1, u_light_colors_ = -1, u_sky_moon_ = -1, u_sky_night_ = -1;
-  GLint u_fade_center_ = -1, u_fade_near_ = -1, u_fade_far_ = -1, u_fade_tree_ = -1;
+  GLint u_sky_moon_ = -1, u_sky_night_ = -1;
+  RenderOptions options_;
+  const View* view_ = nullptr;  // during draw()
+  size_t light_count_ = 0;
+  float light_pos_[kMaxPointLights * 4] = {}, light_colors_[kMaxPointLights * 3] = {};
+  std::vector<PlanMesh> plan_meshes_;
+  std::vector<DrawItem> items_;
+  GLuint frame_vbo_ = 0;  // the instances of the lists not cached, when sorted or drawn twice
+  std::vector<Instance> frame_instances_;
+  std::unordered_map<const DrawList*, std::vector<uint32_t>> frame_offsets_;
   GLuint sky_vao_ = 0;
   GLuint instance_vbo_ = 0;
   bool profiling_ = false;
