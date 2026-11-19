@@ -62,25 +62,6 @@ TEST_CASE("each object is drawn with the mesh of its kind, with a shadow") {
   CHECK(batch(list, MeshId::Crate)[0].y == Approx(0.5f));  // the crate mesh is centered
 }
 
-TEST_CASE("lighter grass: fewer tufts, simpler sooner; the rest of the landscape the same") {
-  const World& w = cached_game(42);
-  DrawList usual, lighter;
-  build_landscape(w, usual);
-  set_lighter_grass(true);
-  build_landscape(w, lighter);
-  set_lighter_grass(false);
-  const auto count = [](const DrawList& l, std::initializer_list<MeshId> ids) {
-    size_t n = 0;
-    for (MeshId id : ids) n += l.batches[static_cast<size_t>(id)].size();
-    return n;
-  };
-  const auto grass = {MeshId::GrassShort, MeshId::GrassTall, MeshId::GrassShortFar, MeshId::GrassTallFar};
-  CHECK(count(lighter, grass) < count(usual, grass) * 9 / 10);
-  CHECK(count(lighter, {MeshId::GrassShort, MeshId::GrassTall}) < count(usual, {MeshId::GrassShort, MeshId::GrassTall}) / 2);
-  CHECK(count(lighter, {MeshId::Crate}) == count(usual, {MeshId::Crate}));
-  CHECK(count(lighter, {MeshId::Shadow}) == count(usual, {MeshId::Shadow}));
-}
-
 TEST_CASE("the landscape has grass, flowers, a forest beyond the edges and mountains") {
   const World& w = cached_game(42);
   DrawList list;

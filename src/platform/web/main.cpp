@@ -863,14 +863,9 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_adaptive_resolution(int on) {
   g_app->redraw = true;
 }
 
-// Settings menu, debug: ways of drawing faster, to compare (bits: RenderOptions, draw_plan.hpp).
+// Settings menu, debug: forward or deferred shading, to compare (bit 1: deferred shading).
 EMSCRIPTEN_KEEPALIVE void monstres_set_render_options(int bits) {
-  const RenderOptions options = render_options_from_bits(bits);
-  g_app->renderer->set_options(options);
-  if (options.lighter_grass != lighter_grass()) {
-    set_lighter_grass(options.lighter_grass);
-    g_app->landscape_center = {1e9f, 1e9f};  // built again, with the other grass
-  }
+  g_app->renderer->set_options(render_options_from_bits(bits));
   g_app->redraw = true;
 }
 

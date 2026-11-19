@@ -493,13 +493,6 @@ int LandscapeCache::prepare(const World& w, Vec2 at, double budget_ms) {
 
 // ---- Building ------------------------------------------------------------------------
 
-namespace {
-bool g_lighter_grass = false;
-}  // namespace
-
-void set_lighter_grass(bool on) { g_lighter_grass = on; }
-bool lighter_grass() { return g_lighter_grass; }
-
 void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache& cache) {
   using landscape::kBins;
   cache.check_world(w);
@@ -558,14 +551,12 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
         if (d2 > grass2) continue;
         // Thinning out: fewer tufts, a little wider, farther away.
         const float d = std::sqrt(d2);
-        const float thin_start = g_lighter_grass ? landscape::kLightGrassThinStart : landscape::kGrassThinStart;
-        const float least = g_lighter_grass ? landscape::kLightGrassThinLeast : landscape::kGrassThinLeast;
-        const float full = g_lighter_grass ? landscape::kLightGrassFullRadius : landscape::kGrassFullRadius;
-        const float share = d <= thin_start
+        const float share = d <= landscape::kGrassThinStart
                                 ? 1.0f
-                                : 1.0f - (1.0f - least) * (d - thin_start) / (landscape::kGrassRadius - thin_start);
+                                : 1.0f - (1.0f - landscape::kGrassThinLeast) * (d - landscape::kGrassThinStart) /
+                                             (landscape::kGrassRadius - landscape::kGrassThinStart);
         if (g.keep >= share) continue;
-        const MeshId mesh = d <= full ? g.mesh : simpler_grass(g.mesh);
+        const MeshId mesh = d <= landscape::kGrassFullRadius ? g.mesh : simpler_grass(g.mesh);
         if (share >= 1.0f) {
           emit(mesh, g.instance);
           continue;

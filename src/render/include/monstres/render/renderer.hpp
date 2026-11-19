@@ -249,25 +249,14 @@ struct Frame {
   int pixel_height = 0;
 };
 
-// Ways of drawing, to try (debug options of the settings menu); all off,
-// one forward pass with the lights in the shader.
+// How to draw, to compare (debug option of the settings menu).
 struct RenderOptions {
   // Deferred shading: the opaque things once, their color, kind and normal
-  // into textures (the G-buffer); then all their light over the whole
-  // screen; the transparent ones over it. Drawn off screen without antialiasing.
+  // into textures (the G-buffer); then their light over the whole screen,
+  // the point lights in a buffer of half the size, each over its rectangle;
+  // the transparent ones over it. Drawn off screen without antialiasing.
+  // Off: one forward pass, the point lights in the shader.
   bool deferred_shading = false;
-  // Lighter grass: simpler and fewer tufts sooner (landscape.hpp), and the
-  // parts of grass, small things and trees already shrunk away not drawn.
-  bool lighter_grass = false;
-  // Deferred shading: the point lights in a buffer of half the size, smoothed up.
-  bool half_res_lights = false;
-  // Deferred shading: the normal in two bytes (octahedral) instead of four.
-  bool compact_gbuffer = false;
-  // Deferred shading: each point light over its rectangle on the screen only,
-  // added up in a buffer, instead of a loop over all of them for every pixel.
-  bool light_rects = false;
-  // The instances sent to the GPU in 40 bytes instead of 64 (PackedInstance).
-  bool compact_instances = false;
   bool operator==(const RenderOptions&) const = default;
 };
 

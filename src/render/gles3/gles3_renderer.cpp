@@ -73,7 +73,7 @@ void main() {
 }
 )";
 
-// The normal in two numbers (octahedral), for the compact G-buffer.
+// The normal in two numbers (octahedral), for the G-buffer.
 constexpr const char* kOctahedral = R"(
 vec2 octahedral(vec3 n) {
   n /= abs(n.x) + abs(n.y) + abs(n.z);
@@ -92,8 +92,8 @@ vec3 from_octahedral(vec2 e) {
 
 // Built with FADE (1: what stands in the camera's way may be discarded) and
 // MODE defined (mesh_fragment_shader): 0 the colors, the point lights in the
-// shader; 1 the G-buffer of deferred shading (color and kind, normal);
-// 2 the same, the normal in two bytes (compact G-buffer).
+// shader; 1 the G-buffer of deferred shading (color and kind; the normal in
+// two bytes).
 constexpr const char* kMeshFragmentShader = R"(
 #define MAX_LIGHTS 12
 in vec3 vNormal;
@@ -150,11 +150,7 @@ void main() {
   // The kind (alpha): 0.25 lit, 0.5 glowing, 0.75 a window lit at night (0: nothing there).
   float kind = vMaterial > 1.5 ? 0.5 : uOpaquePass && abs(vColor.a - 0.985) < 0.002 ? 0.75 : 0.25;
   outColor = vec4(vColor.rgb, kind);
-#if MODE == 2
   outNormal = vec4(octahedral(n) * 0.5 + 0.5, 0.0, 1.0);
-#else
-  outNormal = vec4(n * 0.5 + 0.5, 1.0);
-#endif
 #else
   float diffuse = max(dot(n, uLight), 0.0);
   // Ambient light: from the sky above, bounced from the ground below.
@@ -193,7 +189,7 @@ void main() {
 )";
 
 // What a mesh program draws (MODE in the shader).
-enum Mode { kColor = 0, kGBuffer = 1, kGBufferCompact = 2, kModes = 3 };
+enum Mode { kColor = 0, kGBuffer = 1, kModes = 2 };
 
 std::string mesh_fragment_shader(bool fade, int mode) {
   return std::string("#version 300 es\nprecision mediump float;\n#define FADE ") + (fade ? "1" : "0") +
@@ -202,8 +198,8 @@ std::string mesh_fragment_shader(bool fade, int mode) {
 
 // ---- Deferred shading ---------------------------------------------------------------
 // Full-screen passes (one triangle, kSkyVertexShader) reading the G-buffer:
-// the depth (unit 3), color and kind (unit 4), normal (unit 5; COMPACT: two
-// bytes); the point lights' buffer (unit 6).
+// the depth (unit 3), color and kind (unit 4), normal (unit 5, octahedral);
+// the point lights' buffer (unit 6).
 
 // What both read: where the pixel is, its normal.
 constexpr const char* kGBufferRead = R"(
@@ -216,13 +212,7 @@ vec3 position_at(ivec2 p) {
   vec4 world = uInverseViewProjection * vec4((vec2(p) + 0.5) / uScreen * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
   return world.xyz / world.w;
 }
-vec3 normal_at(ivec2 p) {
-#if COMPACT
-  return from_octahedral(texelFetch(uNormals, p, 0).xy * 2.0 - 1.0);
-#else
-  return normalize(texelFetch(uNormals, p, 0).xyz * 2.0 - 1.0);
-#endif
-}
+vec3 normal_at(ivec2 p) { return from_octahedral(texelFetch(uNormals, p, 0).xy * 2.0 - 1.0); }
 float point_light(vec3 pos, vec3 n, vec4 at) {  // xyz, radius
   vec3 d = at.xyz - pos;
   float dist = length(d);
@@ -233,11 +223,10 @@ float point_light(vec3 pos, vec3 n, vec4 at) {  // xyz, radius
 
 // The lighting, into the image: the same light as the forward shader
 // (ambient, sun or moon, point lights, windows at night, glowing things,
-// fog), once per pixel. Where nothing near and opaque was drawn (kind 0):
-// left as it is (the sky, the far landscape). LIGHT_BUFFER: the point
-// lights read from their buffer (light_rects, half_res_lights) instead of a loop.
+// fog), once per pixel; the point lights read from their buffer (half the
+// size, smoothed up). Where nothing near and opaque was drawn (kind 0):
+// left as it is (the sky, the far landscape).
 constexpr const char* kComposeFragmentShader = R"(
-#define MAX_LIGHTS 12
 uniform sampler2D uAlbedo;
 uniform sampler2D uLightBuffer;
 uniform float uLightBufferScale;
@@ -249,9 +238,6 @@ uniform vec3 uAmbientGround;
 uniform float uNight;
 uniform vec3 uFog;
 uniform vec3 uFogRange;
-uniform int uLightCount;
-uniform vec4 uLightPos[MAX_LIGHTS];
-uniform vec3 uLightColors[MAX_LIGHTS];
 out vec4 outColor;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
@@ -264,14 +250,7 @@ void main() {
   } else {
     vec3 n = normal_at(p);
     vec3 light = mix(uAmbientGround, uAmbientSky, n.y * 0.5 + 0.5) + uLightColor * max(dot(n, uLight), 0.0);
-#if LIGHT_BUFFER
     light += texture(uLightBuffer, gl_FragCoord.xy / uScreen).rgb * uLightBufferScale;
-#else
-    for (int i = 0; i < MAX_LIGHTS; ++i) {
-      if (i >= uLightCount) break;
-      light += uLightColors[i] * point_light(pos, n, uLightPos[i]);
-    }
-#endif
     color = albedo.rgb * light;
     if (albedo.a > 0.6) color = mix(color, vec3(1.0, 0.78, 0.42) * 1.15, uNight);  // a window lit from inside
   }
@@ -281,40 +260,23 @@ void main() {
 }
 )";
 
-// The point lights into their buffer (uRatio: 1, or 2 for half the size):
-// LOOP, all of them over the whole buffer; else one (uOneLight), over its
-// rectangle, the draws added up (blending). Divided by the buffer's scale.
+// A point light into the buffer of half the size, over its rectangle; the
+// draws added up (blending). Divided by the buffer's scale.
 constexpr const char* kLightsFragmentShader = R"(
-#define MAX_LIGHTS 12
-uniform int uRatio;
 uniform float uInverseScale;
-uniform int uLightCount;
-uniform vec4 uLightPos[MAX_LIGHTS];
-uniform vec3 uLightColors[MAX_LIGHTS];
 uniform vec4 uOnePos;
 uniform vec3 uOneColor;
 out vec4 outColor;
 void main() {
-  ivec2 p = ivec2(gl_FragCoord.xy) * uRatio + (uRatio - 1) / 2;
+  ivec2 p = ivec2(gl_FragCoord.xy) * 2;  // the G-buffer's pixel
   if (texelFetch(uDepth, p, 0).r >= 1.0) discard;  // nothing near there
-  vec3 pos = position_at(p);
-  vec3 n = normal_at(p);
-#if LOOP
-  vec3 light = vec3(0.0);
-  for (int i = 0; i < MAX_LIGHTS; ++i) {
-    if (i >= uLightCount) break;
-    light += uLightColors[i] * point_light(pos, n, uLightPos[i]);
-  }
-#else
-  vec3 light = uOneColor * point_light(pos, n, uOnePos);
-#endif
+  vec3 light = uOneColor * point_light(position_at(p), normal_at(p), uOnePos);
   outColor = vec4(light * uInverseScale, 1.0);
 }
 )";
 
-std::string screen_shader(const char* body, bool compact, const char* define, bool on) {
-  return std::string("#version 300 es\nprecision highp float;\n#define COMPACT ") + (compact ? "1" : "0") +
-         "\n#define " + define + (on ? " 1\n" : " 0\n") + kOctahedral + kGBufferRead + body;
+std::string screen_shader(const char* body) {
+  return std::string("#version 300 es\nprecision highp float;\n") + kOctahedral + kGBufferRead + body;
 }
 
 // The finished image, copied to the screen.
@@ -531,8 +493,7 @@ struct MeshProgram {
 struct ScreenProgram {
   GLuint id = 0;
   GLint inverse = -1, screen = -1, camera = -1, light = -1, light_color = -1, ambient_sky = -1, ambient_ground = -1;
-  GLint night = -1, fog = -1, fog_range = -1, light_count = -1, light_pos = -1, light_colors = -1;
-  GLint buffer_scale = -1, ratio = -1, inverse_scale = -1, one_pos = -1, one_color = -1;
+  GLint night = -1, fog = -1, fog_range = -1, buffer_scale = -1, inverse_scale = -1, one_pos = -1, one_color = -1;
 
   bool link(const std::string& fragment) {
     id = monstres::link(kSkyVertexShader, fragment.c_str());
@@ -553,11 +514,7 @@ struct ScreenProgram {
     night = at("uNight");
     fog = at("uFog");
     fog_range = at("uFogRange");
-    light_count = at("uLightCount");
-    light_pos = at("uLightPos");
-    light_colors = at("uLightColors");
     buffer_scale = at("uLightBufferScale");
-    ratio = at("uRatio");
     inverse_scale = at("uInverseScale");
     one_pos = at("uOnePos");
     one_color = at("uOneColor");
@@ -573,13 +530,8 @@ public:
         if (!programs_[fade][mode].link(mesh_fragment_shader(fade != 0, mode))) return false;
       }
     }
-    for (int compact = 0; compact < 2; ++compact) {
-      for (int k = 0; k < 2; ++k) {
-        if (!compose_[compact][k].link(screen_shader(kComposeFragmentShader, compact != 0, "LIGHT_BUFFER", k != 0)) ||
-            !lights_[compact][k].link(screen_shader(kLightsFragmentShader, compact != 0, "LOOP", k != 0))) {
-          return false;
-        }
-      }
+    if (!compose_.link(screen_shader(kComposeFragmentShader)) || !lights_.link(screen_shader(kLightsFragmentShader))) {
+      return false;
     }
     sky_program_ = link(kSkyVertexShader, kSkyFragmentShader);
     copy_program_ = link(kSkyVertexShader, kCopyFragmentShader);
@@ -621,12 +573,8 @@ public:
     for (auto& row : programs_) {
       for (MeshProgram& program : row) glDeleteProgram(program.id);
     }
-    for (int compact = 0; compact < 2; ++compact) {
-      for (int k = 0; k < 2; ++k) {
-        glDeleteProgram(compose_[compact][k].id);
-        glDeleteProgram(lights_[compact][k].id);
-      }
-    }
+    glDeleteProgram(compose_.id);
+    glDeleteProgram(lights_.id);
     glDeleteProgram(sky_program_);
     glDeleteProgram(copy_program_);
     release_shading_targets();
@@ -742,7 +690,6 @@ public:
       for (MeshProgram& program : row) program.set_view(view);
     }
     glEnable(GL_DEPTH_TEST);
-    packed_ = options_.compact_instances;
     for (const DrawList* list : lists) {
       if (list->cached) update_cache(*list);
     }
@@ -804,7 +751,7 @@ public:
   }
 
   void plan(std::span<const DrawList* const> lists, bool far, bool transparent) {
-    plan_draws(lists, plan_meshes_, far, transparent, *view_, items_, options_.lighter_grass ? &shrink_cache_ : nullptr);
+    plan_draws(lists, plan_meshes_, far, transparent, *view_, items_);
   }
 
   // Issues the draws, setting the state when it changes only (each call
@@ -849,7 +796,7 @@ public:
         buffer = wanted;
         glBindBuffer(GL_ARRAY_BUFFER, wanted);
       }
-      point_instance_attributes(item.first_instance, packed_);
+      point_instance_attributes(item.first_instance);
       if (m.ebo) {
         glDrawElementsInstanced(GL_TRIANGLES, item.vertex_count, GL_UNSIGNED_INT,
                                 offset(static_cast<size_t>(item.first_vertex) * sizeof(uint32_t)),
@@ -871,19 +818,10 @@ public:
     }
   }
 
-  // Sends instances into the buffer bound to GL_ARRAY_BUFFER: as they are,
-  // or packed (compact_instances).
+  // Sends instances into the buffer bound to GL_ARRAY_BUFFER.
   void upload_instances(const std::vector<Instance>& instances, GLenum usage) {
-    if (packed_) {
-      pack(instances, packed_scratch_);
-      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(packed_scratch_.size() * sizeof(PackedInstance)),
-                   packed_scratch_.data(), usage);
-      stats_.uploaded_bytes += packed_scratch_.size() * sizeof(PackedInstance);
-    } else {
-      glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)), instances.data(),
-                   usage);
-      stats_.uploaded_bytes += instances.size() * sizeof(Instance);
-    }
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(instances.size() * sizeof(Instance)), instances.data(), usage);
+    stats_.uploaded_bytes += instances.size() * sizeof(Instance);
   }
 
   // The lights of a draw (bit i: the frame's light i), sent to the program
@@ -909,11 +847,10 @@ public:
 
   // ---- Deferred shading ------------------------------------------------------------
   // 1. The near opaque things once, into the G-buffer: color and kind, normal, depth.
-  // 2. (light_rects or half_res_lights) The point lights into their buffer.
+  // 2. The point lights into their buffer, half the size, each over its rectangle.
   // 3. All the light, over the whole screen (kComposeFragmentShader), into the image.
   // 4. The transparent ones over it, as usual (lit in their shader), against that depth.
   void draw_shaded(const View& view, std::span<const DrawList* const> lists, int w, int h) {
-    const int compact = shading_compact_ ? 1 : 0;
     // 1.
     glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo_);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -926,7 +863,7 @@ public:
       for (MeshProgram& program : row) program.set_opaque_pass(true);
     }
     plan(lists, false, false);
-    issue(items_, compact ? kGBufferCompact : kGBuffer);
+    issue(items_, kGBuffer);
     glBindVertexArray(0);
 
     glDisable(GL_DEPTH_TEST);
@@ -945,48 +882,37 @@ public:
     };
 
     // 2.
-    const bool buffer = light_count_ > 0 && (options_.light_rects || options_.half_res_lights);
-    if (buffer) {
-      glBindFramebuffer(GL_FRAMEBUFFER, light_fbo_);
-      glViewport(0, 0, light_w_, light_h_);
-      glClear(GL_COLOR_BUFFER_BIT);
+    glBindFramebuffer(GL_FRAMEBUFFER, light_fbo_);
+    glViewport(0, 0, light_w_, light_h_);
+    glClear(GL_COLOR_BUFFER_BIT);
+    if (light_count_ > 0) {
       glEnable(GL_BLEND);
       glBlendFunc(GL_ONE, GL_ONE);
-      const ScreenProgram& p = lights_[compact][options_.light_rects ? 0 : 1];
-      set_g(p);
-      glUniform1i(p.ratio, shading_half_ ? 2 : 1);
-      glUniform1f(p.inverse_scale, 1.0f / light_buffer_scale_);
-      if (options_.light_rects) {
-        glEnable(GL_SCISSOR_TEST);
-        for (size_t i = 0; i < light_count_; ++i) {
-          const PointLight& l = view.lights[i];
-          PixelRect r;
-          if (!light_rect(view.view_projection, l, light_w_, light_h_, r)) continue;
-          glScissor(r.x, r.y, r.w, r.h);
-          glUniform4f(p.one_pos, l.x, l.y, l.z, l.radius);
-          glUniform3f(p.one_color, l.color.r, l.color.g, l.color.b);
-          glDrawArrays(GL_TRIANGLES, 0, 3);
-          if (profiling_) ++stats_.draw_calls;
-        }
-        glDisable(GL_SCISSOR_TEST);
-      } else {
-        glUniform1i(p.light_count, static_cast<GLint>(light_count_));
-        glUniform4fv(p.light_pos, static_cast<GLsizei>(light_count_), light_pos_);
-        glUniform3fv(p.light_colors, static_cast<GLsizei>(light_count_), light_colors_);
+      set_g(lights_);
+      glUniform1f(lights_.inverse_scale, 1.0f / light_buffer_scale_);
+      glEnable(GL_SCISSOR_TEST);
+      for (size_t i = 0; i < light_count_; ++i) {
+        const PointLight& l = view.lights[i];
+        PixelRect r;
+        if (!light_rect(view.view_projection, l, light_w_, light_h_, r)) continue;
+        glScissor(r.x, r.y, r.w, r.h);
+        glUniform4f(lights_.one_pos, l.x, l.y, l.z, l.radius);
+        glUniform3f(lights_.one_color, l.color.r, l.color.g, l.color.b);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         if (profiling_) ++stats_.draw_calls;
       }
+      glDisable(GL_SCISSOR_TEST);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       glDisable(GL_BLEND);
-      glViewport(0, 0, w, h);
     }
+    glViewport(0, 0, w, h);
 
     // 3. (the light buffer on unit 6 only now: it was drawn into)
     glActiveTexture(GL_TEXTURE6);
     glBindTexture(GL_TEXTURE_2D, light_texture_);
     glActiveTexture(GL_TEXTURE0);
     glBindFramebuffer(GL_FRAMEBUFFER, compose_fbo_);
-    const ScreenProgram& c = compose_[compact][buffer ? 1 : 0];
+    const ScreenProgram& c = compose_;
     set_g(c);
     glUniform3f(c.camera, view.camera_x, view.camera_y, view.camera_z);
     glUniform3f(c.light, view.light_x, view.light_y, view.light_z);
@@ -997,11 +923,6 @@ public:
     glUniform3f(c.fog, view.fog.r, view.fog.g, view.fog.b);
     glUniform3f(c.fog_range, view.fog_start, view.fog_half, view.fog_end);
     glUniform1f(c.buffer_scale, light_buffer_scale_);
-    glUniform1i(c.light_count, static_cast<GLint>(light_count_));
-    if (light_count_ > 0) {
-      glUniform4fv(c.light_pos, static_cast<GLsizei>(light_count_), light_pos_);
-      glUniform3fv(c.light_colors, static_cast<GLsizei>(light_count_), light_colors_);
-    }
     glDrawArrays(GL_TRIANGLES, 0, 3);
     if (profiling_) ++stats_.draw_calls;
     glBindVertexArray(0);
@@ -1027,13 +948,10 @@ public:
   }
 
   // Deferred shading's textures, at the size of the screen (made again when
-  // it or the options change). False when the device cannot draw into them.
+  // it changes). False when the device cannot draw into them.
   bool make_shading_targets(int w, int h) {
     if (shading_targets_failed_ || w <= 0 || h <= 0) return false;
-    const bool compact = options_.compact_gbuffer, half = options_.half_res_lights;
-    if (scene_fbo_ && w == shading_w_ && h == shading_h_ && compact == shading_compact_ && half == shading_half_) {
-      return true;
-    }
+    if (scene_fbo_ && w == shading_w_ && h == shading_h_) return true;
     release_shading_targets();
     const auto texture = [&](GLuint& t, GLenum internal, GLenum format, GLenum type, int tw, int th, GLint filter) {
       glGenTextures(1, &t);
@@ -1046,11 +964,7 @@ public:
     };
     texture(scene_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
     texture(albedo_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
-    if (compact) {
-      texture(gnormals_texture_, GL_RG8, GL_RG, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
-    } else {
-      texture(gnormals_texture_, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
-    }
+    texture(gnormals_texture_, GL_RG8, GL_RG, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
     texture(depth_texture_, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, w, h, GL_NEAREST);
     bool ok = true;
     const auto check = [&] { ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE; };
@@ -1074,10 +988,10 @@ public:
     glBindFramebuffer(GL_FRAMEBUFFER, compose_fbo_);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scene_texture_, 0);
     check();
-    // The point lights' buffer (smoothed when it is half the size): floats if
-    // the device draws into them, else 8 bits for a quarter of the light.
-    light_w_ = half ? (w + 1) / 2 : w;
-    light_h_ = half ? (h + 1) / 2 : h;
+    // The point lights' buffer, half the size (smoothed up): floats if the
+    // device draws into them, else 8 bits for a quarter of the light.
+    light_w_ = (w + 1) / 2;
+    light_h_ = (h + 1) / 2;
     glGenFramebuffers(1, &light_fbo_);
     for (int attempt = 0; ok && attempt < 2; ++attempt) {
       if (light_texture_) glDeleteTextures(1, &light_texture_);
@@ -1103,8 +1017,6 @@ public:
     }
     shading_w_ = w;
     shading_h_ = h;
-    shading_compact_ = compact;
-    shading_half_ = half;
     return true;
   }
 
@@ -1213,18 +1125,8 @@ private:
 
   // Instance attributes read from the buffer bound to GL_ARRAY_BUFFER.
   // From instance `first` on (WebGL2 has no base instance: the attributes
-  // point further into the buffer instead). Packed (PackedInstance): the
-  // same four vectors for the shader, from smaller numbers.
-  static void point_instance_attributes(uint32_t first, bool packed) {
-    if (packed) {
-      constexpr GLsizei stride = sizeof(PackedInstance);
-      const size_t base = first * sizeof(PackedInstance);
-      glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride, offset(base + offsetof(PackedInstance, x)));
-      glVertexAttribPointer(4, 4, GL_SHORT, GL_TRUE, stride, offset(base + offsetof(PackedInstance, rotation)));
-      glVertexAttribPointer(5, 4, GL_HALF_FLOAT, GL_FALSE, stride, offset(base + offsetof(PackedInstance, scale)));
-      glVertexAttribPointer(6, 4, GL_HALF_FLOAT, GL_FALSE, stride, offset(base + offsetof(PackedInstance, tint)));
-      return;
-    }
+  // point further into the buffer instead).
+  static void point_instance_attributes(uint32_t first = 0) {
     constexpr GLsizei stride = sizeof(Instance);
     const size_t offsets[] = {offsetof(Instance, x), offsetof(Instance, rotation), offsetof(Instance, sx),
                               offsetof(Instance, tint)};
@@ -1233,11 +1135,10 @@ private:
     }
   }
 
-  // Uploads a cached list once per version (and when the instances' format
-  // changes), one buffer per batch.
+  // Uploads a cached list once per version, one buffer per batch.
   void update_cache(const DrawList& list) {
     Cache& c = cache_[&list];
-    if (c.valid && c.version == list.version && c.packed == packed_) return;
+    if (c.valid && c.version == list.version) return;
     if (c.buffers.size() < list.batches.size()) {
       const size_t old = c.buffers.size();
       c.buffers.resize(list.batches.size());
@@ -1248,7 +1149,6 @@ private:
       upload_instances(list.batches[i], GL_STATIC_DRAW);
     }
     c.version = list.version;
-    c.packed = packed_;
     c.valid = true;
   }
 
@@ -1288,13 +1188,13 @@ private:
   }
 
   MeshProgram programs_[2][kModes];  // [fade][mode]
-  // Deferred shading (draw_shaded): [compact G-buffer][light buffer / loop].
-  ScreenProgram compose_[2][2], lights_[2][2];
+  // Deferred shading (draw_shaded).
+  ScreenProgram compose_, lights_;
   GLuint copy_program_ = 0;
   GLuint scene_fbo_ = 0, gbuffer_fbo_ = 0, compose_fbo_ = 0, light_fbo_ = 0;
   GLuint scene_texture_ = 0, albedo_texture_ = 0, gnormals_texture_ = 0, depth_texture_ = 0, light_texture_ = 0;
   int shading_w_ = 0, shading_h_ = 0, light_w_ = 0, light_h_ = 0;
-  bool shading_compact_ = false, shading_half_ = false, shading_targets_failed_ = false;
+  bool shading_targets_failed_ = false;
   bool float_lights_ = false;
   float light_buffer_scale_ = 4.0f;  // the light buffer holds the light divided by this
   GLuint sky_program_ = 0;
@@ -1302,14 +1202,12 @@ private:
   GLint u_sky_cover_ = -1, u_sky_cloud_light_ = -1, u_sky_cloud_shade_ = -1, u_sky_cloud_shift_ = -1;
   GLint u_sky_moon_ = -1, u_sky_night_ = -1;
   RenderOptions options_;
-  bool packed_ = false;  // the instances sent packed this frame (compact_instances)
-  std::vector<PackedInstance> packed_scratch_;
   const View* view_ = nullptr;  // during draw()
   size_t light_count_ = 0;
   float light_pos_[kMaxPointLights * 4] = {}, light_colors_[kMaxPointLights * 3] = {};
   std::vector<PlanMesh> plan_meshes_;
   std::vector<DrawItem> items_;
-  ShrinkCache shrink_cache_;
+
   GLuint sky_vao_ = 0;
   GLuint instance_vbo_ = 0;
   bool profiling_ = false;
@@ -1320,7 +1218,6 @@ private:
   std::vector<GpuMesh> meshes_;
   struct Cache {
     bool valid = false;
-    bool packed = false;
     uint32_t version = 0;
     std::vector<GLuint> buffers;
   };
