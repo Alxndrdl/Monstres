@@ -1051,6 +1051,23 @@
       <button id="saves-open" class="button" type="button">Gérer les sauvegardes</button>
     </div>
     <p class="note">La partie est sauvegardée automatiquement. Trois emplacements : nouvelle partie, export, import, suppression.</p>
+    <h3>Son</h3>
+    <div class="slider-field">
+      <label for="volume-music">Musique</label>
+      <output id="volume-music-value" for="volume-music">50 %</output>
+      <input id="volume-music" type="range" min="0" max="100" step="5" value="50">
+    </div>
+    <div class="slider-field">
+      <label for="volume-effects">Effets</label>
+      <output id="volume-effects-value" for="volume-effects">80 %</output>
+      <input id="volume-effects" type="range" min="0" max="100" step="5" value="80">
+    </div>
+    <div class="slider-field">
+      <label for="volume-ambience">Ambiance</label>
+      <output id="volume-ambience-value" for="volume-ambience">70 %</output>
+      <input id="volume-ambience" type="range" min="0" max="100" step="5" value="70">
+    </div>
+    <p class="note">Musique : un thème par saison. Effets : cris des monstres, attaques, sorts, quêtes. Ambiance : vent, pluie, oiseaux, rivière, cascade… À 0 %, rien n’est joué ni calculé. Le son démarre au premier toucher.</p>
     <h3>Affichage</h3>
     <label><input id="show-fps" type="checkbox"> Afficher les FPS</label>
     <label><input id="show-profile" type="checkbox"> Détail du temps de calcul</label>
@@ -1441,6 +1458,8 @@
   <script src="team.js"></script>
   <script src="spells.js"></script>
   <script src="dialogue.js"></script>
+  <script src="sound_recipes.js"></script>
+  <script src="audio.js"></script>
   {{{ SCRIPT }}}
 </body>
 </html>

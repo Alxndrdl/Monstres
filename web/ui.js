@@ -152,6 +152,7 @@
     ['view', 'Caméra et lumières', ''],
     ['draw', 'Envoi au GPU', 'commandes WebGL, données des instances'],
     ['landscape', 'Paysage', 'reconstruit quand tu avances de 16 m'],
+    ['sound', 'Sons (jeu)', 'ce qui s’est passé depuis l’image d’avant : cris, coups, sorts…'],
     ['save', 'Sauvegarde', 'toutes les 5 s'],
   ];
   const GROUPS = { terrain: 'Sol, chemin, eau', vegetation: 'Herbe, fleurs', scenery: 'Décor (arbres, maisons…)',
@@ -213,8 +214,22 @@
     rows.push(row('Résolution', `${Math.round(scale * 100)} %`, scale, 'baissée automatiquement quand le jeu ralentit (paramètres)'));
     rows.push(row('Sol détaillé', `${p.tilesBuilt} tuiles`, 0, 'tuiles du sol construites en avance depuis le début',
       `${p.grassChunks} morceaux d’herbe`));
-    rows.push(row('Lumières', `${p.lights}`, p.lights / 12, 'lanternes, cristaux… (12 au plus)'));
+    rows.push(row('Lumières', `${p.lights}`, p.lights / 12, 'lanternes, cristaux… (12 dessinées en forward, 64 au plus en deferred)'));
     rows.push(row('Créatures', `${p.creatures}`, 0, 'simulées autour de toi', `${p.objects} objets`));
+    // The sound (web/audio.js), when it is there.
+    const a = window.MonstresAudio && window.MonstresAudio.stats();
+    if (a) {
+      const STATES = { off: 'coupé (volumes à 0)', waiting: 'en attente d’un toucher', running: 'actif', suspended: 'en pause' };
+      rows.push(section(`Son : ${STATES[a.state] || a.state}${a.echo ? ' · écho' : ''}`));
+      if (a.state === 'running') {
+        rows.push(row('Audio (page)', ms(a.ms), frame ? a.ms / frame : 0, 'lecture des événements, ambiance et musique, par image'));
+        rows.push(row('Voix', `${a.voices}`, a.voices / 32, 'sons en cours (32 au plus)',
+          `${a.loops} boucles${a.dropped ? ` · ${a.dropped} perdus` : ''}`));
+        rows.push(row('Événements', `${a.eventsPerSecond.toFixed(1)}/s`, 0, 'du jeu (cris, coups, sorts…), joués ou trop loin',
+          `${a.playedPerSecond.toFixed(1)}/s joués`));
+        rows.push(row('Latence', `${Math.round(a.latencyMs)} ms`, 0, 'du navigateur à la sortie audio', `${Math.round(a.sampleRate / 100) / 10} kHz`));
+      }
+    }
     rows.push(row('Envoyé au GPU', `${p.uploadedKiB} Kio`, 0, 'données des instances (personnages, effets ; paysage et tuiles du sol quand ils changent)'));
     // What limits the frame rate, in a few words.
     let hint;

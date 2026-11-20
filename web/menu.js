@@ -567,6 +567,19 @@
     else renderSheet(e);
   }
 
+  // Its call (web/audio.js), when there is sound.
+  function cryButton(species) {
+    const audio = window.MonstresAudio;
+    if (!audio) return [];
+    const on = audio.canPlay('effects');
+    const b = el('button', { type: 'button', className: 'dna-button cry-button', id: 'cry-button',
+      title: on ? 'Écouter son cri' : 'Les effets sonores sont coupés (paramètres)' }, [
+      el('span', { textContent: '♪', ariaHidden: 'true' }), el('span', { textContent: 'Cri' })]);
+    b.disabled = !on;
+    b.addEventListener('click', () => audio.cry(species, 'call'));
+    return [b];
+  }
+
   function renderSheet(e) {
     const info = LORE.species[e.species];
     const stats = el('dl', { className: 'stats' });
@@ -616,7 +629,7 @@
           textContent: `Taille : ${sizeText(Math.round(e.sizeMm))} · poids : ${weightText(Math.round(e.weightG))} · ` +
             `vitesse : ${decimal(e.speed, 1)} m/s`,
         }),
-        el('div', { className: 'sheet-buttons' }, [dna, habitat]),
+        el('div', { className: 'sheet-buttons' }, [dna, habitat, ...cryButton(e.species)]),
       ]),
       stats,
       el('section', { className: 'record-box' }, [el('h3', { textContent: 'Ton carnet' }), record]),

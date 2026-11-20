@@ -29,6 +29,7 @@ std::string to_json(const World& world);
 std::string creature_json(const World& world, int index);
 
 // Names used in the JSON (stable identifiers, translated by the page).
+const char* species_name(Species species);  // "companion", "slime"... (web/lore.js: species)
 const char* zone_name(Zone zone);
 const char* element_name(Element element);
 const char* object_kind_name(ObjectKind kind);

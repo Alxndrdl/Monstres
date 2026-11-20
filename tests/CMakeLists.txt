@@ -17,7 +17,7 @@ FetchContent_MakeAvailable(doctest)
 
 add_library(monstres_test_main STATIC support/doctest_main.cpp)
 target_include_directories(monstres_test_main PUBLIC "${doctest_SOURCE_DIR}" support)
-target_link_libraries(monstres_test_main PUBLIC monstres_core monstres_render)
+target_link_libraries(monstres_test_main PUBLIC monstres_core monstres_render monstres_audio)
 target_compile_definitions(monstres_test_main PUBLIC
   MONSTRES_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/regression/data"
   MONSTRES_ASSETS_DIR="${MONSTRES_ASSETS_DIR}")
@@ -73,6 +73,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_west.cpp
   unit/test_coherence.cpp
   unit/test_seasons.cpp
+  unit/test_sounds.cpp
 )
 
 monstres_add_tests(monstres_functional_tests functional

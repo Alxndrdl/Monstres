@@ -18,7 +18,6 @@ namespace monstres {
 std::string elements_json(Elements e);
 std::string carried_variants_json(Species species, const Genes& genes);
 
-namespace {
 const char* species_name(Species s) {
   static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish", "spark", "axolotl", "cristi",
                                  "raccoon", "owl", "sheep", "mole"};
@@ -26,6 +25,8 @@ const char* species_name(Species s) {
   const auto i = static_cast<size_t>(s);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
+
+namespace {
 
 const char* form_name(Form f) {
   static const char* kNames[] = {"normal", "micro", "alpha", "omega"};

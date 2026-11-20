@@ -6,6 +6,7 @@
 // monstres_jump. Each fixed tick turns that into a monstres::Input.
 
 #include "gles3_renderer.hpp"
+#include "monstres/audio/sounds.hpp"
 #include "monstres/core/battle.hpp"
 #include "monstres/core/debug.hpp"
 #include "monstres/core/interior.hpp"
@@ -59,7 +60,7 @@ constexpr int kMaxSaveBytes = 8 * 1024 * 1024;  // an imported file bigger than 
 
 // Where the time of a frame goes (settings menu, "détail du temps de calcul"):
 // sums and worst values over half a second.
-enum ProfilePart { kSim, kSave, kLandscape, kScene, kView, kDraw, kWasm, kInterval, kProfileParts };
+enum ProfilePart { kSim, kSave, kLandscape, kScene, kView, kDraw, kSound, kWasm, kInterval, kProfileParts };
 struct Profile {
   bool on = false;
   double since = 0;  // start of the current half second
@@ -130,6 +131,16 @@ struct App {
   // The wind (settings menu): -1 the weather's own, else 0..1; what blows now.
   float wind_choice = -1;
   float wind_now = 0;
+  // The sounds (audio/sounds.hpp, played by web/audio.js): watched only
+  // while some sound is on (set by the page); the events wait there for
+  // audio.js (monstres_sound_json), with where the camera is.
+  bool sound_on = false;
+  SoundWatch sound_watch;
+  std::vector<SoundEvent> sound_events;
+  Ambience ambience;
+  Vec3 listener;
+  float listener_yaw = 0;
+  std::string sound_json;
   Profile profile;
   bool paused = false;           // a game menu is open: time stands still
   std::vector<uint8_t> portrait; // last portrait drawn for the page (RGBA)
@@ -451,7 +462,8 @@ void profile_report(App& app, double now, int pw, int ph) {
   Profile& p = app.profile;
   const double span = now - p.since;
   if (span < 500 || p.frames == 0) return;
-  static const char* kNames[] = {"sim", "save", "landscape", "scene", "view", "draw", "wasm", "interval"};
+  static const char* kNames[] = {"sim", "save", "landscape", "scene", "view", "draw", "sound", "wasm", "interval"};
+  static_assert(std::size(kNames) == kProfileParts);
   std::string s = "{\"frames\":" + std::to_string(p.frames) + ",\"seconds\":" + std::to_string(span / 1000);
   s += ",\"ticks\":" + std::to_string(p.ticks) + ",\"landscapeBuilds\":" + std::to_string(p.landscape_builds);
   s += ",\"continentMs\":" + std::to_string(app.continent_ms);
@@ -581,6 +593,17 @@ void frame(void* user) {
       app.redraw = true;
     }
   }
+  if (app.sound_on) {
+    mark = emscripten_get_now();
+    const WeatherField field = weather_field(app);
+    app.sound_watch.watch(app.world, &field, app.paused ? 0.0 : dt / 1000.0, app.sound_events);
+    constexpr size_t kMaxWaiting = 64;  // audio.js not reading (a hidden page): the oldest go
+    if (app.sound_events.size() > kMaxWaiting) {
+      app.sound_events.erase(app.sound_events.begin(), app.sound_events.end() - kMaxWaiting);
+    }
+    app.ambience = ambience_of(app.world, app.season, field.at(app.world.player.pos.x, app.world.player.pos.z), app.wind_now);
+    measure(kSound);
+  }
   mark = emscripten_get_now();
   if (app.world.door_tick != app.door_tick) place_changed(app);  // through a door
   const bool in = inside(app.world);
@@ -620,6 +643,8 @@ void frame(void* user) {
     if (seconds >= kIntroSeconds) app.intro = false;
     app.redraw = true;
   }
+  app.listener = {view.camera_x, view.camera_y, view.camera_z};
+  app.listener_yaw = app.camera.yaw;
   follow_weather_choice(app, dt);
   const WeatherField weather = weather_field(app);
   // Inside: no weather, no landscape, nothing far away; the interior.
@@ -935,6 +960,27 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_render_options(int bits) {
 }
 
 EMSCRIPTEN_KEEPALIVE const char* monstres_profile_json() { return g_app->profile.json.c_str(); }
+
+// The sounds (web/audio.js): on while some volume is above 0 (off: nothing
+// is watched). Turned on, the next look only takes note (no old events).
+EMSCRIPTEN_KEEPALIVE void monstres_set_sound(int on) {
+  g_app->sound_on = on != 0;
+  g_app->sound_watch.forget();
+  g_app->sound_events.clear();
+}
+
+// What happened since the last call (then forgotten), the listener, the
+// ambience and, `with_sources`, the sources around (audio/sounds.hpp:
+// sound_frame_json; looking for them goes through every object: audio.js
+// asks a few times a second).
+EMSCRIPTEN_KEEPALIVE const char* monstres_sound_json(int with_sources) {
+  App& app = *g_app;
+  std::vector<SoundSource> sources;
+  if (with_sources) sound_sources(app.world, app.listener, sources);
+  app.sound_json = sound_frame_json(app.sound_events, app.listener, app.listener_yaw, app.ambience, sources);
+  app.sound_events.clear();
+  return app.sound_json.c_str();
+}
 
 // Game menus: time stands still while one is open (saved when it opens).
 EMSCRIPTEN_KEEPALIVE void monstres_set_paused(int paused) {

@@ -246,6 +246,10 @@ window.monstres = {
   // Settings menu, debug: forward or deferred shading, to compare (bit 1: deferred shading;
   // bit 2: with it, up to 64 lights instead of the 12 nearest).
   setRenderOptions: (bits) => _monstres_set_render_options(bits),
+  // The sounds (web/audio.js): watched while on; the events since the last
+  // call, the listener (the camera), the ambience, the sources around.
+  setSound: (on) => _monstres_set_sound(on ? 1 : 0),
+  soundFrame: (withSources = true) => JSON.parse(UTF8ToString(_monstres_sound_json(withSources ? 1 : 0))),
 
   // Game menus (web/menu.js).
   setPaused: (paused) => _monstres_set_paused(paused ? 1 : 0),

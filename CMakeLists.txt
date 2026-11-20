@@ -26,6 +26,7 @@ set(MONSTRES_ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 
 add_subdirectory(src/core)
 add_subdirectory(src/render)
+add_subdirectory(src/audio)
 
 if(EMSCRIPTEN)
   add_subdirectory(src/platform/web)

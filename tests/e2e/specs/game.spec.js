@@ -261,6 +261,8 @@ test.describe('saves', () => {
   test('an invalid save file is refused', async ({ page }) => {
     await openGame(page, '?seed=7&new&frozen');
     await walk(page, 1, 0, 10);
+    // A frame or two: what follows the camera (the wind blowing there) catches up.
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     const before = await state(page);
     await page.locator('#settings-button').click();
     await page.locator('#saves-open').click();
@@ -1574,5 +1576,72 @@ test.describe('the west', () => {
     const map = await page.evaluate(() => window.monstres.map().west);
     expect(map.road.length).toBeGreaterThan(100);
     expect(map.farm.length).toBe(2);
+  });
+});
+
+test.describe('the sound', () => {
+  // The audio's report, fresh (it is kept for half a second otherwise).
+  const audio = (page) => page.evaluate(async () => {
+    await new Promise((r) => setTimeout(r, 550));
+    return window.MonstresAudio.stats();
+  });
+
+  test('volumes in the settings; sound after a first touch: the game\'s events, the season\'s theme, the bestiary\'s cry', async ({ page }) => {
+    await page.addInitScript(() => localStorage.clear());
+    await openGame(page, '?seed=42&new&frozen');
+    expect((await audio(page)).state).toBe('waiting');  // no touch yet
+    await page.locator('#settings-button').click();
+    await expect(page.locator('#volume-music-value')).toHaveText('50 %');
+    await expect(page.locator('#volume-effects-value')).toHaveText('80 %');
+    await expect(page.locator('#volume-ambience-value')).toHaveText('70 %');
+    await page.locator('#settings-button').click();
+    await page.mouse.click(400, 300);  // the first touch
+    await expect.poll(async () => (await audio(page)).state).toBe('running');
+    // A minute of the game: the wild monsters call, the summer's theme plays.
+    const before = (await audio(page)).total;
+    for (let i = 0; i < 6; ++i) await page.evaluate(() => window.monstres.step(600));
+    await expect.poll(async () => (await audio(page)).total.cries).toBeGreaterThan(before.cries);
+    expect((await audio(page)).music).toBe('summer');
+    // The bestiary: a button plays Zapou's call.
+    await page.locator('#menu-button').click();
+    await page.getByRole('tab', { name: 'Bestiaire' }).click();
+    await page.locator('.bestiary-entry[data-species="spark"]').click();
+    const cries = (await audio(page)).total.cries;
+    await page.locator('#cry-button').click();
+    expect((await audio(page)).total.cries).toBe(cries + 1);
+    await page.keyboard.press('Escape');
+  });
+
+  test('at 0 %, nothing is played nor watched; kept between visits', async ({ page }) => {
+    await page.addInitScript(() => {
+      if (!sessionStorage.getItem('seeded')) {
+        localStorage.clear();
+        sessionStorage.setItem('seeded', '1');
+      }
+    });
+    await openGame(page, '?seed=42&new&frozen');
+    await page.mouse.click(400, 300);
+    await expect.poll(async () => (await audio(page)).state).toBe('running');
+    await page.locator('#settings-button').click();
+    for (const g of ['music', 'effects', 'ambience']) await page.locator(`#volume-${g}`).fill('0');
+    await expect(page.locator('#volume-effects-value')).toHaveText('0 %');
+    await expect.poll(async () => (await audio(page)).state).toBe('off');
+    // The game no longer looks for sounds.
+    await page.evaluate(() => window.monstres.step(1800));
+    expect(await page.evaluate(() => window.monstres.soundFrame().events.length)).toBe(0);
+    const total = (await audio(page)).total;
+    await page.evaluate(() => window.monstres.step(1800));
+    expect((await audio(page)).total).toEqual(total);
+    // The bestiary's button says the effects are off.
+    await page.locator('#settings-button').click();
+    await page.locator('#menu-button').click();
+    await page.getByRole('tab', { name: 'Bestiaire' }).click();
+    await expect(page.locator('#cry-button')).toBeDisabled();
+    // Kept.
+    await page.reload();
+    await page.evaluate(() => window.monstres.ready);
+    await page.locator('#settings-button').click();
+    await expect(page.locator('#volume-music')).toHaveValue('0');
+    await expect(page.locator('#volume-ambience-value')).toHaveText('0 %');
   });
 });

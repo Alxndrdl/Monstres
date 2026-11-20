@@ -10,7 +10,7 @@
 // keep an old index.js / index.wasm next to a new index.html and ui.js, which
 // do not work together.
 
-const CACHE = 'monstres-v43';
+const CACHE = 'monstres-v44';
 const CORE_FILES = [
   './',
   'index.html',
@@ -28,6 +28,8 @@ const CORE_FILES = [
   'team.js',
   'dialogue.js',
   'spells.js',
+  'sound_recipes.js',
+  'audio.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

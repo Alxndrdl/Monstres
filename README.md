@@ -151,13 +151,16 @@ src/core/        monstres_core      règles du jeu, sauvegarde : C++ pur, sans n
 src/render/      monstres_render    monde -> instances à dessiner, caméra, modèles,
                                     personnages animés par parties (characters.cpp)
   gles3/         monstres_render_gles3   backend OpenGL ES 3.0 / WebGL2
+src/audio/       monstres_audio     ce que le jeu fait entendre (événements, ambiance,
+                                    sources), lu par web/audio.js
 src/platform/web/                   main(), boucle, caméra, IndexedDB, API JS (pre.js, post.js)
 web/                                index.html (gabarit Emscripten), util.js (chargé en
                                     premier : aides communes aux scripts), controls.js (joystick,
                                     saut, regard, clavier), ui.js (paramètres, FPS, fiche
                                     des monstres), saves.js (les sauvegardes), menu.js (grimoire : personnage,
                                     bestiaire, cartes), lore.js (noms et textes du monde),
-                                    sw.js, manifeste, icônes
+                                    audio.js (le son), sound_recipes.js (les sons, faits
+                                    par code), sw.js, manifeste, icônes
 assets/models/                      modèles 3D .glb chargés par le jeu (générés par
                                     tools/make_models.py, remplaçables par des exports Blender)
 tests/unit/                         tests unitaires (doctest)
@@ -885,6 +888,61 @@ sauvegarde.
 - **La carte** suit la saison : prés ocre et arbres roux en automne ; neige,
   lacs et rivière gelés, arbres nus en hiver. Ses images sont redessinées à
   l'avance quand la saison change.
+
+## Son
+
+Trois volumes dans les paramètres (**Musique**, **Effets**, **Ambiance**),
+gardés par la page. Tous les sons sont fabriqués par code avec la Web Audio
+API (`web/sound_recipes.js`) : aucun fichier son, aucun service extérieur.
+Le navigateur ne laisse le son démarrer qu'après un premier toucher ou une
+touche.
+
+- **Séparé du jeu** : les règles ne demandent jamais un son. Un
+  `SoundWatch` (`src/audio/sounds.hpp`) regarde le monde après ses pas et
+  dit ce qui s'est passé depuis la dernière fois, d'après ce que le monde
+  garde déjà pour l'affichage (le tick de la dernière attaque, du dernier
+  coup, du dernier sort, de la dernière porte…). `web/audio.js` lit ces
+  événements à chaque image (`soundFrame()` : les événements, la caméra,
+  l'ambiance, les sources autour) et les joue. Le son ne change donc rien au
+  jeu (rejeux, sauvegardes identiques).
+- **À 0 %** : un groupe à 0 % ne fabrique plus rien (ni nœud audio, ni
+  musique planifiée) ; les trois à 0 %, le jeu ne regarde plus le monde pour
+  le son (`setSound(false)`) et le contexte audio dort. Il dort aussi quand
+  la page est cachée ; au réveil, ce qui s'est passé pendant ce temps est
+  oublié.
+- **Cris des monstres** : une voix par espèce (forme d'onde, hauteur,
+  timbre : Pompon jappe, Gloubi gargouille, Laini bêle, Cristi tinte
+  comme un cristal…). Trois variantes du cri « de base », entendu des
+  monstres sauvages autour (de temps en temps, jamais pendant un combat), à
+  l'invocation et avec le bouton **Cri** de sa fiche du bestiaire ; un cri
+  d'attaque ; un cri quand il prend un coup.
+- **Effets** : élan des attaques, coups (plus forts quand ils font mal),
+  parades, impacts selon l'élément (feu, eau, foudre…), chaque sort, la
+  sortie et le retour au cristal, téléportation, portes, début et fin des
+  combats (victoire, défaite, fuite), runes de capture (une note par rune,
+  une fausse note à l'erreur), capture réussie ou ratée, quêtes (acceptée,
+  étape, terminée), objets ramassés, niveaux gagnés, tonnerre (qui arrive
+  après l'éclair, selon la distance).
+- **Placés dans le monde** : ce qui a un lieu vient de là (à droite, à
+  gauche, plus faible au loin ; rien au-delà de 70 m), l'oreille étant la
+  caméra. De même les sources continues autour (`sound_sources`, 90 m) : la
+  cascade, la rivière, la roue du moulin à eau et le moulin à vent quand ils
+  tournent, les feux et les cheminées.
+- **Ambiance** : vent (selon sa force), pluie, neige feutrée, orage ;
+  oiseaux le jour (beaucoup au printemps, aucun en hiver), grillons la nuit,
+  gouttes et grondement sourd dans les grottes.
+- **Écho** : dans une grotte tout résonne longuement (une réverbération,
+  `ConvolverNode`), moins dans le terrier, à peine dans un bâtiment.
+- **Musique** : un thème par saison (printemps : flûte et cordes pincées,
+  lumineux ; été : marimba, enjoué ; automne : violoncelle et harpe,
+  mélancolique ; hiver : célesta, lent et clairsemé), joué mesure par mesure
+  un peu en avance. Plus lent et dépouillé la nuit, plus rapide avec des
+  percussions pendant un combat, plus doux dans une grotte ou pendant une
+  capture. Changer de saison fond un thème dans l'autre.
+- **Performances** : au plus 32 sons à la fois (les suivants sont perdus et
+  comptés). Le détail du temps de calcul montre le temps du `SoundWatch`
+  (« Sons (jeu) ») et une partie **Son** : état, temps par image côté page,
+  voix et boucles en cours, événements par seconde, latence.
 
 ## Combats
 
