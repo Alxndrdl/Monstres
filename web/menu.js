@@ -934,6 +934,57 @@
     menhir: '#a8a39a', meteorite: '#3a2f46', waterMill: '#c9b89a', hiddenCave: '#2a2630',
   };
 
+  // The season (settings menu, ui.js): the map's colors follow it, as the
+  // game's do (the shaders' seasonal(): spring fresher, autumn ochre, snow
+  // and ice in winter).
+  let season = Number(prefs.get('season', 1)) || 0;
+  if (!(season >= 0 && season <= 3)) season = 1;
+  window.addEventListener('monstres-season', (event) => {
+    if (season === event.detail.season) return;
+    season = event.detail.season;
+    if (isOpen() && current === 'map') {
+      renderMap();
+    } else if (game && base) {  // its pictures drawn again ahead, in the new season's colors
+      base = null;
+      warm = null;
+      clearTimeout(warmTimer);
+      warmTimer = setTimeout(warmUp, 1000);
+    }
+  });
+  const SEASON_OBJECTS = [
+    { tree: 'rgba(66, 132, 56, 0.85)', bush: 'rgba(84, 150, 66, 0.9)', fruitTree: 'rgba(238, 196, 212, 0.95)' },
+    {},
+    { tree: 'rgba(198, 112, 40, 0.88)', bush: 'rgba(180, 116, 52, 0.9)', fruitTree: 'rgba(196, 128, 44, 0.9)',
+      hollowTree: '#8a5a2a' },
+    { tree: 'rgba(112, 92, 72, 0.8)', bush: 'rgba(150, 132, 104, 0.9)', fruitTree: 'rgba(112, 92, 72, 0.8)',
+      pine: 'rgba(46, 84, 66, 0.92)', crops: 'rgba(236, 238, 244, 0.9)', haystack: '#e8e8ee' },
+  ];
+  const objectColor = (kind) => SEASON_OBJECTS[season][kind] || OBJECT_COLORS[kind] || '#777';
+  const ICE = [196, 220, 234];
+  // A pixel of the map in its season: `water` 0 land, 1 the sea (as it is),
+  // 2 a lake or a river (frozen in winter); `snowy` 0..1 how much snow lies
+  // there in winter (none on cliffs). Changes `px` ({ r, g, b }).
+  function inSeason(px, water, snowy) {
+    if (season === 1 || water === 1) return;
+    if (water === 2) {
+      if (season === 3) { px.r = ICE[0]; px.g = ICE[1]; px.b = ICE[2]; }
+      return;
+    }
+    const { r, g, b } = px;
+    const green = Math.min(Math.max((g - Math.max(r, b)) / 255 * 5, 0), 1);
+    const l = 0.3 * r + 0.59 * g + 0.11 * b;
+    let tr = r, tg = g, tb = b;
+    if (season === 0) { tr = r * 0.95 + 5; tg = g * 1.1 + 8; tb = b * 0.82; }
+    if (season === 2) { tr = 0.70 * l * 1.7; tg = 0.58 * l * 1.7; tb = 0.30 * l * 1.7; }
+    if (season === 3) { tr = 0.78 * l * 1.45; tg = 0.72 * l * 1.45; tb = 0.52 * l * 1.45; }
+    const k = season === 2 ? 0.6 * green : green;
+    px.r = r + (tr - r) * k; px.g = g + (tg - g) * k; px.b = b + (tb - b) * k;
+    if (season === 3) {
+      const w = 0.9 * snowy;
+      px.r += (236 - px.r) * w; px.g += (240 - px.g) * w; px.b += (248 - px.b) * w;
+    }
+  }
+
   function heightAt(data, x, z) {
     const n = data.points;
     if (!n) return 0;
@@ -970,9 +1021,11 @@
         const x = d.minX + i * d.cell, z = d.minZ + j * d.cell;
         const h = H(i, j);
         let r, g, b;
+        let water = 0;
         if (h < d.seaLevel) {  // the sea: lighter in the shallows
           const k = Math.min(1, (d.seaLevel - h) / 25);
           r = 70 - 40 * k; g = 150 - 60 * k; b = 190 - 40 * k;
+          water = 1;
         } else {
           const t = Math.min(Math.max((h + 2) / 60, 0), 1);
           r = 92 + 50 * t; g = 140 + 30 * t; b = 70 + 30 * t;
@@ -990,9 +1043,17 @@
         }
         for (const p of d.ponds) {
           const dx = (x - p.x) / p.rx, dz = (z - p.z) / p.rz;
-          if (dx * dx + dz * dz < 1 && h < p.level) { r = 72; g = 140; b = 170; }
+          if (dx * dx + dz * dz < 1 && h < p.level) { r = 72; g = 140; b = 170; water = 2; }
         }
-        if (Math.hypot(x - d.crater.x, z - d.crater.z) < d.crater.r * 0.8) { r = 240; g = 110; b = 40; }  // lava
+        const lava = Math.hypot(x - d.crater.x, z - d.crater.z) < d.crater.r * 0.8;
+        if (!lava) {
+          const steep = Math.abs(H(i + 1, j) - H(i - 1, j)) + Math.abs(H(i, j + 1) - H(i, j - 1));
+          const px = { r, g, b };
+          inSeason(px, water, (1 - smooth(1000, 1250, z) * 0.8) * (1 - smooth(0.6, 1.2, steep / (2 * d.cell))) *
+                   (h < d.seaLevel + 1 ? 0.2 : 1));
+          ({ r, g, b } = px);
+        }
+        if (lava) { r = 240; g = 110; b = 40; }
         // Light from the north-west, shading the slopes: soft (over 4 cells,
         // the little bumps smoothed away), the relief still readable.
         const shade = 1 + 0.009 * ((H(i - 2, j) - H(i + 2, j)) + (H(i, j - 2) - H(i, j + 2)));
@@ -1054,6 +1115,7 @@
         const h = heights[py * size + px];
         const t = Math.min(Math.max((h + 4) / 12, 0), 1);
         let r = 78 + 70 * t, g = 128 + 46 * t, b = 62 + 30 * t;
+        let water = 0;
         if (near(forest, forest && forest.rx, forest && forest.rz, x, z) &&
             outlineDistance(data, forest, forest.rx, forest.rz, forest.outline, x, z) < 1 &&
             outlineDistance(data, forest, forest.clearing, forest.clearing, forest.clearingOutline, x, z) >= 1) {
@@ -1061,18 +1123,25 @@
         }
         // Cliffs (the terrace's edge, the cave's spur): grey rock where the ground is steep.
         const steep = Math.hypot(H(px + step, py) - H(px - step, py), H(px, py + step) - H(px, py - step)) * PX_PER_M / (2 * step);
-        if (steep > 0.7) { const k = Math.min(1, (steep - 0.7) / 0.6); r += (140 - r) * k; g += (136 - g) * k; b += (132 - b) * k; }
+        const rock = Math.min(1, Math.max(0, (steep - 0.7) / 0.6));
+        if (steep > 0.7) { const k = rock; r += (140 - r) * k; g += (136 - g) * k; b += (132 - b) * k; }
         if (village && Math.hypot(x - village.x, z - village.z) < 7) { r = 168; g = 142; b = 104; }
         if (ruins && Math.max(Math.abs(x - ruins.x), Math.abs(z - ruins.z)) < 8.5) { r = 150; g = 146; b = 136; }
         if (castle && Math.max(Math.abs(x - castle.x), Math.abs(z - castle.z)) < castle.r) { r = 156; g = 150; b = 140; }
         // The sea where it comes in, and its beaches (not the hollows of the hills).
         const around = Math.abs(x) > 150 || Math.abs(z) > 150 ? landAt(continent, x, z) : 0;
         if (h < data.seaLevel + 2.5 && around < data.seaLevel + 1) { r = 214; g = 196; b = 140; }
-        if (h < data.seaLevel && around < data.seaLevel) { const k = Math.min(1, (data.seaLevel - h) / 12); r = 70 - 40 * k; g = 150 - 60 * k; b = 190 - 40 * k; }
+        const shore = h < data.seaLevel + 2.5 && around < data.seaLevel + 1;
+        if (h < data.seaLevel && around < data.seaLevel) { const k = Math.min(1, (data.seaLevel - h) / 12); r = 70 - 40 * k; g = 150 - 60 * k; b = 190 - 40 * k; water = 1; }
         if (near(lake, lake && lake.rx * 1.05, lake && lake.rz * 1.05, x, z)) {
           const d = outlineDistance(data, lake, lake.rx, lake.rz, lake.outline, x, z);
           if (d < 1.04 && h > data.waterLevel - 0.05) { r = 214; g = 196; b = 140; }  // sandy shore
-          if (d < 1 && h < data.waterLevel) { const k = Math.min(1, (data.waterLevel - h) / 1.2); r = 80 - 30 * k; g = 150 - 40 * k; b = 196 - 20 * k; }
+          if (d < 1 && h < data.waterLevel) { const k = Math.min(1, (data.waterLevel - h) / 1.2); r = 80 - 30 * k; g = 150 - 40 * k; b = 196 - 20 * k; water = 2; }
+        }
+        if (season !== 1) {
+          const px = { r, g, b };
+          inSeason(px, water, (1 - rock) * (shore ? 0.35 : 1));
+          ({ r, g, b } = px);
         }
         // Light from the north-west, shading the slopes: soft (over 6 m, the
         // little bumps smoothed away), the relief still readable.
@@ -1100,7 +1169,7 @@
     if (data.west) {
       // The river, as wide as it is at each place.
       const st = data.west.stream, sw = data.west.streamW || [];
-      ctx.strokeStyle = 'rgba(70, 150, 200, 0.95)';
+      ctx.strokeStyle = season === 3 ? `rgba(${ICE.join(', ')}, 0.95)` : 'rgba(70, 150, 200, 0.95)';  // frozen in winter
       ctx.lineCap = 'round';
       for (let i = 0; i + 3 < st.length; i += 2) {
         ctx.lineWidth = 2 * (sw[i / 2] || 2) * PX_PER_M;
@@ -1126,7 +1195,7 @@
     const order = (kind) => (kind === 'tree' || kind === 'pine' ? 1 : 0);  // crowns over the rest
     const objects = [...data.objects].sort((a, b) => order(a[0]) - order(b[0]));
     for (const [kind, x, z, hx, hz] of objects) {
-      ctx.fillStyle = OBJECT_COLORS[kind] || '#777';
+      ctx.fillStyle = objectColor(kind);
       if (kind === 'tree' || kind === 'pine' || kind === 'bush' || kind === 'tower' || kind === 'hut' ||
           kind === 'well' || kind === 'rubble' || kind === 'stump' || kind === 'castleTower' || kind === 'crystal' ||
           kind === 'fruitTree' || kind === 'haystack' || kind === 'windmill' || kind === 'hollowTree' ||
@@ -1174,7 +1243,7 @@
   // The pictures of the map (the continent's, the playable area's): long to
   // draw (over a million pixels), so drawn ahead, a few rows at a time while
   // the game runs; what is left is finished when the map opens.
-  const baseKey = (data) => `${data.path.length}:${data.path[0]}:${data.path[1]}:${data.objects.length}`;
+  const baseKey = (data) => `${data.path.length}:${data.path[0]}:${data.path[1]}:${data.objects.length}:${season}`;
   let warm = null;  // { key, steps (generator), done: { land, base } once finished }
   function* drawPictures(data, key) {
     const c = game.continent();

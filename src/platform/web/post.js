@@ -203,6 +203,10 @@ window.monstres = {
   // fewClouds, overcast, rain, storm, fog, snow; 7 fine here and a storm
   // ahead. What it is now: state().weather.
   setWeather: (choice) => _monstres_set_weather(choice),
+  // The season: 0 spring, 1 summer, 2 autumn, 3 winter (state().season: its name).
+  setSeason: (season) => _monstres_set_season(season),
+  // The wind: 0 calm .. 1 a gale; -1 the weather's own (state().wind: now, choice).
+  setWind: (wind) => _monstres_set_wind(wind),
   team: () => JSON.parse(UTF8ToString(_monstres_team_json())),
   battle: () => JSON.parse(UTF8ToString(_monstres_battle_json())),
   setCamera: (yaw, pitch) => _monstres_set_camera(yaw, pitch),

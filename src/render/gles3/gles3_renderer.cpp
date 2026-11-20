@@ -36,18 +36,65 @@ uniform vec2 uFadeCenter;
 uniform vec2 uFadeNear;  // grass, flowers: shrink away between these distances
 uniform vec2 uFadeFar;   // small things
 uniform vec2 uFadeTree;  // trees and rocks far away
+uniform vec4 uSeason;       // the seasons (SeasonLook): spring, autumn, winter, the snow lying
+uniform vec2 uSeasonWater;  // the ice on lakes and rivers, the sea's level
+uniform float uSeasonal;    // this draw: 0 as it is (characters, inside), 1 the land, 2 a trodden way,
+                            // 3 what else is see-through (shadows: no snow; water: ice)
 out vec3 vNormal;
 out vec3 vWorld;
 out vec3 vToCamera;  // computed here: in the fragment shader, mediump may be 16 bits (phones)
 out vec4 vColor;
 out float vMaterial;
+out float vIce;      // water: how frozen
 // The same position in every program (the depth pre-pass, then the colors).
 invariant gl_Position;
 vec3 rotate(vec4 q, vec3 v) {
   return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
 }
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+const vec3 kSnow = vec3(0.93, 0.95, 1.0);
+// The colors of the land in its season (uSeason; summer: as they are).
+// `kind`: the instance's material (Instance::material: the ground and grass
+// below 0 or at 3); `leaves`: 1 leaves, 2 a fruit tree's, 3 fruit, 0 none
+// (the alpha of the models' colors); `at`: the instance's place.
+vec3 seasonal(vec3 c, vec3 n, vec3 world, float kind, float leaves, vec2 at, float dry) {
+  float spring = uSeason.x, autumn = uSeason.y, winter = uSeason.z;
+  float l = dot(c, vec3(0.3, 0.59, 0.11));
+  if (leaves > 0.5) {
+    float own = hash(floor(at * 4.0) * 0.173);    // the tree's own color in autumn...
+    float here = hash(floor(world.xz * 2.5) + at); // ...and a few leaves of another
+    vec3 warm = own < 0.3 ? vec3(0.95, 0.74, 0.18) : own < 0.6 ? vec3(0.93, 0.48, 0.12)
+              : own < 0.85 ? vec3(0.80, 0.22, 0.10) : vec3(0.66, 0.64, 0.18);
+    warm = mix(warm, vec3(0.92, 0.58, 0.14), 0.45 * step(0.72, here)) * l * 1.9;
+    vec3 leaf = mix(c, c * vec3(0.92, 1.12, 0.78) + vec3(0.04, 0.05, 0.0), spring);  // fresh, light green
+    leaf = mix(leaf, warm, autumn);
+    leaf = mix(leaf, vec3(0.62, 0.48, 0.30) * l * 1.6, winter);  // what keeps its leaves: dry
+    vec3 bloom = mix(vec3(1.0, 0.80, 0.88), vec3(1.0, 0.96, 0.96), hash(floor(world.xz * 6.0)));
+    if (leaves > 2.5) leaf = mix(c, bloom, spring);  // no fruit yet: flowers
+    else if (leaves > 1.5) leaf = mix(leaf, bloom * (0.8 + 0.4 * l), spring * step(0.4, here));
+    c = leaf;
+  } else if (kind < -0.5 || (kind > 2.5 && kind < 3.5)) {  // the ground, grass and flowers
+    float green = clamp((c.g - max(c.r, c.b)) * 5.0, 0.0, 1.0);
+    float patches = noise(world.xz * 0.05);
+    vec3 g = mix(c, c * vec3(0.95, 1.1, 0.82) + vec3(0.02, 0.03, 0.0), spring);
+    g = mix(g, mix(vec3(0.70, 0.60, 0.30), vec3(0.64, 0.44, 0.24), patches) * l * 1.7, autumn * (0.55 + 0.35 * patches));
+    g = mix(g, vec3(0.78, 0.72, 0.52) * l * 1.45, winter * 0.8);
+    c = mix(c, g, green);
+  }
+  // Snow on what faces up: patchy when little has fallen, less on the ways, none under water.
+  float lying = smoothstep(0.5, 0.85, n.y) * (0.7 + 0.3 * noise(world.xz * 0.35)) * dry;
+  float cover = uSeason.w * smoothstep(1.0 - uSeason.w, 1.15 - uSeason.w, lying);
+  if (uSeasonal > 1.5) cover *= 0.55;
+  return mix(c, kSnow, cover);
+}
 void main() {
   float material = iScale.w;
+  float kind = material;
   float fade = 1.0;
   if (material > 2.5) {
     vec2 range = material > 4.5 ? uFadeTree : material > 3.5 ? uFadeFar : uFadeNear;
@@ -67,7 +114,27 @@ void main() {
   }
   vWorld = world;
   vToCamera = uEye - world;
-  vColor = aColor * iTint;
+  // Leaves and fruits (kLeavesAlpha...), on the land's opaque meshes: their
+  // alpha says what they are; drawn opaque.
+  vec4 color = aColor;
+  float leaves = 0.0;
+  if (uSeasonal > 0.5 && uSeasonal < 1.5 && color.a > 0.93 && color.a < 0.98) {
+    leaves = color.a > 0.962 ? 1.0 : color.a > 0.947 ? 2.0 : 3.0;
+    color.a = 1.0;
+  }
+  vColor = color * iTint;
+  vIce = 0.0;
+  if (uSeasonal > 0.5) {
+    if (kind > 0.5 && kind < 1.5) {  // water: frozen, above the sea, with some snow on the ice
+      vIce = uSeasonWater.x * step(uSeasonWater.y + 0.15, world.y);
+      float snowy = uSeason.w * smoothstep(0.45, 0.75, noise(world.xz * 0.25));
+      vColor.rgb = mix(vColor.rgb, mix(vec3(0.72, 0.84, 0.92), kSnow, snowy), vIce);
+    } else if (uSeasonal < 2.5 && (kind < 1.5 || kind > 2.5)) {  // not what glows
+      // The ground under water (kUnderWaterAlpha): no snow.
+      float dry = kind < -0.5 && aColor.a < 0.995 ? 0.0 : 1.0;
+      vColor.rgb = seasonal(vColor.rgb, normalize(vNormal), world, kind, leaves, iPosWind.xz, dry);
+    }
+  }
   vMaterial = material;
   gl_Position = uViewProjection * vec4(world, 1.0);
 }
@@ -101,6 +168,7 @@ in vec3 vWorld;
 in vec3 vToCamera;
 in vec4 vColor;
 in float vMaterial;
+in float vIce;
 uniform vec3 uLight;
 uniform vec3 uLightColor;
 uniform vec3 uAmbientSky;
@@ -173,14 +241,17 @@ void main() {
     alpha = 1.0;
   } else if (vMaterial > 0.5) {  // water
     // Small moving waves: sky reflection at grazing angles and sun glints.
+    // Frozen (vIce): still, nearly opaque, a softer shine.
     vec3 wave = normalize(vec3(sin(vWorld.x * 1.7 + uTimeFs * 1.3) * 0.06 + sin(vWorld.z * 2.3 - uTimeFs) * 0.04,
                                1.0,
                                cos(vWorld.z * 1.5 + uTimeFs * 1.1) * 0.06 + cos(vWorld.x * 2.1 + uTimeFs * 0.7) * 0.04));
+    wave = normalize(mix(wave, vec3(0.0, 1.0, 0.0), vIce));
     float fresnel = pow(1.0 - max(dot(view, wave), 0.0), 3.0);
-    color = mix(color, uFog * 1.05, fresnel * 0.7);
-    float glint = pow(max(dot(reflect(-uLight, wave), view), 0.0), 80.0);
-    color += uLightColor * (1.0 / 0.62) * glint * 0.8;  // the sun at noon: (1, 0.95, 0.85)
+    color = mix(color, uFog * 1.05, fresnel * 0.7 * (1.0 - 0.6 * vIce));
+    float glint = pow(max(dot(reflect(-uLight, wave), view), 0.0), mix(80.0, 20.0, vIce));
+    color += uLightColor * (1.0 / 0.62) * glint * mix(0.8, 0.25, vIce);  // the sun at noon: (1, 0.95, 0.85)
     alpha = max(alpha, fresnel * 0.9 * step(0.01, vColor.a));
+    alpha = mix(alpha, 0.94 * step(0.01, vColor.a), vIce);
   }
   float fog = max(1.0 - exp2(-max(d - uFogRange.x, 0.0) / uFogRange.y), smoothstep(uFogRange.z * 0.75, uFogRange.z, d));
   outColor = vec4(mix(color, uFog, fog), alpha);
@@ -423,7 +494,8 @@ struct MeshProgram {
   GLint view_projection = -1, time = -1, wind = -1, eye = -1, time_fs = -1, light = -1, light_color = -1;
   GLint ambient_sky = -1, ambient_ground = -1, night = -1, fade_from = -1, fade_to = -1, opaque_pass = -1;
   GLint light_count = -1, light_pos = -1, light_colors = -1, fade_center = -1, fade_near = -1, fade_far = -1;
-  GLint fade_tree = -1, fog = -1, fog_range = -1;
+  GLint fade_tree = -1, fog = -1, fog_range = -1, season = -1, season_water = -1, seasonal = -1;
+  float seasonal_now = -1;  // what uSeasonal holds (-1: not known)
   bool lights_known = false;  // which of the frame's lights it has (upload_lights)
   uint16_t lights = 0;
 
@@ -453,6 +525,9 @@ struct MeshProgram {
     fade_tree = at("uFadeTree");
     fog = at("uFog");
     fog_range = at("uFogRange");
+    season = at("uSeason");
+    season_water = at("uSeasonWater");
+    seasonal = at("uSeasonal");
     return true;
   }
 
@@ -477,11 +552,20 @@ struct MeshProgram {
     glUniform2f(fade_near, v.fade_near_start, v.fade_near_end);
     glUniform2f(fade_far, v.fade_far_start, v.fade_far_end);
     glUniform2f(fade_tree, v.fade_tree_start, v.fade_tree_end);
+    glUniform4f(season, v.season.spring, v.season.autumn, v.season.winter, v.season.snow);
+    glUniform2f(season_water, v.season.ice, v.season.sea_level);
+    set_seasonal(0);
     lights_known = false;
   }
   void set_view_projection(const Mat4& m) {
     glUseProgram(id);
     glUniformMatrix4fv(view_projection, 1, GL_FALSE, m.m);
+  }
+  // How the season changes this draw (uSeasonal); the program in use.
+  void set_seasonal(float value) {
+    if (value == seasonal_now) return;
+    glUniform1f(seasonal, value);
+    seasonal_now = value;
   }
   void set_opaque_pass(bool opaque) {
     glUseProgram(id);
@@ -770,6 +854,10 @@ public:
       }
       if (mode == kColor) upload_lights(p, item.lights);
       const GpuMesh& m = meshes_[item.mesh];
+      p.set_seasonal(!item.list->seasonal                                ? 0.0f
+                     : item.mesh == static_cast<uint32_t>(MeshId::Path) ? 2.0f
+                     : m.transparent                                     ? 3.0f
+                                                                         : 1.0f);
       const int cull = m.double_sided ? 0 : 1;
       if (cull != culling) {
         culling = cull;

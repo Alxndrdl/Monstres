@@ -783,8 +783,9 @@ personnages gardent leur éclat la nuit (`kGlowing`).
 ## Météo
 
 Sept temps : ensoleillé, quelques nuages, couvert (on ne voit plus le ciel),
-pluie, tempête avec orage, brouillard, neige (sur l'herbe verte : pas de
-saisons pour l'instant). Ils ne changent rien au jeu pour l'instant, ni aux
+pluie, tempête avec orage, brouillard, neige (en hiver seulement : la pluie
+y devient de la neige, et la neige de la pluie le reste de l'année ; voir
+« Saisons et vent »). Ils ne changent rien au jeu pour l'instant, ni aux
 combats ni aux monstres.
 
 **Le temps qu'il fait** (`src/core/weather.cpp`) est un champ sur tout le
@@ -822,6 +823,55 @@ met le beau temps ici et un orage à 1,1 km devant la caméra. Dans la console :
 `monstres.state().weather`. Coût mesuré (Chromium, logiciel) : environ
 30 000 triangles de plus quand le ciel est couvert, 40 000 sous la pluie,
 moins d'un demi-milliseconde de calcul par image.
+
+## Saisons et vent
+
+Quatre saisons et la force du vent, choisies dans le menu des paramètres
+(sous la météo) et gardées d'une visite à l'autre par la page. Elles ne
+changent rien au jeu pour l'instant (ni monstres, ni combats, ni
+déplacements) : seulement ce qu'on voit. La saison n'est pas dans la
+sauvegarde.
+
+- **Couleurs** (dans le shader des maillages, `seasonal()` de
+  `src/render/gles3/gles3_renderer.cpp`, d'après `View::season`) : seulement
+  sur les listes marquées `DrawList::seasonal` (le sol, le paysage, le
+  continent), jamais sur les personnages ni à l'intérieur. Le vert du sol et
+  de l'herbe devient plus frais au printemps, ocre par endroits en automne,
+  terne en hiver. Le feuillage des arbres et des buissons est repéré par
+  l'alpha de ses couleurs dans les modèles (`kLeavesAlpha`, `kBlossomAlpha`
+  pour les arbres fruitiers, `kFruitAlpha` pour les pommes) : vert tendre au
+  printemps, avec les fruitiers en fleurs (les pommes deviennent des fleurs),
+  jaune, orange ou rouge en automne (une couleur par arbre, quelques feuilles
+  d'une autre), sec en hiver pour ce qui garde ses feuilles. Changer de
+  saison se fait en fondu, en une seconde.
+- **Neige** : elle se pose sur tout ce qui regarde vers le haut (sol, toits,
+  rochers, sapins), par plaques quand il en est peu tombé, moins sur le
+  chemin, jamais sous l'eau (couleurs du sol marquées `kUnderWaterAlpha`) ni
+  sur les falaises. En hiver tout est blanc ; le reste de l'année, une chute
+  de neige en laisse un peu tant qu'elle dure.
+- **Glace** : en hiver, le lac et la rivière gèlent (presque opaques, sans
+  vagues, un reflet plus doux, un peu de neige dessus), mais pas la mer. La
+  cascade devient un rideau de glace immobile, sans écume ; la roue du moulin
+  à eau s'arrête.
+- **Paysage** (`build_landscape`, reconstruit quand la saison change) : en
+  hiver, les arbres feuillus et les fruitiers sont nus (`tree_bare`,
+  `tree_bare_far` ; les sapins gardent leurs aiguilles), il n'y a plus de
+  fleurs et l'herbe est plus rare et plus basse. En automne, des feuilles
+  mortes jonchent le sol sous les arbres et les buissons, avec quelques-unes
+  dans les prés (`leaf_litter`), et les fleurs sont moins nombreuses. Au
+  printemps, il y a beaucoup plus de fleurs.
+- **Le vent** : « Naturel » (celui de la météo), ou de calme à tempête.
+  L'herbe et les arbres plient plus ou moins, la pluie et la neige penchent
+  et la fumée des cheminées se couche dans son sens. En automne, des
+  feuilles tourbillonnent autour de la caméra (`leaves`, comme la neige),
+  quelques-unes même sans vent et beaucoup quand il souffle ; au printemps,
+  ce sont des pétales quand il y a du vent. Ni les unes ni les autres sous
+  la pluie.
+- **Visibilité** : quand il neige, un voile blanc cache le lointain (le
+  brouillard commence à quelques mètres et tout disparaît vers 400 m).
+- **La carte** suit la saison : prés ocre et arbres roux en automne ; neige,
+  lacs et rivière gelés, arbres nus en hiver. Ses images sont redessinées à
+  l'avance quand la saison change.
 
 ## Combats
 
@@ -1211,6 +1261,13 @@ sur leurs ponts, dont les bouts touchent le sol ; les téléporteurs sur un sol
 plat, au sec, loin du bord de la terrasse. Le sentier et la route restent
 au-dessus de la mer (une bande de terre là où le sol plonge un peu sous elle,
 près de la côte) ; au sud, le sentier s'arrête sur la plage.
+
+Les saisons (`tests/unit/test_seasons.cpp`) : le paysage de chaque saison
+(arbres nus et pas de fleurs en hiver, feuilles mortes en automne, plus de
+fleurs au printemps), les feuilles et les pétales portés par le vent, la
+neige qui cache le lointain plus que la pluie, la cascade et la roue
+immobiles dans la glace, et seul le feuillage des modèles marqué pour les
+saisons.
 
 Après un changement **voulu** des règles, régénérer les références puis relire
 le diff avant de valider :

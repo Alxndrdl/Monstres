@@ -90,6 +90,37 @@
     if (game) game.setWeather(Number(weatherInput.value) - 1);
   });
 
+  // ---- The season and the wind (kept between visits) ----
+  const SEASONS = ['Printemps', 'Été', 'Automne', 'Hiver'];
+  const WINDS = ['Naturel', 'Calme', 'Brise légère', 'Vent modéré', 'Vent fort', 'Tempête'];
+  const seasonInput = document.getElementById('season');
+  const seasonValue = document.getElementById('season-value');
+  const windInput = document.getElementById('wind');
+  const windValue = document.getElementById('wind-value');
+  const clampStep = (v, max, fallback) => (Number.isInteger(v) && v >= 0 && v <= max ? v : fallback);
+  seasonInput.value = String(clampStep(prefs.get('season', 1), 3, 1));
+  windInput.value = String(clampStep(prefs.get('wind', 0), 5, 0));
+  const sendSeason = () => {
+    seasonValue.textContent = SEASONS[Number(seasonInput.value)];
+    whenReady((g) => typeof g.setSeason === 'function' && g.setSeason(Number(seasonInput.value)));
+    window.dispatchEvent(new CustomEvent('monstres-season', { detail: { season: Number(seasonInput.value) } }));
+  };
+  const sendWind = () => {
+    const k = Number(windInput.value);
+    windValue.textContent = WINDS[k];
+    whenReady((g) => typeof g.setWind === 'function' && g.setWind(k === 0 ? -1 : (k - 1) / 4));
+  };
+  seasonInput.addEventListener('input', () => {
+    prefs.set('season', Number(seasonInput.value));
+    sendSeason();
+  });
+  windInput.addEventListener('input', () => {
+    prefs.set('wind', Number(windInput.value));
+    sendWind();
+  });
+  sendSeason();
+  sendWind();
+
   // ---- Frames per second, and where their time goes ----
   const fpsBox = document.getElementById('fps');
   const fpsCheck = document.getElementById('show-fps');

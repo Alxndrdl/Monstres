@@ -186,6 +186,9 @@ struct DrawList {
   // things are all outside the playable square, near things inside it: seen
   // from inside, a far thing is never in front of a near one.
   bool far = false;
+  // Changed by the seasons (View::season): the ground, the landscape, the
+  // continent. Not the characters, nor what is inside.
+  bool seasonal = false;
   // Culling (cull.hpp). parts[i]: batch i by groups of instances, with where
   // they are (empty: not culled, all drawn); mesh_parts[i]: the parts of
   // mesh i, for a batch of one unturned, unscaled instance (the ground).
@@ -199,6 +202,26 @@ struct DrawList {
   };
   std::vector<Visible> visible;  // empty: everything
 };
+
+// How the season looks, on the lists marked DrawList::seasonal (in the
+// shaders, on the meshes' colors): each season's share (blended for a moment
+// when it changes; summer is the rest, the colors as they are), the snow
+// lying on what faces up, the lakes and rivers frozen (not the sea).
+struct SeasonLook {
+  float spring = 0, autumn = 0, winter = 0;
+  float snow = 0;       // 0..1: a dusting (a snowfall out of winter) .. all white
+  float ice = 0;        // 0..1: the water above the sea's level, frozen
+  float sea_level = -2; // rules::kSeaLevel: the sea never freezes (its beaches keep no snow)
+  bool operator==(const SeasonLook&) const = default;
+};
+
+// Vertex colors of the models with these alphas (the leaves of trees and
+// bushes, those of fruit trees, fruits) change with the seasons; drawn opaque.
+inline constexpr float kLeavesAlpha = 0.97f;
+inline constexpr float kBlossomAlpha = 0.955f;  // a fruit tree's leaves: in bloom in spring
+inline constexpr float kFruitAlpha = 0.94f;     // only in summer and autumn
+// The ground's vertex colors under water (the sea, lakes, rivers): no snow lies there.
+inline constexpr float kUnderWaterAlpha = 253.0f / 255.0f;
 
 struct View {
   Mat4 view_projection;
@@ -228,6 +251,7 @@ struct View {
   float fade_tree_start = 1e6f, fade_tree_end = 2e6f;
   float time = 0;  // seconds, drives the wind
   float wind = 0;  // 0..1: how hard the wind blows (grass sways more)
+  SeasonLook season;
   // The clouds drawn by the sky itself, overhead (weather_view.hpp): how
   // much of the sky they cover (0..1), their lit and shaded colors, and how
   // far they drifted with the wind (meters).

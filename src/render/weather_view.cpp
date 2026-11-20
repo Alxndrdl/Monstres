@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 
 namespace monstres {
 
@@ -68,6 +69,11 @@ float apply_weather(View& v, const WeatherField& field) {
   v.fog_half = lerp(v.fog_half, 35.0f, w.fog);
   v.fog_end = lerp(v.fog_end, 5000.0f, std::max(w.rain, w.snow));
   v.fog_end = lerp(v.fog_end, 260.0f, w.fog);
+  // Falling snow hides the distance: a white veil, close.
+  v.fog = mixed(v.fog, grey_like(horizon, 1.08f), 0.6f * w.snow);
+  v.fog_start = lerp(v.fog_start, 4.0f, w.snow);
+  v.fog_half = lerp(v.fog_half, 45.0f, 0.85f * w.snow);
+  v.fog_end = lerp(v.fog_end, 420.0f, w.snow);
   // Clouds hide the sun: a softer, greyer, darker light.
   const float block = std::min(0.9f, 0.8f * veil + 0.15f * w.dark + 0.45f * w.fog);
   v.light_color = scaled(v.light_color, 1 - block);
@@ -197,11 +203,14 @@ void build_weather(const WeatherField& field, const View& view, float flash, flo
   const Weather here = field.at(cx, cz);
   const Frustum near_view = frustum_of(view.view_projection);
   const float light = luminance(view.fog) * 1.05f + 0.08f;
-  const float gust = here.wind / weather::kWindSpeed * 4.5f;  // m/s sideways, at most
-  const float side_x = wind.x * gust, side_z = wind.z * gust;
+  const float gust = view.wind / weather::kWindSpeed * 4.5f;  // m/s sideways, at most (the wind of the view)
+  // `flutter`: leaves, tumbling and carried farther by the wind; `palette`:
+  // a color for each box among these (else `tint`).
   const auto fall = [&](MeshId mesh, float amount, float tile, float height, float speed, int tiles, Color tint,
-                        bool sway, uint64_t salt) {
+                        bool sway, uint64_t salt, bool flutter = false, std::span<const Color> palette = {}) {
     if (amount < 0.02f) return;
+    const float push = flutter ? 1.0f + 1.4f * view.wind : 1.0f;
+    const float side_x = wind.x * gust * push, side_z = wind.z * gust * push;
     const float down = positive_mod(time * speed, height);
     const float ox = positive_mod(time * side_x, tile), oz = positive_mod(time * side_z, tile);
     const float len = std::sqrt(side_x * side_x + speed * speed + side_z * side_z);
@@ -221,13 +230,19 @@ void build_weather(const WeatherField& field, const View& view, float flash, flo
         const float bottom = cy - 0.5f * height - down;
         const float half = tile * 0.5f + 1;
         if (!in_view(near_view, {x - half, bottom, z - half, x + half, bottom + 2 * height, z + half})) continue;
+        const float h = rand01(seed ^ salt ^ 0xC0105ULL, static_cast<uint64_t>(gi), static_cast<uint64_t>(gj));
         for (int copy = 0; copy < 2; ++copy) {
           Instance d;
           d.x = x;
           d.y = bottom + static_cast<float>(copy) * height;
           d.z = z;
           d.rotation = lean;
-          d.tint = tint;
+          if (flutter) {  // the leaves of a box turning and rocking together, each box its own way
+            const float k = h * kTau + static_cast<float>(copy);
+            d.rotation = quat_yaw(time * (0.4f + 0.5f * h) + k) * quat_x(0.5f * std::sin(time * 1.7f + k)) *
+                         quat_z(0.4f * std::sin(time * 1.3f + 2 * k));
+          }
+          d.tint = palette.empty() ? tint : palette[static_cast<size_t>(h * static_cast<float>(palette.size())) % palette.size()];
           add(near_list, mesh, d);
         }
       }
@@ -238,6 +253,16 @@ void build_weather(const WeatherField& field, const View& view, float flash, flo
   const float white = light * 1.15f + 0.1f;
   fall(MeshId::Snow, here.snow, kSnowTile, kSnowHeight, kSnowFall, kSnowTiles, {white, white, white * 1.03f, here.snow},
        true, 0x5A0ULL);
+  // Leaves blown around in autumn (a few even without wind), petals in spring when it blows.
+  const SeasonLook& season = view.season;
+  const float dry = 1 - 0.8f * std::max(here.rain, here.snow);
+  const Color autumn[] = {{0.95f, 0.72f, 0.22f, 1}, {0.92f, 0.48f, 0.14f, 1}, {0.80f, 0.26f, 0.12f, 1},
+                          {0.70f, 0.50f, 0.24f, 1}};
+  const Color petals[] = {{1.0f, 0.86f, 0.92f, 1}, {1.0f, 0.96f, 0.96f, 1}};
+  fall(MeshId::Leaves, season.autumn * (0.12f + 0.88f * view.wind) * dry, kLeafTile, kLeafHeight, kLeafFall, kLeafTiles,
+       {}, true, 0x1EAFULL, true, autumn);
+  fall(MeshId::Leaves, season.spring * 0.35f * view.wind * dry, kLeafTile, kLeafHeight, kLeafFall * 0.7f, kLeafTiles,
+       {}, true, 0x9E7A1ULL, true, petals);
 }
 
 }  // namespace monstres

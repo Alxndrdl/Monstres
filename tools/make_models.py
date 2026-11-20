@@ -94,9 +94,13 @@ def mix(a, b, t):
 
 BARK = (0.42, 0.28, 0.17, 1)
 WOOD = (0.80, 0.66, 0.45, 1)
-LEAVES = (0.34, 0.62, 0.26, 1)
+# Leaves change with the seasons: their alpha says so to the game
+# (kLeavesAlpha, kBlossomAlpha, kFruitAlpha in src/render/include/monstres/render/renderer.hpp),
+# which draws them opaque.
+LEAVES = (0.34, 0.62, 0.26, 0.97)
 NEEDLES = (0.18, 0.42, 0.27, 1)
-BUSH_LEAVES = (0.40, 0.66, 0.30, 1)
+BUSH_LEAVES = (0.40, 0.66, 0.30, 0.97)
+FRUIT_TREE_LEAVES = (0.34, 0.62, 0.26, 0.955)  # in bloom in spring
 ROCK = (0.56, 0.56, 0.58, 1)
 MOSS = (0.38, 0.52, 0.28, 1)
 CRATE_PLANK = (0.74, 0.55, 0.32, 1)
@@ -1941,6 +1945,113 @@ def pine_far():
     return m
 
 
+def limb(m, base, tip, r0, r1, sides, color):
+    """A tapered branch from `base` to `tip` (faceted)."""
+    d = sub(tip, base)
+    h = length(d)
+    u = normalize(d)
+    axis = normalize(cross((0.0, 1.0, 0.0), u)) if abs(u[1]) < 0.999 else (1.0, 0.0, 0.0)
+    angle = math.acos(max(-1.0, min(1.0, u[1])))
+
+    def turn(p):
+        c, s_ = math.cos(angle), math.sin(angle)
+        q = add(add(mul(p, c), mul(cross(axis, p), s_)), mul(axis, dot(axis, p) * (1 - c)))
+        return add(base, q)
+    frustum(m, turn, r0, r1, h, sides, color, open_ends=True, flat=True)
+
+
+def bare_branches(m, branches, twigs, sides):
+    """The tree in winter: the trunk of tree(), its leader on up, branches
+    spreading up and out where the crowns were, a few twigs on each."""
+    frustum(m, identity, 0.2, 0.13, 2.3, sides + 1, BARK, open_ends=True, flat=True)
+    limb(m, (0, 2.25, 0), (0.12, 3.9, -0.08), 0.13, 0.03, sides, BARK)
+    for k in range(branches):
+        a = TAU * (k + 0.35 * hash01(2700, k)) / branches
+        y = 1.65 + 0.6 * hash01(2701, k)
+        reach = 1.05 + 0.45 * hash01(2702, k)
+        rise = 0.75 + 0.6 * hash01(2703, k)
+        base = (0.1 * math.cos(a), y, 0.1 * math.sin(a))
+        tip = (reach * math.cos(a), y + rise, reach * math.sin(a))
+        limb(m, base, tip, 0.075, 0.02, sides, BARK)
+        for t in range(twigs):
+            f = 0.45 + 0.35 * t
+            at = add(base, mul(sub(tip, base), f))
+            b = a + (0.7 if t % 2 else -0.7) * (0.6 + 0.4 * hash01(2704 + t, k))
+            twig = add(at, (0.45 * math.cos(b), 0.35 + 0.2 * hash01(2705 + t, k), 0.45 * math.sin(b)))
+            limb(m, at, twig, 0.03, 0.01, 3, BARK)
+
+
+def tree_bare():
+    """The tree without its leaves (winter), the same size as tree()."""
+    m = Mesh()
+    bare_branches(m, 6, 2, 4)
+    return m
+
+
+def tree_bare_far():
+    """The bare tree from a middle distance and afar: fewer branches, no twigs."""
+    m = Mesh()
+    bare_branches(m, 4, 0, 3)
+    return m
+
+
+LEAF_TILE, LEAF_HEIGHT = 6.0, 6.0   # must match kLeafTile, kLeafHeight (weather_view.hpp)
+AUTUMN_LEAVES = [(0.93, 0.70, 0.20, 1), (0.90, 0.46, 0.13, 1), (0.76, 0.24, 0.12, 1), (0.60, 0.40, 0.20, 1),
+                 (0.82, 0.58, 0.22, 1)]
+
+
+def leaf_shape(m, center, size, turn, tilt, color):
+    """A small leaf: a diamond, turned around Y then tilted."""
+    c, s_ = math.cos(turn), math.sin(turn)
+    ct, st = math.cos(tilt), math.sin(tilt)
+
+    def at(x, z):
+        y = z * st
+        z = z * ct
+        return add(center, (x * c - z * s_, y, x * s_ + z * c))
+    tip, back = at(0, size), at(0, -size * 0.8)
+    left, right = at(-size * 0.45, 0), at(size * 0.45, 0)
+    m.tri(back, right, tip, color)
+    m.tri(back, tip, left, color)
+
+
+def leaves():
+    """Leaves blown by the wind in a box of LEAF_TILE x LEAF_HEIGHT x LEAF_TILE
+    meters (as rain()): light colors, tinted by the game (autumn, or petals in spring)."""
+    m = Mesh(double_sided=True)
+    side = 6
+    for i in range(side):
+        for j in range(side):
+            k = i * side + j
+            x = -LEAF_TILE / 2 + LEAF_TILE * (i + hash01(1520, k)) / side
+            z = -LEAF_TILE / 2 + LEAF_TILE * (j + hash01(1521, k)) / side
+            y = LEAF_HEIGHT * hash01(1522, k)
+            g = 0.82 + 0.18 * hash01(1523, k)
+            leaf_shape(m, (x, y, z), 0.06 + 0.03 * hash01(1524, k), TAU * hash01(1525, k),
+                       (hash01(1526, k) - 0.5) * 2.6, (g, g, g, 1))
+    return m
+
+
+def leaf_litter():
+    """Fallen leaves lying in a patch of radius 1 (autumn), flat on the ground."""
+    m = Mesh(double_sided=True)
+    up = (0.0, 1.0, 0.0)
+    for k in range(18):
+        a = TAU * hash01(1530, k)
+        r = math.sqrt(hash01(1531, k))
+        size = 0.11 + 0.06 * hash01(1532, k)
+        color = shade(AUTUMN_LEAVES[int(hash01(1533, k) * len(AUTUMN_LEAVES)) % len(AUTUMN_LEAVES)],
+                      0.85 + 0.25 * hash01(1534, k))
+        center = (r * math.cos(a), 0.015 + 0.02 * hash01(1535, k), r * math.sin(a))
+        turn = TAU * hash01(1536, k)
+        c, s_ = math.cos(turn), math.sin(turn)
+        pts = [add(center, (x * c - z * s_, 0.0, x * s_ + z * c))
+               for x, z in ((0, size), (size * 0.7, 0), (0, -size * 0.8), (-size * 0.7, 0))]
+        m.tri(pts[2], pts[1], pts[0], color, normal=up)
+        m.tri(pts[2], pts[0], pts[3], color, normal=up)
+    return m
+
+
 def sparkle():
     """A small magic spark (radius 1), transparent; tinted and faded by the game."""
     m = Mesh(transparent=True)
@@ -2784,12 +2895,12 @@ def fruit_tree():
     m = Mesh()
     frustum(m, identity, 0.2, 0.15, 1.5, 7, BARK, open_ends=True, flat=True)
     for k, (x, y, z, r) in enumerate(((0, 2.1, 0, 1.15), (0.6, 1.9, 0.3, 0.75), (-0.55, 1.95, -0.25, 0.8), (0.1, 2.6, -0.2, 0.7))):
-        blob(m, (x, y, z), (r, r * 0.85, r), 0.12, 3130 + k, jitter(LEAVES, 3130 + k, 0.08))
+        blob(m, (x, y, z), (r, r * 0.85, r), 0.12, 3130 + k, jitter(FRUIT_TREE_LEAVES, 3130 + k, 0.08))
     for k in range(14):
         a = TAU * hash01(3140, k)
         y = 1.6 + 1.0 * hash01(3141, k)
         r = 1.05 * math.sqrt(max(0.1, 1 - ((y - 2.1) / 1.1) ** 2))
-        blob(m, (r * math.cos(a), y, r * math.sin(a)), (0.08, 0.08, 0.08), 0.0, 3150 + k, solid(APPLE), detail=0)
+        blob(m, (r * math.cos(a), y, r * math.sin(a)), (0.08, 0.08, 0.08), 0.0, 3150 + k, solid(APPLE[:3] + (0.94,)), detail=0)
     return m
 
 
@@ -3192,6 +3303,10 @@ def all_models():
         "grass_short_far": grass_far(7, 0.18, 0.38, 0.12, 700),
         "grass_tall_far": grass_far(11, 0.5, 0.95, 0.2, 701),
         "flower_far": flower_far(),
+        "tree_bare": tree_bare(),
+        "tree_bare_far": tree_bare_far(),
+        "leaf_litter": leaf_litter(),
+        "leaves": leaves(),
         "shadow": shadow(),
         "eye": eye(),
         "player_leg": player_leg(),

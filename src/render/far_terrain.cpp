@@ -85,6 +85,7 @@ Color far_color(const Continent& k, float x, float z, float h, Vec3 n) {
                          smooth(330.0f, 480.0f, from_start));
   for (const Pond& p : continent_ponds()) c = lerp(c, kSeaFloor, smooth(-0.05f, 0.15f, ellipse(p.center, p.radius_x, p.radius_z, x, z)) * smooth(p.level + 0.5f, p.level - 1.5f, h));
   c = lerp(c, kSeaFloor, smooth(rules::kSeaLevel, rules::kSeaLevel - 3.0f, h));
+  if (h < rules::kSeaLevel - 0.05f) c.a = kUnderWaterAlpha;  // under the sea: no snow on it
   return c;
 }
 

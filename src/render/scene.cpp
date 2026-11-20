@@ -242,7 +242,10 @@ void add_teleporter_effects(const World& w, float time, DrawList& list) {
 }
 
 // Smoke rising from chimneys, ripples around fish.
-void add_village_effects(const World& w, float time, DrawList& list) {
+void add_village_effects(const World& w, float time, DrawList& list, float wind) {
+  // The smoke leans with the wind (0..1), the way it blows.
+  const Vec2 blow = wind_velocity(w.seed);
+  const float lean = (0.6f + 3.4f * wind) / weather::kWindSpeed;
   constexpr int kPuffs = 7;
   for (const Object& o : valley_objects(w)) {
     if (o.kind != ObjectKind::HouseChimney) continue;
@@ -254,9 +257,9 @@ void add_village_effects(const World& w, float time, DrawList& list) {
     for (int i = 0; i < kPuffs; ++i) {
       const float t = std::fmod(time * 0.22f + offset + static_cast<float>(i) / kPuffs, 1.0f);  // 0 = just out
       Instance puff;
-      puff.x = cx + t * t * 2.5f + std::sin(time * 0.9f + static_cast<float>(i)) * 0.15f * t;
-      puff.y = o.pos.y + 6.55f + t * 4.5f;
-      puff.z = cz + t * t * 1.0f;
+      puff.x = cx + t * t * blow.x * lean + std::sin(time * 0.9f + static_cast<float>(i)) * 0.15f * t;
+      puff.y = o.pos.y + 6.55f + t * (4.5f - 2.0f * wind);
+      puff.z = cz + t * t * blow.z * lean;
       const float size = 0.25f + 0.85f * t;
       puff.sx = puff.sy = puff.sz = size;
       puff.rotation = quat_yaw(static_cast<float>(i) * 1.7f + t);
@@ -317,8 +320,11 @@ void build_far_landscape(DrawList& list) {
   list.batches.assign(kMeshCount, {});
   list.cached = true;
   list.far = true;
+  list.seasonal = true;
   ++list.version;
-  add(list, MeshId::FarGround, Instance{});
+  Instance ground;
+  ground.material = kSolid;  // the land (its colors change with the seasons)
+  add(list, MeshId::FarGround, ground);
   Instance water;
   water.material = kWater;
   add(list, MeshId::FarWater, water);
@@ -1190,7 +1196,7 @@ bool near_camera(const World& w, Vec2 at, float r) {
 // The west: the cart as it is (overturned, or standing again), the merchant's
 // bundles lying around, the mill's sails (turning once pushed), the
 // campfire's flames, the lighthouse's light, the farm's lanterns at night.
-void add_west_effects(const World& w, float time, DrawList& list) {
+void add_west_effects(const World& w, float time, DrawList& list, bool frozen) {
   const WestLayout& west = w.west;
   if (!west.valid() || inside(w)) return;
   const float dark = night_amount(w);
@@ -1243,7 +1249,7 @@ void add_west_effects(const World& w, float time, DrawList& list) {
   // The water mill's wheel: jammed with branches until the Ploufis that did
   // it are beaten, then turning with the river.
   if (near_camera(w, west.water_mill, 300)) {
-    const bool turning = wheel_turning(w);
+    const bool turning = wheel_turning(w) && !frozen;  // frozen: the river is ice
     west_objects_near(w, west.water_mill, 3.0f, [&](const Object& o) {
       if (o.kind != ObjectKind::WaterMill) return;
       const float yaw = static_cast<float>(radians_from_angle16(o.yaw));
@@ -1256,7 +1262,7 @@ void add_west_effects(const World& w, float time, DrawList& list) {
       wheel.z = axle.z;
       wheel.rotation = quat_yaw(yaw) * quat_z(turning ? -time * 0.8f : 0.05f);
       add(list, MeshId::MillWheel, wheel);
-      if (turning) return;
+      if (turning || wheel_turning(w)) return;
       for (int k = 0; k < 3; ++k) {  // the branches jammed in it
         const Vec3 p = at(-0.9f + 0.9f * static_cast<float>(k), -1.35f + 0.25f * static_cast<float>(k % 2), 3.0f);
         Instance branch;
@@ -1303,11 +1309,12 @@ void add_west_effects(const World& w, float time, DrawList& list) {
         band.sz = 1.0f;
         const float pulse = 0.5f + 0.5f * std::sin(time * 7.0f - static_cast<float>(k) * 0.95f);
         band.tint = {1, 1, 1, 0.66f + 0.32f * pulse};
+        if (frozen) band.tint = {0.86f, 0.93f, 1.0f, 0.93f};  // frozen still: a curtain of ice
         add(list, MeshId::FallsBand, band);
       }
       const Vec2 lat{-o.z, o.x};
       const Vec2 foot = along2(west.falls, o, rules::kFallsLanding);
-      for (int i = 0; i < 7; ++i) {  // foam
+      for (int i = 0; i < (frozen ? 0 : 7); ++i) {  // foam (none on the ice)
         const float t = std::fmod(time * 0.7f + static_cast<float>(i) / 7, 1.0f);
         const Vec2 p = along2(along2(foot, lat, (static_cast<float>(i) - 3.0f) * 0.55f), o, 0.9f * t);
         Instance puff;
@@ -1319,7 +1326,7 @@ void add_west_effects(const World& w, float time, DrawList& list) {
         puff.tint = {0.95f, 0.98f, 1.0f, 0.55f * (1 - t)};
         add(list, MeshId::Smoke, puff);
       }
-      for (int i = 0; i < 8; ++i) {  // spray
+      for (int i = 0; i < (frozen ? 0 : 8); ++i) {  // spray
         const float t = std::fmod(time * 1.3f + static_cast<float>(i) / 8, 1.0f);
         const float a = static_cast<float>(i) * 2.4f;
         const Vec2 p = along2(along2(foot, lat, std::cos(a) * (0.5f + 1.4f * t)), o, std::fabs(std::sin(a)) * 0.8f * t);
@@ -1389,13 +1396,15 @@ void add_west_effects(const World& w, float time, DrawList& list) {
 
 }  // namespace
 
-void build_dynamic(const World& w, float time, DrawList& list, int selected, const Frustum* view) {
+void build_dynamic(const World& w, float time, DrawList& list, int selected, const Frustum* view, const View* look) {
   list.batches.resize(kMeshCount);
   for (auto& batch : list.batches) batch.clear();
 
   add_characters(w, time, list, view);
-  add_village_effects(w, time, list);
-  add_west_effects(w, time, list);
+  const float wind = look ? look->wind : 0.0f;
+  const bool frozen = look && look->season.ice > 0.5f;
+  add_village_effects(w, time, list, wind);
+  add_west_effects(w, time, list, frozen);
   add_teleporter_effects(w, time, list);
 
   // A golden ring, gently pulsing, at the feet of the selected creature.

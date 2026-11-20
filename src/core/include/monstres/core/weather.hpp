@@ -7,7 +7,7 @@
 namespace monstres {
 
 // The weather: what the sky does, everywhere and all the time, for the
-// eyes only for now (no effect on battles or monsters, no seasons).
+// eyes only for now (no effect on battles or monsters).
 //
 // It is a field over the land and the continent: big cells (kCellSize
 // meters) each with its kind of weather for a while (kSlotSeconds), all
@@ -31,6 +31,15 @@ struct Weather {
   float wind = 0;
   bool operator==(const Weather&) const = default;
 };
+
+// The seasons (chosen in the menu for now; for the eyes only): what the
+// land looks like (render: SeasonLook), and what falls from the sky: snow
+// instead of rain in winter, rain instead of snow the rest of the year.
+enum class Season : uint8_t { Spring, Summer, Autumn, Winter, Count };
+inline constexpr int kSeasons = static_cast<int>(Season::Count);
+const char* season_name(Season season);
+// The weather of a kind in a season (rain turns to snow in winter, snow to rain otherwise).
+WeatherKind in_season(WeatherKind kind, Season season);
 
 // A kind of weather at its strongest.
 Weather weather_of(WeatherKind kind);
@@ -59,6 +68,7 @@ Vec2 wind_velocity(uint64_t seed);
 struct WeatherField {
   uint64_t seed = 0;
   uint64_t tick = 0;
+  Season season = Season::Summer;  // what falls: rain or snow
   // Debug: the weather `forced` (strength forced_amount, 0: none) within
   // kForcedRadius of `center`; with `afar`, a storm at `afar_at`.
   Weather forced;

@@ -37,14 +37,14 @@ constexpr uint64_t kSalt = 0x5745415448455221ULL;  // "WEATHER!"
 constexpr int kOdds[kWeatherKinds] = {28, 27, 12, 12, 6, 7, 8};
 static_assert(kOdds[0] + kOdds[1] + kOdds[2] + kOdds[3] + kOdds[4] + kOdds[5] + kOdds[6] == 100);
 
-WeatherKind cell_kind(uint64_t seed, int64_t i, int64_t j, int64_t slot) {
+WeatherKind cell_kind(uint64_t seed, int64_t i, int64_t j, int64_t slot, Season season) {
   const float h = hash01(seed ^ kSalt, static_cast<uint64_t>(i), static_cast<uint64_t>(j), static_cast<uint64_t>(slot));
   // The first while of a world is fine weather everywhere (a new game starts in the sun).
   if (slot == 0) return h < 0.6f ? WeatherKind::Clear : WeatherKind::FewClouds;
   float sum = 0;
   for (int k = 0; k < kWeatherKinds; ++k) {
     sum += static_cast<float>(kOdds[k]) / 100.0f;
-    if (h < sum) return static_cast<WeatherKind>(k);
+    if (h < sum) return in_season(static_cast<WeatherKind>(k), season);
   }
   return WeatherKind::Clear;
 }
@@ -89,6 +89,19 @@ WeatherKind kind_of(const Weather& w) {
   return best;
 }
 
+const char* season_name(Season season) {
+  static const char* kNames[] = {"spring", "summer", "autumn", "winter"};
+  static_assert(std::size(kNames) == kSeasons);
+  const auto i = static_cast<size_t>(season);
+  return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+WeatherKind in_season(WeatherKind kind, Season season) {
+  if (season == Season::Winter && kind == WeatherKind::Rain) return WeatherKind::Snow;
+  if (season != Season::Winter && kind == WeatherKind::Snow) return WeatherKind::Rain;
+  return kind;
+}
+
 const char* weather_name(WeatherKind kind) {
   static const char* kNames[] = {"clear", "fewClouds", "overcast", "rain", "storm", "fog", "snow"};
   static_assert(std::size(kNames) == kWeatherKinds);
@@ -114,7 +127,7 @@ Weather WeatherField::natural(float x, float z) const {
   const float into = static_cast<float>(t - static_cast<double>(slot) * kSlotSeconds);
   const float next = smooth((into - (kSlotSeconds - kChangeSeconds)) / kChangeSeconds);
   const auto at_slot = [&](int64_t s) {
-    const auto cell = [&](int64_t a, int64_t b) { return weather_of(cell_kind(seed, a, b, s)); };
+    const auto cell = [&](int64_t a, int64_t b) { return weather_of(cell_kind(seed, a, b, s, season)); };
     return mix(mix(cell(i, j), cell(i + 1, j), wx), mix(cell(i, j + 1), cell(i + 1, j + 1), wx), wz);
   };
   const Weather now = at_slot(slot);

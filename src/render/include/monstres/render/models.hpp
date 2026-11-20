@@ -68,6 +68,9 @@ enum class MeshId : size_t {
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar,
   GrassShortFar, GrassTallFar, FlowerFar,
+  // The seasons: the tree in winter (near; at a middle distance and afar),
+  // fallen leaves on the ground, leaves blown around the camera (weather_view.hpp).
+  TreeBare, TreeBareFar, LeafLitter, Leaves,
   IconQuestion, IconExclaim, IconPlus, IconCross,  // over villagers (npc_marks)
   IconBolt, IconCoin, IconFarm,  // over aggressive monsters; the merchant, the farm (npc_marks)
   Ground,  // built at runtime
@@ -102,14 +105,14 @@ inline MeshGroup mesh_group(MeshId id) {
     case MeshId::Lava: case MeshId::InteriorShell:
       return MeshGroup::Terrain;
     case MeshId::GrassShort: case MeshId::GrassTall: case MeshId::Flower:
-    case MeshId::GrassShortFar: case MeshId::GrassTallFar: case MeshId::FlowerFar:
+    case MeshId::GrassShortFar: case MeshId::GrassTallFar: case MeshId::FlowerFar: case MeshId::LeafLitter:
       return MeshGroup::Vegetation;
     case MeshId::Cloud0: case MeshId::Cloud1: case MeshId::Cloud2: case MeshId::Mountain0: case MeshId::Mountain1:
     case MeshId::CloudLow0: case MeshId::CloudLow1: case MeshId::CloudLow2: case MeshId::RainShaft: case MeshId::Bolt:
       return MeshGroup::Sky;
     case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::RuneCircle:
     case MeshId::DoorGlow: case MeshId::Gust: case MeshId::FallsBand:
-    case MeshId::Rain: case MeshId::Snow:
+    case MeshId::Rain: case MeshId::Snow: case MeshId::Leaves:
       return MeshGroup::Effects;
     default: break;
   }

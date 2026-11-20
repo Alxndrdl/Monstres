@@ -1068,7 +1068,17 @@
       <output id="weather-value" for="weather">Naturelle</output>
       <input id="weather" type="range" min="0" max="8" step="1" value="0">
     </div>
-    <p class="note">Une heure de jeu dure une minute : une journée, 24 minutes. La météo choisie vaut autour de toi ; « orage au loin » en met un droit devant.</p>
+    <div class="slider-field">
+      <label for="season">Saison</label>
+      <output id="season-value" for="season">Été</output>
+      <input id="season" type="range" min="0" max="3" step="1" value="1">
+    </div>
+    <div class="slider-field">
+      <label for="wind">Vent</label>
+      <output id="wind-value" for="wind">Naturel</output>
+      <input id="wind" type="range" min="0" max="5" step="1" value="0">
+    </div>
+    <p class="note">Une heure de jeu dure une minute : une journée, 24 minutes. La météo choisie vaut autour de toi ; « orage au loin » en met un droit devant. En hiver il neige au lieu de pleuvoir ; le reste de l’année, il pleut au lieu de neiger. Saison et vent sont gardés d’une visite à l’autre.</p>
     <h3>Rendu (essai)</h3>
     <label><input id="render-shading" class="render-option" data-bit="1" type="checkbox"> Deferred shading complet (sans antialiasing)</label>
     <p class="note">À comparer avec « Détail du temps de calcul » (temps GPU, FPS), de nuit près des lanternes.</p>

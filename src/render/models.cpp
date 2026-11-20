@@ -41,6 +41,7 @@ constexpr const char* kNames[kMeshCount] = {
     "lighthouse", "lighthouse_lamp", "menhir", "meteorite",
     "tree_far", "pine_far", "tree_mid", "bush_far",
     "grass_short_far", "grass_tall_far", "flower_far",
+    "tree_bare", "tree_bare_far", "leaf_litter", "leaves",
     "icon_question", "icon_exclaim", "icon_plus", "icon_cross", "icon_bolt", "icon_coin", "icon_farm",
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "shadow", "ripple", "smoke", "sparkle", "gust", "door_glow",
     "rune_circle", "falls_band",

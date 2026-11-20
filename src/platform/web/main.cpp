@@ -121,6 +121,15 @@ struct App {
   Weather forced_now;
   float forced_amount = 0;
   Vec2 afar_at;
+  // The season (settings menu, remembered by the page): how it looks now,
+  // blending into the one chosen in a moment (at once when frozen); the
+  // landscape is built again for it (landscape_season: what it was built for).
+  Season season = Season::Summer;
+  SeasonLook season_look;
+  Season landscape_season = Season::Summer;
+  // The wind (settings menu): -1 the weather's own, else 0..1; what blows now.
+  float wind_choice = -1;
+  float wind_now = 0;
   Profile profile;
   bool paused = false;           // a game menu is open: time stands still
   std::vector<uint8_t> portrait; // last portrait drawn for the page (RGBA)
@@ -231,6 +240,7 @@ WeatherField weather_field(const App& app) {
   WeatherField f;
   f.seed = app.world.seed;
   f.tick = app.world.tick;
+  f.season = app.season;
   f.center = {app.world.player.pos.x, app.world.player.pos.z};
   f.forced = app.forced_now;
   f.forced_amount = app.forced_amount;
@@ -253,6 +263,33 @@ void follow_weather_choice(App& app, double dt_ms) {
   if (app.forced_amount < 0.002f && target == 0) app.forced_amount = 0;
 }
 
+static_assert(SeasonLook{}.sea_level == rules::kSeaLevel);
+
+// The season and the wind as they look now: towards what is chosen, in a
+// second (at once when frozen); a snowfall leaves some snow out of winter.
+void follow_season(App& app, double dt_ms, const WeatherField& weather, float natural_wind) {
+  SeasonLook goal;
+  goal.spring = app.season == Season::Spring ? 1.0f : 0.0f;
+  goal.autumn = app.season == Season::Autumn ? 1.0f : 0.0f;
+  goal.winter = app.season == Season::Winter ? 1.0f : 0.0f;
+  goal.ice = goal.winter;
+  const Weather here = weather.at(app.world.player.pos.x, app.world.player.pos.z);
+  goal.snow = std::max(goal.winter, 0.55f * here.snow);
+  const float k = app.frozen ? 1.0f : static_cast<float>(std::min(1.0, dt_ms / 1000.0));
+  SeasonLook& now = app.season_look;
+  const auto toward = [k](float& v, float to) { v += (to - v) * k; if (std::fabs(to - v) < 1e-3f) v = to; };
+  const SeasonLook before = now;
+  toward(now.spring, goal.spring);
+  toward(now.autumn, goal.autumn);
+  toward(now.winter, goal.winter);
+  toward(now.snow, goal.snow);
+  toward(now.ice, goal.ice);
+  const float wind = app.wind_choice >= 0 ? app.wind_choice : natural_wind;
+  const float wind_before = app.wind_now;
+  toward(app.wind_now, wind);
+  if (!(now == before) || app.wind_now != wind_before) app.redraw = true;
+}
+
 constexpr double kBackgroundMs = 2.0;  // each frame, at most this long building ahead (tiles, chunks)
 
 // The detailed ground and landscape follow the player: built ahead of time,
@@ -263,7 +300,12 @@ bool update_landscape(App& app, bool all_now = false) {
   const double start = emscripten_get_now();
   const double budget = all_now ? 1e9 : kBackgroundMs;
   int prepared = 0;
-  const bool rebuilt = follow_player(w, app.landscape, app.landscape_cache, app.landscape_center, budget, all_now, &prepared);
+  if (app.landscape_season != app.season) {  // another season: built again now
+    app.landscape_season = app.season;
+    app.landscape_center = {1e9f, 1e9f};
+  }
+  const bool rebuilt = follow_player(w, app.landscape, app.landscape_cache, app.landscape_center, budget, all_now,
+                                     &prepared, app.season);
   if (rebuilt) app.redraw = true;
   if (app.profile.on) app.profile.chunks_prepared += prepared;
   const double left = std::max(0.2, budget - (emscripten_get_now() - start));
@@ -582,6 +624,11 @@ void frame(void* user) {
   const WeatherField weather = weather_field(app);
   // Inside: no weather, no landscape, nothing far away; the interior.
   const float flash = in ? 0.0f : apply_weather(view, weather);
+  follow_season(app, dt, weather, view.wind);
+  if (!in) {
+    view.season = app.season_look;
+    view.wind = app.wind_now;
+  }
   // Only what the camera can see (cull.hpp).
   const Frustum in_front = frustum_of(view.view_projection);
   if (!in) {
@@ -590,7 +637,7 @@ void frame(void* user) {
     cull_list(app.far_landscape, frustum_of(view.far_view_projection));
   }
   measure(kView);
-  build_dynamic(app.world, time, app.dynamic, app.selected, &in_front);
+  build_dynamic(app.world, time, app.dynamic, app.selected, &in_front, &view);
   if (!in) {
     build_far_dynamic(app.world, time, app.far_dynamic);
     build_weather(weather, view, flash, time, app.far_dynamic, app.dynamic);
@@ -753,6 +800,21 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_weather(int choice) {
   app.redraw = true;
 }
 
+// Settings menu: the season (0 spring, 1 summer, 2 autumn, 3 winter).
+EMSCRIPTEN_KEEPALIVE void monstres_set_season(int season) {
+  if (season < 0 || season >= kSeasons) return;
+  App& app = *g_app;
+  app.season = static_cast<Season>(season);
+  app.redraw = true;
+}
+
+// Settings menu: the wind, 0 (calm) .. 1 (a gale); below 0, the weather's own.
+EMSCRIPTEN_KEEPALIVE void monstres_set_wind(float wind) {
+  if (!std::isfinite(wind)) return;
+  g_app->wind_choice = wind < 0 ? -1.0f : std::min(wind, 1.0f);
+  g_app->redraw = true;
+}
+
 EMSCRIPTEN_KEEPALIVE void monstres_hold_hour(int hold) {
   g_app->hold_clock = hold != 0;
   g_app->held_clock = g_app->world.clock;
@@ -776,14 +838,16 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_state_json() {
   const WeatherField field = weather_field(*g_app);
   const Weather w = field.at(g_app->world.player.pos.x, g_app->world.player.pos.z);
   const Lightning bolt = lightning_at(field, g_app->world.player.pos.x, g_app->world.player.pos.z);
-  char weather[384];
+  char weather[512];
   std::snprintf(weather, sizeof weather,
                 "\"weather\":{\"kind\":\"%s\",\"choice\":%d,\"cover\":%.3f,\"dark\":%.3f,\"rain\":%.3f,"
-                "\"snow\":%.3f,\"fog\":%.3f,\"storm\":%.3f,\"wind\":%.3f,\"bolt\":%s}}",
+                "\"snow\":%.3f,\"fog\":%.3f,\"storm\":%.3f,\"wind\":%.3f,\"bolt\":%s},"
+                "\"season\":\"%s\",\"wind\":{\"now\":%.3f,\"choice\":%.3f}}",
                 weather_name(kind_of(w)), g_app->weather_choice, static_cast<double>(w.cover),
                 static_cast<double>(w.dark), static_cast<double>(w.rain), static_cast<double>(w.snow),
                 static_cast<double>(w.fog), static_cast<double>(w.storm), static_cast<double>(w.wind),
-                bolt.on ? "true" : "false");
+                bolt.on ? "true" : "false", season_name(g_app->season), static_cast<double>(g_app->wind_now),
+                static_cast<double>(g_app->wind_choice));
   g_app->json = json + camera + arrival + weather;
   return g_app->json.c_str();
 }

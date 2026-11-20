@@ -498,7 +498,7 @@ int LandscapeCache::prepare(const World& w, Vec2 at, double budget_ms) {
 
 // ---- Building ------------------------------------------------------------------------
 
-void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache& cache) {
+void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache& cache, Season season) {
   using landscape::kBins;
   cache.check_world(w);
   list.batches.assign(kMeshCount, {});
@@ -506,6 +506,7 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
   list.mesh_parts.clear();
   list.visible.clear();
   list.cached = true;
+  list.seasonal = true;
   ++list.version;
   auto& bins = cache.bins_;
   auto& bounds = cache.bin_bounds_;
@@ -524,6 +525,34 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
     const size_t k = static_cast<size_t>(mesh) * kBins + static_cast<size_t>(bin);
     bins[k].push_back(in);
     bounds[k].add(instance_bounds(mesh, in));
+  };
+
+  // The season: which model of a tree, and what grows or lies in the grass.
+  const bool winter = season == Season::Winter, autumn = season == Season::Autumn, spring = season == Season::Spring;
+  const auto in_season = [&](MeshId mesh) {
+    if (!winter) return mesh;
+    switch (mesh) {
+      case MeshId::Tree:
+      case MeshId::FruitTree: return MeshId::TreeBare;
+      case MeshId::TreeMid:
+      case MeshId::TreeFar: return MeshId::TreeBareFar;
+      default: return mesh;
+    }
+  };
+  const auto chance = [&](float x, float z, uint64_t salt) {
+    return rand01(w.seed ^ salt, static_cast<uint64_t>(std::lround(x * 16.0f) + (1 << 20)),
+                  static_cast<uint64_t>(std::lround(z * 16.0f) + (1 << 20)));
+  };
+  // Fallen leaves lying at (x, z), on the slope of the ground.
+  const auto litter = [&](float x, float z, float size, uint64_t salt) {
+    Instance in;
+    in.x = x;
+    in.z = z;
+    in.y = w.ground.height(x, z);
+    in.rotation = ground_tilt(w, x, z) * quat_yaw(kTau * chance(x, z, salt + 1));
+    in.sx = in.sz = size;
+    in.material = kFadeNear;
+    emit(MeshId::LeafLitter, in);
   };
 
   constexpr float near2 = landscape::kDetailRadius * landscape::kDetailRadius;
@@ -546,8 +575,30 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
         if (item.nature && d2 > reach2) continue;  // too far: not drawn (the buildings are, everywhere)
         const bool near = d2 < near2;
         if (!near && item.small) continue;
-        emit(near ? (d2 < full2 ? item.full : item.mid) : item.far, item.instance);
-        if (near && item.has_shadow) emit(MeshId::Shadow, item.shadow);
+        const bool leafy = item.full == MeshId::Tree || item.full == MeshId::FruitTree || item.full == MeshId::Bush;
+        if (!winter || !leafy || item.full == MeshId::Bush) {
+          emit(near ? (d2 < full2 ? item.full : item.mid) : item.far, item.instance);
+          if (near && item.has_shadow) emit(MeshId::Shadow, item.shadow);
+        } else {  // bare: the fruit tree as a smaller tree, a fainter shadow
+          Instance in = item.instance;
+          if (item.full == MeshId::FruitTree) in.sx = in.sy = in.sz = in.sx * 0.72f;
+          emit(in_season(near ? (d2 < full2 ? item.full : item.mid) : item.far), in);
+          if (near && item.has_shadow) {
+            Instance shade = item.shadow;
+            shade.tint.a *= 0.45f;
+            emit(MeshId::Shadow, shade);
+          }
+        }
+        if (autumn && leafy && d2 < grass2) {  // their leaves on the ground around them
+          const float spread = item.instance.sx * (item.full == MeshId::Bush ? 0.9f : 1.5f);
+          const int patches = item.full == MeshId::Bush ? 1 : 3;
+          for (int k = 0; k < patches; ++k) {
+            const float a = kTau * chance(item.x, item.z, 0x1EAF0ULL + static_cast<uint64_t>(k));
+            const float out = spread * std::sqrt(chance(item.x, item.z, 0x1EAF8ULL + static_cast<uint64_t>(k)));
+            litter(item.x + out * std::cos(a), item.z + out * std::sin(a),
+                   0.8f + 0.5f * chance(item.x, item.z, 0x1EB00ULL + static_cast<uint64_t>(k)), 0x1EB10ULL + static_cast<uint64_t>(k));
+          }
+        }
       }
       if (!grass) continue;
       for (const LandscapeCache::Grass& g : c.grass) {
@@ -561,12 +612,27 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
                                 : 1.0f - (1.0f - landscape::kGrassThinLeast) * (d - landscape::kGrassThinStart) /
                                              (landscape::kGrassRadius - landscape::kGrassThinStart);
         if (g.keep >= share) continue;
-        const MeshId mesh = d <= landscape::kGrassFullRadius ? g.mesh : simpler_grass(g.mesh);
+        // The season: no flowers in winter, less grass and lower (under the
+        // snow); fewer flowers in autumn, a few leaves; more flowers in spring.
+        MeshId kind = g.mesh;
+        Instance in = g.instance;
+        const float roll = chance(in.x, in.z, 0x5EA50ULL);
+        if (winter) {
+          if (kind == MeshId::Flower || roll > 0.4f) continue;
+          in.sy *= kind == MeshId::GrassTall ? 0.65f : 0.7f;
+        } else if (autumn) {
+          if (kind == MeshId::Flower && roll > 0.3f) continue;
+          if (kind == MeshId::GrassShort && roll > 0.975f) litter(in.x, in.z, 0.6f + 0.4f * chance(in.x, in.z, 3), 0x1EB20ULL);
+        } else if (spring && kind == MeshId::GrassShort && roll < 0.14f) {
+          kind = MeshId::Flower;
+          in.sx = in.sy = in.sz = 0.8f + 0.5f * chance(in.x, in.z, 4);
+          in.tint = kFlowerColors[static_cast<size_t>(chance(in.x, in.z, 5) * 5) % 5];
+        }
+        const MeshId mesh = d <= landscape::kGrassFullRadius ? kind : simpler_grass(kind);
         if (share >= 1.0f) {
-          emit(mesh, g.instance);
+          emit(mesh, in);
           continue;
         }
-        Instance in = g.instance;
         const float widen = std::sqrt(1.0f / share);
         in.sx *= widen;
         in.sz *= widen;
@@ -588,7 +654,7 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
 }
 
 bool follow_player(const World& w, DrawList& list, LandscapeCache& cache, Vec2& built, double budget_ms, bool all_now,
-                   int* prepared) {
+                   int* prepared, Season season) {
   const Vec2 player{w.player.pos.x, w.player.pos.z};
   const Vec2 center = landscape_center(player.x, player.z);
   int n = 0;
@@ -599,20 +665,20 @@ bool follow_player(const World& w, DrawList& list, LandscapeCache& cache, Vec2& 
     n = cache.prepare(w, center, budget_ms);  // a little longer: its chunks first
   } else {
     built = center;
-    build_landscape(w, list, center, cache);  // what is still missing is computed now
+    build_landscape(w, list, center, cache, season);  // what is still missing is computed now
     rebuilt = true;
   }
   if (prepared) *prepared += n;
   return rebuilt;
 }
 
-void build_landscape(const World& w, DrawList& list, Vec2 center) {
+void build_landscape(const World& w, DrawList& list, Vec2 center, Season season) {
   LandscapeCache cache;
-  build_landscape(w, list, center, cache);
+  build_landscape(w, list, center, cache, season);
 }
 
-void build_landscape(const World& w, DrawList& list) {
-  build_landscape(w, list, landscape_center(w.player.pos.x, w.player.pos.z));
+void build_landscape(const World& w, DrawList& list, Season season) {
+  build_landscape(w, list, landscape_center(w.player.pos.x, w.player.pos.z), season);
 }
 
 // One object inside (interior.hpp), with its shadow: as in the landscape,

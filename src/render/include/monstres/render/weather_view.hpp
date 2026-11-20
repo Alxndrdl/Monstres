@@ -20,6 +20,8 @@ inline constexpr float kRainTile = 8, kRainHeight = 12;  // the rain and snow mo
 inline constexpr float kSnowTile = 6, kSnowHeight = 8;
 inline constexpr float kRainFall = 9.0f, kSnowFall = 1.1f;  // m/s
 inline constexpr int kRainTiles = 5, kSnowTiles = 6;  // a side, around the camera
+inline constexpr float kLeafTile = 6, kLeafHeight = 6, kLeafFall = 0.8f;  // leaves blown about (make_models.py: leaves)
+inline constexpr int kLeafTiles = 6;
 inline constexpr float kCloudSpacing = 200;   // meters between two clouds (when the sky is full)
 inline constexpr float kCloudReach = 3400;    // clouds up to this far from the camera
 inline constexpr float kCloudLowFrom = 700;   // simpler clouds beyond
@@ -33,7 +35,9 @@ inline constexpr float kCloudBase = 150, kCloudTop = 220;  // heights of the clo
 float apply_weather(View& view, const WeatherField& field);
 
 // Clouds, rain curtains and lightning (added to the far list), rain or snow
-// around the camera (added to the near list), for a view after apply_weather.
+// around the camera (added to the near list), for a view after apply_weather;
+// with its season (View::season) and wind, leaves blown about in autumn,
+// petals in spring.
 // `flash`: what apply_weather returned. `time`: seconds of the game.
 void build_weather(const WeatherField& field, const View& view, float flash, float time, DrawList& far_list,
                    DrawList& near_list);

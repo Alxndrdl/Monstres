@@ -13,10 +13,11 @@ namespace {
 
 constexpr uint64_t kMinute = 60ULL * rules::kTicksPerSecond;
 
-WeatherField field_at(uint64_t seed, uint64_t tick) {
+WeatherField field_at(uint64_t seed, uint64_t tick, Season season = Season::Summer) {
   WeatherField f;
   f.seed = seed;
   f.tick = tick;
+  f.season = season;
   return f;
 }
 
@@ -93,7 +94,17 @@ TEST_CASE("the weather differs from place to place, changes slowly, and every ki
     for (float z = -6000; z <= 6000; z += 400) here_and_now.insert(kind_of(f.at(x, z)));
   }
   CHECK(here_and_now.size() >= 4);  // rain over there, sun here...
-  for (uint64_t minute = 6; minute < 600; minute += 3) seen.insert(kind_of(field_at(3, minute * kMinute).at(0, 0)));
+  // Every kind in its season: snow in winter, rain the rest of the year.
+  for (const Season season : {Season::Summer, Season::Winter}) {
+    std::set<WeatherKind> in_season;
+    for (uint64_t minute = 6; minute < 600; minute += 3) {
+      const WeatherKind k = kind_of(field_at(3, minute * kMinute, season).at(0, 0));
+      seen.insert(k);
+      in_season.insert(k);
+    }
+    CHECK(in_season.count(WeatherKind::Snow) == (season == Season::Winter ? 1u : 0u));
+    CHECK(in_season.count(WeatherKind::Rain) == (season == Season::Winter ? 0u : 1u));
+  }
   CHECK(seen.size() == static_cast<size_t>(kWeatherKinds));
   // Small steps, small changes: no jump from a place or a second to the next.
   for (float x = -2000; x <= 2000; x += 37) {

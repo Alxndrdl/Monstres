@@ -1,5 +1,6 @@
 #pragma once
 
+#include "monstres/core/weather.hpp"
 #include "monstres/core/world.hpp"
 #include "monstres/render/models.hpp"
 #include "monstres/render/renderer.hpp"
@@ -113,7 +114,7 @@ public:
   const Chunk& chunk(const World& world, int cx, int cz, bool grass);
 
 private:
-  friend void build_landscape(const World& world, DrawList& list, Vec2 center, LandscapeCache& cache);
+  friend void build_landscape(const World& world, DrawList& list, Vec2 center, LandscapeCache& cache, Season season);
   void check_world(const World& world);
   uint64_t seed_ = ~0ULL;
   size_t object_count_ = 0;
@@ -129,9 +130,13 @@ private:
 // everywhere; sorted by sectors around the center, each one a part of
 // every batch (DrawList::parts), for culling. Rebuild it when the world
 // changes or the center moves. Without a cache, everything is computed.
-void build_landscape(const World& world, DrawList& list, Vec2 center, LandscapeCache& cache);
-void build_landscape(const World& world, DrawList& list, Vec2 center);
-void build_landscape(const World& world, DrawList& list);
+// In its season: the trees bare in winter (no flowers, less grass), fallen
+// leaves in autumn (under the trees, a few in the meadows; fewer flowers),
+// more flowers in spring (the colors themselves: SeasonLook, in the shaders).
+void build_landscape(const World& world, DrawList& list, Vec2 center, LandscapeCache& cache,
+                     Season season = Season::Summer);
+void build_landscape(const World& world, DrawList& list, Vec2 center, Season season = Season::Summer);
+void build_landscape(const World& world, DrawList& list, Season season = Season::Summer);
 
 // One frame of the landscape following the player: rebuilt around its new
 // center when the chunks are ready (or right away, see landscape_can_wait),
@@ -139,7 +144,7 @@ void build_landscape(const World& world, DrawList& list);
 // of the landscape in `list` ({1e9, 1e9} at first). `all_now`: no waiting
 // (a new world, pictures). True when rebuilt; `prepared` counts the chunks computed.
 bool follow_player(const World& world, DrawList& list, LandscapeCache& cache, Vec2& built, double budget_ms,
-                   bool all_now = false, int* prepared = nullptr);
+                   bool all_now = false, int* prepared = nullptr, Season season = Season::Summer);
 
 // One object of an interior (interior.hpp) into `list`, with its shadow.
 void add_interior_object(const World& world, const Object& object, DrawList& list);

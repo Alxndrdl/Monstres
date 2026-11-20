@@ -132,6 +132,14 @@ Color ground_color(const World& w, float x, float z) {
   const float coast = smooth(rules::kSeaLevel + 1.5f, rules::kSeaLevel + 0.2f, w.ground.land_height(x, z));
   c = lerp(c, kSand, smooth(rules::kSeaLevel + 3.0f, rules::kSeaLevel + 0.8f, h) * coast);
   c = lerp(c, kLakeBed, smooth(rules::kSeaLevel, rules::kSeaLevel - 2.5f, h) * coast);
+  // Under water (the sea, the lake, the river): no snow on it in winter (kUnderWaterAlpha).
+  bool wet = coast > 0.5f && h < rules::kSeaLevel - 0.05f;
+  if (w.village.lake.radius_x > 0) wet = wet || lake_depth_factor(w.village.lake, x, z) > 0.0f;
+  if (w.west.valid() && distance_to_stream(w.west.stream, x, z, 16.0f) < 16.0f) {
+    float level = 0, width = 0;
+    wet = wet || (river_surface(w.west, x, z, h, 16.0f, level, width) < 16.0f && h < level - 0.05f);
+  }
+  if (wet) c.a = kUnderWaterAlpha;
   return c;
 }
 
@@ -175,13 +183,14 @@ std::vector<TileKey> detailed_tiles(float x, float z) {
 
 namespace {
 
+// The alpha: 1, or kUnderWaterAlpha (never 0: an empty slot of GroundColors).
 uint32_t pack(Color c) {
   const auto byte = [](float v) { return static_cast<uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
-  return byte(c.r) | (byte(c.g) << 8) | (byte(c.b) << 16) | (255u << 24);
+  return byte(c.r) | (byte(c.g) << 8) | (byte(c.b) << 16) | ((c.a < 1.0f ? 253u : 255u) << 24);
 }
 Color unpack(uint32_t p) {
   return {static_cast<float>(p & 255u) / 255.0f, static_cast<float>((p >> 8) & 255u) / 255.0f,
-          static_cast<float>((p >> 16) & 255u) / 255.0f, 1};
+          static_cast<float>((p >> 16) & 255u) / 255.0f, (p >> 24) == 255u ? 1.0f : kUnderWaterAlpha};
 }
 
 // Appends a square of n x n cells of `cell` meters from (x0, z0), on the
@@ -410,6 +419,7 @@ void GroundTiles::fill_list(DrawList& list, const std::vector<Part>& path_parts,
   list.visible.clear();
   list.cached = true;
   list.far = false;
+  list.seasonal = true;
   ++list.version;
   Instance solid;
   solid.material = kSolid;  // the ground never shows through (View::fade_*)
