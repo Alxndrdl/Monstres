@@ -243,7 +243,8 @@ window.monstres = {
   profile: () => JSON.parse(UTF8ToString(_monstres_profile_json())),
   // Settings menu: lower the resolution when frames are slow (on by default).
   setAdaptiveResolution: (on) => _monstres_set_adaptive_resolution(on ? 1 : 0),
-  // Settings menu, debug: forward or deferred shading, to compare (bit 1: deferred shading).
+  // Settings menu, debug: forward or deferred shading, to compare (bit 1: deferred shading;
+  // bit 2: with it, up to 64 lights instead of the 12 nearest).
   setRenderOptions: (bits) => _monstres_set_render_options(bits),
 
   // Game menus (web/menu.js).

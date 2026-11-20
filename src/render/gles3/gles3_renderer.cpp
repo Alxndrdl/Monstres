@@ -979,7 +979,8 @@ public:
       set_g(lights_);
       glUniform1f(lights_.inverse_scale, 1.0f / light_buffer_scale_);
       glEnable(GL_SCISSOR_TEST);
-      for (size_t i = 0; i < light_count_; ++i) {
+      const size_t lights = options_.many_lights ? std::min(view.light_count, kMaxDeferredLights) : light_count_;
+      for (size_t i = 0; i < lights; ++i) {
         const PointLight& l = view.lights[i];
         PixelRect r;
         if (!light_rect(view.view_projection, l, light_w_, light_h_, r)) continue;

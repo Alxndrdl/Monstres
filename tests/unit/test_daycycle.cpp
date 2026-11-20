@@ -82,4 +82,12 @@ TEST_CASE("at night the lanterns, the staff and glowing monsters give light") {
   CHECK(world_lights(one, 0, 0, 1, 0, lights) == 2);  // the staff, the slime
   one.creatures[0].genes.allele[3] = 0;
   CHECK(world_lights(one, 0, 0, 1, 0, lights) == 1);
+
+  // As many as asked for (deferred shading takes more), the same nearest first.
+  PointLight more[kMaxDeferredLights];
+  const size_t many = world_lights(w, w.village.center.x, w.village.center.z, 1, 0, more, kMaxDeferredLights);
+  CHECK(many >= n);
+  CHECK(many <= kMaxDeferredLights);
+  CHECK(world_lights(w, w.village.center.x, w.village.center.z, 1, 0, lights, 4) == std::min<size_t>(n, 4));
+  for (size_t i = 0; i < std::min<size_t>(n, 4); ++i) CHECK(more[i].x == lights[i].x);
 }

@@ -293,6 +293,8 @@ window.MonstresLore = {
     wayOut: { name: 'Fil d’Ariane', text: 'Dans une grotte ou un bâtiment, pendant 1 minute, la lumière de ton bâton ' +
       'montre le chemin vers l’entrée par laquelle tu es venu : elle suit les tunnels et contourne les parois, ' +
       'pas juste la direction de la sortie. Gratuit.' },
+    home: { name: 'Retour', text: 'Ta magie te ramène aussitôt à l’exploitation de Capucine, ton monstre avec toi, ' +
+      'même du fond d’une grotte ou d’un bâtiment. Gratuit, mais une fois toutes les 5 minutes.' },
     // The capture spells (during a capture: the circle of runes).
     replay: { name: 'Écho', text: 'Les runes de la série se rallument dans l’ordre : reprends-la depuis la première. ' +
       'Celles déjà validées ne font pas avancer la jauge une seconde fois.' },

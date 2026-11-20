@@ -495,7 +495,11 @@ Règles dans `src/core/west.hpp` / `west.cpp`, tirées de la graine
 - **La charrette d'Anselme**, renversée au bord de la route : ses trois
   ballots sont éparpillés autour. Les ramasser (en passant dessus), les lui
   rapporter : la charrette se redresse et il vend des potions de mana
-  (15 pièces). Récompense : 40 pièces, 2 potions, 40 XP / 25.
+  (15 pièces). Récompense : 40 pièces, 2 potions, 40 XP / 25. Pendant la
+  quête, à moins de 40 m de la charrette (`kGoodsGuideRange` ; les ballots
+  sont à 9 à 22 m), le compagnon sorti aide (voir la bergerie) : il se tient
+  vers le ballot le plus proche, puis vers la charrette quand tout est
+  ramassé. Anselme le dit en donnant la quête.
 - **L'exploitation de Capucine** : sa ferme (on y entre), la grange, le puits,
   un enclos où paissent les monstres qu'on y laisse, un verger de pommiers et
   des champs de blé et de choux, un téléporteur. Violette, la soigneuse, y
@@ -510,6 +514,12 @@ Règles dans `src/core/west.hpp` / `west.cpp`, tirées de la graine
   suivre le magicien ; entrés dans l'enclos, ils rejoignent le troupeau. Basile
   donne alors un Laini (niveau 5) : dans l'équipe, ou à l'exploitation si
   l'équipe est pleine (pas avant la pierre de transfert : il attend).
+  Pendant la quête, à moins de 100 m de l'enclos (`kLambGuideRange` ; les
+  agneaux errent à moins de 8 m de leur place, à 35 à 60 m de l'enclos), le
+  compagnon sorti ne suit plus derrière le magicien (Basile le dit) : il
+  se tient à 3 m de lui (`kCompanionGuideDistance`), vers l'agneau égaré le
+  plus proche (là où il attend, même pas encore apparu), puis vers l'enclos
+  quand tous suivent, et regarde dans cette direction (`companion_guide`).
 - **Le terrier** (on y entre) : des galeries basses creusées dans la terre,
   et des Taupi.
 - **Le bois de l'Ouest** : la cabane de Firmin le bûcheron (on y entre), le camp
@@ -637,6 +647,9 @@ laquelle il est entré (pas de carte de l'intérieur pour l'instant).
   l'entrée. Elle suit le chemin réel (tunnels, détours autour des parois et des
   rochers) : le sol de l'intérieur est quadrillé tous les 50 cm, chaque case
   sait à combien de pas elle est de la porte (`map_way_out`, `way_out`).
+- **Le compagnon montre la sortie** : dans une grotte ou le terrier, le
+  monstre sorti ne suit plus derrière le magicien mais se tient 3 m devant,
+  sur ce même chemin vers l'entrée (`way_out_ahead`, `companion_guide`).
 - **Le rendu** : dedans, ni terrain, ni paysage, ni ciel, ni météo : la
   coquille de l'intérieur (un seul maillage, `MeshId::InteriorShell`,
   `src/render/interior_mesh.cpp` : la surface de la grotte calculée sur une
@@ -1049,6 +1062,10 @@ de 5 par niveau du magicien (un nouveau niveau ajoute ces 5 points).
   les monstres très rares à moins de 50 m (une variante très rare, une forme
   chromatique ou élémentaire, un micro ou un alpha) ; il pulse, et s'il en sent
   un, une traînée de lumière dorée part vers le plus proche.
+- Retour (aventure, gratuit) : ramène aussitôt le magicien à l'exploitation
+  de Capucine (là où le ramène un combat perdu), même du fond d'une grotte ou
+  d'un bâtiment (il en sort d'abord) ; le compagnon sorti vient avec lui, à
+  ses côtés. Recharge 5 minutes (`go_home`).
 
 Les sorts choisis, le mana et la Détection en cours sont sauvegardés
 (sauvegarde v18).
@@ -1145,6 +1162,13 @@ transparents par-dessus comme d'habitude ; l'image est enfin copiée à
 l'écran. Sans antialiasing (WebGL2 ne lit pas les textures
 multi-échantillonnées) : contours crénelés, et les contours prennent un peu
 de la lumière voisine. Pas pour les portraits.
+
+Les lumières (lanternes, bâton, monstres lumineux, projectiles) sont triées
+de la plus proche à la plus lointaine. Le forward en dessine les 12 plus
+proches dans les shaders (`kMaxPointLights`). Avec le deferred, la case
+« Jusqu'à 64 lumières en deferred » (Paramètres → Debug, `many_lights`,
+bit 2) met dans le tampon de lumière toutes celles de la vue, jusqu'à 64
+(`kMaxDeferredLights`) ; les transparents gardent les 12 plus proches.
 
 ## Personnages et animations
 

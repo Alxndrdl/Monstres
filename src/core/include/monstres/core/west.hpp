@@ -80,6 +80,8 @@ inline constexpr uint32_t kWanderersAtOnce = 2;
 inline constexpr uint32_t kAggressiveWanderers = 35;  // percent of them
 inline constexpr float kGoodsReach = 1.4f;         // the merchant's bundles are picked up from this close
 inline constexpr float kLambFollow = 3.0f;         // a lost lamb follows the player from this close
+inline constexpr float kLambGuideRange = 100.0f;   // the companion shows the lambs this close to the pen (they stay closer)
+inline constexpr float kGoodsGuideRange = 40.0f;   // and the merchant's bundles this close to his cart (they lie closer)
 inline constexpr uint32_t kGoods = 3, kLambs = 3, kFlock = 5, kRaiders = 5, kBoardersShown = 8;
 inline constexpr uint16_t kPotionMana = 15;        // a mana potion gives back
 inline constexpr uint32_t kPotionPrice = 15;       // coins, at the merchant's
@@ -190,6 +192,17 @@ void west_step(World& world);
 // The battle with an aggressive monster was lost, or fled: the magician goes
 // back to the farm, the companion back into the crystal (battle.cpp).
 void rescue(World& world);
+// The Home spell (battle.cpp): back to the farm's rescue spot, out of a cave
+// or a building first; the companion comes along, beside the player.
+void go_home(World& world);
+// Where the companion helps the player look (step_companion goes
+// kCompanionGuideDistance that way instead of following behind): the
+// nearest lost lamb while the shepherd's quest is on and the player is
+// within rules::kLambGuideRange of the pen (once all are found, the pen),
+// the nearest of the merchant's bundles within rules::kGoodsGuideRange of
+// his cart (once all are found, the cart); in a cave or the burrow, the way
+// out. False: nothing to show.
+bool companion_guide(const World& world, Vec2& at);
 // A wind monster's throw (training) at (p): the mill's sails turn again if it
 // hits them (battle.cpp, the projectiles).
 bool push_sails(World& world, Vec3 p);

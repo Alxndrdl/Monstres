@@ -777,3 +777,155 @@ TEST_CASE("the water mill's wheel: Ploufis jammed it; beaten, it turns, and Math
   REQUIRE(loaded.has_value());
   CHECK(loaded->quests == w.quests);
 }
+
+TEST_CASE("the Home spell, free, once every 5 minutes: back to the farm, out of a cave too, the companion along") {
+  World w = cached_game(5);
+  REQUIRE(w.west.valid());
+  if (w.active < 0) step(w, command(Command::Summon, 0));
+  REQUIRE(w.active >= 0);
+  w.adventure_spells = {SpellId::Home, SpellId::None, SpellId::None, SpellId::None};
+  const Vec2 farm = farm_rescue_spot(w.west);
+  // Into the crystal cave, far from the farm.
+  const int mouth = kind_index(w, ObjectKind::CaveMouth);
+  REQUIRE(mouth >= 0);
+  const Object& o = w.objects[static_cast<size_t>(mouth)];
+  REQUIRE(enter_place(w, {PlaceKind::Cave, static_cast<uint32_t>(mouth)}));
+  REQUIRE(inside(w));
+  CHECK(o.kind == ObjectKind::CaveMouth);
+  REQUIRE(cannot_cast(w, 0) == nullptr);
+  const uint16_t mana = w.wizard.mana;
+  step(w, command(Command::Cast, 0));
+  CHECK_FALSE(inside(w));
+  CHECK(flat({w.player.pos.x, w.player.pos.z}, farm) < 1.0f);
+  CHECK(w.wizard.mana == mana);  // free
+  CHECK(w.teleport_tick > 0);
+  // The companion came along, out of its crystal still.
+  REQUIRE(w.active >= 0);
+  CHECK(flat({w.creatures[0].body.pos.x, w.creatures[0].body.pos.z}, farm) < 3.0f);
+  // Not again before 5 minutes.
+  put_player(w, w.west.cart);
+  CHECK(std::string(cannot_cast(w, 0)) == "cooldown");
+  for (int t = 0; t < 5 * 60 * rules::kTicksPerSecond; ++t) step(w, Input{});
+  CHECK(cannot_cast(w, 0) == nullptr);
+  step(w, command(Command::Cast, 0));
+  CHECK(flat({w.player.pos.x, w.player.pos.z}, farm) < 1.0f);
+}
+
+namespace {
+// Where the companion goes after a few seconds with the player standing still.
+Vec2 companion_after_a_while(World& w) {
+  for (int t = 0; t < 4 * rules::kTicksPerSecond; ++t) step(w, Input{});
+  return {w.creatures[0].body.pos.x, w.creatures[0].body.pos.z};
+}
+
+// How well (the cosine) the companion stands from the player towards `to`.
+float towards(const World& w, Vec2 at, Vec2 to) {
+  const Vec2 p{w.player.pos.x, w.player.pos.z};
+  const float ax = at.x - p.x, az = at.z - p.z, tx = to.x - p.x, tz = to.z - p.z;
+  return (ax * tx + az * tz) / (std::hypot(ax, az) * std::hypot(tx, tz) + 1e-6f);
+}
+}  // namespace
+
+TEST_CASE("the companion helps: it stands towards the nearest lost lamb, the nearest bundle, the way out of the cave") {
+  World w = cached_game(9);
+  if (w.active < 0) step(w, command(Command::Summon, 0));
+  REQUIRE(w.active >= 0);
+  // No quest: it follows behind.
+  Vec2 goal;
+  CHECK_FALSE(companion_guide(w, goal));
+
+  // The shepherd's lambs: from the pen, towards the nearest one.
+  quest(w, QuestId::Shepherd).stage = QuestStage::Active;
+  put_player(w, w.west.pasture + Vec2{0, 12});
+  const Vec2 p{w.player.pos.x, w.player.pos.z};
+  const auto spots = lamb_spots(w);
+  Vec2 nearest = spots[0];
+  for (const Vec2 s : spots) {
+    if (flat(s, p) < flat(nearest, p)) nearest = s;
+  }
+  REQUIRE(companion_guide(w, goal));
+  CHECK(flat(goal, nearest) < 10.0f);  // where it waits, or where it wandered off to
+  // Far from the pen (at the start, by the village): it follows as usual.
+  {
+    World away = w;
+    put_player(away, {0, 0});
+    CHECK_FALSE(companion_guide(away, goal));
+    REQUIRE(companion_guide(w, goal));
+  }
+  const Vec2 at = companion_after_a_while(w);
+  REQUIRE(companion_guide(w, goal));  // the lambs around came out meanwhile: maybe another one, nearer
+  CHECK(towards(w, at, goal) > 0.9f);
+  CHECK(std::fabs(flat(at, {w.player.pos.x, w.player.pos.z}) - rules::kCompanionGuideDistance) < 1.0f);
+  // All back in the pen: nothing more to show.
+  quest(w, QuestId::Shepherd).progress = kLambsHome;
+  CHECK_FALSE(companion_guide(w, goal));
+  quest(w, QuestId::Shepherd).stage = QuestStage::Done;
+
+  // The merchant's bundles: the nearest one left; all found, his cart.
+  quest(w, QuestId::Merchant).stage = QuestStage::Active;
+  put_player(w, w.west.cart + Vec2{3, 3});
+  const auto goods = goods_spots(w);
+  quest(w, QuestId::Merchant).progress = 1;  // the first one found
+  REQUIRE(companion_guide(w, goal));
+  const Vec2 q{w.player.pos.x, w.player.pos.z};
+  CHECK(flat(goal, flat(goods[1], q) < flat(goods[2], q) ? goods[1] : goods[2]) < 0.01f);
+  const Vec2 by_cart = companion_after_a_while(w);
+  REQUIRE(companion_guide(w, goal));
+  CHECK(towards(w, by_cart, goal) > 0.9f);
+  quest(w, QuestId::Merchant).progress = kGoodsFound;
+  REQUIRE(companion_guide(w, goal));
+  CHECK(flat(goal, w.west.cart) < 0.01f);
+  {
+    World away = w;
+    put_player(away, w.west.cart + Vec2{rules::kGoodsGuideRange + 5, 0});
+    CHECK_FALSE(companion_guide(away, goal));
+  }
+  quest(w, QuestId::Merchant).stage = QuestStage::Done;
+  CHECK_FALSE(companion_guide(w, goal));
+
+  // In the crystal cave: ahead along the way out, round its walls.
+  const int mouth = kind_index(w, ObjectKind::CaveMouth);
+  REQUIRE(mouth >= 0);
+  REQUIRE(enter_place(w, {PlaceKind::Cave, static_cast<uint32_t>(mouth)}));
+  const RoomPiece* far = nullptr;
+  float farthest = 0;
+  for (const RoomPiece& r : w.interior.pieces) {
+    const float d = std::hypot(r.a.x, r.a.z);
+    if (r.a == r.b && d > farthest) {
+      farthest = d;
+      far = &r;
+    }
+  }
+  REQUIRE(far != nullptr);
+  w.player.pos = {far->a.x, 0, far->a.z};
+  w.creatures.resize(1);  // no Cristi in the way
+  w.creatures[0].body.pos = w.player.pos;
+  REQUIRE(companion_guide(w, goal));
+  Vec2 dir;
+  REQUIRE(way_out(w, dir));
+  CHECK(flat(goal, {w.player.pos.x, w.player.pos.z}) > 1.5f);
+  CHECK(flat(goal, {w.player.pos.x, w.player.pos.z}) < rules::kCompanionGuideDistance + 1.0f);
+  const Vec2 in_cave = companion_after_a_while(w);
+  CHECK(towards(w, in_cave, goal) > 0.8f);
+  CHECK(wall_distance(w.interior, in_cave.x, in_cave.z) > 0.0f);
+  // In a house: it follows as usual.
+  w = cached_game(9);
+  for (size_t k = 0; k < w.objects.size(); ++k) {
+    if (w.objects[k].kind != ObjectKind::HouseCottage) continue;
+    REQUIRE(enter_place(w, {PlaceKind::House, static_cast<uint32_t>(k)}));
+    break;
+  }
+  REQUIRE(inside(w));
+  CHECK_FALSE(companion_guide(w, goal));
+}
+
+TEST_CASE("the lost lambs stay close enough to the pen, the bundles to the cart, for the companion to show them") {
+  for (uint64_t seed = 0; seed < kManySeeds; ++seed) {
+    CAPTURE(seed);
+    const World& w = cached_game(seed);
+    REQUIRE(w.west.valid());
+    // A lost lamb wanders around where it waits (rules::kWanderRadius, a square).
+    for (const Vec2 s : lamb_spots(w)) CHECK(flat(s, w.west.pasture) + rules::kWanderRadius * 1.5f < rules::kLambGuideRange);
+    for (const Vec2 s : goods_spots(w)) CHECK(flat(s, w.west.cart) + 5.0f < rules::kGoodsGuideRange);
+  }
+}

@@ -755,6 +755,8 @@ bool enter_place(World& w, Place place, bool from_roof) {
   return true;
 }
 
+void leave_place(World& w) { leave(w, false); }
+
 bool use_door(World& w) {
   if (w.battle.phase != BattlePhase::None) return false;
   const DoorNear d = door_near(w);
@@ -965,7 +967,11 @@ void map_way_out(Interior& in, const std::vector<Object>& objects) {
   }
 }
 
-bool way_out(const World& w, Vec2& dir) {
+namespace {
+// From the player, along the way out: the point `cells` cells farther down
+// the way (at most), or the first one at least `reach` meters away; the door
+// itself when it is that close.
+bool walk_way_out(const World& w, int cells, float reach, Vec2& at) {
   const Interior& in = w.interior;
   if (!inside(w) || in.nav.empty() || in.exits.empty()) return false;
   const float c = Interior::kNavCell;
@@ -974,6 +980,9 @@ bool way_out(const World& w, Vec2& dir) {
   const auto steps = [&](int i, int k) {
     return i < 0 || k < 0 || i >= in.nav_x || k >= in.nav_z ? Interior::kNoWay
                                                              : in.nav[static_cast<size_t>(i * in.nav_z + k)];
+  };
+  const auto center = [&](int i, int k) {
+    return Vec2{in.bounds.min.x + c * (static_cast<float>(i) + 0.5f), in.bounds.min.z + c * (static_cast<float>(k) + 0.5f)};
   };
   int i = static_cast<int>((p.x - in.bounds.min.x) / c), k = static_cast<int>((p.z - in.bounds.min.z) / c);
   // Not on a cell of the way (against a rock, up a stair): the nearest one around.
@@ -994,8 +1003,10 @@ bool way_out(const World& w, Vec2& dir) {
     i = best_i;
     k = best_k;
   }
-  // A few cells ahead along the way: downhill on the steps (diagonals too).
-  for (int n = 0; n < 6 && steps(i, k) > 0; ++n) {
+  // Cells farther along the way: downhill on the steps (diagonals too).
+  for (int n = 0; n < cells && steps(i, k) > 0; ++n) {
+    const Vec2 here = center(i, k);
+    if (distance2d(here.x - p.x, here.z - p.z) >= reach) break;
     int next_i = i, next_k = k;
     uint16_t lowest = steps(i, k);
     for (int a = -1; a <= 1; ++a) {
@@ -1014,12 +1025,24 @@ bool way_out(const World& w, Vec2& dir) {
     i = next_i;
     k = next_k;
   }
-  Vec2 to{in.bounds.min.x + c * (static_cast<float>(i) + 0.5f) - p.x, in.bounds.min.z + c * (static_cast<float>(k) + 0.5f) - p.z};
-  if (steps(i, k) == 0 || distance2d(door.x - p.x, door.z - p.z) < 1.5f) to = {door.x - p.x, door.z - p.z};
+  at = center(i, k);
+  if (steps(i, k) == 0 || distance2d(door.x - p.x, door.z - p.z) < std::min(1.5f, reach)) at = {door.x, door.z};
+  return true;
+}
+}  // namespace
+
+bool way_out(const World& w, Vec2& dir) {
+  Vec2 at;
+  if (!walk_way_out(w, 6, 1e9f, at)) return false;
+  const Vec2 to{at.x - w.player.pos.x, at.z - w.player.pos.z};
   const float l = distance2d(to.x, to.z);
   if (l < 1e-3f) return false;
   dir = {to.x / l, to.z / l};
   return true;
+}
+
+bool way_out_ahead(const World& w, float reach, Vec2& at) {
+  return walk_way_out(w, static_cast<int>(4.0f * reach / Interior::kNavCell) + 8, reach, at);
 }
 
 // ---- Cristi ---------------------------------------------------------------------

@@ -8,6 +8,7 @@ namespace monstres {
 RenderOptions render_options_from_bits(int bits) {
   RenderOptions o;
   o.deferred_shading = (bits & 1) != 0;
+  o.many_lights = (bits & 2) != 0;
   return o;
 }
 

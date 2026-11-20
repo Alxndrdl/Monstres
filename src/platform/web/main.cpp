@@ -927,7 +927,8 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_adaptive_resolution(int on) {
   g_app->redraw = true;
 }
 
-// Settings menu, debug: forward or deferred shading, to compare (bit 1: deferred shading).
+// Settings menu, debug: forward or deferred shading, to compare (bit 1: deferred shading;
+// bit 2: with it, up to kMaxDeferredLights lights instead of the kMaxPointLights nearest).
 EMSCRIPTEN_KEEPALIVE void monstres_set_render_options(int bits) {
   g_app->renderer->set_options(render_options_from_bits(bits));
   g_app->redraw = true;

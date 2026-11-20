@@ -947,6 +947,7 @@ const SpellInfo& spell_info(SpellId spell) {
       {"newOrder", false, false, true, false, 0, 3},
       {"steady", false, false, true, false, 0, 8},
       {"hint", false, false, true, false, 0, 2},
+      {"home", false, true, false, false, rules::kHomeCooldown, 0},
   };
   static_assert(std::size(kSpells) == kSpellCount);
   const auto i = static_cast<size_t>(spell);
@@ -1016,10 +1017,11 @@ const char* cannot_cast(const World& w, size_t slot) {
     return "active";
   }
   if (s == SpellId::WayOut && !inside(w)) return "outside";
+  if (s == SpellId::Home && (w.battle.phase != BattlePhase::None || !w.west.valid())) return "notNow";
   if (w.spell_cooldowns[static_cast<size_t>(s)] > 0) return "cooldown";
   if (s == SpellId::Mercy && training(w)) return "training";  // no one is hurt there
   const Monster* a = active_monster(w);
-  if (s != SpellId::Detect && s != SpellId::WayOut) {
+  if (s != SpellId::Detect && s != SpellId::WayOut && s != SpellId::Home) {
     if (!a) return "noCompanion";
     if (s == SpellId::Heal && a->hp >= monster_fight_stats(*a).hp) return "full";
   }
@@ -1318,6 +1320,8 @@ void battle_command(World& w, const Input& in) {
         w.detect_ticks = rules::kDetectTicks;
       } else if (s == SpellId::WayOut) {
         w.way_out_ticks = rules::kWayOutTicks;
+      } else if (s == SpellId::Home) {
+        go_home(w);
       }
       w.wizard.mana = static_cast<uint16_t>(w.wizard.mana - spell_info(s).mana);
       w.spell_cooldowns[static_cast<size_t>(s)] = spell_info(s).cooldown;

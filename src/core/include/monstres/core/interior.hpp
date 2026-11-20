@@ -61,6 +61,8 @@ DoorNear door_near(const World& world, float reach = rules::kDoorReach);
 // Through the door the player stands at: in, out, up onto the tower's roof,
 // down from it. False if there is none (or a battle goes on).
 bool use_door(World& world);
+// Out by the door one came in by, at once (the Home spell).
+void leave_place(World& world);
 
 // Going in (load: the place a save was made in); the player at the door's
 // inside, or at the tower's top (`from_roof`). False if the door is not one.
@@ -114,6 +116,9 @@ inline bool clinging(const Body& b) { return b.up.y < 0.95f; }
 // along the way to the door, round the walls and the rocks of a winding cave
 // (the floor's grid, Interior::nav). False outside, or with no way.
 bool way_out(const World& world, Vec2& dir);
+// Where the way out is `reach` meters ahead of the player (along it, round
+// the walls), or the door when nearer (false: no way known).
+bool way_out_ahead(const World& world, float reach, Vec2& at);
 // Fills Interior::nav for the interior's objects (enter_place does).
 void map_way_out(Interior& in, const std::vector<Object>& objects);
 

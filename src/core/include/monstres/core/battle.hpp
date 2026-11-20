@@ -91,6 +91,7 @@ inline constexpr uint16_t kShieldCooldown = 5 * rules::kTicksPerSecond;
 inline constexpr uint16_t kMercyCooldown = rules::kTicksPerSecond;
 inline constexpr uint16_t kDetectTicks = 60 * rules::kTicksPerSecond;
 inline constexpr uint16_t kWayOutTicks = 60 * rules::kTicksPerSecond;
+inline constexpr uint16_t kHomeCooldown = 5 * 60 * rules::kTicksPerSecond;  // the Home spell
 inline constexpr uint16_t kWizardManaPerLevel = 5;  // see wizard_stats
 }  // namespace rules
 
@@ -107,6 +108,8 @@ inline constexpr uint16_t kWizardManaPerLevel = 5;  // see wizard_stats
 // Way out (adventure, free): inside a cave or a building, for a minute, the
 // staff's crystal points the way back to the door one came in by, along the
 // way (round the walls, through the tunnels), not straight at it.
+// Home (adventure, free, once every 5 minutes): back to the farm, out of a
+// cave or a building too, the companion along (west.hpp, go_home).
 // The capture spells (while sealing, see seal_step; those marked "a rune"
 // cost their mana for each rune left to touch in the series):
 // Replay: the series lights up again, to be touched from its first rune (the

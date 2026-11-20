@@ -350,7 +350,8 @@
         'Tu voudrais bien m’aider à les retrouver ? Ils ne doivent pas être bien loin.', [
         ['Je vais les chercher', () => {
           game.acceptQuest(QUEST_INDEX.merchant);
-          afterTick(() => show('Merci, merci ! Il y en a trois. Regarde autour de la charrette, dans l’herbe.'));
+          afterTick(() => show('Merci, merci ! Il y en a trois. Regarde autour de la charrette, dans l’herbe. ' +
+            'Et sors donc ton monstre : il a du flair, il se mettra du côté du ballot le plus proche.'));
         }, 'accept-quest'],
         ['Au revoir', close],
       ]);
@@ -363,7 +364,8 @@
         }, 'complete-quest'],
       ]);
     } else if (q.stage === 'active') {
-      show(`Tu en as trouvé ${s.goods} sur ${s.of}. Les autres doivent traîner dans l’herbe, autour de la charrette.`);
+      show(`Tu en as trouvé ${s.goods} sur ${s.of}. Les autres doivent traîner dans l’herbe, autour de la charrette. ` +
+        'Ton monstre peut t’aider : sorti, près d’ici, il se tient du côté du ballot le plus proche.');
     } else {
       shop();
     }
@@ -535,7 +537,8 @@
         'suivent volontiers quelqu’un de gentil. Tu pourrais me les ramener jusqu’à l’enclos ?', [
         ['Je vais les chercher', () => {
           game.acceptQuest(QUEST_INDEX.shepherd);
-          afterTick(() => show('Merci ! Approche-toi doucement d’eux : ils te suivront. Ramène-les jusque dans l’enclos.'));
+          afterTick(() => show('Merci ! Approche-toi doucement d’eux : ils te suivront. Ramène-les jusque dans l’enclos. ' +
+            'Ton monstre peut t’aider : sorti, dans les collines autour, il se tiendra du côté de l’agneau le plus proche.'));
         }, 'accept-quest'],
         ['Au revoir', close],
       ]);
@@ -552,7 +555,8 @@
         }, 'complete-quest'],
       ]);
     } else if (q.stage === 'active') {
-      show(`${s.lambs} sur ${s.of} sont rentrés. Les autres errent dans les collines, plus loin de l’enclos.`);
+      show(`${s.lambs} sur ${s.of} sont rentrés. Les autres errent dans les collines, plus loin de l’enclos. ` +
+        'Ton monstre, sorti, te montrera de quel côté.');
     } else {
       villager(BASILE);
     }

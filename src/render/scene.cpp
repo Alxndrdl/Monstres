@@ -1923,7 +1923,7 @@ void interior_light(const World& w, float time, View& v) {
   v.fog = v.background;
   v.sky_zenith = v.sky_horizon = v.background;
   v.night = night;
-  v.light_count = world_lights(w, w.player.pos.x, w.player.pos.z, night, time, v.lights);
+  v.light_count = world_lights(w, w.player.pos.x, w.player.pos.z, night, time, v.lights, kMaxDeferredLights);
 }
 
 }  // namespace
@@ -2017,7 +2017,7 @@ View build_view_from(const World& w, Vec3 eye, Vec3 target, float aspect, float 
   v.ambient_sky = sky.ambient_sky;
   v.ambient_ground = sky.ambient_ground;
   v.night = 1 - sky.daylight;
-  v.light_count = world_lights(w, tx, tz, v.night, time, v.lights);
+  v.light_count = world_lights(w, tx, tz, v.night, time, v.lights, kMaxDeferredLights);
   v.time = time;
   // Grass and small things shrink away around the player (see build_landscape).
   v.fade_x = w.player.pos.x;

@@ -1512,6 +1512,87 @@ void rescue(World& w) {
   update_population(w);
 }
 
+void go_home(World& w) {
+  if (inside(w)) leave_place(w);
+  const WestLayout& west = w.west;
+  if (!west.valid() || inside(w)) return;
+  const Vec2 s = farm_rescue_spot(west);
+  w.teleport_from = w.player.pos;
+  w.teleport_tick = w.tick;
+  w.player.pos = {s.x, w.ground.height(s.x, s.z), s.z};
+  w.player.velocity_y = 0;
+  w.player.on_ground = true;
+  w.player.facing_x = -west.farm_front.x;
+  w.player.facing_z = -west.farm_front.z;
+  if (!w.creatures.empty()) {  // the companion comes along, beside the player
+    Body& c = w.creatures[0].body;
+    const float x = s.x + west.farm_front.z * 1.2f, z = s.z - west.farm_front.x * 1.2f;
+    c.pos = {x, w.ground.height(x, z), z};
+    c.velocity_y = 0;
+  }
+  update_population(w);
+}
+
+bool companion_guide(const World& w, Vec2& at) {
+  if (inside(w)) {
+    if (w.place.kind != PlaceKind::Cave && w.place.kind != PlaceKind::Burrow) return false;
+    return way_out_ahead(w, rules::kCompanionGuideDistance, at);
+  }
+  if (!w.west.valid() || w.ground.empty()) return false;
+  const Vec3 p = w.player.pos;
+  float best = 1e18f;
+  const auto offer = [&](Vec2 q) {
+    const float d2 = (q.x - p.x) * (q.x - p.x) + (q.z - p.z) * (q.z - p.z);
+    if (d2 < best) {
+      best = d2;
+      at = q;
+    }
+  };
+  bool back = false;  // all found: back to where they belong (when nothing is left to look for)
+  Vec2 home{};
+  const auto near = [&](Vec2 q, float r) { return (q.x - p.x) * (q.x - p.x) + (q.z - p.z) * (q.z - p.z) < r * r; };
+  const QuestState& shepherd = w.quests[static_cast<size_t>(QuestId::Shepherd)];
+  if (shepherd.stage == QuestStage::Active && near(w.west.pasture, rules::kLambGuideRange)) {
+    std::array<bool, rules::kLambs> following{};
+    std::array<bool, rules::kLambs> seen{};
+    for (const Creature& c : w.creatures) {
+      if (c.tag != Tag::Lamb || c.variant >= rules::kLambs || (shepherd.progress & (1u << c.variant))) continue;
+      seen[c.variant] = true;
+      if (c.mind == Mind::Follow) following[c.variant] = true;
+      else offer({c.body.pos.x, c.body.pos.z});
+    }
+    std::array<Vec2, rules::kLambs> spots{};
+    bool spotted = false;
+    for (uint32_t k = 0; k < rules::kLambs; ++k) {
+      if ((shepherd.progress & (1u << k)) || seen[k]) continue;
+      if (!spotted) spots = lamb_spots(w);  // not around yet: where it waits
+      spotted = true;
+      offer(spots[k]);
+    }
+    for (uint32_t k = 0; k < rules::kLambs; ++k) {
+      if (following[k]) {
+        back = true;
+        home = w.west.pasture;
+      }
+    }
+  }
+  const QuestState& merchant = w.quests[static_cast<size_t>(QuestId::Merchant)];
+  if (merchant.stage == QuestStage::Active && near(w.west.cart, rules::kGoodsGuideRange)) {
+    if ((merchant.progress & kGoodsFound) != kGoodsFound) {
+      const auto spots = goods_spots(w);
+      for (uint32_t k = 0; k < rules::kGoods; ++k) {
+        if (!(merchant.progress & (1u << k))) offer(spots[k]);
+      }
+    } else if (!back) {
+      back = true;
+      home = w.west.cart;
+    }
+  }
+  if (best < 1e17f) return true;
+  if (back) at = home;
+  return back;
+}
+
 bool push_sails(World& w, Vec3 p) {
   QuestState& q = w.quests[static_cast<size_t>(QuestId::Mill)];
   if (q.stage != QuestStage::Active || (q.progress & kMillTurning)) return false;

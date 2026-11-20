@@ -487,4 +487,6 @@ TEST_CASE("draw plan: a light's rectangle on the screen") {
 TEST_CASE("render options from the page's bits") {
   CHECK(render_options_from_bits(0) == RenderOptions{});
   CHECK(render_options_from_bits(1).deferred_shading);
+  CHECK_FALSE(render_options_from_bits(1).many_lights);
+  CHECK(render_options_from_bits(3).many_lights);
 }

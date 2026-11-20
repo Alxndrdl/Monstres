@@ -1531,7 +1531,7 @@ void add_crystal_effects(const World& w, float time, DrawList& list) {
   add_rig(list, look.rig(), poses, ghost.body, look.tints, rig_scale(g.species) * look.size, kMonsterGlowSlot);
 }
 
-size_t world_lights(const World& w, float x, float z, float night, float time, PointLight* out) {
+size_t world_lights(const World& w, float x, float z, float night, float time, PointLight* out, size_t max) {
   struct Candidate {
     PointLight light;
     float distance2;
@@ -1633,9 +1633,9 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
 
   std::sort(found.begin(), found.end(), [](const Candidate& a, const Candidate& b) { return a.distance2 < b.distance2; });
   size_t n = 0;
-  if (night > 0.01f) out[n++] = staff;
+  if (night > 0.01f && max > 0) out[n++] = staff;
   for (const Candidate& c : found) {
-    if (n >= kMaxPointLights) break;
+    if (n >= max) break;
     out[n++] = c.light;
   }
   return n;

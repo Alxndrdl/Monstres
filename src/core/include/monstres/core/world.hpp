@@ -46,6 +46,7 @@ inline constexpr float kWanderRadius = 8.0f;             // around a monster's h
 inline constexpr float kBirdFleeDistance = 3.5f;
 inline constexpr float kCompanionFollowDistance = 1.3f;  // behind the player
 inline constexpr float kCompanionTeleportDistance = 14.0f;
+inline constexpr float kCompanionGuideDistance = 3.0f;  // ahead, when it shows the way (west.hpp: companion_guide)
 // Time of day: one hour of the game lasts one real minute, a day 24 minutes.
 inline constexpr uint32_t kTicksPerHour = 60 * kTicksPerSecond;
 inline constexpr uint32_t kTicksPerDay = 24 * kTicksPerHour;
@@ -99,10 +100,11 @@ enum class Command : uint8_t {
 inline constexpr size_t kCommandCount = static_cast<size_t>(Command::Rune) + 1;  // the last one
 
 // The magician's spells (see battle.hpp: what each does, where it can be cast).
-// Replay to Hint: the capture spells (Battle::seal).
+// Replay to Hint: the capture spells (Battle::seal); Home: an adventure one.
 enum class SpellId : uint8_t {
   None, Heal, Shield, Mercy, Detect, WayOut,
   Replay, Guard, Boost, NewOrder, Steady, Hint,
+  Home,  // an adventure spell (after the capture ones: the saves keep the numbers)
   Count
 };
 inline constexpr size_t kSpellCount = static_cast<size_t>(SpellId::Count);

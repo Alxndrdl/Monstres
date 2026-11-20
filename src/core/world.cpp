@@ -742,9 +742,27 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
     c.timer = 0;
   }
 
-  // Follow a point behind the player.
-  c.target = clamp_to_world({p.pos.x - p.facing_x * rules::kCompanionFollowDistance,
-                             p.pos.z - p.facing_z * rules::kCompanionFollowDistance}, info.shape.half_width);
+  // Follow a point behind the player; or, helping, a few meters from it
+  // towards what the player looks for (a lost lamb, a bundle, the way out).
+  Vec2 goal;
+  bool guiding = companion_guide(w, goal);
+  float look_x = to_player_x, look_z = to_player_z;
+  if (guiding) {
+    float gx, gz;
+    const float far = direction_to(p.pos.x, p.pos.z, goal, gx, gz);
+    guiding = far > 0.3f;
+    if (guiding) {
+      if (!inside(w)) {
+        const float r = std::min(far, rules::kCompanionGuideDistance);
+        goal = {p.pos.x + gx * r, p.pos.z + gz * r};
+      }
+      look_x = gx;
+      look_z = gz;
+    }
+  }
+  c.target = guiding ? clamp_to_world(goal, info.shape.half_width)
+                     : clamp_to_world({p.pos.x - p.facing_x * rules::kCompanionFollowDistance,
+                                       p.pos.z - p.facing_z * rules::kCompanionFollowDistance}, info.shape.half_width);
   float dir_x, dir_z;
   const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
   float speed = 0;
@@ -754,9 +772,9 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
   } else {
     c.mind = Mind::Idle;
     dir_x = dir_z = 0;
-    if (player_distance > 0.1f) {  // look at the player
-      b.facing_x = to_player_x;
-      b.facing_z = to_player_z;
+    if (player_distance > 0.1f || guiding) {  // look at the player, or the way it shows
+      b.facing_x = look_x;
+      b.facing_z = look_z;
     }
   }
   // Jump when stuck against something, or to follow the player up onto

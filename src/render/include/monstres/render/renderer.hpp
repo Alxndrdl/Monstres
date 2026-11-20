@@ -154,7 +154,8 @@ struct PointLight {
   float radius = 1;  // no light beyond
   Color color;       // at the center
 };
-inline constexpr size_t kMaxPointLights = 12;
+inline constexpr size_t kMaxPointLights = 12;     // drawn in the shaders (forward), the nearest first
+inline constexpr size_t kMaxDeferredLights = 64;  // a view's lights: so many with deferred shading (RenderOptions::many_lights)
 
 // The usual case: turned around the vertical axis only.
 inline Instance make_instance(float x, float y, float z, float yaw, float sx, float sy, float sz,
@@ -239,7 +240,7 @@ struct View {
   Color ambient_sky{0.52f, 0.58f, 0.70f, 1};    // on surfaces facing up
   Color ambient_ground{0.36f, 0.40f, 0.32f, 1}; // on surfaces facing down
   float night = 0;                              // 0 day .. 1 night: stars, lit windows
-  PointLight lights[kMaxPointLights];
+  PointLight lights[kMaxDeferredLights];  // the nearest first
   size_t light_count = 0;
   // Fog: none before fog_start, half of it fog_half meters farther, thickening
   // on (exponentially), complete at fog_end.
@@ -281,6 +282,10 @@ struct RenderOptions {
   // the transparent ones over it. Drawn off screen without antialiasing.
   // Off: one forward pass, the point lights in the shader.
   bool deferred_shading = false;
+  // With deferred shading: all the view's lights (up to kMaxDeferredLights)
+  // into the light buffer, not only the kMaxPointLights nearest (the
+  // transparent things keep those).
+  bool many_lights = false;
   bool operator==(const RenderOptions&) const = default;
 };
 

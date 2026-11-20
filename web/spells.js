@@ -29,6 +29,10 @@
     wayOut: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round" aria-hidden="true"><path d="M4 20c4 0 4-5 8-5s4-5 8-5"/><path d="M16 3h5v7"/>' +
       '<circle cx="4" cy="20" r="1.2"/></svg>',
+    // Home: a house and an arrow back to it.
+    home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>' +
+      '<path d="M10 20v-5h4v5"/></svg>',
     // The capture spells: the series again, a guard, a boost, another series, halfway, the next rune.
     replay: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
       'stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v5h5"/></svg>',
@@ -162,7 +166,8 @@
     const kinds = known.capture ? 'pendant une capture'
       : known.combat && known.adventure ? 'combat et aventure' : known.combat ? 'combat seulement' : 'aventure seulement';
     const wait = known.capture ? '' : id === 'mercy' ? ' · jusqu’à la fin du combat'
-      : id === 'detect' || id === 'wayOut' ? ' · dure 1 min' : ` · recharge ${known.cooldown} s`;
+      : id === 'detect' || id === 'wayOut' ? ' · dure 1 min'
+        : known.cooldown >= 60 ? ` · recharge ${Math.round(known.cooldown / 60)} min` : ` · recharge ${known.cooldown} s`;
     return [
       el('p', { textContent: (LORE.spells[id] || {}).text || '' }),
       el('p', { className: 'facts', textContent: `Coût : ${costText(known)}${wait} · ${kinds}` }),
