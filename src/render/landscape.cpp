@@ -227,7 +227,9 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
   // The west's road, its stream's water and its fields.
   if (w.west.valid()) {
     if (distance_to_road(w.west.road, x, z, 2 * rules::kRoadHalfWidth) < 0.75f * rules::kRoadHalfWidth) return;
-    if (distance_to_stream(w.west.stream, x, z, rules::kStreamWater + 1.0f) < rules::kStreamWater + 0.3f) return;
+    float level = 0, width = 0;  // not under its water (nor right at its edge)
+    const float g = w.ground.height(x, z);
+    if (river_surface(w.west, x, z, g, 12.0f, level, width) < 12.0f && g < level + 0.15f) return;
     const float cx = x - w.west.crater.x, cz = z - w.west.crater.z;  // the crater's scorched bowl
     if (cx * cx + cz * cz < rules::kCraterRadius * rules::kCraterRadius * 0.8f) return;
   }

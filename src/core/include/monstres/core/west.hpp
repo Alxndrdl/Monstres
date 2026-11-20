@@ -48,8 +48,13 @@ inline constexpr float kForkZ = -6.0f;            // the road leaves the path he
 inline constexpr float kStreamWater = 2.6f;       // a usual half width of the river's water (Stream::width: each point's)
 inline constexpr float kStreamChannel = 7.0f;     // a usual half width of its bed and banks
 inline constexpr float kBridgeHalf = 8.4f;        // half length of a bridge over it
+inline constexpr float kFallsFromMouth = 95.0f;   // the waterfall: this far along the terrace's edge from the cave's mouth
+inline constexpr float kFallsLeast = 9.0f;        // its height at least (its water far above the hidden cleft behind it)
+inline constexpr float kFallsLip = 1.1f;          // its lip (the cliff's top) behind the edge's line (half the cliff's width there)
+inline constexpr float kFallsLanding = 3.7f;      // where its water lands, out from the edge's line (in front of the cleft)
+inline constexpr float kHiddenOut = 1.3f;         // the hidden cleft's mouth, out from the edge's line, behind the falling water
 inline constexpr float kWaterMillUpstream = 110.0f;  // the water mill: this far up the river from the path's bridge
-inline constexpr float kTerraceHeight = 8.5f;     // the terrace inland, above the valley (more or less)
+inline constexpr float kTerraceHeight = 12.0f;    // the terrace inland, above the valley (more or less)
 inline constexpr float kFarmRadius = 36.0f;       // the farm's flat ground
 inline constexpr float kMillRadius = 7.0f, kMillKnoll = 22.0f, kMillRise = 3.5f;
 inline constexpr float kPastureRadius = 16.0f;
@@ -152,6 +157,14 @@ float scarp_side(const WestLayout& west, float x, float z);
 // The river's nearest segment to (x, z) (its first point, and how far along
 // it), and the distance to it (`limit` if farther).
 float stream_segment(const Stream& stream, float x, float z, float limit, size_t& seg, float& t);
+// The river's water surface over (x, z), whose ground is at `ground`: its
+// level and half width there, and the distance to its line (`limit` if
+// farther). By the waterfall, the river above it on the terrace (up to the
+// lip), the pool below elsewhere; or only the river above the falls, or
+// only below them. `segment`: the river's segment there (its first point).
+enum class RiverPart { Any, Above, Below };
+float river_surface(const WestLayout& west, float x, float z, float ground, float limit, float& level, float& width,
+                    RiverPart part = RiverPart::Any, size_t* segment = nullptr);
 // The water mill: where the aggressive Ploufis that jammed its wheel stay (in
 // the river, by the wheel), how many are left, whether the wheel turns again.
 Vec2 wheel_spot(const WestLayout& west);

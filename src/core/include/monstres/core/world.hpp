@@ -941,6 +941,9 @@ Zone zone_at(const World& world, float x, float z);
 void settle_objects(World& world, size_t first = 0);
 // Ground too steep to stand a tree or a rock on (the terrace's cliffs, the river's cut banks).
 bool steep_ground(const World& world, float x, float z);
+// Whether the river's, the lake's or the sea's water covers (x, z), its
+// surface above the ground there by more than -margin (margin > 0: or nearly).
+bool under_water(const World& world, float x, float z, float margin = 0);
 
 // The wilds around the valley: trees, rocks, bushes, logs... from the seed
 // (their own random stream), over the whole relief beyond the valley:

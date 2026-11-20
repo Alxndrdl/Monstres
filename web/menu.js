@@ -954,7 +954,7 @@
 
   // The continent, drawn once per world: one pixel per cell of its grid,
   // shaded relief, sea, beaches, snow, forest, marsh, desert, lava.
-  function buildLand(d) {
+  function* buildLand(d) {
     const image = el('canvas', { width: d.pointsX, height: d.pointsZ });
     const ctx = image.getContext('2d');
     const pixels = ctx.createImageData(d.pointsX, d.pointsZ);
@@ -1000,6 +1000,7 @@
         const o = (j * d.pointsX + i) * 4;
         pixels.data[o] = r * k; pixels.data[o + 1] = g * k; pixels.data[o + 2] = b * k; pixels.data[o + 3] = 255;
       }
+      if (j % 16 === 15) yield;
     }
     ctx.putImageData(pixels, 0, 0);
     return image;
@@ -1029,7 +1030,7 @@
   }
 
   // The playable area, drawn once per world: terrain, path and objects.
-  function buildBase(data, continent) {
+  function* buildBase(data, continent) {
     const R = data.world + 7;
     const size = Math.round(2 * R * PX_PER_M);
     const image = el('canvas', { width: size, height: size });
@@ -1037,18 +1038,29 @@
     const pixels = ctx.createImageData(size, size);
     const lake = data.lake, village = data.village, ruins = data.ruins;
     const forest = data.forest, cave = data.cave, castle = data.castle;
+    // The ground's height at every pixel, looked up once (the slopes and the
+    // shading below read their neighbors here: 1 px per meter).
+    const heights = new Float32Array(size * size);
+    for (let py = 0; py < size; ++py) {
+      for (let px = 0; px < size; ++px) heights[py * size + px] = heightAt(data, -R + (px + 0.5) / PX_PER_M, -R + (py + 0.5) / PX_PER_M);
+      if (py % 64 === 63) yield;
+    }
+    const H = (px, py) => heights[Math.min(size - 1, Math.max(0, py)) * size + Math.min(size - 1, Math.max(0, px))];
+    const near = (c, rx, rz, x, z) => c && Math.abs(x - c.x) < rx && Math.abs(z - c.z) < rz;  // its outline's box
+    const step = Math.max(1, Math.round(PX_PER_M)), far = Math.max(1, Math.round(3 * PX_PER_M));
     for (let py = 0; py < size; ++py) {
       for (let px = 0; px < size; ++px) {
         const x = -R + (px + 0.5) / PX_PER_M, z = -R + (py + 0.5) / PX_PER_M;
-        const h = heightAt(data, x, z);
+        const h = heights[py * size + px];
         const t = Math.min(Math.max((h + 4) / 12, 0), 1);
         let r = 78 + 70 * t, g = 128 + 46 * t, b = 62 + 30 * t;
-        if (forest && outlineDistance(data, forest, forest.rx, forest.rz, forest.outline, x, z) < 1 &&
+        if (near(forest, forest && forest.rx, forest && forest.rz, x, z) &&
+            outlineDistance(data, forest, forest.rx, forest.rz, forest.outline, x, z) < 1 &&
             outlineDistance(data, forest, forest.clearing, forest.clearing, forest.clearingOutline, x, z) >= 1) {
           r *= 0.8; g *= 0.88; b *= 0.8;  // darker under the trees (not in the clearing)
         }
         // Cliffs (the terrace's edge, the cave's spur): grey rock where the ground is steep.
-        const steep = Math.hypot(heightAt(data, x + 1, z) - heightAt(data, x - 1, z), heightAt(data, x, z + 1) - heightAt(data, x, z - 1)) / 2;
+        const steep = Math.hypot(H(px + step, py) - H(px - step, py), H(px, py + step) - H(px, py - step)) * PX_PER_M / (2 * step);
         if (steep > 0.7) { const k = Math.min(1, (steep - 0.7) / 0.6); r += (140 - r) * k; g += (136 - g) * k; b += (132 - b) * k; }
         if (village && Math.hypot(x - village.x, z - village.z) < 7) { r = 168; g = 142; b = 104; }
         if (ruins && Math.max(Math.abs(x - ruins.x), Math.abs(z - ruins.z)) < 8.5) { r = 150; g = 146; b = 136; }
@@ -1057,19 +1069,19 @@
         const around = Math.abs(x) > 150 || Math.abs(z) > 150 ? landAt(continent, x, z) : 0;
         if (h < data.seaLevel + 2.5 && around < data.seaLevel + 1) { r = 214; g = 196; b = 140; }
         if (h < data.seaLevel && around < data.seaLevel) { const k = Math.min(1, (data.seaLevel - h) / 12); r = 70 - 40 * k; g = 150 - 60 * k; b = 190 - 40 * k; }
-        if (lake) {
+        if (near(lake, lake && lake.rx * 1.05, lake && lake.rz * 1.05, x, z)) {
           const d = outlineDistance(data, lake, lake.rx, lake.rz, lake.outline, x, z);
           if (d < 1.04 && h > data.waterLevel - 0.05) { r = 214; g = 196; b = 140; }  // sandy shore
           if (d < 1 && h < data.waterLevel) { const k = Math.min(1, (data.waterLevel - h) / 1.2); r = 80 - 30 * k; g = 150 - 40 * k; b = 196 - 20 * k; }
         }
         // Light from the north-west, shading the slopes: soft (over 6 m, the
         // little bumps smoothed away), the relief still readable.
-        const shade = 1 + 0.07 * ((heightAt(data, x - 3, z) - heightAt(data, x + 3, z)) +
-                                  (heightAt(data, x, z - 3) - heightAt(data, x, z + 3)));
+        const shade = 1 + 0.07 * ((H(px - far, py) - H(px + far, py)) + (H(px, py - far) - H(px, py + far)));
         const k = Math.min(Math.max(shade, 0.78), 1.18);
         const o = (py * size + px) * 4;
         pixels.data[o] = r * k; pixels.data[o + 1] = g * k; pixels.data[o + 2] = b * k; pixels.data[o + 3] = 255;
       }
+      if (py % 16 === 15) yield;
     }
     ctx.putImageData(pixels, 0, 0);
     const toPx = (v) => (v + R) * PX_PER_M;
@@ -1159,15 +1171,57 @@
     fitPlayable = teleport;
   }
 
+  // The pictures of the map (the continent's, the playable area's): long to
+  // draw (over a million pixels), so drawn ahead, a few rows at a time while
+  // the game runs; what is left is finished when the map opens.
+  const baseKey = (data) => `${data.path.length}:${data.path[0]}:${data.path[1]}:${data.objects.length}`;
+  let warm = null;  // { key, steps (generator), done: { land, base } once finished }
+  function* drawPictures(data, key) {
+    const c = game.continent();
+    const landImage = c.ready ? yield* buildLand(c) : null;
+    const picture = yield* buildBase(data, c.ready ? c : null);
+    return { land: c.ready ? { data: c, image: landImage } : null, base: { key, ...picture } };
+  }
+  function startWarm(data) {
+    const key = baseKey(data);
+    warm = { key, steps: drawPictures(data, key), done: null };
+  }
+  function finishWarm() {
+    for (;;) {
+      const step = warm.steps.next();
+      if (step.done) { warm.done = step.value; return; }
+    }
+  }
+  let warmTimer = 0;
+  function warmUp() {
+    clearTimeout(warmTimer);
+    warmTimer = 0;
+    if (!game || base) return;
+    if (!warm) {
+      if (!game.continent().ready) { warmTimer = setTimeout(warmUp, 1000); return; }  // its land first
+      startWarm(game.map());
+    }
+    if (warm.done) return;
+    const until = performance.now() + 6;  // a few ms per frame
+    while (performance.now() < until) {
+      const step = warm.steps.next();
+      if (step.done) { warm.done = step.value; return; }
+    }
+    warmTimer = setTimeout(warmUp, 30);
+  }
+  whenReady(() => { warmTimer = setTimeout(warmUp, 2000); });
+
   // The world's map data, read once per opening (big), and the pictures drawn from it.
   function mapBase() {
     if (!mapData) mapData = game.map();
     const data = mapData;
-    const key = `${data.path.length}:${data.path[0]}:${data.path[1]}:${data.objects.length}`;
+    const key = baseKey(data);
     if (!base || base.key !== key) {
-      const c = game.continent();
-      land = c.ready ? { data: c, image: buildLand(c) } : null;
-      base = { key, ...buildBase(data, land && land.data) };
+      clearTimeout(warmTimer);
+      warmTimer = 0;
+      if (!warm || warm.key !== key) startWarm(data);
+      if (!warm.done) finishWarm();
+      ({ land, base } = warm.done);
       habitatImage = null;
     }
     return data;
@@ -1370,6 +1424,9 @@
     close();
     mapData = null;
     base = null;
+    warm = null;
+    clearTimeout(warmTimer);
+    warmTimer = setTimeout(warmUp, 2000);
   });
   // teleportTargets: where the teleporters are on the map (teleport mode), for tests.
   window.monstresMenu = { open, close, isOpen, show, teleportTargets: () => teleportTargets.slice() };

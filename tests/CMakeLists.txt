@@ -71,6 +71,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_creation.cpp
   unit/test_interiors.cpp
   unit/test_west.cpp
+  unit/test_coherence.cpp
 )
 
 monstres_add_tests(monstres_functional_tests functional

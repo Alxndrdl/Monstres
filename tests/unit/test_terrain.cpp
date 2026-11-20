@@ -1,6 +1,7 @@
 #include "monstres/core/terrain.hpp"
 #include "monstres/render/terrain_mesh.hpp"
 #include "monstres/core/west.hpp"
+#include "monstres/core/continent.hpp"
 #include "test_helpers.hpp"
 
 #include <algorithm>
@@ -25,13 +26,16 @@ void for_each_triangle(const MeshData& m, F f) {
 
 }  // namespace
 
-TEST_CASE("the path crosses the world and passes by the spawn point") {
+TEST_CASE("the path crosses the world (southwards up to the sea) and passes by the spawn point") {
   for (uint64_t seed = 0; seed < kManySeeds; ++seed) {
     CAPTURE(seed);
     const Path path = make_path(seed);
     REQUIRE(path.points.size() > 50);
     CHECK(path.points.front().z < -rules::kWorldHalfSize);
-    CHECK(path.points.back().z > rules::kWorldHalfSize);
+    // Southwards to the end of the world, or to the beach where the sea comes.
+    const Vec2 end = path.points.back();
+    CHECK((end.z > rules::kWorldHalfSize || continent_height(seed, end.x, end.z + 2.0f) < rules::kSeaLevel + 0.6f));
+    CHECK(end.z > rules::kPathExtent);
     CHECK(distance_to_path(path, 0, 0) <= 1.0f + 1e-4f);
     for (size_t i = 0; i < path.points.size(); ++i) {
       // Within the valley as it always was; beyond it, winding farther.

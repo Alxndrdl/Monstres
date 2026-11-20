@@ -437,6 +437,153 @@ constexpr float kWaterBands[] = {150.0f, 350.0f};
 constexpr float kWaterBig = 120.0f;
 }  // namespace
 
+namespace {
+
+void add_river_surface(MeshData& m, const World& world) {
+  const WestLayout& west = world.west;
+  const Stream& st = west.stream;
+  const size_t n = st.points.size();
+  if (n < 2) return;
+  constexpr float kPast = 5.0f;  // drawn this far past its banks (under the ground there)
+  float widest = 0, x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
+  for (size_t i = 0; i < n; ++i) {
+    widest = std::max(widest, st.width[i]);
+    x0 = std::min(x0, st.points[i].x);
+    x1 = std::max(x1, st.points[i].x);
+    z0 = std::min(z0, st.points[i].z);
+    z1 = std::max(z1, st.points[i].z);
+  }
+  std::vector<float> left(n, 0.0f);  // meters to its end
+  for (size_t i = n - 1; i-- > 0;) {
+    left[i] = left[i + 1] + std::hypot(st.points[i + 1].x - st.points[i].x, st.points[i + 1].z - st.points[i].z);
+  }
+  constexpr float kCell = Heightmap::kCellSize;
+  constexpr float R = rules::kReliefHalfSize;
+  const float limit = widest + kPast;
+  const auto index = [&](float v) {
+    return std::clamp(static_cast<int>(std::floor((v + R) / kCell)), 0, Heightmap::kPoints - 1);
+  };
+  const int i0 = index(x0 - limit), i1 = std::min(index(x1 + limit) + 1, Heightmap::kPoints - 1);
+  const int j0 = index(z0 - limit), j1 = std::min(index(z1 + limit) + 1, Heightmap::kPoints - 1);
+  const int ni = i1 - i0 + 1, nj = j1 - j0 + 1;
+  // At each grid point: its level for the river above the falls (or the
+  // river anywhere, away from them) and for the pool below them.
+  constexpr float kNone = -1e9f;
+  struct Point {
+    float x = 0, z = 0, ground = 0;
+    float level[2] = {kNone, kNone};
+    float fade[2] = {1, 1};
+    int side = -1;  // which of them it is in (-1: neither)
+  };
+  std::vector<Point> pts(static_cast<size_t>(ni) * static_cast<size_t>(nj));
+  const size_t f = st.falls;
+  const bool falls = f > 0 && f + 1 < n;
+  const Vec2 F = west.falls, o = west.falls_out;
+  const float mid = falls ? 0.5f * (st.level[f] + st.level[f + 1]) : 0.0f;
+  for (int i = 0; i < ni; ++i) {
+    for (int j = 0; j < nj; ++j) {
+      Point& p = pts[static_cast<size_t>(i) * nj + j];
+      p.x = static_cast<float>(i0 + i) * kCell - R;
+      p.z = static_cast<float>(j0 + j) * kCell - R;
+      p.ground = world.ground.at(i0 + i, j0 + j);
+      const auto take = [&](int k, RiverPart part) {
+        float level = 0, width = 0;
+        size_t seg = 0;
+        const float d = river_surface(west, p.x, p.z, p.ground, limit, level, width, part, &seg);
+        if (d >= width + kPast) return false;
+        p.level[k] = level;
+        p.fade[k] = std::clamp(left[std::min(seg + 1, n - 1)] / 40.0f, 0.0f, 1.0f);
+        return true;
+      };
+      if (falls && std::hypot(p.x - F.x, p.z - F.z) < 40.0f) {
+        take(0, RiverPart::Above);
+        take(1, RiverPart::Below);
+        const bool above = p.ground > mid && scarp_side(west, p.x, p.z) < -rules::kFallsLip;
+        p.side = above ? (p.level[0] > kNone ? 0 : -1) : (p.level[1] > kNone ? 1 : -1);
+      } else if (take(0, RiverPart::Any)) {
+        p.side = 0;
+      }
+    }
+  }
+  struct V {
+    float x, y, z, ground, fade;
+  };
+  const auto color = [](const V& v) {
+    const float depth = v.y - v.ground;
+    const float deep = std::clamp(depth / 1.2f, 0.0f, 1.0f);
+    return Color{0.24f - 0.07f * deep, 0.50f - 0.10f * deep, 0.58f - 0.05f * deep,
+                 (0.4f + 0.5f * smooth(0.0f, 1.0f, depth)) * v.fade};
+  };
+  const auto emit = [&](const V* poly, int count) {
+    for (int k = 1; k + 1 < count; ++k) {
+      vertex(m, poly[0].x, poly[0].y, poly[0].z, color(poly[0]));
+      vertex(m, poly[k].x, poly[k].y, poly[k].z, color(poly[k]));
+      vertex(m, poly[k + 1].x, poly[k + 1].y, poly[k + 1].z, color(poly[k + 1]));
+    }
+  };
+  // A triangle at one of the levels, if some of it is under water (else the
+  // ground, on the same triangle, is above all of it); the river above the
+  // falls cut along their lip.
+  const auto triangle = [&](const Point* a, const Point* b, const Point* c, int k, bool cut) {
+    const Point* t[3] = {a, b, c};
+    float lo = 1e9f, hi = -1e9f;
+    bool wet = false;
+    for (const Point* q : t) {
+      if (q->level[k] <= kNone) return;
+      lo = std::min(lo, q->level[k]);
+      hi = std::max(hi, q->level[k]);
+      wet = wet || q->ground < q->level[k];
+    }
+    if (!wet || hi - lo > 0.5f) return;
+    V in[3], out[4];
+    for (int q = 0; q < 3; ++q) in[q] = {t[q]->x, t[q]->level[k], t[q]->z, t[q]->ground, t[q]->fade[k]};
+    if (!cut) {
+      emit(in, 3);
+      return;
+    }
+    // What is behind the lip: (p - F) . o <= -kFallsLip.
+    const auto beyond = [&](const V& v) { return (v.x - F.x) * o.x + (v.z - F.z) * o.z + rules::kFallsLip; };
+    int count = 0;
+    for (int q = 0; q < 3; ++q) {
+      const V& u = in[q];
+      const V& w = in[(q + 1) % 3];
+      const float du = beyond(u), dw = beyond(w);
+      if (du <= 0) out[count++] = u;
+      if ((du <= 0) != (dw <= 0)) {
+        const float s = du / (du - dw);
+        out[count++] = {u.x + (w.x - u.x) * s, u.y + (w.y - u.y) * s, u.z + (w.z - u.z) * s,
+                        u.ground + (w.ground - u.ground) * s, u.fade + (w.fade - u.fade) * s};
+      }
+    }
+    if (count >= 3) emit(out, count);
+  };
+  for (int i = 0; i + 1 < ni; ++i) {
+    for (int j = 0; j + 1 < nj; ++j) {
+      const Point* p00 = &pts[static_cast<size_t>(i) * nj + j];
+      const Point* p01 = &pts[static_cast<size_t>(i) * nj + j + 1];
+      const Point* p10 = &pts[static_cast<size_t>(i + 1) * nj + j];
+      const Point* p11 = &pts[static_cast<size_t>(i + 1) * nj + j + 1];
+      // As the relief's own triangles (Heightmap::height).
+      const Point* tris[2][3] = {{p00, p01, p11}, {p00, p11, p10}};
+      for (const auto& t : tris) {
+        const int s0 = t[0]->side, s1 = t[1]->side, s2 = t[2]->side;
+        if (s0 < 0 && s1 < 0 && s2 < 0) continue;
+        const bool by_falls = falls && std::hypot(t[0]->x - F.x, t[0]->z - F.z) < 38.0f;
+        if (!by_falls) {
+          if (s0 == 0 && s1 == 0 && s2 == 0) triangle(t[0], t[1], t[2], 0, false);
+          continue;
+        }
+        // By the falls: the river above, up to the lip, where any of it is
+        // up there; the pool, where any of it is down there.
+        if (s0 == 0 || s1 == 0 || s2 == 0) triangle(t[0], t[1], t[2], 0, true);
+        if (s0 == 1 || s1 == 1 || s2 == 1) triangle(t[0], t[1], t[2], 1, false);
+      }
+    }
+  }
+}
+
+}  // namespace
+
 MeshData build_water_mesh(const World& world) {
   MeshData m;
   m.transparent = true;
@@ -471,49 +618,14 @@ MeshData build_water_mesh(const World& world) {
       }
     }
   }
-  // The river: a ribbon at its water's level, as wide as it is at each
-  // place, clear at its banks (the ground there draws its real shore); not
-  // down its waterfall (drawn falling: build_dynamic); fading into the sea.
-  if (world.west.valid() && world.west.stream.width.size() == world.west.stream.points.size()) {
-    const Stream& st = world.west.stream;
-    const size_t n = st.points.size();
-    constexpr int kColumns = 6;
-    const float offsets[kColumns] = {-1.2f, -0.85f, -0.4f, 0.4f, 0.85f, 1.2f};
-    const float alphas[kColumns] = {0.0f, 0.7f, 0.88f, 0.88f, 0.7f, 0.0f};
-    float to_end = 0;
-    std::vector<float> left(n, 0.0f);  // meters to its end
-    for (size_t i = n - 1; i-- > 0;) {
-      to_end += std::hypot(st.points[i + 1].x - st.points[i].x, st.points[i + 1].z - st.points[i].z);
-      left[i] = to_end;
-    }
-    for (size_t i = 0; i + 1 < n && i + 1 < st.level.size(); ++i) {
-      if (st.level[i] - st.level[i + 1] > 0.6f) continue;  // its waterfall
-      const auto corner = [&](size_t k, int col, float& x, float& z) {
-        const Vec2 prev = st.points[k > 0 ? k - 1 : k], next = st.points[k + 1 < n ? k + 1 : k];
-        float tx = next.x - prev.x, tz = next.z - prev.z;
-        const float len = std::max(1e-4f, std::sqrt(tx * tx + tz * tz));
-        tx /= len;
-        tz /= len;
-        const float w = st.width[k] * offsets[col];
-        x = st.points[k].x - tz * w;
-        z = st.points[k].z + tx * w;
-      };
-      const auto fade = [&](size_t k) { return std::clamp(left[k] / 40.0f, 0.0f, 1.0f); };
-      for (int col = 0; col + 1 < kColumns; ++col) {
-        float ax, az, bx, bz, cx, cz, dx, dz;
-        corner(i, col, ax, az);
-        corner(i, col + 1, bx, bz);
-        corner(i + 1, col + 1, cx, cz);
-        corner(i + 1, col, dx, dz);
-        const float y0 = st.level[i], y1 = st.level[i + 1];
-        const auto water = [&](int c, size_t k) {
-          const float deep = std::min(1.0f, st.depth[k] / 1.2f);
-          return Color{0.24f - 0.06f * deep, 0.50f - 0.08f * deep, 0.58f - 0.04f * deep, alphas[c] * fade(k)};
-        };
-        vertex(m, ax, y0, az, water(col, i)); vertex(m, bx, y0, bz, water(col + 1, i)); vertex(m, cx, y1, cz, water(col + 1, i + 1));
-        vertex(m, ax, y0, az, water(col, i)); vertex(m, cx, y1, cz, water(col + 1, i + 1)); vertex(m, dx, y1, dz, water(col, i + 1));
-      }
-    }
+  // The river: its water's surface on the relief's grid points (the ground
+  // there is known exactly, the same triangles), drawn past its banks: the
+  // ground hides it where it rises, so the water meets the shore everywhere.
+  // Clearer where it is shallow; the river above its waterfall ends at the
+  // cliff's lip (the falling water: build_dynamic); fading into the sea.
+  if (world.west.valid() && !world.ground.empty() && world.west.stream.width.size() == world.west.stream.points.size() &&
+      world.west.stream.level.size() == world.west.stream.points.size()) {
+    add_river_surface(m, world);
   }
   const Lake& lake = world.village.lake;
   if (lake.radius_x <= 0) {
@@ -557,6 +669,17 @@ namespace {
 
 // A dirt strip along points (the path, the west's road), following the ground
 // just above it, faded at both ends; cut into parts by stretches (culling).
+// Whether a point of a way is on one of the west's bridges (between its ends).
+bool under_bridge(const World& world, Vec2 p) {
+  if (!world.west.valid()) return false;
+  const WestLayout& w = world.west;
+  for (const auto& [c, a] : {std::pair{w.bridge, w.bridge_along}, std::pair{w.path_bridge, w.path_bridge_along}}) {
+    const float u = (p.x - c.x) * a.x + (p.z - c.z) * a.z, v = -(p.x - c.x) * a.z + (p.z - c.z) * a.x;
+    if (std::fabs(u) < rules::kBridgeHalf - 0.4f && std::fabs(v) < 3.0f) return true;
+  }
+  return false;
+}
+
 void add_path_strip(MeshData& m, const World& world, const std::vector<Vec2>& pts, float half_width, uint64_t salt) {
   if (pts.size() < 2) return;
   const size_t n = pts.size();
@@ -591,6 +714,7 @@ void add_path_strip(MeshData& m, const World& world, const std::vector<Vec2>& pt
       part_first = static_cast<uint32_t>(m.vertex_count());
       part_box = empty_aabb();
     }
+    if (under_bridge(world, pts[i]) && under_bridge(world, pts[i + 1])) continue;  // the deck is the way there
     for (int col = 0; col + 1 < kColumns; ++col) {
       float ax, az, bx, bz, cx, cz, dx, dz;
       Color ca, cb, cc, cd;

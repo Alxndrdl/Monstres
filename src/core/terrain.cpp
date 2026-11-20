@@ -1,5 +1,7 @@
 #include "monstres/core/terrain.hpp"
 
+#include "monstres/core/continent.hpp"
+
 #include "monstres/core/rng.hpp"
 
 #include <algorithm>
@@ -63,6 +65,18 @@ Path make_path(uint64_t seed) {
     }
   }
   path.points.push_back({xs[kControlPoints - 1], z0 + kControlStep * (kControlPoints - 1)});
+  // Southwards it ends on the beach where it comes to the sea (not on into
+  // it). (Northwards it goes up onto the terrace, whatever the continent's
+  // ground below it.)
+  {
+    auto& pts = path.points;
+    for (size_t i = pts.size() / 2; i < pts.size(); ++i) {
+      if (pts[i].z > rules::kPathExtent && continent_height(seed, pts[i].x, pts[i].z) < rules::kSeaLevel + 0.6f) {
+        pts.resize(std::min(pts.size(), i + 4));
+        break;
+      }
+    }
+  }
   return path;
 }
 

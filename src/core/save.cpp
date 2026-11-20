@@ -334,6 +334,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_west = version >= 23;        // the west: its species, quests, places; the bag, the farm
   const bool with_capture = version >= 24;     // four adventure spells, the capture spells
   const bool with_river = version >= 25;       // the river's water mill: its quest
+  const bool with_falls_moved = version >= 26;  // the waterfall away from the cave (the river elsewhere there)
   // Species in the bestiary and the counts: two more from version 19.
   const size_t species_saved = with_west     ? kSpeciesCount
                                : with_places ? kSpeciesCountV22
@@ -659,17 +660,26 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   for (Object& o : w.objects) {
     if (o.kind == ObjectKind::Teleporter && !w.ground.empty()) o.pos.y = w.ground.height(o.pos.x, o.pos.z) - 0.05f;
   }
-  // Before version 25 the relief had no terrace, the river ran elsewhere:
-  // the valley's trees and rocks on what are now its cliffs go, the others
-  // settle on the ground as it is.
-  if (!with_river && !w.ground.empty()) {
+  // Before version 25 the relief had no terrace, the river ran elsewhere
+  // (before 26, elsewhere by its waterfall): the valley's trees and rocks on
+  // what are now its cliffs or in its water go, the others settle on the
+  // ground as it is.
+  if (!with_falls_moved && !w.ground.empty()) {
     const bool by_door = place != 0 && w.place.door < w.objects.size();
     const Object door = by_door ? w.objects[w.place.door] : Object{};
     std::erase_if(w.objects, [&](const Object& o) {
       const bool nature = o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine || o.kind == ObjectKind::Rock ||
                           o.kind == ObjectKind::Bush || o.kind == ObjectKind::Stump;
-      return nature && steep_ground(w, o.pos.x, o.pos.z);
+      // The cave's teleporter was up on the cliff beside its mouth in some worlds: built again below.
+      if (o.kind == ObjectKind::Teleporter && o.variant == static_cast<uint8_t>(TeleporterId::Cave)) return true;
+      if (!nature) return false;
+      float level = 0, width = 0;
+      const float ground = w.ground.height(o.pos.x, o.pos.z);
+      const bool wet = w.west.valid() && river_surface(w.west, o.pos.x, o.pos.z, ground, 12.0f, level, width) < 12.0f &&
+                       ground < level + 0.3f;
+      return wet || steep_ground(w, o.pos.x, o.pos.z);
     });
+    build_teleporters(w, TeleporterId::Cave);
     if (by_door) {  // saved inside: its door, where it is now in the list
       for (size_t k = 0; k < w.objects.size(); ++k) {
         if (w.objects[k] == door) w.place.door = static_cast<uint32_t>(k);

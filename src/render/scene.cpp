@@ -1270,39 +1270,46 @@ void add_west_effects(const World& w, float time, DrawList& list) {
       }
     });
   }
-  // The river's waterfall: from the cliff's lip, where the river comes to it,
-  // down into the pool; foam and spray at its foot.
-  if (near_camera(w, west.cove, 85) && west.stream.falls > 2 && west.stream.falls < west.stream.width.size()) {
+  // The river's waterfall: from the cliff's lip, at the river's level up
+  // there, curving out (thrown off the lip) down into the pool, in front of
+  // the hidden cleft; foam and spray where it lands.
+  if (near_camera(w, west.cove, 85) && west.stream.falls > 0 && west.stream.falls + 1 < west.stream.width.size() &&
+      west.stream.level.size() == west.stream.width.size()) {
     const Stream& st = west.stream;
     const Vec2 o = west.falls_out;
-    const float top = st.level[st.falls - 2];
+    const float top = st.level[st.falls];
     const float bottom = west.cove_level;
     const float height = top - bottom;
     const float lip = st.width[st.falls];
-    const Vec2 f = along2(west.falls, o, 0.5f);
     const float yaw = std::atan2(-o.x, -o.z);
+    const float throw_out = rules::kFallsLanding + rules::kFallsLip;
+    const auto out_at = [&](float drop) {  // out from the edge's line, `drop` below the top
+      return -rules::kFallsLip + throw_out * std::sqrt(std::clamp(drop / height, 0.0f, 1.0f));
+    };
     if (height > 0.5f) {
-      const int bands = static_cast<int>(std::ceil(height));
+      const int bands = std::max(4, static_cast<int>(std::ceil(height * 1.5f)));
       for (int k = 0; k < bands; ++k) {
-        const float u = static_cast<float>(k) / static_cast<float>(bands);
+        const float d0 = height * static_cast<float>(k) / static_cast<float>(bands);
+        const float d1 = height * static_cast<float>(k + 1) / static_cast<float>(bands);
+        const float o0 = out_at(d0), o1 = out_at(d1);
+        const Vec2 at = along2(west.falls, o, o0);
         Instance band;
-        band.x = f.x;
-        band.z = f.z;
-        band.y = top - static_cast<float>(k);
-        band.rotation = quat_yaw(yaw);
-        band.sx = (lip * 1.1f + 0.6f) / 1.4f;  // one curtain, as wide as the river at the lip
-        band.sy = std::min(1.0f, height - static_cast<float>(k));
-        band.sz = 1.3f;
-        (void)u;
-        const float pulse = 0.5f + 0.5f * std::sin(time * 7.0f - static_cast<float>(k) * 1.4f);
-        band.tint = {1, 1, 1, 0.62f + 0.35f * pulse};
+        band.x = at.x;
+        band.z = at.z;
+        band.y = top - d0 + 0.02f;
+        band.rotation = quat_yaw(yaw) * quat_x(std::atan2(o1 - o0, d1 - d0));  // leaning out, as it falls
+        band.sx = std::max(lip * 1.1f + 0.6f, 2.2f) / 1.4f;  // one curtain, as wide as the river at the lip
+        band.sy = std::hypot(o1 - o0, d1 - d0);
+        band.sz = 1.0f;
+        const float pulse = 0.5f + 0.5f * std::sin(time * 7.0f - static_cast<float>(k) * 0.95f);
+        band.tint = {1, 1, 1, 0.66f + 0.32f * pulse};
         add(list, MeshId::FallsBand, band);
       }
       const Vec2 lat{-o.z, o.x};
-      const Vec2 foot = along2(f, o, 1.4f);
+      const Vec2 foot = along2(west.falls, o, rules::kFallsLanding);
       for (int i = 0; i < 7; ++i) {  // foam
         const float t = std::fmod(time * 0.7f + static_cast<float>(i) / 7, 1.0f);
-        const Vec2 p = along2(along2(foot, lat, (static_cast<float>(i) - 3.0f) * 0.55f), o, 0.7f * t);
+        const Vec2 p = along2(along2(foot, lat, (static_cast<float>(i) - 3.0f) * 0.55f), o, 0.9f * t);
         Instance puff;
         puff.x = p.x;
         puff.y = bottom + 0.1f + 0.7f * t;

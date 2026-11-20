@@ -115,7 +115,11 @@ namespace monstres {
 //  25  the river (the west's stream, now from the Forêt Profonde to the sea):
 //      thirteen quests (the water mill's wheel). Before: twelve, the last
 //      one not taken.
-inline constexpr uint32_t kSaveVersion = 25;
+//  26  same layout; the river's waterfall moved away from the cave's mouth
+//      (and its water drawn up to its banks): before, the valley's trees and
+//      rocks now in its water or on its cliffs go, the others settle again;
+//      the cave's teleporter is built again, down before its mouth.
+inline constexpr uint32_t kSaveVersion = 26;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

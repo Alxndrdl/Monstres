@@ -272,7 +272,11 @@ Ce qui tient le passage à l'échelle :
   visibles sont dessinées d'un seul appel). Les créatures hors champ ne sont
   pas dessinées non plus ;
 - **la carte** met ses données en cache, dessine le monde à 1 pixel par
-  mètre et le continent à 1 pixel pour 10 m.
+  mètre et le continent à 1 pixel pour 10 m. Ces images (plus d'un million
+  de pixels) se dessinent d'avance, quelques rangées à la fois pendant le
+  jeu (6 ms toutes les 30 ms, à partir de 2 s après le chargement) ; ce qui
+  reste est fini à l'ouverture. La hauteur du sol est lue une fois par pixel
+  (pentes et ombrage lisent les voisines).
 
 Rendu lointain (`src/render/far_terrain.hpp`) :
 - le sol du continent est un seul maillage indexé (chaque point une seule
@@ -447,25 +451,42 @@ Règles dans `src/core/west.hpp` / `west.cpp`, tirées de la graine
 - **La route** part du sentier juste au nord du départ (un panneau à la
   bifurcation) et file vers l'ouest jusqu'à la porte du phare, en longeant
   l'avant de l'exploitation. **La terrasse** : à l'intérieur des terres (au
-  nord et à l'est) le sol est plus haut, d'environ 8 m. Son bord serpente
+  nord et à l'est) le sol est plus haut, d'environ 12 m (jamais moins, même
+  au-dessus d'un creux du continent). Son bord serpente
   (`WestLayout::scarp`, déformé par du bruit) : falaise ici, pente douce là
-  (`cliff_width`), une rampe là où le sentier y monte. La Grotte aux Cristaux
-  s'ouvre dans un éperon de ce bord, au bout d'un ravin.
+  (`cliff_width`), une large rampe là où le sentier y monte. La Grotte aux Cristaux
+  s'ouvre dans un éperon de ce bord, au pied de sa face raide (du côté où
+  regarde l'entrée), au fond d'une échancrure qui s'évase vers la vallée,
+  aux parois irrégulières ; son téléporteur est en bas, devant elle.
 - **La rivière** descend de la Forêt Profonde, à l'est : elle suit la
   terrasse en méandres (courbes de taille changeante), passe sous le sentier
-  (un pont), puis tombe du bord de la terrasse près de la grotte : une
-  cascade, sa rivière au-dessus d'elle, un bassin en bas (la rivière s'y
-  élargit et s'y creuse). Elle file ensuite vers l'ouest, passe sous la
-  route (un autre pont) et s'élargit en estuaire jusqu'à la mer. Sa largeur
+  (un pont), puis tombe du bord de la terrasse, à une soixantaine de mètres
+  de l'entrée de la grotte (l'éperon entre les deux ; quand la grotte est à
+  l'est du sentier, la chute est de l'autre côté du sentier) : une cascade,
+  sa rivière au-dessus d'elle jusqu'au rebord, son eau lancée en courbe
+  jusqu'au bassin en bas (la rivière s'y élargit et s'y creuse). Elle fait
+  au moins 9 m (`kFallsLeast`) : son eau passe loin au-dessus de l'entrée
+  cachée ; là où le sol de la vallée est haut au pied de la falaise, le
+  bassin et la rivière après lui sont plus bas (une petite gorge). Son niveau
+  ne descend que depuis la limite de la zone jouable (au-delà elle coule sous
+  terre : sa source). Elle file
+  ensuite vers l'ouest, passe sous la route (un autre pont) et s'élargit en
+  estuaire jusqu'à la mer. Chaque pont va d'un point de son chemin à un autre
+  (ses deux bouts sur le chemin, même dans un virage) ; le sol de ses abords
+  est relevé jusqu'au tablier. L'eau de la rivière est une surface posée sur
+  la grille du relief, dessinée au-delà des berges : le sol la cache là où il
+  monte, si bien qu'elle touche le bord partout (`add_river_surface`). Sa largeur
   et sa profondeur changent le long d'elle ; dans un virage, le lit est plus
   profond côté extérieur (berge raide) et peu profond côté intérieur (banc de
   graviers, pente douce). Son eau descend toujours (`carve_stream` dans
   `heightmap.cpp`). On peut y patauger ; des Ploufi vivent sur ses berges
   (zone « Rivière »).
-- **L'entrée cachée** : à côté de la cascade, au pied de la falaise, une
-  fente dans la roche (`ObjectKind::HiddenCave`) mène dans la Grotte aux
-  Cristaux, au bout d'un tunnel qui part de sa salle la plus profonde
-  (`ExitKind::Hidden`). On en ressort au pied de la cascade.
+- **L'entrée cachée** : derrière le rideau d'eau de la cascade, au pied de la
+  falaise, une fente dans la roche (`ObjectKind::HiddenCave`), sur une
+  corniche à fleur d'eau qui longe la falaise jusqu'à la berge la plus
+  proche, mène dans la Grotte aux Cristaux, au bout d'un tunnel qui part de
+  sa salle la plus profonde (`ExitKind::Hidden`). On en ressort derrière la
+  cascade.
 - **Le moulin à eau** de Mathurin, sur la rive, en amont du pont du sentier
   (sa roue dans l'eau, au-dessus d'un bief creusé) :
   une bande de Ploufi agressifs (un alpha niveau 9, deux niveau 7) a bloqué sa
@@ -1181,6 +1202,15 @@ rendent le jeu environ 40 fois plus lent : sous eux, les plus longues parties
 aléatoires sont raccourcies (`kSanitized`, `tests/support/test_helpers.hpp`)
 et les mondes générés sont mis en cache par graine (`cached_game`) ; la
 version optimisée joue tout en entier.
+
+La cohérence du monde est vérifiée sur 30 mondes (`tests/unit/test_coherence.cpp`) :
+la cascade assez haute pour cacher l'entrée derrière elle ; aucun arbre,
+rocher ou bâtiment dans l'eau (rivière, lac, mer : `under_water`) ni, pour
+les arbres et rochers, sur une falaise ; le sentier et la route au sec sauf
+sur leurs ponts, dont les bouts touchent le sol ; les téléporteurs sur un sol
+plat, au sec, loin du bord de la terrasse. Le sentier et la route restent
+au-dessus de la mer (une bande de terre là où le sol plonge un peu sous elle,
+près de la côte) ; au sud, le sentier s'arrête sur la plage.
 
 Après un changement **voulu** des règles, régénérer les références puis relire
 le diff avant de valider :

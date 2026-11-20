@@ -276,9 +276,13 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
                         {C.x - 150 + j(8, 20), std::max(C.z - 430.0f, -rules::kReliefHalfSize + 20.0f)},
                         {C.x - 118 + j(2, 15), C.z - 230 + j(3, 20)},
                         {C.x - 95 + j(4, 8), C.z - 115 + j(5, 10)},
-                        {C.x - 62 + j(6, 5), C.z - 55 + j(7, 5)},
-                        {C.x - 38, C.z - 14}, {C.x - 24, C.z + 10}, {C.x - 4, C.z + 23}, {C.x + 16, C.z + 12},
-                        {C.x + 21, C.z - 4}, {C.x + 24, C.z - 24}, {C.x + 44, C.z - 36}};
+                        {C.x - 62 + j(6, 5), C.z - 55 + j(7, 5)}};
+    // The spur around the cave: its steep face just before the mouth (on the
+    // side the cave looks to), its long gentle side on the other.
+    const float k = cave.radius > 0 && cave.facing.x < 0 ? -1.0f : 1.0f;
+    std::vector<Vec2> spur{{-38, -14}, {-24, 10}, {-4, 23}, {16, 12}, {21, -4}, {24, -24}, {44, -36}};
+    if (k < 0) std::reverse(spur.begin(), spur.end());
+    for (const Vec2& p : spur) c.push_back({C.x + k * p.x, C.z + p.z});
     for (float x = C.x + 92; x < rules::kReliefHalfSize + 90; x += 55) {
       c.push_back({x, std::min(C.z - 40.0f + j(static_cast<uint64_t>(x + 2000), 15), -128.0f)});
     }
@@ -293,20 +297,39 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
       }
     }
   }
-  // The waterfall: the edge's point by the cave's far side; the pool below,
-  // the hidden cleft at the cliff's foot beside the falling water.
+  // The waterfall: along the edge westwards from the cave's mouth, well away
+  // from it (the spur between them); the pool below, the hidden cleft at the
+  // cliff's foot right behind the falling water.
   {
-    const Vec2 want{cave_at.x - 36.0f, cave_at.z - 6.0f};
+    const Vec2 mouth = cave.radius > 0 ? cave.mouth : cave_at;
+    const auto& sp = w.scarp.points;
     size_t best = 1;
-    for (size_t i = 1; i + 1 < w.scarp.points.size(); ++i) {
-      if (distance(w.scarp.points[i], want) < distance(w.scarp.points[best], want)) best = i;
+    for (size_t i = 1; i + 1 < sp.size(); ++i) {
+      if (distance(sp[i], mouth) < distance(sp[best], mouth)) best = i;
     }
-    const Vec2 d = normalized(w.scarp.points[std::min(best + 2, w.scarp.points.size() - 1)] - w.scarp.points[best - 1]);
-    w.falls = w.scarp.points[best];
+    const auto westwards = [&](size_t i, float meters) {
+      float gone = 0;
+      while (i > 3 && gone < meters) {
+        gone += distance(sp[i], sp[i - 1]);
+        --i;
+      }
+      return i;
+    };
+    best = westwards(best, rules::kFallsFromMouth);
+    if (!cave_west) {
+      // The cave east of the path, little room between them: the falls on
+      // the other side of the path, past where it goes up the terrace.
+      size_t ramp = 1;
+      for (size_t i = 1; i + 1 < sp.size(); ++i) {
+        if (distance(sp[i], w.ramp) < distance(sp[ramp], w.ramp)) ramp = i;
+      }
+      best = std::min(best, westwards(ramp, 110.0f));
+    }
+    const Vec2 d = normalized(sp[std::min(best + 2, sp.size() - 1)] - sp[best - 1]);
+    w.falls = sp[best];
     w.falls_out = {-d.z, d.x};  // the valley's side
-    w.cove = w.falls + w.falls_out * 8.0f;
-    const Vec2 lat{-w.falls_out.z, w.falls_out.x};
-    w.hidden = w.falls + lat * 4.8f + w.falls_out * 1.4f;
+    w.cove = w.falls + w.falls_out * 9.0f;
+    w.hidden = w.falls + w.falls_out * rules::kHiddenOut;
   }
   {
     const float x_cross = std::min(w.farm.x + rules::kFarmRadius + 30.0f, -154.0f);
@@ -319,17 +342,24 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     }
     std::vector<Vec2> anchors;  // from upstream, down to the falls
     Vec2 up_cross{};
-    if (cave_west) {
-      float z = cave_at.z - 75.0f;
+    const bool falls_west = F.x < path_x_at(path, F.z);
+    if (falls_west) {  // across the path up on the terrace (north of the falls)
+      float z = std::min(cave_at.z - 75.0f, F.z - 45.0f);
       while (z > -rules::kReliefHalfSize + 80 && scarp_side(w, path_x_at(path, z), z) > -25.0f) z -= 10.0f;
       up_cross = {path_x_at(path, z), z};
-      anchors = {up_cross + east * 10.0f, up_cross - east * 10.0f, {cave_at.x + 12, cave_at.z - 54}};
+      // Across it and well away from it (not along it on the other side).
+      Vec2 away = up_cross - east * 30.0f;  // (on the terrace, not by its edge)
+      for (int k = 0; k < 12 && scarp_side(w, away.x, away.z) > -22.0f; ++k) away = away - out * 4.0f;
+      anchors = {up_cross + east * 12.0f, up_cross - east * 12.0f, away};
+      if (cave_west) anchors.push_back({cave_at.x + 12, cave_at.z - 54});  // behind the cave
       pins.push_back(up_cross);
     } else {
       anchors = {{cave_at.x + 30, cave_at.z - 64}, {cave_at.x + 4, cave_at.z - 52}};
     }
-    anchors.push_back(F - out * 26.0f + lat * 4.0f);
-    anchors.push_back(F - out * 11.0f);
+    // Straight to the lip over its last meters (less of them by the path).
+    const float back = std::clamp(distance_to_path(path, F.x, F.z, 60.0f) - 14.0f, 12.0f, 26.0f);
+    anchors.push_back(F - out * back + lat * (0.15f * back));
+    anchors.push_back(F - out * (0.42f * back));
     const Vec2 to_deep = normalized(deep - anchors.front());
     const float edge = rules::kReliefHalfSize + 6.0f;
     Vec2 spring = anchors.front() + to_deep * ((edge - anchors.front().x) / std::max(to_deep.x, 0.2f));
@@ -367,7 +397,7 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     c.push_back(w.cove);
     pins.push_back(w.cove);
     c.push_back(w.cove + out * 11.0f + lat * 2.0f);
-    if (!cave_west) {  // back west under the path
+    if (!falls_west) {  // back west under the path
       const float z = w.cove.z + 16.0f;
       const Vec2 low{path_x_at(path, z), z};
       c.push_back(low + east * 10.0f);
@@ -428,7 +458,7 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
         }
         pin_s.push_back(s[best]);
       }
-      const float falls_s = pin_s[cave_west ? 2 : 1];
+      const float falls_s = pin_s[falls_west ? 2 : 1];
       std::vector<Vec2> moved(pts);
       float phase = 6.2831853f * hash01(seed, 102);
       for (size_t i = 0; i < n; ++i) {
@@ -447,7 +477,8 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
           const Vec2 p = pts[i] + nrm * off;
           const bool upstream = s[i] < falls_s;
           if ((upstream && scarp_side(w, p.x, p.z) > -18.0f) || (!upstream && scarp_side(w, p.x, p.z) < 6.0f && s[i] > falls_s + 25) ||
-              in_farm(w, p.x, p.z, 14.0f) || in_village(village, p.x, p.z, 20.0f)) {
+              in_farm(w, p.x, p.z, 14.0f) || in_village(village, p.x, p.z, 20.0f) ||
+              (held > 25.0f && distance_to_path(path, p.x, p.z, 14.0f) < 14.0f)) {  // not along the path
             off *= 0.3f;
           }
         }
@@ -494,7 +525,8 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
         for (const float p : narrow) {
           if (std::fabs(s[i] - p) < 14.0f && std::fabs(p - sK) > 1.0f && std::fabs(p - sF) > 1.0f) W = std::min(W, 2.7f);
         }
-        if (std::fabs(s[i] - sF) < 5.0f) W = std::min(W, 2.2f);  // gathered at the lip
+        if (s[i] <= sF && s[i] > sF - 5.0f) W = std::min(W, 2.2f);  // gathered at the lip
+        if (s[i] > sF && s[i] < sK) W = std::max(W, 5.0f);          // the pool, wide from the cliff's foot
         W *= 1 + 2.3f * smoothstep(sEnd - 120.0f, sEnd, s[i]);  // opening into the sea
         float D = 0.42f + 0.35f * value_noise(seed + 133, s[i] / 45.0f, 0, 1.0f) + 0.25f * std::fabs(st.bend[i]);
         D += 1.1f * std::exp(-((s[i] - sF - 6.0f) / 5.0f) * ((s[i] - sF - 6.0f) / 5.0f));  // the plunge pool
@@ -506,29 +538,41 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     }
   }
 
-  // The bridges: where the road crosses the river, and where the path does.
+  // The bridges: where the road crosses the river, and where the path does;
+  // each from the way's point a bridge's half length before the crossing to
+  // the one as far after it (both its ends on the way, even where it bends).
   {
+    const auto span = [](const std::vector<Vec2>& pts, size_t at, Vec2& middle, Vec2& along) {
+      size_t a = at, b = at;
+      float before = 0, after = 0;
+      while (a > 0 && before < rules::kBridgeHalf) before += distance(pts[a], pts[a - 1]), --a;
+      while (b + 1 < pts.size() && after < rules::kBridgeHalf) after += distance(pts[b], pts[b + 1]), ++b;
+      along = normalized(pts[b] - pts[a]);  // its axis: from end to end
+      middle = pts[at];                     // over the river, on the way
+    };
     float best = 1e30f;
+    size_t at = 0;
     for (size_t i = 1; i + 1 < w.road.points.size(); ++i) {
       const Vec2 p = w.road.points[i];
       const float d = distance_to_stream(w.stream, p.x, p.z, best);
       if (d < best) {
         best = d;
-        w.bridge = p;
-        w.bridge_along = normalized(w.road.points[i + 1] - w.road.points[i - 1]);
+        at = i;
       }
     }
+    span(w.road.points, at, w.bridge, w.bridge_along);
     best = 1e30f;
+    at = 0;
     for (size_t i = 1; i + 1 < path.points.size(); ++i) {
       const Vec2 p = path.points[i];
       if (p.z > -40.0f) continue;  // north of the start
       const float d = distance_to_stream(w.stream, p.x, p.z, best);
       if (d < best) {
         best = d;
-        w.path_bridge = p;
-        w.path_bridge_along = normalized(path.points[i + 1] - path.points[i - 1]);
+        at = i;
       }
     }
+    span(path.points, at, w.path_bridge, w.path_bridge_along);
   }
   // The water mill: up the river from the path's bridge (above the falls), on
   // a straight reach; its wheel in the water by the southern bank, the house
@@ -574,8 +618,11 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
 
   const auto away_from_ways = [&](float r) {
     return [&, r](Vec2 c) {
-      return distance_to_road(w.road, c.x, c.z, r + 4.0f) >= r + 4.0f &&
-             distance_to_stream(w.stream, c.x, c.z, r + 5.0f) >= r + 5.0f;
+      size_t seg = 0;
+      float t = 0;  // (the river as wide as it is there: its estuary is)
+      const float d = stream_segment(w.stream, c.x, c.z, r + 40.0f, seg, t);
+      const float water = seg < w.stream.width.size() ? w.stream.width[seg] : rules::kStreamWater;
+      return distance_to_road(w.road, c.x, c.z, r + 4.0f) >= r + 4.0f && d >= r + 5.0f + water;
     };
   };
   const Vec2 right = farm_axis_right(w.farm_front);
@@ -1121,6 +1168,52 @@ Vec2 wheel_spot(const WestLayout& west) {
 float stream_segment(const Stream& s, float x, float z, float limit, size_t& seg, float& t) {
   if (s.points.size() < 2) return limit;
   return polyline_distance(s.points, s.chunks, x, z, limit, &seg, &t);
+}
+
+float river_surface(const WestLayout& west, float x, float z, float ground, float limit, float& level, float& width,
+                    RiverPart part, size_t* segment) {
+  const Stream& s = west.stream;
+  const size_t n = s.points.size();
+  if (n < 2 || s.level.size() != n || s.width.size() != n) return limit;
+  // Beyond the playable area it runs under the ground (it springs there).
+  if (std::max(std::fabs(x), std::fabs(z)) > rules::kWorldHalfSize + 12.0f) return limit;
+  size_t seg = 0;
+  float t = 0;
+  float d = polyline_distance(s.points, s.chunks, x, z, limit, &seg, &t);
+  const size_t f = s.falls;
+  if (f > 0 && f + 1 < n && (part != RiverPart::Any || distance(Vec2{x, z}, west.falls) < 40.0f)) {
+    // By the waterfall: above its lip (on the terrace, the ground up there),
+    // the river up to its lip; anywhere else, the pool (under the cliff's
+    // rock where that stands higher).
+    const float mid = 0.5f * (s.level[f] + s.level[f + 1]);
+    const bool above = part == RiverPart::Any ? ground > mid && scarp_side(west, x, z) < -rules::kFallsLip
+                                              : part == RiverPart::Above;
+    const bool near = distance(Vec2{x, z}, west.falls) < 40.0f;  // else: all of that part
+    const size_t first = above ? (near && f > 60 ? f - 60 : 0) : f + 1;
+    const size_t last = above ? f : (near ? std::min(n - 1, f + 61) : n - 1);
+    float best2 = limit * limit;
+    bool found = false;
+    for (size_t i = first; i < last; ++i) {
+      const Vec2 a = s.points[i], e = s.points[i + 1];
+      const float abx = e.x - a.x, abz = e.z - a.z;
+      const float len2 = abx * abx + abz * abz;
+      const float u = len2 > 0 ? std::clamp(((x - a.x) * abx + (z - a.z) * abz) / len2, 0.0f, 1.0f) : 0.0f;
+      const float px = a.x + abx * u - x, pz = a.z + abz * u - z;
+      if (px * px + pz * pz < best2) {
+        best2 = px * px + pz * pz;
+        seg = i;
+        t = u;
+        found = true;
+      }
+    }
+    if (!found) return limit;
+    d = std::sqrt(best2);
+  }
+  if (d >= limit) return limit;
+  if (segment) *segment = seg;
+  level = s.level[seg] + (s.level[seg + 1] - s.level[seg]) * t;
+  width = s.width[seg] + (s.width[seg + 1] - s.width[seg]) * t;
+  return d;
 }
 
 float scarp_side(const WestLayout& west, float x, float z) {

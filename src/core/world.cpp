@@ -164,12 +164,36 @@ bool steep_here(const World& w, float x, float z) {
   return most > 1.1f;
 }
 
+}  // namespace
+
+bool under_water(const World& w, float x, float z, float margin) {
+  if (w.ground.empty()) return false;
+  const float g = w.ground.height(x, z);
+  float level = 0, width = 0;
+  if (w.west.valid() && river_surface(w.west, x, z, g, 16.0f, level, width) < width + 2.0f && g < level + margin) return true;
+  if (in_lake(w.village.lake, x, z, margin)) return true;
+  // The sea, drawn over squares where some of the relief is the sea
+  // (build_water_mesh): around there, the ground below its level is under it.
+  if (g >= rules::kSeaLevel + margin) return false;
+  for (float dx = -8; dx <= 8; dx += 8) {
+    for (float dz = -8; dz <= 8; dz += 8) {
+      if (w.ground.sea(x + dx, z + dz)) return true;
+    }
+  }
+  return false;
+}
+
+namespace {
+
+// In the water or right at its edge (no tree or rock there).
+bool wet_here(const World& w, float x, float z) { return under_water(w, x, z, 0.3f); }
+
 // Whether (x, z) belongs to a place built by hand, or the forest's clearing
 // (no random trees or rocks there).
 bool in_a_place(const World& w, float x, float z) {
   return in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.5f) || in_ruins(w.ruins, x, z, 2.0f) ||
          in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f) || in_west_place(w.west, x, z, 1.0f) ||
-         steep_here(w, x, z);
+         steep_here(w, x, z) || wet_here(w, x, z);
 }
 
 // A number in [0, 1) for a spot of the world (the same each time).
@@ -346,6 +370,7 @@ void generate_wilds(World& w) {
       if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize - 2.0f) continue;  // the valley's own
       // The west's places stay clear; its woods have their own trees (below).
       if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z)) continue;
+      if (steep_here(w, x, z) || wet_here(w, x, z)) continue;  // not on the cliffs, not in the water
       const float h = w.ground.height(x, z);
       // How likely an object is here: woods in patches, the continent's forest
       // dense, the hills rocky with pines, the beach almost bare, none at sea.
@@ -428,7 +453,7 @@ void generate_wilds(World& w) {
       Object o = random_object(trees, 0, 0, true);
       const float roll = random_range(trees, 0, 1);
       const float x = west.woods.x + u * west.woods_rx, z = west.woods.z + v * west.woods_rz;
-      if (!in_woods(west, x, z) || in_west_place(west, x, z, 1.5f)) continue;
+      if (!in_woods(west, x, z) || in_west_place(west, x, z, 1.5f) || steep_here(w, x, z) || wet_here(w, x, z)) continue;
       o.pos = {x, 0, z};
       if (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine) {
         o.size = o.size * (roll < 0.4f ? 1.0f : roll < 0.85f ? rules::kForestTreeScale : 1.8f);
@@ -1975,6 +2000,24 @@ void build_teleporters(World& w, TeleporterId only) {
   const float gate = rules::kClearingRadius * outline_scale(w.forest.center, kClearingOutline, forest_side > 0 ? static_cast<float>(kPi) : 0.0f) - 5.0f;
   // To the centimeter: the outline's sine may differ in its last digits between platforms.
   const Vec2 forest_gate{std::round((w.forest.center.x - forest_side * gate) * 100.0f) / 100.0f, w.forest.center.z};
+  // Before the cave: out of its notch, down on the valley's ground (not up
+  // on the cliff beside it).
+  Vec2 cave_spot{w.cave.mouth.x + w.cave.facing.x * 12.0f, w.cave.mouth.z + 4.0f};
+  if (w.cave.radius > 0 && w.west.valid()) {
+    const auto level_around = [&](Vec2 p) {  // its stones' ring, and a few meters on (where it may move to)
+      for (float k = -2.0f; k <= 6.0f; k += 2.0f) {
+        if (steep_ground(w, p.x + w.cave.facing.x * k, p.z + w.cave.facing.z * k) || under_water(w, p.x, p.z, 0.3f)) return false;
+      }
+      return true;
+    };
+    for (float a = 8.0f; a < 60.0f; a += 1.0f) {
+      const Vec2 p{w.cave.mouth.x + w.cave.facing.x * a, w.cave.mouth.z + w.cave.facing.z * a + 4.0f};
+      if (scarp_side(w.west, p.x, p.z) > 6.0f && level_around(p)) {
+        cave_spot = p;
+        break;
+      }
+    }
+  }
   const Spot places[] = {
       // On the village square, on the side away from the lake.
       {TeleporterId::Village, {vc.x - lake_side * 7.0f, vc.z + 6.0f}, {-lake_side, 0}, w.village.lake.radius_x > 0},
@@ -1983,7 +2026,7 @@ void build_teleporters(World& w, TeleporterId only) {
       // At the edge of the clearing, on the side of the path (the giant lives in its middle).
       {TeleporterId::Forest, forest_gate, {forest_side, 0}, w.forest.radius_x > 0},
       // Out of the ravine of the cave.
-      {TeleporterId::Cave, {w.cave.mouth.x + w.cave.facing.x * 12.0f, w.cave.mouth.z + 4.0f}, w.cave.facing,
+      {TeleporterId::Cave, cave_spot, w.cave.facing,
        w.cave.radius > 0},
       // Before the castle's gate, beside the way in.
       {TeleporterId::Castle, {w.castle.center.x + w.castle.facing.x * (rules::kCastleHalf + 8.0f), w.castle.center.z + 5.0f},
