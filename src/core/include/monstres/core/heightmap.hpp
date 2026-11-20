@@ -66,6 +66,12 @@ struct Places {
   WestLayout* west = nullptr;
 };
 
+// The terrace inland (west.hpp): how much higher the ground is there (0 in
+// the valley), and how wide its edge is around (x, z): a few meters where it
+// is a cliff, tens where it is a slope (and where the path goes up).
+float terrace_rise(uint64_t seed, const Path& path, const WestLayout& west, const CaveLayout& cave, float x, float z);
+float cliff_width(uint64_t seed, const Path& path, const WestLayout& west, const CaveLayout& cave, float x, float z);
+
 // The ground beyond the valley before any place shapes it: the hills and the
 // continent's (as make_heightmap draws it, near enough to place things).
 float natural_height(uint64_t seed, float x, float z);

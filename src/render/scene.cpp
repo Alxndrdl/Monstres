@@ -156,6 +156,8 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::Lighthouse: return MeshId::Lighthouse;
     case ObjectKind::Menhir: return MeshId::Menhir;
     case ObjectKind::Meteorite: return MeshId::Meteorite;
+    case ObjectKind::WaterMill: return MeshId::WaterMill;  // its wheel: build_dynamic
+    case ObjectKind::HiddenCave: return MeshId::CaveMouth;
     default:                return MeshId::Crate;
   }
 }
@@ -573,6 +575,393 @@ void add_spell_effects(const World& w, float time, DrawList& list) {
   }
 }
 
+// ---- The elements' looks: projectiles, impacts, bursts ------------------------
+// Each its own: fire burns and leaves embers rising, water wobbles and
+// splashes, nature throws leaves, shadow trails dark wisps and tendrils,
+// light shines in rays, arcane turns in runes; air is a gust, electricity
+// crackles (as before).
+
+constexpr Color kFireHeart{2.8f, 2.5f, 1.4f, 1}, kFlame{2.2f, 0.95f, 0.3f, 1}, kEmber{1.7f, 0.42f, 0.12f, 1};
+constexpr Color kWaterGlow{0.55f, 1.25f, 2.0f, 1}, kFoam{2.1f, 2.3f, 2.5f, 1}, kDrop{0.8f, 1.6f, 2.2f, 1};
+constexpr Color kLeaf{0.6f, 1.6f, 0.4f, 1}, kLeafLight{1.4f, 1.75f, 0.45f, 1}, kSeed{0.9f, 1.9f, 0.6f, 1};
+constexpr Color kShadowGlow{1.3f, 0.75f, 1.9f, 1}, kShadowHeart{2.0f, 1.2f, 2.6f, 1};
+constexpr Color kLightGlow{2.0f, 1.9f, 1.25f, 1}, kLightWhite{2.8f, 2.7f, 2.2f, 1};
+constexpr Color kArcaneGlow{1.75f, 0.6f, 2.1f, 1}, kRune{2.2f, 1.3f, 2.5f, 1};
+constexpr Color kAirGlow{1.5f, 1.8f, 1.9f, 1};
+
+Color mixed(Color a, Color b, float t) { return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1}; }
+Vec3 at_spark(DrawList& list, Vec3 p, float size, Color c, float alpha, float spin = 0) {
+  add_spark(list, p.x, p.y, p.z, size, c, alpha, spin);
+  return p;
+}
+
+// Two unit axes across a direction.
+void across(Vec3 d, Vec3& side, Vec3& up) {
+  float sx = -d.z, sz = d.x;
+  float l = std::sqrt(sx * sx + sz * sz);
+  if (l < 1e-4f) {
+    sx = 1;
+    sz = 0;
+    l = 1;
+  }
+  side = {sx / l, 0, sz / l};
+  up = {d.y * side.z, d.z * side.x - d.x * side.z, -d.y * side.x};
+}
+
+// A puff of smoke (not glowing: dark wisps, grey smoke).
+void add_puff(DrawList& list, Vec3 p, float size, Color c, float alpha, float spin) {
+  if (alpha <= 0) return;
+  Instance puff;
+  puff.x = p.x;
+  puff.y = p.y;
+  puff.z = p.z;
+  puff.sx = puff.sy = puff.sz = size;
+  puff.rotation = quat_yaw(spin);
+  puff.tint = {c.r, c.g, c.b, alpha};
+  add(list, MeshId::Smoke, puff);
+}
+
+// A wavy stroke from a to b (shadow's tendrils, nature's vines): `wave`
+// across, along `side`.
+void add_wavy(DrawList& list, Vec3 a, Vec3 b, Vec3 side, float wave, float phase, float width, Color c, float alpha) {
+  constexpr int kSegments = 5;
+  Vec3 prev = a;
+  for (int s = 1; s <= kSegments; ++s) {
+    const float u = static_cast<float>(s) / kSegments;
+    const Vec3 p = a + (b - a) * u + side * (wave * std::sin(u * kTau * 0.75f + phase) * std::sin(u * kTau / 2));
+    add_stroke(list, prev, p, width * (1.2f - 0.6f * u), c, alpha * (1 - 0.5f * u));
+    prev = p;
+  }
+}
+
+// A circle of runes lying flat (arcane), turning.
+void add_rune_circle(DrawList& list, Vec3 at, float radius, float turn, Color c, float alpha) {
+  if (alpha <= 0) return;
+  Instance r;
+  r.x = at.x;
+  r.y = at.y;
+  r.z = at.z;
+  r.rotation = quat_yaw(turn);
+  r.sx = r.sz = radius;
+  r.tint = {c.r, c.g, c.b, alpha};
+  r.material = kGlowing;
+  add(list, MeshId::RuneCircle, r);
+}
+
+void add_projectile(DrawList& list, const Projectile& p, size_t i, uint64_t tick, float time) {
+  const Vec3 at = p.pos, d{p.dir_x, p.dir_y, p.dir_z};
+  Vec3 side, up;
+  across(d, side, up);
+  const auto back = [&](float k) { return at - d * k; };
+  const float seed = static_cast<float>(i) * 1.7f;
+  const uint64_t flick = tick / 2 + i * 131;
+  switch (p.element) {
+    case Element::Fire: {  // a fireball: white-hot inside, flames licking back, embers rising, a little smoke
+      at_spark(list, at, 0.12f, kFireHeart, 1, time * 11);
+      at_spark(list, at, 0.24f + 0.04f * std::sin(time * 31 + seed), kFlame, 0.85f, time * 7);
+      for (int k = 1; k <= 7; ++k) {
+        const float u = static_cast<float>(k) / 7;
+        const float jitter = rand01(flick, 50, static_cast<uint64_t>(k)) - 0.5f;
+        const Vec3 q = back(0.15f * static_cast<float>(k)) + side * (jitter * 0.16f) + Vec3{0, 0.12f * u * u * 4, 0};
+        at_spark(list, q, 0.19f * (1 - u) + 0.035f, mixed(kFlame, kEmber, u), 0.9f - 0.75f * u, time * 9 + static_cast<float>(k));
+      }
+      for (int k = 0; k < 2; ++k) {
+        const float u = std::fmod(time * 2.0f + 0.5f * static_cast<float>(k) + seed, 1.0f);
+        add_puff(list, back(0.9f + 0.6f * u) + Vec3{0, 0.35f * u, 0}, 0.08f + 0.14f * u, {0.35f, 0.33f, 0.32f, 1}, 0.35f * (1 - u), u * 3);
+      }
+      return;
+    }
+    case Element::Water: {  // a wobbling orb, a gleam on it, droplets falling behind
+      const float wobble = 0.03f * std::sin(time * 14 + seed);
+      at_spark(list, at, 0.21f + wobble, kWaterGlow, 0.75f, time * 3);
+      at_spark(list, at, 0.15f - wobble, {0.4f, 0.9f, 1.6f, 1}, 0.6f, -time * 4);
+      at_spark(list, at + up * 0.08f + side * 0.07f, 0.055f, kFoam, 0.95f, time);
+      for (int k = 1; k <= 6; ++k) {
+        const float kk = static_cast<float>(k);
+        const float s = rand01(flick / 2, 51, static_cast<uint64_t>(k)) - 0.5f;
+        const Vec3 q = back(0.17f * kk) + side * (s * 0.22f) - Vec3{0, 0.022f * kk * kk, 0};
+        at_spark(list, q, 0.065f - 0.006f * kk, kDrop, 0.85f - 0.12f * kk, time * 5 + kk);
+      }
+      return;
+    }
+    case Element::Nature: {  // a glowing seed, leaves whirling around it, others falling behind
+      at_spark(list, at, 0.13f, kSeed, 1, time * 5);
+      at_spark(list, at, 0.22f, kLeaf, 0.3f, time * 2);
+      for (int k = 0; k < 4; ++k) {
+        const float a = time * 9.0f + kTau * static_cast<float>(k) / 4;
+        at_spark(list, at + (side * std::cos(a) + up * std::sin(a)) * 0.28f, 0.075f, k % 2 ? kLeafLight : kLeaf, 0.95f, a * 2);
+      }
+      for (int k = 1; k <= 5; ++k) {
+        const float kk = static_cast<float>(k);
+        const Vec3 q = back(0.24f * kk) + side * (0.13f * std::sin(time * 5 + kk * 1.3f)) - Vec3{0, 0.06f * kk, 0};
+        at_spark(list, q, 0.06f, k % 2 ? kLeaf : kLeafLight, 0.85f - 0.14f * kk, time * 6 + kk);
+      }
+      return;
+    }
+    case Element::Shadow: {  // a ball of darkness with a violet heart, tendrils writhing behind, dark wisps
+      add_puff(list, at, 0.27f + 0.03f * std::sin(time * 9 + seed), {0.12f, 0.06f, 0.17f, 1}, 0.85f, time * 2);
+      at_spark(list, at, 0.2f, kShadowGlow, 0.45f, time * 5);
+      at_spark(list, at, 0.07f, kShadowHeart, 1, -time * 7);
+      for (int k = 0; k < 3; ++k) {
+        const float a = kTau * static_cast<float>(k) / 3 + time * 2;
+        const Vec3 across_k = side * std::cos(a) + up * std::sin(a);
+        add_wavy(list, at + across_k * 0.12f, back(1.0f) + across_k * 0.25f, across_k, 0.12f, time * 8 + static_cast<float>(k),
+                 0.035f, kShadowGlow, 0.7f);
+      }
+      for (int k = 0; k < 3; ++k) {
+        const float u = std::fmod(time * 1.8f + static_cast<float>(k) / 3 + seed, 1.0f);
+        add_puff(list, back(0.3f + 0.9f * u), 0.1f + 0.16f * u, {0.1f, 0.05f, 0.14f, 1}, 0.6f * (1 - u), u * 4);
+      }
+      return;
+    }
+    case Element::Light: {  // a star: a white heart, rays turning across its way, a beam behind
+      at_spark(list, at, 0.12f, kLightWhite, 1, time * 6);
+      at_spark(list, at, 0.24f, kLightGlow, 0.5f, time * 3);
+      for (int k = 0; k < 4; ++k) {
+        const float a = time * 6.0f + kTau * static_cast<float>(k) / 8;
+        const Vec3 r = side * std::cos(a) + up * std::sin(a);
+        add_stroke(list, at - r * 0.4f, at + r * 0.4f, 0.018f, kLightWhite, 0.8f);
+      }
+      add_stroke(list, at, back(1.0f), 0.07f, kLightGlow, 0.35f);
+      add_stroke(list, at, back(0.8f), 0.022f, kLightWhite, 0.7f);
+      return;
+    }
+    case Element::Arcane: {  // a bright heart, runes orbiting on two rings, a spiral of glyphs behind
+      at_spark(list, at, 0.1f, kRune, 1, time * 8);
+      at_spark(list, at, 0.2f, kArcaneGlow, 0.55f, time * 4);
+      for (int k = 0; k < 3; ++k) {
+        const float a = time * 7.0f + kTau * static_cast<float>(k) / 3, b = -time * 9.0f + kTau * static_cast<float>(k) / 3;
+        at_spark(list, at + (side * std::cos(a) + up * std::sin(a)) * 0.3f, 0.05f, kRune, 0.95f, a);
+        at_spark(list, at + (side * std::cos(b) + d * std::sin(b)) * 0.3f, 0.05f, kArcaneGlow, 0.95f, b);
+      }
+      for (int k = 1; k <= 5; ++k) {
+        const float kk = static_cast<float>(k), a = time * 10 + kk * 1.4f;
+        at_spark(list, back(0.2f * kk) + (side * std::cos(a) + up * std::sin(a)) * 0.12f, 0.045f, kRune, 0.8f - 0.13f * kk, a);
+      }
+      return;
+    }
+    default: {  // a glowing ball of its element and its trail
+      const Color c = element_glow(p.element);
+      at_spark(list, at, 0.24f, c, 1, time * 9);
+      for (int k = 1; k <= 3; ++k) {
+        const float kk = static_cast<float>(k);
+        at_spark(list, back(0.22f * kk), 0.2f - 0.04f * kk, c, 0.7f - 0.18f * kk, time * 7 + kk);
+      }
+      return;
+    }
+  }
+}
+
+// Where a projectile stopped, `t` from 0 to 1.
+void add_impact(DrawList& list, const Impact& m, size_t i, uint64_t tick, float t, float time) {
+  const Vec3 at = m.pos;
+  const float turn = static_cast<float>(m.tick % 7);
+  const auto ring_of = [&](int n, float r, float y, float size, Color c, float alpha, float twist) {
+    for (int k = 0; k < n; ++k) {
+      const float a = kTau * static_cast<float>(k) / static_cast<float>(n) + turn + twist;
+      at_spark(list, at + Vec3{std::cos(a) * r, y, std::sin(a) * r}, size, c, alpha, a);
+    }
+  };
+  switch (m.element) {
+    case Element::Fire: {  // it bursts into flames: embers flying up and out, a puff of smoke
+      at_spark(list, at, 0.25f + 0.45f * t, kFlame, 0.7f * (1 - t), time);
+      for (int k = 0; k < 10; ++k) {
+        const float a = kTau * static_cast<float>(k) / 10 + turn, r = (0.3f + 0.5f * rand01(m.tick, 52, static_cast<uint64_t>(k))) * t * 1.6f;
+        at_spark(list, at + Vec3{std::cos(a) * r, 0.9f * t - 0.2f * t * t + 0.1f * static_cast<float>(k % 3) * t, std::sin(a) * r},
+                 0.09f * (1 - t) + 0.02f, mixed(kFlame, kEmber, t), 1 - t, a);
+      }
+      add_puff(list, at + Vec3{0, 0.6f * t, 0}, 0.15f + 0.35f * t, {0.35f, 0.33f, 0.32f, 1}, 0.4f * (1 - t) * std::min(1.0f, t * 4), t);
+      return;
+    }
+    case Element::Water: {  // a splash: droplets thrown up in arcs, falling back
+      at_spark(list, at, 0.2f + 0.3f * t, kWaterGlow, 0.5f * (1 - t), time);
+      for (int k = 0; k < 12; ++k) {
+        const float a = kTau * static_cast<float>(k) / 12 + turn;
+        const float speed = 0.6f + 0.6f * rand01(m.tick, 53, static_cast<uint64_t>(k));
+        const float r = speed * t * 1.1f, y = speed * (1.8f * t - 2.6f * t * t);
+        at_spark(list, at + Vec3{std::cos(a) * r, y, std::sin(a) * r}, 0.06f * (1 - 0.5f * t), k % 3 ? kDrop : kFoam, 1 - t, a);
+      }
+      return;
+    }
+    case Element::Nature: {  // leaves thrown out, fluttering down
+      for (int k = 0; k < 10; ++k) {
+        const float a = kTau * static_cast<float>(k) / 10 + turn;
+        const float r = 0.8f * std::sqrt(t), sway = 0.12f * std::sin(time * 6 + static_cast<float>(k));
+        at_spark(list, at + Vec3{std::cos(a) * r + sway, 0.45f * t - 0.9f * t * t, std::sin(a) * r}, 0.07f,
+                 k % 2 ? kLeaf : kLeafLight, 1 - t, time * 5 + a);
+      }
+      at_spark(list, at, 0.15f + 0.3f * t, kSeed, 0.4f * (1 - t), time);
+      return;
+    }
+    case Element::Shadow: {  // darkness drawn in, then a dark puff spreading
+      ring_of(10, 0.9f * (1 - t), 0.1f * std::sin(t * 6), 0.07f, kShadowGlow, 1 - t, t * 3);
+      add_puff(list, at, 0.15f + 0.45f * t, {0.1f, 0.05f, 0.14f, 1}, 0.75f * (1 - t), t * 2);
+      at_spark(list, at, 0.1f * (1 - t), kShadowHeart, 1 - t, time);
+      return;
+    }
+    case Element::Light: {  // a star flashing: rays out, a white glow
+      for (int k = 0; k < 8; ++k) {
+        const float a = kTau * static_cast<float>(k) / 8 + turn, tilt = (k % 2 ? 0.5f : -0.3f);
+        const Vec3 r{std::cos(a), tilt, std::sin(a)};
+        add_stroke(list, at + r * (0.1f + 0.3f * t), at + r * (0.35f + 0.9f * t), 0.025f, kLightWhite, 1 - t);
+      }
+      at_spark(list, at, 0.3f * (1 - t) + 0.1f, kLightWhite, 1 - t, time);
+      at_spark(list, at, 0.3f + 0.4f * t, kLightGlow, 0.5f * (1 - t), time);
+      return;
+    }
+    case Element::Arcane: {  // a circle of runes opening, turning, and a flash
+      add_rune_circle(list, at, 0.25f + 0.8f * t, t * 4, kRune, 1 - t);
+      ring_of(6, 0.3f + 0.6f * t, 0.15f * t, 0.06f, kArcaneGlow, 1 - t, -t * 5);
+      at_spark(list, at, 0.2f * (1 - t) + 0.05f, kRune, 1 - t, time);
+      return;
+    }
+    case Element::Air: {  // a little whirl spreading
+      for (int k = 0; k < 8; ++k) {
+        const float a = kTau * static_cast<float>(k) / 8 + t * 7;
+        const float r = 0.2f + 0.8f * t;
+        at_spark(list, at + Vec3{std::cos(a) * r, 0.3f * t * static_cast<float>(k % 3), std::sin(a) * r}, 0.06f, kAirGlow, 1 - t, a);
+      }
+      at_spark(list, at, 0.2f + 0.3f * t, kAirGlow, 0.35f * (1 - t), time);
+      return;
+    }
+    default: {
+      const Color c = element_glow(m.element);
+      for (int k = 0; k < 8; ++k) {
+        const float a = kTau * static_cast<float>(k) / 8 + turn;
+        const float r = 0.15f + 0.7f * t;
+        at_spark(list, at + Vec3{std::cos(a) * r, 0.35f * t * (1 - t) * 4 * (k % 2 ? 1.0f : 0.4f), std::sin(a) * r},
+                 0.08f * (1 - t), c, 1 - t, a);
+      }
+      at_spark(list, at, 0.2f + 0.35f * t, c, 0.6f * (1 - t), time);
+      if (m.element == Element::Electric && t < 0.6f) {
+        const uint64_t flick = tick / 2 + i * 977;
+        for (uint64_t k = 0; k < 5; ++k) {
+          add_bolt(list, at, around(at, 0.5f + 0.5f * t, flick, k), kElectricGlow, 1 - t / 0.6f, flick * 5 + k, 0.3f);
+        }
+      }
+      return;
+    }
+  }
+}
+
+// A burst let out (its third attack), `t` from 0 to 1 over its spreading: its
+// element all around, out to `range` (electricity: in add_battle_effects).
+void add_burst_release(DrawList& list, const World& w, const Creature& c, Element element, float range, float t,
+                       float mid, float time) {
+  const Vec3 base{c.body.pos.x, c.body.pos.y, c.body.pos.z};
+  const Vec3 middle{base.x, mid, base.z};
+  const float r = range * t, fade = 1 - t;
+  const Color glow = element_glow(element);
+  add_ring(list, w, c, range * (0.3f + 0.7f * t), {glow.r, glow.g, glow.b, fade});
+  const auto on_ring = [&](float a, float radius, float y) { return Vec3{base.x + std::cos(a) * radius, base.y + y, base.z + std::sin(a) * radius}; };
+  switch (element) {
+    case Element::Fire: {  // a ring of flames rushing out, tongues licking up, embers
+      for (int k = 0; k < 16; ++k) {
+        const float a = kTau * static_cast<float>(k) / 16 + t * 0.6f;
+        const float lick = 0.75f + 0.35f * rand01(w.tick / 3, 54, static_cast<uint64_t>(k));
+        for (int h = 0; h < 3; ++h) {
+          const float hh = static_cast<float>(h);
+          at_spark(list, on_ring(a, r, (0.12f + 0.3f * hh) * lick * (1 - 0.4f * t)), 0.17f - 0.045f * hh,
+                   mixed(kFireHeart, kEmber, 0.3f * hh + 0.4f * t), fade * (1 - 0.2f * hh), a + hh);
+        }
+      }
+      for (int k = 0; k < 8; ++k) {
+        const float a = kTau * (static_cast<float>(k) + 0.5f) / 8;
+        at_spark(list, on_ring(a, r * 0.8f, 0.3f + 1.2f * t), 0.05f, kEmber, fade, a);
+      }
+      return;
+    }
+    case Element::Water: {  // a wave rolling out, spray thrown up and falling back
+      for (int k = 0; k < 20; ++k) {
+        const float a = kTau * static_cast<float>(k) / 20;
+        const float crest = 0.45f * std::sin(t * kTau / 2) * (1 + 0.3f * std::sin(static_cast<float>(k) * 2.1f));
+        at_spark(list, on_ring(a, r, crest), 0.13f * (1 - 0.4f * t), k % 3 ? kWaterGlow : kFoam, fade * 0.9f, a);
+        at_spark(list, on_ring(a + 0.15f, r * 0.85f, crest * 0.4f), 0.08f, kDrop, fade * 0.6f, a);
+      }
+      for (int k = 0; k < 8; ++k) {
+        const float a = kTau * (static_cast<float>(k) + 0.3f) / 8;
+        at_spark(list, on_ring(a, r * 0.7f, 2.2f * t - 2.4f * t * t), 0.06f, kFoam, fade, a);
+      }
+      return;
+    }
+    case Element::Nature: {  // vines snaking out on the ground, leaves whirling up
+      for (int k = 0; k < 7; ++k) {
+        const float a = kTau * static_cast<float>(k) / 7;
+        const Vec3 from = on_ring(a, 0.3f, 0.06f), to = on_ring(a + 0.35f * t, std::max(r, 0.35f), 0.06f);
+        add_wavy(list, from, to, {-std::sin(a), 0, std::cos(a)}, 0.25f, static_cast<float>(k), 0.05f, kLeaf, fade);
+      }
+      for (int k = 0; k < 12; ++k) {
+        const float a = kTau * static_cast<float>(k) / 12 + 2.5f * t;
+        at_spark(list, on_ring(a, r, 0.25f + 0.9f * std::sin(t * kTau / 2)), 0.075f, k % 2 ? kLeafLight : kLeaf, fade, time * 4 + a);
+      }
+      return;
+    }
+    case Element::Air: {  // gusts whirling around it, dust caught up
+      for (int k = 0; k < 3; ++k) {
+        const float a = kTau * static_cast<float>(k) / 3 + t * 5;
+        const Vec3 p = on_ring(a, std::max(r * 0.8f, 0.4f), 0.5f);
+        Instance g;
+        g.x = p.x;
+        g.y = p.y;
+        g.z = p.z;
+        g.rotation = quat_yaw(-a) * quat_z(time * 12 + static_cast<float>(k));  // along the circle
+        g.sx = g.sy = 0.9f + 0.6f * t;
+        g.sz = 1.3f;
+        g.tint = {1.6f, 1.85f, 2.0f, 0.75f * fade};
+        add(list, MeshId::Gust, g);
+      }
+      for (int k = 0; k < 12; ++k) {
+        const float a = kTau * static_cast<float>(k) / 12 + t * 6;
+        at_spark(list, on_ring(a, r, 0.2f + 0.8f * t * static_cast<float>(k % 3) / 2), 0.05f, kAirGlow, fade, a);
+      }
+      return;
+    }
+    case Element::Shadow: {  // tendrils of darkness lashing out on the ground, dark wisps
+      for (int k = 0; k < 8; ++k) {
+        const float a = kTau * static_cast<float>(k) / 8 + 0.4f;
+        add_wavy(list, middle, on_ring(a, std::max(r, 0.4f), 0.05f), {-std::sin(a), 0, std::cos(a)}, 0.35f,
+                 time * 6 + static_cast<float>(k), 0.05f, kShadowGlow, fade);
+        add_puff(list, on_ring(a + 0.4f, r * 0.9f, 0.25f), 0.2f + 0.2f * t, {0.1f, 0.05f, 0.14f, 1}, 0.6f * fade, a);
+      }
+      at_spark(list, middle, 0.3f * fade, kShadowHeart, fade, time);
+      return;
+    }
+    case Element::Light: {  // rays shining out all around, a column of light
+      for (int k = 0; k < 12; ++k) {
+        const float a = kTau * static_cast<float>(k) / 12 + t;
+        add_stroke(list, middle, on_ring(a, std::max(r, 0.3f), 0.15f), 0.03f, kLightWhite, fade);
+        at_spark(list, on_ring(a, r, 0.15f), 0.08f, kLightGlow, fade, a);
+      }
+      Instance column;
+      column.x = base.x;
+      column.y = base.y + 1.4f;
+      column.z = base.z;
+      column.sx = column.sz = 0.3f + 0.2f * t;
+      column.sy = 1.5f;
+      column.rotation = quat_yaw(time);
+      column.tint = {kLightGlow.r, kLightGlow.g, kLightGlow.b, 0.5f * fade};
+      add(list, MeshId::Sparkle, column);
+      return;
+    }
+    case Element::Arcane: {  // a circle of runes opening on the ground, runes rising from it
+      add_rune_circle(list, base + Vec3{0, kShadowHeight + 0.02f, 0}, std::max(r, 0.4f), t * 3, kRune, fade);
+      add_rune_circle(list, base + Vec3{0, kShadowHeight + 0.03f, 0}, std::max(r * 0.6f, 0.3f), -t * 4, kArcaneGlow, fade * 0.7f);
+      for (int k = 0; k < 8; ++k) {
+        const float a = kTau * static_cast<float>(k) / 8 + t * 2;
+        at_spark(list, on_ring(a, r, 0.2f + 1.1f * t), 0.07f, kRune, fade, a);
+      }
+      return;
+    }
+    default: {
+      for (int k = 0; k < 10; ++k) {
+        const float a = kTau * static_cast<float>(k) / 10 + t;
+        at_spark(list, on_ring(a, r, 0.3f + 0.4f * t), 0.12f, glow, fade, a);
+      }
+      return;
+    }
+  }
+}
+
 // Battle: the enemy's red ring, what it is preparing, projectiles, bursts,
 // parries, hits and stuns.
 void add_battle_effects(const World& w, float time, DrawList& list) {
@@ -615,7 +1004,6 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
   // little bolts leaping off it.
   for (size_t i = 0; i < b.projectiles.size(); ++i) {
     const Projectile& p = b.projectiles[i];
-    const Color c = element_glow(p.element);
     if (p.element == Element::Electric) {
       const uint64_t flick = w.tick / 3 + i * 131;
       add_spark(list, p.pos.x, p.pos.y, p.pos.z, 0.13f, {2.8f, 2.8f, 2.4f, 1}, 1, time * 13);  // white heart
@@ -655,32 +1043,13 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
       }
       continue;
     }
-    add_spark(list, p.pos.x, p.pos.y, p.pos.z, 0.24f, c, 1, time * 9);
-    for (int k = 1; k <= 3; ++k) {
-      const float back = 0.22f * static_cast<float>(k);
-      add_spark(list, p.pos.x - p.dir_x * back, p.pos.y, p.pos.z - p.dir_z * back, 0.2f - 0.04f * static_cast<float>(k),
-                c, 0.7f - 0.18f * static_cast<float>(k), time * 7 + static_cast<float>(k));
-    }
+    add_projectile(list, p, i, w.tick, time);  // the other elements, each its own
   }
-  // Where one stopped: sparks of its element; an electric one, a crackling star.
+  // Where one stopped: its element's way (an electric one, a crackling star).
   for (size_t i = 0; i < b.impacts.size(); ++i) {
     const Impact& m = b.impacts[i];
     const float t = static_cast<float>(w.tick - m.tick) / static_cast<float>(rules::kImpactTicks);
-    if (t >= 1) continue;
-    const Color c = element_glow(m.element);
-    for (int k = 0; k < 8; ++k) {
-      const float a = kTau * static_cast<float>(k) / 8 + static_cast<float>(m.tick % 5);
-      const float r = 0.15f + 0.7f * t;
-      add_spark(list, m.pos.x + std::cos(a) * r, m.pos.y + 0.35f * t * (1 - t) * 4 * (k % 2 ? 1.0f : 0.4f),
-                m.pos.z + std::sin(a) * r, 0.08f * (1 - t), c, 1 - t, a);
-    }
-    add_spark(list, m.pos.x, m.pos.y, m.pos.z, 0.2f + 0.35f * t, c, 0.6f * (1 - t), time);
-    if (m.element == Element::Electric && t < 0.6f) {
-      const uint64_t flick = w.tick / 2 + i * 977;
-      for (uint64_t k = 0; k < 5; ++k) {
-        add_bolt(list, m.pos, around(m.pos, 0.5f + 0.5f * t, flick, k), kElectricGlow, 1 - t / 0.6f, flick * 5 + k, 0.3f);
-      }
-    }
+    if (t < 1) add_impact(list, m, i, w.tick, t, time);
   }
 
   const size_t sides = 1 + (training ? 0 : b.foes.size());
@@ -692,8 +1061,9 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
     const Species species = mine ? mine->species : c.species;
     const BodyShape& sh = species_info(c.species).shape;
     const float mid = c.body.pos.y + sh.height * 0.5f;
-    const Color element = element_glow(mine ? creature_elements(species, mine->genes).first : creature_element(c));
-    const bool zapou = species == Species::Spark;
+    const Element own = mine ? creature_elements(species, mine->genes).first : creature_element(c);
+    const Color element = element_glow(own);
+    const bool zapou = own == Element::Electric;  // Zapou, and any electric one
     const Vec3 middle{c.body.pos.x, mid, c.body.pos.z};
     // A burst gathering: a ring of its element closing in on where it will
     // reach, sparks drawn in towards it; Zapou crackles, bolts leaping
@@ -737,15 +1107,7 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
     }
     if (f.attack_tick > 0 && f.attack_move == 2 && since_attack < 24) {
       const float t = static_cast<float>(since_attack) / 24.0f;
-      const Move& m = species_moves(species)[2];
-      const Color glow = element_glow(mine ? creature_elements(species, mine->genes).first : creature_element(c));
-      add_ring(list, w, c, m.range * (0.3f + 0.7f * t), {glow.r, glow.g, glow.b, 1 - t});
-      for (int k = 0; k < 10; ++k) {
-        const float a = kTau * static_cast<float>(k) / 10 + t;
-        const float r = m.range * t;
-        add_spark(list, c.body.pos.x + std::cos(a) * r, c.body.pos.y + 0.3f + 0.4f * t, c.body.pos.z + std::sin(a) * r,
-                  0.12f, glow, 1 - t, a);
-      }
+      add_burst_release(list, w, c, own, species_moves(species)[2].range, t, mid, time);
     }
     // Guarding: a bubble of light; a blocked hit flashes.
     if (f.state == FighterState::Parry) {
@@ -818,6 +1180,8 @@ void west_objects_near(const World& w, Vec2 at, float r, F f) {
   });
 }
 
+Vec2 along2(Vec2 a, Vec2 d, float k) { return {a.x + d.x * k, a.z + d.z * k}; }
+
 bool near_camera(const World& w, Vec2 at, float r) {
   const float dx = at.x - w.player.pos.x, dz = at.z - w.player.pos.z;
   return dx * dx + dz * dz < r * r;
@@ -875,6 +1239,86 @@ void add_west_effects(const World& w, float time, DrawList& list) {
     const float spin = mill_turning(w) ? time * 0.9f : 0.12f;
     in.rotation = quat_yaw(std::atan2(-facing.x, -facing.z)) * quat_z(spin);
     add(list, MeshId::WindmillSails, in);
+  }
+  // The water mill's wheel: jammed with branches until the Ploufis that did
+  // it are beaten, then turning with the river.
+  if (near_camera(w, west.water_mill, 300)) {
+    const bool turning = wheel_turning(w);
+    west_objects_near(w, west.water_mill, 3.0f, [&](const Object& o) {
+      if (o.kind != ObjectKind::WaterMill) return;
+      const float yaw = static_cast<float>(radians_from_angle16(o.yaw));
+      const float s = std::sin(yaw), c = std::cos(yaw);
+      const auto at = [&](float lx, float ly, float lz) { return Vec3{o.pos.x + lx * c + lz * s, o.pos.y + ly, o.pos.z - lx * s + lz * c}; };
+      const Vec3 axle = at(0, 0.6f, 3.0f);
+      Instance wheel;
+      wheel.x = axle.x;
+      wheel.y = axle.y;
+      wheel.z = axle.z;
+      wheel.rotation = quat_yaw(yaw) * quat_z(turning ? -time * 0.8f : 0.05f);
+      add(list, MeshId::MillWheel, wheel);
+      if (turning) return;
+      for (int k = 0; k < 3; ++k) {  // the branches jammed in it
+        const Vec3 p = at(-0.9f + 0.9f * static_cast<float>(k), -1.35f + 0.25f * static_cast<float>(k % 2), 3.0f);
+        Instance branch;
+        branch.x = p.x;
+        branch.y = p.y;
+        branch.z = p.z;
+        branch.rotation = quat_yaw(yaw + 0.5f * static_cast<float>(k) - 0.4f) * quat_z(0.3f - 0.25f * static_cast<float>(k));
+        branch.sx = 0.9f;
+        branch.sy = branch.sz = 0.11f;
+        add(list, MeshId::Log, branch);
+      }
+    });
+  }
+  // The river's waterfall: from the cliff's lip, where the river comes to it,
+  // down into the pool; foam and spray at its foot.
+  if (near_camera(w, west.cove, 85) && west.stream.falls > 2 && west.stream.falls < west.stream.width.size()) {
+    const Stream& st = west.stream;
+    const Vec2 o = west.falls_out;
+    const float top = st.level[st.falls - 2];
+    const float bottom = west.cove_level;
+    const float height = top - bottom;
+    const float lip = st.width[st.falls];
+    const Vec2 f = along2(west.falls, o, 0.5f);
+    const float yaw = std::atan2(-o.x, -o.z);
+    if (height > 0.5f) {
+      const int bands = static_cast<int>(std::ceil(height));
+      for (int k = 0; k < bands; ++k) {
+        const float u = static_cast<float>(k) / static_cast<float>(bands);
+        Instance band;
+        band.x = f.x;
+        band.z = f.z;
+        band.y = top - static_cast<float>(k);
+        band.rotation = quat_yaw(yaw);
+        band.sx = (lip * 1.1f + 0.6f) / 1.4f;  // one curtain, as wide as the river at the lip
+        band.sy = std::min(1.0f, height - static_cast<float>(k));
+        band.sz = 1.3f;
+        (void)u;
+        const float pulse = 0.5f + 0.5f * std::sin(time * 7.0f - static_cast<float>(k) * 1.4f);
+        band.tint = {1, 1, 1, 0.62f + 0.35f * pulse};
+        add(list, MeshId::FallsBand, band);
+      }
+      const Vec2 lat{-o.z, o.x};
+      const Vec2 foot = along2(f, o, 1.4f);
+      for (int i = 0; i < 7; ++i) {  // foam
+        const float t = std::fmod(time * 0.7f + static_cast<float>(i) / 7, 1.0f);
+        const Vec2 p = along2(along2(foot, lat, (static_cast<float>(i) - 3.0f) * 0.55f), o, 0.7f * t);
+        Instance puff;
+        puff.x = p.x;
+        puff.y = bottom + 0.1f + 0.7f * t;
+        puff.z = p.z;
+        puff.sx = puff.sy = puff.sz = 0.35f + 0.6f * t;
+        puff.rotation = quat_yaw(static_cast<float>(i) + t);
+        puff.tint = {0.95f, 0.98f, 1.0f, 0.55f * (1 - t)};
+        add(list, MeshId::Smoke, puff);
+      }
+      for (int i = 0; i < 8; ++i) {  // spray
+        const float t = std::fmod(time * 1.3f + static_cast<float>(i) / 8, 1.0f);
+        const float a = static_cast<float>(i) * 2.4f;
+        const Vec2 p = along2(along2(foot, lat, std::cos(a) * (0.5f + 1.4f * t)), o, std::fabs(std::sin(a)) * 0.8f * t);
+        add_spark(list, p.x, bottom + 0.2f + 1.4f * t * (1 - t) * 2, p.z, 0.05f, {1.6f, 1.75f, 1.9f, 1}, 0.7f * (1 - t), a);
+      }
+    }
   }
   if (near_camera(w, west.camp, 120)) {
     west_objects_near(w, west.camp, 1.0f, [&](const Object& o) {

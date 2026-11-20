@@ -7,8 +7,11 @@
 namespace monstres {
 
 // The west: between the valley and the sea. A road leaves the path near the
-// start and goes west to the lighthouse on the coast; a stream comes down
-// from the hills in the north, under the road's bridge, and on to the sea.
+// start and goes west to the lighthouse on the coast; a river comes down
+// from the Forêt Profonde in the east (the continent's higher ground), crosses
+// the path under a bridge north of the cave's hill, runs along the hill's foot
+// (a cove there, a waterfall down the cliff, and behind it a hidden way into
+// the crystal cave), then west, under the road's bridge, and on to the sea.
 // Along them (WestLayout, derived from the seed, see make_west_layout):
 //
 // - the merchant's cart, overturned by the road: Anselme lost his goods
@@ -42,9 +45,11 @@ namespace monstres {
 namespace rules {
 inline constexpr float kRoadHalfWidth = 1.35f;
 inline constexpr float kForkZ = -6.0f;            // the road leaves the path here
-inline constexpr float kStreamWater = 1.5f;       // half width of the stream's water
-inline constexpr float kStreamChannel = 4.6f;     // half width of its bed and banks
-inline constexpr float kStreamDepth = 0.45f;      // of the water over its bed
+inline constexpr float kStreamWater = 2.6f;       // a usual half width of the river's water (Stream::width: each point's)
+inline constexpr float kStreamChannel = 7.0f;     // a usual half width of its bed and banks
+inline constexpr float kBridgeHalf = 8.4f;        // half length of a bridge over it
+inline constexpr float kWaterMillUpstream = 110.0f;  // the water mill: this far up the river from the path's bridge
+inline constexpr float kTerraceHeight = 8.5f;     // the terrace inland, above the valley (more or less)
 inline constexpr float kFarmRadius = 36.0f;       // the farm's flat ground
 inline constexpr float kMillRadius = 7.0f, kMillKnoll = 22.0f, kMillRise = 3.5f;
 inline constexpr float kPastureRadius = 16.0f;
@@ -76,6 +81,9 @@ inline constexpr uint32_t kPotionPrice = 15;       // coins, at the merchant's
 inline constexpr size_t kMaxFarm = 500;            // monsters kept at the farm
 inline constexpr uint16_t kFarmEmpty = 8191, kTeamNone = 7;  // Command::FarmSwap's "none"
 inline constexpr uint8_t kRaiderLevel = 6, kRaiderLeaderLevel = 8, kLambLevel = 3, kFlockLevel = 5;
+// The water mill's wheel (QuestId::WaterWheel): aggressive Ploufis jammed it.
+inline constexpr uint32_t kWheelRaiders = 3;
+inline constexpr uint8_t kWheelRaiderLevel = 7, kWheelLeaderLevel = 9;
 }  // namespace rules
 
 // QuestState::progress of the west's quests.
@@ -85,7 +93,8 @@ inline constexpr uint8_t kSentToFarm = 1;       // Transfer: a monster went to t
 inline constexpr uint8_t kTookFromFarm = 2;     // and one came back from it
 inline constexpr uint8_t kLambsHome = 7;        // Shepherd: a bit per lamb back in the pen
 inline constexpr uint8_t kMillTurning = 1;      // Mill: the sails turn again
-// Orchard: how many raiders were beaten or caught (its progress, up to rules::kRaiders).
+// Orchard: how many raiders were beaten or caught (its progress, up to rules::kRaiders);
+// WaterWheel: the same, of the wheel's (up to rules::kWheelRaiders).
 
 // Where the places of the west are (World::west), from the seed, the path and
 // the valley's places; empty when the world has no relief.
@@ -137,6 +146,17 @@ bool mill_sails(const World& world, Vec3& hub, Vec2& facing);
 bool mill_turning(const World& world);
 // The orchard's raiders still to beat (0 once the quest is done, or not taken).
 uint32_t raiders_left(const World& world);
+// The terrace's edge (WestLayout::scarp): signed distance to it, positive on
+// the valley's side, negative on the terrace.
+float scarp_side(const WestLayout& west, float x, float z);
+// The river's nearest segment to (x, z) (its first point, and how far along
+// it), and the distance to it (`limit` if farther).
+float stream_segment(const Stream& stream, float x, float z, float limit, size_t& seg, float& t);
+// The water mill: where the aggressive Ploufis that jammed its wheel stay (in
+// the river, by the wheel), how many are left, whether the wheel turns again.
+Vec2 wheel_spot(const WestLayout& west);
+uint32_t wheel_raiders_left(const World& world);
+bool wheel_turning(const World& world);
 // The transfer stone is at the farm: caught with a full team, a monster goes there.
 bool farm_open(const World& world);
 // After the orchard: may a new wild monster at (x, z) be an aggressive one

@@ -29,9 +29,15 @@ namespace rules {
 inline constexpr float kDoorReach = 1.9f;      // this close to a door: it can be used
 inline constexpr float kDoorGlowReach = 5.0f;  // its opening glows from this far
 inline constexpr float kRoofHeight = 9.2f;     // the floor of the tower's broken top
+inline constexpr float kHiddenCaveScale = 0.6f; // the hidden way in (behind the waterfall): the cave's mouth, smaller
 inline constexpr float kCristiWake = 3.2f;     // a wild Cristi scuttles away when the player comes this close
 inline constexpr uint32_t kCaveCristisMin = 7, kCaveCristisMore = 4;  // in the cave: 7 to 10
 }  // namespace rules
+
+// A tall hall's stair (the tower, the hollow tree, the lighthouse): its steps
+// (ObjectKind::Step, variant = which step, two blocks each: by the wall and
+// inside) and the landing at its top (this variant).
+inline constexpr uint8_t kLandingVariant = 200;
 
 inline bool inside(const World& w) { return w.place.kind != PlaceKind::Outside; }
 
@@ -48,6 +54,7 @@ struct DoorNear {
   Vec2 facing;           // the way the opening faces (towards who uses it)
   float width = 1, height = 2;  // of the opening
   float distance = 0;
+  bool hidden = false;   // the cave's hidden way, behind the waterfall (ObjectKind::HiddenCave)
 };
 DoorNear door_near(const World& world, float reach = rules::kDoorReach);
 

@@ -222,6 +222,7 @@ uint8_t quest_giver(QuestId q) {
     case QuestId::Orchard: return npc::kCapucine;
     case QuestId::Shepherd: return npc::kBasile;
     case QuestId::Mill: return npc::kLucien;
+    case QuestId::WaterWheel: return npc::kMathurin;
     default: return npc::kLison;
   }
 }
@@ -304,6 +305,7 @@ bool quest_ready(const World& w, QuestId q) {
     case QuestId::Orchard: return s.progress >= rules::kRaiders;
     case QuestId::Shepherd: return (s.progress & kLambsHome) == kLambsHome;
     case QuestId::Mill: return (s.progress & kMillTurning) != 0;
+    case QuestId::WaterWheel: return s.progress >= rules::kWheelRaiders;
     default: return false;
   }
 }
@@ -400,6 +402,11 @@ void quest_command(World& w, const Input& in) {
           coins(rules::kMillCoins);
           potions(rules::kMillPotions);
           reward(w, rules::kMillWizardXp, rules::kMillMonsterXp);
+          break;
+        case QuestId::WaterWheel:
+          coins(rules::kWheelCoins);
+          potions(rules::kWheelPotions);
+          reward(w, rules::kWheelWizardXp, rules::kWheelMonsterXp);
           break;
         default: break;
       }

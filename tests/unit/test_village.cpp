@@ -149,7 +149,7 @@ TEST_CASE("crows start on roofs and fly to another perch when the player comes")
 
 TEST_CASE("villagers stay around the village and greet the player") {
   World w = cached_game(8);
-  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1 + 8);  // and Isidore, and the west's
+  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1 + 9);  // and Isidore, and the west's (the water miller too)
   run(w, move(0, 0), 30 * rules::kTicksPerSecond);
   for (const Creature& c : w.creatures) {
     if (c.species != Species::Villager) continue;
@@ -182,7 +182,8 @@ TEST_CASE("the lake has water above a sunken bed, chimneys smoke") {
   for (size_t i = 0; i < water.vertices.size(); i += MeshData::kFloatsPerVertex) {
     const float x = water.vertices[i], z = water.vertices[i + 2];
     if (!in_lake(lake, x, z, 1.0f)) {  // the sea, far to the west; the west's stream, at its own level
-      if (distance_to_stream(w.west.stream, x, z, 3.0f) < 2.5f) continue;
+      // The river at its own level, its cove, its waterfall.
+      if (distance_to_stream(w.west.stream, x, z, 30.0f) < 30.0f && water.vertices[i + 1] > rules::kSeaLevel + 0.01f) continue;
       CHECK(water.vertices[i + 1] == Approx(rules::kSeaLevel));
       continue;
     }

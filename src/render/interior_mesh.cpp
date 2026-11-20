@@ -287,6 +287,70 @@ void walls(Builder& out, const RoomPiece& r, const Look& look, float door_width,
   }
 }
 
+// A tall hall's stair, whole: each step a slice of the ring from the wall
+// (into it a little) to a meter inside the stair's circle, its tread on top
+// of its two blocks (interior.cpp), its riser, its inner side, and under it a
+// slope going up with the stair (no gaps under or beside it); a post under the
+// landing.
+void spiral_stair(Builder& out, const World& w, const RoomPiece& r, Color tread, Color side) {
+  struct Step {
+    Vec3 sum{};
+    int blocks = 0;
+    float top = 0;
+  };
+  std::array<Step, 256> steps{};
+  int count = 0;
+  const Object* landing = nullptr;
+  for (const Object& o : w.objects) {
+    if (o.kind != ObjectKind::Step) continue;
+    if (o.variant == kLandingVariant) {
+      landing = &o;
+      continue;
+    }
+    Step& s = steps[o.variant];
+    s.sum = s.sum + Vec3{o.pos.x - r.a.x, 0, o.pos.z - r.a.z};
+    ++s.blocks;
+    s.top = o.pos.y + 2 * o.size.y;
+    count = std::max(count, o.variant + 1);
+  }
+  constexpr float kRise = 0.3f, kUnder = 0.55f;  // each step's height; the slope under the steps, below their fronts
+  const Vec3 up{0, 1, 0};
+  for (int i = 0; i < count; ++i) {
+    const Step& s = steps[static_cast<size_t>(i)];
+    if (s.blocks == 0) continue;
+    const float ring = std::sqrt(s.sum.x * s.sum.x + s.sum.z * s.sum.z) / static_cast<float>(s.blocks);
+    const float mid = std::atan2(s.sum.z, s.sum.x), half = 0.152f;  // a step's half angle (kStairStep)
+    const float a0 = mid - half, a1 = mid + half;
+    const float r0 = ring - 0.95f, r1 = r.radius + 0.05f;
+    const auto at = [&](float rad, float a, float y) { return Vec3{r.a.x + rad * std::cos(a), y, r.a.z + rad * std::sin(a)}; };
+    const float low0 = std::max(0.0f, s.top - kRise - kUnder), low1 = std::max(0.0f, s.top - kUnder);
+    const Color t = shade(tread, 0.92f + 0.16f * value_noise(47, static_cast<float>(i), 0, 1.0f));
+    // The tread, and its riser (from the step below's tread up).
+    out.quad(at(r0, a0, s.top), at(r1, a0, s.top), at(r1, a1, s.top), at(r0, a1, s.top), up, t);
+    const Vec3 back{std::sin(a0), 0, -std::cos(a0)};  // towards the step below
+    out.quad(at(r0, a0, s.top - kRise), at(r1, a0, s.top - kRise), at(r1, a0, s.top), at(r0, a0, s.top), back, side);
+    if (i == 0) out.quad(at(r0, a0, 0), at(r1, a0, 0), at(r1, a0, s.top - kRise), at(r0, a0, s.top - kRise), back, side);
+    // Its inner side, down to the slope; the slope under it.
+    const Vec3 in{-std::cos(mid), 0, -std::sin(mid)};
+    out.quad(at(r0, a0, low0), at(r0, a1, low1), at(r0, a1, s.top), at(r0, a0, s.top), in, shade(side, 0.9f));
+    if (low1 > 0) out.quad(at(r0, a0, low0), at(r1, a0, low0), at(r1, a1, low1), at(r0, a1, low1), up * -1.0f, shade(side, 0.7f));
+    if (i + 1 == count) {  // the last one's back, up to the landing
+      const Vec3 ahead{-std::sin(a1), 0, std::cos(a1)};
+      out.quad(at(r0, a1, low1), at(r1, a1, low1), at(r1, a1, s.top), at(r0, a1, s.top), ahead, side);
+    }
+  }
+  if (landing) {
+    const float y = landing->pos.y, k = 0.22f;
+    const Vec3 c{landing->pos.x, 0, landing->pos.z};
+    const Vec3 sides[4] = {{1, 0, 0}, {0, 0, 1}, {-1, 0, 0}, {0, 0, -1}};
+    for (const Vec3 n : sides) {
+      const Vec3 t{-n.z, 0, n.x};
+      const Vec3 a = c + n * k - t * k, b = c + n * k + t * k;
+      out.quad(a, b, b + up * y, a + up * y, n, shade(side, 0.85f));
+    }
+  }
+}
+
 MeshData room_mesh(const World& w) {
   const Interior& in = w.interior;
   Builder out;
@@ -319,6 +383,8 @@ MeshData room_mesh(const World& w) {
   }
   floor_and_ceiling(out, r, look);
   walls(out, r, look, door_width, door_height);
+  if (in.kind == PlaceKind::Tower || in.kind == PlaceKind::Lighthouse) spiral_stair(out, w, r, shade(kStone, 1.05f), shade(kStone, 0.75f));
+  if (in.kind == PlaceKind::HollowTree) spiral_stair(out, w, r, kPlanks, shade(kBark, 0.9f));
   return out.mesh;
 }
 

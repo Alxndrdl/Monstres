@@ -117,7 +117,7 @@ TEST_CASE("grass and flowers are small, double-sided and stand on the ground") {
   CHECK(bounds(model(MeshId::GrassTall)).max[1] > bounds(model(MeshId::GrassShort)).max[1]);
 }
 
-TEST_CASE("only the shadow, smoke, ripples, sparks, gusts, the rune circle, the weather and doors' glow are transparent") {
+TEST_CASE("only the shadow, smoke, ripples, sparks, gusts, the rune circle, waterfalls, the weather and doors' glow are transparent") {
   for (size_t id = 0; id < kMeshCount; ++id) {
     const auto mesh = static_cast<MeshId>(id);
     if (!model_name(mesh)) continue;
@@ -125,7 +125,7 @@ TEST_CASE("only the shadow, smoke, ripples, sparks, gusts, the rune circle, the 
     const bool expected = mesh == MeshId::Shadow || mesh == MeshId::Smoke || mesh == MeshId::Ripple ||
                           mesh == MeshId::Sparkle || mesh == MeshId::RuneCircle || mesh == MeshId::RainShaft ||
                           mesh == MeshId::Bolt || mesh == MeshId::Rain || mesh == MeshId::Snow || mesh == MeshId::DoorGlow ||
-                          mesh == MeshId::Gust;
+                          mesh == MeshId::Gust || mesh == MeshId::FallsBand;
     CHECK(models()[id].transparent == expected);
     if (expected) CHECK(mesh > MeshId::Ground);  // drawn after the opaque meshes
   }

@@ -210,7 +210,7 @@ namespace monstres {
 
 const char* zone_name(Zone zone) {
   static const char* kNames[] = {"meadow", "village", "lake", "ruins", "forest", "cave", "castle", "coast", "hills", "plains",
-                                 "farm", "woods", "crater"};
+                                 "farm", "woods", "crater", "river"};
   static_assert(std::size(kNames) == static_cast<size_t>(Zone::Count));
   const auto i = static_cast<size_t>(zone);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -265,7 +265,7 @@ const char* object_kind_name(ObjectKind kind) {
                                  "table", "chair", "bed", "shelf", "hearth", "rug", "step", "hatch",
                                  "cart", "bridge", "farmhouse", "barn", "fruitTree", "crops", "haystack", "windmill",
                                  "cabin", "tent", "campfire", "woodpile", "hollowTree", "burrow", "lighthouse",
-                                 "menhir", "meteorite"};
+                                 "menhir", "meteorite", "waterMill", "hiddenCave"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -452,7 +452,8 @@ const char* teleporter_name(TeleporterId id) {
 
 const char* quest_name(QuestId id) {
   static const char* kNames[] = {"lostPiou", "teleporters", "giantChampi", "combat", "healing", "main",
-                                 "merchant",  "delivery",    "transfer",    "orchard", "shepherd", "mill"};
+                                 "merchant",  "delivery",    "transfer",    "orchard", "shepherd", "mill",
+                                 "waterWheel"};
   static_assert(std::size(kNames) == kQuestCount);
   return kNames[static_cast<size_t>(id)];
 }
@@ -566,6 +567,10 @@ std::string quests_json(const World& w) {
       s += std::string(",\"room\":") + (w.team.size() < rules::kTeamSize || farm_open(w) ? "true" : "false");
     } else if (id == QuestId::Mill) {
       s += std::string("\"turning\":") + ((q.progress & kMillTurning) ? "true" : "false");
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
+    } else if (id == QuestId::WaterWheel) {
+      s += "\"beaten\":" + std::to_string(done ? rules::kWheelRaiders : std::min<uint32_t>(q.progress, rules::kWheelRaiders));
+      s += ",\"of\":" + std::to_string(rules::kWheelRaiders);
       s += std::string(",\"tell\":") + (done ? "true" : "false");
     } else {
       s += std::string("\"discover\":") + (teleporter_known(w, TeleporterId::Castle) ? "true" : "false");
@@ -729,7 +734,11 @@ std::string map_json(const World& w) {
     s += at("cart", west.cart) + at("bridge", west.bridge) + at("farm", west.farm) + at("mill", west.mill) +
          at("pasture", west.pasture) + at("burrow", west.burrow) + at("woods", west.woods) + at("cabin", west.cabin) +
          at("camp", west.camp) + at("hollowTree", west.hollow_tree) + at("lighthouse", west.lighthouse) +
-         at("menhirs", west.menhirs) + at("crater", west.crater);
+         at("menhirs", west.menhirs) + at("crater", west.crater) + at("pathBridge", west.path_bridge) +
+         at("cove", west.cove) + at("waterMill", west.water_mill) + at("falls", west.falls) + at("fallsOut", west.falls_out);
+    s += ",\"streamW\":[";  // the river's half width, at the same points as its line
+    for (size_t i = 0; i < west.stream.width.size(); i += 2) s += std::string(i ? "," : "") + num(west.stream.width[i]);
+    s += "]";
     s += ",\"farmR\":" + num(rules::kFarmRadius) + ",\"woodsRx\":" + num(west.woods_rx) + ",\"woodsRz\":" + num(west.woods_rz) +
          ",\"craterR\":" + num(rules::kCraterRadius) + "}";
   } else {

@@ -1,4 +1,5 @@
 #include "monstres/core/heightmap.hpp"
+#include "monstres/core/west.hpp"
 #include "monstres/core/world.hpp"
 #include "monstres/render/terrain_mesh.hpp"
 #include "test_helpers.hpp"
@@ -29,7 +30,7 @@ World world_on(F f) {
 
 // Steepest slope between neighboring grid points inside the playable area
 // (but the cliffs of the cave's hill, made to stop walkers).
-float steepest_slope(const World& w, float half_size) {
+float steepest_slope(const World& w, float half_size, Vec2* where = nullptr) {
   const Heightmap& m = w.ground;
   constexpr float cell = Heightmap::kCellSize;
   float steepest = 0;
@@ -40,12 +41,24 @@ float steepest_slope(const World& w, float half_size) {
       const float x = static_cast<float>(i) * cell - rules::kReliefHalfSize;
       const float z = static_cast<float>(j) * cell - rules::kReliefHalfSize;
       if (in_cave_hill(w.cave, x, z, 3.0f)) continue;
+      // The terrace's edge where it is a cliff (not where it is a slope, or the
+      // ramp the path goes up), and the ravine cut through it to the cave's mouth.
+      if (w.west.valid() && std::fabs(scarp_side(w.west, x, z)) < 25.0f) continue;  // (the path's way up: below)
+      {
+        const float mx = x - w.cave.mouth.x, mz = z - w.cave.mouth.z;
+        const float along = mx * w.cave.facing.x + mz * w.cave.facing.z;
+        const float across = std::fabs(-mx * w.cave.facing.z + mz * w.cave.facing.x);
+        if (across < 5.0f && along > -8.0f && along < 45.0f) continue;
+      }
+      // The river's cut banks, steep on the outside of its bends.
+      if (w.west.valid() && distance_to_stream(w.west.stream, x, z, 30.0f) < 22.0f) continue;
       // Around the lake, the ground flattened to its shore can drop steeply into
       // a hollow of the hills (a few worlds, seed 9); the lake is no way up.
       if (w.village.lake.radius_x > 0 && lake_distance(w.village.lake, x, z) < 2.2f) continue;
-      steepest = std::max({steepest, std::fabs(m.at(i + 1, j) - m.at(i, j)) / cell,
-                           std::fabs(m.at(i, j + 1) - m.at(i, j)) / cell,
-                           std::fabs(m.at(i + 1, j + 1) - m.at(i, j)) / (cell * std::sqrt(2.0f))});
+      const float here = std::max({std::fabs(m.at(i + 1, j) - m.at(i, j)) / cell, std::fabs(m.at(i, j + 1) - m.at(i, j)) / cell,
+                                   std::fabs(m.at(i + 1, j + 1) - m.at(i, j)) / (cell * std::sqrt(2.0f))});
+      if (here > steepest && where) *where = {x, z};
+      steepest = std::max(steepest, here);
     }
   }
   return steepest;
@@ -77,7 +90,21 @@ TEST_CASE("every slope of the playable area can be walked up") {
   for (uint64_t seed = 0; seed < kManySeeds; ++seed) {
     CAPTURE(seed);
     const World& w = cached_game(seed);
-    CHECK(steepest_slope(w, rules::kWorldHalfSize) < rules::kMaxWalkSlope * 0.9f);
+    Vec2 where;
+    const float steepest = steepest_slope(w, rules::kWorldHalfSize, &where);
+    CAPTURE(where.x);
+    CAPTURE(where.z);
+    CAPTURE(scarp_side(w.west, where.x, where.z));
+    CAPTURE(distance_to_stream(w.west.stream, where.x, where.z, 100.0f));
+    CHECK(steepest < rules::kMaxWalkSlope * 0.9f);
+    // The path goes everywhere it leads, up the terrace's edge too (its ramp) and over the river.
+    for (size_t k = 1; k < w.path.points.size(); ++k) {
+      const Vec2 a = w.path.points[k - 1], b = w.path.points[k];
+      if (std::max(std::fabs(b.x), std::fabs(b.z)) > rules::kWorldHalfSize) continue;
+      if (w.west.valid() && distance_to_stream(w.west.stream, b.x, b.z, 12.0f) < 11.0f) continue;  // on its bridge
+      const float run = std::hypot(b.x - a.x, b.z - a.z);
+      CHECK(std::fabs(w.ground.height(b.x, b.z) - w.ground.height(a.x, a.z)) / run < rules::kMaxWalkSlope * 0.9f);
+    }
   }
 }
 

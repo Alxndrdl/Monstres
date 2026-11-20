@@ -48,6 +48,13 @@ size_t count_kind(const World& w, ObjectKind k) {
   return n;
 }
 
+int kind_index(const World& w, ObjectKind k) {
+  for (size_t i = 0; i < w.objects.size(); ++i) {
+    if (w.objects[i].kind == k) return static_cast<int>(i);
+  }
+  return -1;
+}
+
 int first_tagged(const World& w, Tag t) {
   for (size_t i = 1; i < w.creatures.size(); ++i) {
     if (w.creatures[i].tag == t) return static_cast<int>(i);
@@ -106,10 +113,11 @@ TEST_CASE("the west's buildings and villagers") {
   const World& w = cached_game(4);
   for (ObjectKind k : {ObjectKind::Farmhouse, ObjectKind::Barn, ObjectKind::Windmill, ObjectKind::Cabin, ObjectKind::Tent,
                        ObjectKind::Campfire, ObjectKind::HollowTree, ObjectKind::Burrow, ObjectKind::Lighthouse,
-                       ObjectKind::Meteorite, ObjectKind::Cart, ObjectKind::Bridge}) {
+                       ObjectKind::Meteorite, ObjectKind::Cart, ObjectKind::WaterMill, ObjectKind::HiddenCave}) {
     CAPTURE(object_kind_name(k));
     CHECK(count_kind(w, k) == 1);
   }
+  CHECK(count_kind(w, ObjectKind::Bridge) == 2);  // the road's and the path's, over the river
   CHECK(count_kind(w, ObjectKind::FruitTree) == 16);
   CHECK(count_kind(w, ObjectKind::Menhir) >= 8);
   Vec3 t;
@@ -431,7 +439,7 @@ TEST_CASE("the bag, the farm and the west's quests are saved") {
   for (const Creature& c : loaded->creatures) CHECK(c.tag != Tag::Boarder);  // drawn again
   size_t west = 0;
   for (const Creature& c : loaded->creatures) west += c.species == Species::Villager && c.npc > npc::kMentor;
-  CHECK(west == 8);
+  CHECK(west == 9);  // the water miller too
   CHECK(bag_json(w).find("\"coins\":123") != std::string::npos);
   CHECK(farm_json(w).find("\"species\":\"mole\"") != std::string::npos);
 }
@@ -616,4 +624,156 @@ TEST_CASE("the monsters kept at the farm are cared for: their hit points full") 
   const auto loaded = deserialize(serialize(w));
   REQUIRE(loaded);
   CHECK(loaded->farm[0].hp == monster_fight_stats(loaded->farm[0]).hp);
+}
+
+TEST_CASE("owls fly over the hollow tree's crown of leaves, never through it or its trunk") {
+  World w = cached_game(3);
+  const size_t tree = static_cast<size_t>(std::find_if(w.objects.begin(), w.objects.end(), [](const Object& o) {
+                                            return o.kind == ObjectKind::HollowTree;
+                                          }) - w.objects.begin());
+  REQUIRE(tree < w.objects.size());
+  const Vec3 t = w.objects[tree].pos;
+  put_player(w, {t.x + 18.0f, t.z});
+  int flights = 0, through = 0;
+  for (int tick = 0; tick < 90 * rules::kTicksPerSecond; ++tick) {
+    step(w, Input{});
+    for (const Creature& c : w.creatures) {
+      if (c.species != Species::Owl || c.mind != Mind::Fly) continue;
+      ++flights;
+      const float r = std::hypot(c.body.pos.x - t.x, c.body.pos.z - t.z), y = c.body.pos.y - t.y;
+      const bool trunk = r < 4.4f && y < rules::kHollowTreeTop - 0.05f;
+      const bool leaves = r > 4.2f && r < 9.0f && y > 11.0f && y < 16.0f;
+      if (trunk || leaves) ++through;
+    }
+  }
+  CHECK(flights > 0);
+  CHECK(through == 0);
+}
+
+TEST_CASE("the river comes from the Forêt Profonde along the terrace, over its edge by the cave, and out to the sea") {
+  for (uint64_t seed : {3ull, 4ull, 42ull}) {
+    CAPTURE(seed);
+    const World& w = cached_game(seed);
+    const WestLayout& v = w.west;
+    REQUIRE(v.valid());
+    const Stream& st = v.stream;
+    const size_t n = st.points.size();
+    REQUIRE(st.width.size() == n);
+    // From the relief's eastern edge (towards the Forêt Profonde), down all along, to the sea.
+    CHECK(st.points.front().x > rules::kReliefHalfSize);
+    for (size_t k = 1; k < st.level.size(); ++k) CHECK(st.level[k] <= st.level[k - 1]);
+    CHECK(w.ground.sea(st.points.back().x, st.points.back().z));
+    // The cave in a spur of the terrace; the river on it, then over its edge
+    // by the cave: a real waterfall (its river above it), into a pool.
+    CHECK(scarp_side(v, w.cave.center.x, w.cave.center.z) < 0);
+    REQUIRE(st.falls > 40);
+    const Vec2 above = st.points[st.falls - 30];
+    CHECK(scarp_side(v, above.x, above.z) < -5.0f);
+    CHECK(st.level[st.falls - 3] > v.cove_level + 5.0f);
+    CHECK(flat(v.falls, {w.cave.center.x, w.cave.center.z}) < w.cave.radius + 30.0f);
+    CHECK(w.ground.height(v.cove.x, v.cove.z) < v.cove_level - 0.5f);
+    CHECK(flat(v.hidden, v.falls) < 7.0f);
+    // Under the path's bridge.
+    CHECK(distance_to_path(w.path, v.path_bridge.x, v.path_bridge.z) < 0.5f);
+    CHECK(distance_to_stream(st, v.path_bridge.x, v.path_bridge.z) < 2.0f);
+    // A river, not a ditch: it bends, its width changes, it opens into the sea.
+    float length = 0;
+    for (size_t k = 1; k < n; ++k) length += flat(st.points[k], st.points[k - 1]);
+    CHECK(length > 1.15f * (flat(st.points.front(), v.falls) + flat(v.falls, st.points.back())));
+    float narrow = 1e9f, wide = 0;
+    for (size_t k = st.falls + 60; k + 200 < n; ++k) {
+      narrow = std::min(narrow, st.width[k]);
+      wide = std::max(wide, st.width[k]);
+    }
+    CHECK(wide > 1.4f * narrow);
+    CHECK(st.width.back() > 2.5f * st.width[n / 2]);
+    // The water mill's wheel in the water, over a deeper race.
+    float level = 0;
+    const float d = distance_to_stream(st, v.water_wheel.x, v.water_wheel.z, 20.0f, &level);
+    size_t seg = 0;
+    float t = 0;
+    stream_segment(st, v.water_wheel.x, v.water_wheel.z, 20.0f, seg, t);
+    CHECK(d < st.width[seg] - 0.2f);
+    CHECK(w.ground.height(v.water_wheel.x, v.water_wheel.z) < level - 0.8f);
+    // Ploufis along it.
+    const Vec2 mid = st.points[st.falls + (n - st.falls) / 3];
+    CAPTURE(mid.x);
+    CAPTURE(mid.z);
+    CHECK(zone_at(w, mid.x, mid.z) == Zone::River);
+  }
+}
+
+TEST_CASE("behind the waterfall, a hidden way into the crystal cave, and back out there") {
+  World w = cached_game(4);
+  const int hidden = kind_index(w, ObjectKind::HiddenCave);
+  REQUIRE(hidden >= 0);
+  const Object h = w.objects[static_cast<size_t>(hidden)];
+  // On the ledge in front of it (beside the falling water).
+  const Vec2 o = w.west.falls_out;
+  w.player.pos = {h.pos.x + o.x * 0.6f, h.pos.y, h.pos.z + o.z * 0.6f};
+  const DoorNear d = door_near(w);
+  REQUIRE(d.action == DoorAction::Enter);
+  CHECK(d.hidden);
+  CHECK(d.place == PlaceKind::Cave);
+  REQUIRE(use_door(w));
+  REQUIRE(w.place.kind == PlaceKind::Cave);
+  // The crystal cave itself (the one of its mouth), at its hidden tunnel's end.
+  CHECK(w.outdoors.objects[w.place.door].kind == ObjectKind::CaveMouth);
+  const Exit* out = nullptr;
+  for (const Exit& e : w.interior.exits) {
+    if (e.kind == ExitKind::Hidden) out = &e;
+  }
+  REQUIRE(out);
+  CHECK(std::hypot(w.player.pos.x - out->at.x, w.player.pos.z - out->at.z) < 2.5f);
+  CHECK(wall_distance(w.interior, w.player.pos.x, w.player.pos.z) > 0.3f);
+  // The way back out there: behind the waterfall again.
+  w.player.pos = {out->at.x, 0, out->at.z};
+  const DoorNear leave = door_near(w);
+  REQUIRE(leave.action == DoorAction::Leave);
+  CHECK(leave.hidden);
+  REQUIRE(use_door(w));
+  REQUIRE_FALSE(inside(w));
+  CHECK(std::hypot(w.player.pos.x - h.pos.x, w.player.pos.z - h.pos.z) < 2.0f);
+  CHECK((w.player.pos.x - h.pos.x) * o.x + (w.player.pos.z - h.pos.z) * o.z > 0.3f);  // out in front of the cliff, not in it
+  // And through the cave's mouth, out at the mouth.
+  World v = cached_game(4);
+  const int mouth = kind_index(v, ObjectKind::CaveMouth);
+  REQUIRE(mouth >= 0);
+  REQUIRE(enter_place(v, {PlaceKind::Cave, static_cast<uint32_t>(mouth)}));
+  CHECK(std::hypot(v.player.pos.x - v.interior.entry.x, v.player.pos.z - v.interior.entry.z) < 0.01f);
+}
+
+TEST_CASE("the water mill's wheel: Ploufis jammed it; beaten, it turns, and Mathurin rewards the player") {
+  World w = cached_game(6);
+  go_to_npc(w, npc::kMathurin);
+  CHECK(npc_marks(w, npc::kMathurin) == kMarkNewQuest);
+  CHECK_FALSE(wheel_turning(w));
+  step(w, command(Command::QuestAccept, static_cast<uint16_t>(QuestId::WaterWheel)));
+  REQUIRE(quest(w, QuestId::WaterWheel).stage == QuestStage::Active);
+  CHECK(wheel_raiders_left(w) == rules::kWheelRaiders);
+  // By the wheel, in the river: aggressive Ploufis.
+  put_player(w, wheel_spot(w.west) + Vec2{0, 25});
+  size_t ploufis = 0;
+  for (const Creature& c : w.creatures) {
+    if (c.tag != Tag::Raider || c.species != Species::Axolotl) continue;
+    ++ploufis;
+    CHECK(flat({c.body.pos.x, c.body.pos.z}, wheel_spot(w.west)) < 10.0f);
+  }
+  CHECK(ploufis == rules::kWheelRaiders);
+  // Beaten one by one (the orchard's quest untouched).
+  for (const Creature& c : std::vector<Creature>(w.creatures)) {
+    if (c.tag == Tag::Raider && c.species == Species::Axolotl) raider_down(w, c);
+  }
+  CHECK(quest(w, QuestId::Orchard).progress == 0);
+  CHECK(quest_ready(w, QuestId::WaterWheel));
+  CHECK(wheel_turning(w));
+  const uint32_t coins = w.bag[static_cast<size_t>(Item::Coin)];
+  go_to_npc(w, npc::kMathurin);
+  step(w, command(Command::QuestComplete, static_cast<uint16_t>(QuestId::WaterWheel)));
+  CHECK(quest(w, QuestId::WaterWheel).stage == QuestStage::Done);
+  CHECK(w.bag[static_cast<size_t>(Item::Coin)] == coins + rules::kWheelCoins);
+  CHECK(wheel_turning(w));
+  const auto loaded = deserialize(serialize(w));
+  REQUIRE(loaded.has_value());
+  CHECK(loaded->quests == w.quests);
 }

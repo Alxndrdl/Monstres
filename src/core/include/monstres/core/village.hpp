@@ -144,8 +144,12 @@ struct Road {
   bool operator==(const Road&) const = default;
 };
 struct Stream {
-  std::vector<Vec2> points;  // every ~1 m, from its spring (north) down to the sea
+  std::vector<Vec2> points;  // every ~1 m, from its spring (east) down to the sea
   std::vector<float> level;  // its water's surface at each point (going down, never up)
+  // At each point: its water's half width, its depth in the middle, how it
+  // bends (-1 right .. 1 left: deeper by the outer bank, a gravel bar inside).
+  std::vector<float> width, depth, bend;
+  size_t falls = 0;          // the point at the top of its waterfall (the cliff's lip)
   Chunks chunks;
   bool operator==(const Stream&) const = default;
 };
@@ -164,6 +168,20 @@ struct WestLayout {
   Vec2 lighthouse, sea;         // the lighthouse on the coast; the way to the sea from it
   Vec2 menhirs;                 // the circle of standing stones (a teleporter in its middle)
   Vec2 crater;                  // where the meteorite fell
+  // The terrace (west.hpp): the higher land inland (north and east), its edge
+  // a line of cliffs and slopes (west to east, the terrace on its left), the
+  // cave in a spur of it. The river's places: its waterfall over that edge,
+  // the pool below it, the hidden way into the cave beside the falling water,
+  // the path's bridge, the water mill on its bank.
+  Road scarp;
+  Vec2 ramp;                    // where the path crosses the terrace's edge: a gentle slope up
+  Vec2 falls, falls_out;        // the cliff's lip where the river falls; the way out of the cliff there
+  Vec2 cove;                    // the pool below
+  float cove_level = 0;         // its water (the river's there: set with the relief)
+  Vec2 hidden;                  // the hidden way into the cave: a cleft at the cliff's foot
+  Vec2 path_bridge, path_bridge_along;
+  Vec2 water_mill, water_mill_along;  // the mill on the bank; the river's way there (downstream)
+  Vec2 water_wheel;             // its wheel's middle, in the river
   bool valid() const { return !road.points.empty(); }
   bool operator==(const WestLayout&) const = default;
 };

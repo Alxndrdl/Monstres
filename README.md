@@ -190,7 +190,7 @@ régression le vérifient.
 ## Le monde et le continent
 
 Le monde jouable fait 1 160 m de côté (±580 m, `rules::kWorldHalfSize`), soit
-environ 16 fois l'ancienne surface. Au milieu, la Vallée du Départ : l'ancien
+environ 16 fois l'ancienne surface. Au milieu, le Val Verdoyant : l'ancien
 monde de 280 m, inchangé (même chemin, mêmes lieux, mêmes objets ; seule la
 crête qui fermait ses bords a disparu). Autour, les terres sauvages, avec
 leurs zones : la Côte des Embruns à l'ouest (une plage, puis la mer, à
@@ -446,10 +446,31 @@ Règles dans `src/core/west.hpp` / `west.cpp`, tirées de la graine
 
 - **La route** part du sentier juste au nord du départ (un panneau à la
   bifurcation) et file vers l'ouest jusqu'à la porte du phare, en longeant
-  l'avant de l'exploitation. **Le ruisseau** descend des collines du nord,
-  passe sous la route (un pont de bois), puis tourne vers la mer : son eau
-  descend toujours, dans un lit creusé, aux berges douces (relief aplani
-  autour de lui, `carve_stream` dans `heightmap.cpp`). On peut y patauger.
+  l'avant de l'exploitation. **La terrasse** : à l'intérieur des terres (au
+  nord et à l'est) le sol est plus haut, d'environ 8 m. Son bord serpente
+  (`WestLayout::scarp`, déformé par du bruit) : falaise ici, pente douce là
+  (`cliff_width`), une rampe là où le sentier y monte. La Grotte aux Cristaux
+  s'ouvre dans un éperon de ce bord, au bout d'un ravin.
+- **La rivière** descend de la Forêt Profonde, à l'est : elle suit la
+  terrasse en méandres (courbes de taille changeante), passe sous le sentier
+  (un pont), puis tombe du bord de la terrasse près de la grotte : une
+  cascade, sa rivière au-dessus d'elle, un bassin en bas (la rivière s'y
+  élargit et s'y creuse). Elle file ensuite vers l'ouest, passe sous la
+  route (un autre pont) et s'élargit en estuaire jusqu'à la mer. Sa largeur
+  et sa profondeur changent le long d'elle ; dans un virage, le lit est plus
+  profond côté extérieur (berge raide) et peu profond côté intérieur (banc de
+  graviers, pente douce). Son eau descend toujours (`carve_stream` dans
+  `heightmap.cpp`). On peut y patauger ; des Ploufi vivent sur ses berges
+  (zone « Rivière »).
+- **L'entrée cachée** : à côté de la cascade, au pied de la falaise, une
+  fente dans la roche (`ObjectKind::HiddenCave`) mène dans la Grotte aux
+  Cristaux, au bout d'un tunnel qui part de sa salle la plus profonde
+  (`ExitKind::Hidden`). On en ressort au pied de la cascade.
+- **Le moulin à eau** de Mathurin, sur la rive, en amont du pont du sentier
+  (sa roue dans l'eau, au-dessus d'un bief creusé) :
+  une bande de Ploufi agressifs (un alpha niveau 9, deux niveau 7) a bloqué sa
+  roue avec des branches et garde la rivière (`QuestId::WaterWheel`). Battus,
+  la roue tourne de nouveau ; Mathurin donne 60 pièces, 2 potions, 80 XP / 50.
 - **La charrette d'Anselme**, renversée au bord de la route : ses trois
   ballots sont éparpillés autour. Les ramasser (en passant dessus), les lui
   rapporter : la charrette se redresse et il vend des potions de mana
@@ -458,7 +479,7 @@ Règles dans `src/core/west.hpp` / `west.cpp`, tirées de la graine
   un enclos où paissent les monstres qu'on y laisse, un verger de pommiers et
   des champs de blé et de choux, un téléporteur. Violette, la soigneuse, y
   soigne l'équipe et rend le mana, comme Odette.
-- **Le moulin** sur sa butte : ses ailes sont coincées. Pendant un
+- **Le moulin à vent** sur sa butte : ses ailes sont coincées. Pendant un
   entraînement, une attaque à distance d'un monstre de vent (élément air :
   Hulou, Croa) lancée sans viser le magicien dans les ailes les relance
   (`push_sails`) ; elles tournent ensuite pour toujours. Lucien, le meunier :

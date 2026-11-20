@@ -931,7 +931,7 @@
     cart: '#8a6a44', bridge: '#9a7a50', farmhouse: '#b8553a', barn: '#a33a2c', fruitTree: 'rgba(60, 120, 50, 0.9)',
     crops: 'rgba(214, 186, 96, 0.85)', haystack: '#d8b860', windmill: '#a8a298', cabin: '#7a5534', tent: '#d8cca8',
     campfire: '#e07a30', woodpile: '#7a5534', hollowTree: '#4e3a26', burrow: '#7a5a3a', lighthouse: '#e8e4dc',
-    menhir: '#a8a39a', meteorite: '#3a2f46',
+    menhir: '#a8a39a', meteorite: '#3a2f46', waterMill: '#c9b89a', hiddenCave: '#2a2630',
   };
 
   function heightAt(data, x, z) {
@@ -993,9 +993,10 @@
           if (dx * dx + dz * dz < 1 && h < p.level) { r = 72; g = 140; b = 170; }
         }
         if (Math.hypot(x - d.crater.x, z - d.crater.z) < d.crater.r * 0.8) { r = 240; g = 110; b = 40; }  // lava
-        // Light from the north-west, shading the slopes.
-        const shade = 1 + 0.03 * ((H(i - 1, j) - H(i + 1, j)) + (H(i, j - 1) - H(i, j + 1)));
-        const k = Math.min(Math.max(shade, 0.55), 1.4);
+        // Light from the north-west, shading the slopes: soft (over 4 cells,
+        // the little bumps smoothed away), the relief still readable.
+        const shade = 1 + 0.009 * ((H(i - 2, j) - H(i + 2, j)) + (H(i, j - 2) - H(i, j + 2)));
+        const k = Math.min(Math.max(shade, 0.75), 1.2);
         const o = (j * d.pointsX + i) * 4;
         pixels.data[o] = r * k; pixels.data[o + 1] = g * k; pixels.data[o + 2] = b * k; pixels.data[o + 3] = 255;
       }
@@ -1046,7 +1047,9 @@
             outlineDistance(data, forest, forest.clearing, forest.clearing, forest.clearingOutline, x, z) >= 1) {
           r *= 0.8; g *= 0.88; b *= 0.8;  // darker under the trees (not in the clearing)
         }
-        if (cave && Math.hypot(x - cave.x, z - cave.z) < cave.r) { const k = Math.min(1, (h + 2) / 14); r = 110 + 50 * k; g = 106 + 46 * k; b = 104 + 44 * k; }
+        // Cliffs (the terrace's edge, the cave's spur): grey rock where the ground is steep.
+        const steep = Math.hypot(heightAt(data, x + 1, z) - heightAt(data, x - 1, z), heightAt(data, x, z + 1) - heightAt(data, x, z - 1)) / 2;
+        if (steep > 0.7) { const k = Math.min(1, (steep - 0.7) / 0.6); r += (140 - r) * k; g += (136 - g) * k; b += (132 - b) * k; }
         if (village && Math.hypot(x - village.x, z - village.z) < 7) { r = 168; g = 142; b = 104; }
         if (ruins && Math.max(Math.abs(x - ruins.x), Math.abs(z - ruins.z)) < 8.5) { r = 150; g = 146; b = 136; }
         if (castle && Math.max(Math.abs(x - castle.x), Math.abs(z - castle.z)) < castle.r) { r = 156; g = 150; b = 140; }
@@ -1059,10 +1062,11 @@
           if (d < 1.04 && h > data.waterLevel - 0.05) { r = 214; g = 196; b = 140; }  // sandy shore
           if (d < 1 && h < data.waterLevel) { const k = Math.min(1, (data.waterLevel - h) / 1.2); r = 80 - 30 * k; g = 150 - 40 * k; b = 196 - 20 * k; }
         }
-        // Light from the north-west, shading the slopes.
-        const shade = 1 + 0.45 * ((heightAt(data, x - 1, z) - heightAt(data, x + 1, z)) +
-                                  (heightAt(data, x, z - 1) - heightAt(data, x, z + 1)));
-        const k = Math.min(Math.max(shade, 0.6), 1.35);
+        // Light from the north-west, shading the slopes: soft (over 6 m, the
+        // little bumps smoothed away), the relief still readable.
+        const shade = 1 + 0.07 * ((heightAt(data, x - 3, z) - heightAt(data, x + 3, z)) +
+                                  (heightAt(data, x, z - 3) - heightAt(data, x, z + 3)));
+        const k = Math.min(Math.max(shade, 0.78), 1.18);
         const o = (py * size + px) * 4;
         pixels.data[o] = r * k; pixels.data[o + 1] = g * k; pixels.data[o + 2] = b * k; pixels.data[o + 3] = 255;
       }
@@ -1082,7 +1086,17 @@
       ctx.stroke();
     };
     if (data.west) {
-      line(data.west.stream, 'rgba(70, 150, 200, 0.95)', 3.0);
+      // The river, as wide as it is at each place.
+      const st = data.west.stream, sw = data.west.streamW || [];
+      ctx.strokeStyle = 'rgba(70, 150, 200, 0.95)';
+      ctx.lineCap = 'round';
+      for (let i = 0; i + 3 < st.length; i += 2) {
+        ctx.lineWidth = 2 * (sw[i / 2] || 2) * PX_PER_M;
+        ctx.beginPath();
+        ctx.moveTo(toPx(st[i]), toPx(st[i + 1]));
+        ctx.lineTo(toPx(st[i + 2]), toPx(st[i + 3]));
+        ctx.stroke();
+      }
       line(data.west.road, 'rgba(176, 140, 96, 0.95)', 2.6);
     }
     // The path.

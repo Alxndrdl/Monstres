@@ -112,7 +112,10 @@ namespace monstres {
 //      adventure spells of slots 2 and 3, then the capture spells (u8 SpellId
 //      each). Before: those adventure slots are empty, the capture spells are
 //      the first ones.
-inline constexpr uint32_t kSaveVersion = 24;
+//  25  the river (the west's stream, now from the Forêt Profonde to the sea):
+//      thirteen quests (the water mill's wheel). Before: twelve, the last
+//      one not taken.
+inline constexpr uint32_t kSaveVersion = 25;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

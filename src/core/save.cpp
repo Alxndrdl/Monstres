@@ -125,6 +125,7 @@ constexpr size_t kSpeciesCountV18 = 7;  // before Zapou and Ploufi
 constexpr size_t kSpeciesCountV21 = 9;  // before Cristi
 constexpr size_t kSpeciesCountV22 = 10;  // before Chipou, Hulou, Laini and Taupi
 constexpr size_t kQuestCountV22 = 6;     // before the west's
+constexpr size_t kQuestCountV24 = 12;    // before the water mill's
 constexpr uint8_t kTeleportersV22 = 5;
 constexpr uint8_t kPlacesV22 = 4;        // outside, cave, house, tower
 
@@ -332,6 +333,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_places = version >= 22;      // inside a cave, a house, the tower; Cristi
   const bool with_west = version >= 23;        // the west: its species, quests, places; the bag, the farm
   const bool with_capture = version >= 24;     // four adventure spells, the capture spells
+  const bool with_river = version >= 25;       // the river's water mill: its quest
   // Species in the bestiary and the counts: two more from version 19.
   const size_t species_saved = with_west     ? kSpeciesCount
                                : with_places ? kSpeciesCountV22
@@ -519,7 +521,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     // before 19 three (fighting, healing and the main quest came then).
     const uint8_t teleporters = with_west ? static_cast<uint8_t>(kTeleporterCount) : kTeleportersV22;
     if (!in.u8(w.teleporters) || w.teleporters >= (1u << teleporters) || !in.u8(quests) ||
-        quests != (with_west ? kQuestCount : with_looks ? kQuestCountV22 : with_builds ? 3 : 2)) {
+        quests != (with_river ? kQuestCount : with_west ? kQuestCountV24 : with_looks ? kQuestCountV22 : with_builds ? 3 : 2)) {
       return fail(error, LoadError::Corrupt);
     }
     for (size_t k = 0; k < quests; ++k) {
@@ -656,6 +658,24 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   // moved them in the list, and they were missed): put them back up.
   for (Object& o : w.objects) {
     if (o.kind == ObjectKind::Teleporter && !w.ground.empty()) o.pos.y = w.ground.height(o.pos.x, o.pos.z) - 0.05f;
+  }
+  // Before version 25 the relief had no terrace, the river ran elsewhere:
+  // the valley's trees and rocks on what are now its cliffs go, the others
+  // settle on the ground as it is.
+  if (!with_river && !w.ground.empty()) {
+    const bool by_door = place != 0 && w.place.door < w.objects.size();
+    const Object door = by_door ? w.objects[w.place.door] : Object{};
+    std::erase_if(w.objects, [&](const Object& o) {
+      const bool nature = o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine || o.kind == ObjectKind::Rock ||
+                          o.kind == ObjectKind::Bush || o.kind == ObjectKind::Stump;
+      return nature && steep_ground(w, o.pos.x, o.pos.z);
+    });
+    if (by_door) {  // saved inside: its door, where it is now in the list
+      for (size_t k = 0; k < w.objects.size(); ++k) {
+        if (w.objects[k] == door) w.place.door = static_cast<uint32_t>(k);
+      }
+    }
+    settle_objects(w);
   }
   // The wilds around the valley (not saved). Before version 18 the relief at
   // the valley's edge rose into hills: it changed, the objects there settle again.

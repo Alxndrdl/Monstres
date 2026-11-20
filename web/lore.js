@@ -442,11 +442,12 @@ window.MonstresLore = {
     farm: 'Exploitation de Capucine',
     woods: 'Bois de l’Ouest',
     crater: 'Cratère de l’Étoile',
+    river: 'Rivière',
   },
   // The regions of the continent (src/core/continent.hpp), for the map. Not
   // reachable yet: names to refine.
   regions: {
-    start: 'Vallée du Départ',
+    start: 'Val Verdoyant',
     mountains: 'Monts Givrés',
     volcano: 'Presqu’île du Volcan',
     desert: 'Désert d’Ocre',
@@ -464,7 +465,8 @@ window.MonstresLore = {
   },
   // The west's places (west.hpp), for the map.
   westPlaces: {
-    cart: 'Charrette d’Anselme', bridge: 'Pont du Ruisseau', farm: 'Exploitation', mill: 'Moulin', pasture: 'Bergerie',
+    cart: 'Charrette d’Anselme', bridge: 'Pont de la Route', pathBridge: 'Pont du Sentier', cove: 'Crique de la Cascade',
+    waterMill: 'Moulin à eau', farm: 'Exploitation', mill: 'Moulin à vent', pasture: 'Bergerie',
     burrow: 'Terrier', woods: 'Bois de l’Ouest', cabin: 'Cabane du bûcheron', camp: 'Camp de Romane',
     hollowTree: 'Arbre creux', lighthouse: 'Phare', menhirs: 'Cercle des Menhirs', crater: 'Cratère de l’Étoile',
   },
@@ -517,6 +519,10 @@ window.MonstresLore = {
     19: { name: 'Maëlle', trainer: true, wanderer: true, chatter: ['Les routes sont plus sûres avec un bon compagnon.'] },
     20: { name: 'Théo', trainer: true, wanderer: true, chatter: ['Je cherche des adversaires dignes de ce nom.'] },
     21: { name: 'Lou', trainer: true, wanderer: true, chatter: ['Mes monstres et moi, on ne recule devant rien.'] },
+    // The river (west.hpp).
+    22: { name: 'Mathurin', chatter: ['La rivière descend de la Forêt Profonde, à l’est. Son eau est fraîche même en plein été.',
+      'Près de la grotte aux cristaux, la rivière passe au pied d’une cascade. On raconte qu’il y a quelque chose derrière…',
+      'Les Ploufi adorent la rivière. D’habitude ils sont gentils, mais quand ils s’énervent, gare à toi !'] },
   },
   // What the other villagers say about the quests (any of them, see web/dialogue.js).
   rumors: {
@@ -629,6 +635,14 @@ window.MonstresLore = {
         'jusqu’à la bergerie.',
       steps: { lambs: 'Ramener les agneaux dans l’enclos', tell: 'Le dire à Basile' },
       done: 'Le troupeau est au complet. Pour te remercier, Basile t’a confié un Laini.',
+    },
+    waterWheel: {
+      title: 'La roue bloquée', giver: 22, xp: 80,
+      summary: 'Une bande de Ploufi en colère a coincé des branches dans la roue du moulin à eau de Mathurin, et ils ' +
+        'montent la garde dans la rivière. Ils attaquent dès qu’on s’approche. Si tu perds ou si tu fuis, ta magie te ' +
+        'ramènera à l’exploitation.',
+      steps: { beaten: 'Battre les Ploufi de la roue', tell: 'Le dire à Mathurin' },
+      done: 'La roue tourne de nouveau, et le moulin à eau moud le grain. Mathurin t’a récompensé.',
     },
     mill: {
       title: 'Le moulin arrêté', giver: 16, xp: 50,

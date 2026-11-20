@@ -1,5 +1,6 @@
 #include "monstres/render/landscape.hpp"
 
+#include "monstres/core/interior.hpp"
 #include "monstres/core/west.hpp"
 
 #include "monstres/render/scene.hpp"
@@ -46,7 +47,8 @@ void scale_for(const Object& o, Instance& in) {
       in.sz = turned ? s.x : s.z;
       break;
     }
-    case ObjectKind::Bridge: in.sx = in.sy = in.sz = 1; in.y += 2 * s.y; break;  // its deck on top of its box
+    case ObjectKind::Bridge: in.sx = s.x / 5.4f; in.sy = in.sz = 1; in.y += 2 * s.y; break;  // its deck on top of its box, as long
+    case ObjectKind::HiddenCave: in.sx = in.sy = in.sz = rules::kHiddenCaveScale; break;           // the cave's mouth, smaller
     default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
   }
 }
@@ -168,6 +170,7 @@ LandscapeCache::Item make_item(const World& w, const Object& o) {
     case ObjectKind::FruitTree: shadow(1.6f * s.x, 1.6f * s.x, 0); break;
     case ObjectKind::Haystack: shadow(1.3f, 1.3f, 0, 0.7f); break;
     case ObjectKind::Windmill: shadow(3.6f, 3.6f, 0, 0.75f); break;
+    case ObjectKind::WaterMill: shadow(4.0f, 3.4f, yaw, 0.7f); break;
     case ObjectKind::Cabin: shadow(4.0f, 3.4f, yaw, 0.7f); break;
     case ObjectKind::Tent: shadow(1.9f, 2.1f, yaw, 0.6f); break;
     case ObjectKind::Woodpile: shadow(1.8f, 0.8f, yaw, 0.6f); break;
@@ -614,6 +617,7 @@ void build_landscape(const World& w, DrawList& list) {
 // and turned upside down or sideways when it hangs from the ceiling or
 // sticks out of a wall.
 void add_interior_object(const World& w, const Object& o, DrawList& list) {
+  if (o.kind == ObjectKind::Step && o.variant < kLandingVariant) return;  // the stair: in the room's mesh
   const LandscapeCache::Item item = make_item(w, o);
   Instance in = item.instance;
   in.material = scene_util::material_for(item.full, kLit);

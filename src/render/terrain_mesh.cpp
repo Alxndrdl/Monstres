@@ -106,11 +106,17 @@ Color ground_color(const World& w, float x, float z) {
     const Color stone = lerp(kCastlePaving, kEarth, 0.2f * value_noise(w.seed + 34, x, z, 1.5f));
     c = lerp(c, stone, inside * 0.85f);
   }
-  if (w.cave.radius > 0) {
-    // The cave's hill: grey rock, a little grass on top.
-    const float dx = x - w.cave.center.x, dz = z - w.cave.center.z;
-    const float rock = 1 - smooth(w.cave.radius - 1.0f, w.cave.radius + 2.0f, std::sqrt(dx * dx + dz * dz));
-    c = lerp(c, lerp(kCaveRock, kGrassDark, 0.35f * smooth(0.55f, 0.8f, value_noise(w.seed + 35, x, z, 4.0f))), rock * 0.9f);
+  // Cliffs (the terrace's edge, the cave's spur): grey rock, some grass on its ledges.
+  c = lerp(c, lerp(kCaveRock, kGrassDark, 0.3f * smooth(0.55f, 0.8f, value_noise(w.seed + 35, x, z, 4.0f))),
+           smooth(0.32f, 0.5f, steep) * 0.95f);
+  if (w.west.valid()) {
+    // By the river: wet gravel and sand at the water's edge, its bars.
+    float level = 0;
+    const float d = distance_to_stream(w.west.stream, x, z, 16.0f, &level);
+    if (d < 16.0f) {
+      const float wet = smooth(level + 0.6f, level + 0.05f, h) * (1 - smooth(10.0f, 16.0f, d));
+      c = lerp(c, lerp(kSand, kEarth, 0.45f * value_noise(w.seed + 36, x, z, 1.5f)), wet * 0.85f);
+    }
   }
   if (w.ruins.radius > 0) {
     // The courtyard of the ruins: worn flagstones, grass growing through.
@@ -450,36 +456,49 @@ MeshData build_water_mesh(const World& world) {
       for (int j = 0; j < n; ++j) {
         const float x0 = -d + kCell * static_cast<float>(i), z0 = -d + kCell * static_cast<float>(j);
         const float x1 = x0 + kCell, z1 = z0 + kCell;
-        float lowest = 1e9f;  // the lowest ground under the square (every 4 m)
-        for (float a = x0; a <= x1; a += 4) {
-          for (float b = z0; b <= z1; b += 4) lowest = std::min(lowest, world.ground.height(a, b));
+        // Some ground under the sea's level in the square (every 2 m), where
+        // the sea is (not a hollow of the hills): looked at all over it, not
+        // only at its middle, else the water stops short along the shore.
+        bool wet = false;
+        for (float a = x0; a <= x1 && !wet; a += 2) {
+          for (float b = z0; b <= z1 && !wet; b += 2) {
+            wet = world.ground.height(a, b) < rules::kSeaLevel + 0.2f && world.ground.sea(a, b);
+          }
         }
-        if (lowest > rules::kSeaLevel + 0.2f || !world.ground.sea(x0 + kCell / 2, z0 + kCell / 2)) continue;  // not a hollow of the hills
+        if (!wet) continue;
         vertex(m, x0, y, z0, water(x0, z0)); vertex(m, x0, y, z1, water(x0, z1)); vertex(m, x1, y, z1, water(x1, z1));
         vertex(m, x0, y, z0, water(x0, z0)); vertex(m, x1, y, z1, water(x1, z1)); vertex(m, x1, y, z0, water(x1, z0));
       }
     }
   }
-  // The west's stream: a ribbon at its water's level, clear at its banks
-  // (where it meets the sea, the sea's water takes over).
-  if (world.west.valid()) {
+  // The river: a ribbon at its water's level, as wide as it is at each
+  // place, clear at its banks (the ground there draws its real shore); not
+  // down its waterfall (drawn falling: build_dynamic); fading into the sea.
+  if (world.west.valid() && world.west.stream.width.size() == world.west.stream.points.size()) {
     const Stream& st = world.west.stream;
     const size_t n = st.points.size();
-    constexpr int kColumns = 4;
-    const float offsets[kColumns] = {-1.15f, -0.6f, 0.6f, 1.15f};
-    const float alphas[kColumns] = {0.0f, 0.85f, 0.85f, 0.0f};
+    constexpr int kColumns = 6;
+    const float offsets[kColumns] = {-1.2f, -0.85f, -0.4f, 0.4f, 0.85f, 1.2f};
+    const float alphas[kColumns] = {0.0f, 0.7f, 0.88f, 0.88f, 0.7f, 0.0f};
+    float to_end = 0;
+    std::vector<float> left(n, 0.0f);  // meters to its end
+    for (size_t i = n - 1; i-- > 0;) {
+      to_end += std::hypot(st.points[i + 1].x - st.points[i].x, st.points[i + 1].z - st.points[i].z);
+      left[i] = to_end;
+    }
     for (size_t i = 0; i + 1 < n && i + 1 < st.level.size(); ++i) {
-      if (st.level[i + 1] < rules::kSeaLevel + 0.02f) break;
+      if (st.level[i] - st.level[i + 1] > 0.6f) continue;  // its waterfall
       const auto corner = [&](size_t k, int col, float& x, float& z) {
         const Vec2 prev = st.points[k > 0 ? k - 1 : k], next = st.points[k + 1 < n ? k + 1 : k];
         float tx = next.x - prev.x, tz = next.z - prev.z;
         const float len = std::max(1e-4f, std::sqrt(tx * tx + tz * tz));
         tx /= len;
         tz /= len;
-        const float w = rules::kStreamWater * offsets[col];
+        const float w = st.width[k] * offsets[col];
         x = st.points[k].x - tz * w;
         z = st.points[k].z + tx * w;
       };
+      const auto fade = [&](size_t k) { return std::clamp(left[k] / 40.0f, 0.0f, 1.0f); };
       for (int col = 0; col + 1 < kColumns; ++col) {
         float ax, az, bx, bz, cx, cz, dx, dz;
         corner(i, col, ax, az);
@@ -487,9 +506,12 @@ MeshData build_water_mesh(const World& world) {
         corner(i + 1, col + 1, cx, cz);
         corner(i + 1, col, dx, dz);
         const float y0 = st.level[i], y1 = st.level[i + 1];
-        const auto water = [&](int c) { return Color{0.22f, 0.48f, 0.58f, alphas[c]}; };
-        vertex(m, ax, y0, az, water(col)); vertex(m, bx, y0, bz, water(col + 1)); vertex(m, cx, y1, cz, water(col + 1));
-        vertex(m, ax, y0, az, water(col)); vertex(m, cx, y1, cz, water(col + 1)); vertex(m, dx, y1, dz, water(col));
+        const auto water = [&](int c, size_t k) {
+          const float deep = std::min(1.0f, st.depth[k] / 1.2f);
+          return Color{0.24f - 0.06f * deep, 0.50f - 0.08f * deep, 0.58f - 0.04f * deep, alphas[c] * fade(k)};
+        };
+        vertex(m, ax, y0, az, water(col, i)); vertex(m, bx, y0, bz, water(col + 1, i)); vertex(m, cx, y1, cz, water(col + 1, i + 1));
+        vertex(m, ax, y0, az, water(col, i)); vertex(m, cx, y1, cz, water(col + 1, i + 1)); vertex(m, dx, y1, dz, water(col, i + 1));
       }
     }
   }

@@ -37,13 +37,13 @@ constexpr const char* kNames[kMeshCount] = {
     "castle_wall", "castle_tower", "castle_gate", "castle_keep", "cave_mouth", "crystal", "teleporter",
     "table", "chair", "bed", "shelf", "hearth", "hearth_fire", "rug", "step", "hatch",
     "cart", "cart_up", "goods", "bridge", "farmhouse", "barn", "fruit_tree", "crops_wheat", "crops_cabbage", "haystack",
-    "windmill", "windmill_sails", "cabin", "tent", "campfire", "campfire_fire", "woodpile", "hollow_tree", "burrow",
+    "windmill", "windmill_sails", "water_mill", "mill_wheel", "cabin", "tent", "campfire", "campfire_fire", "woodpile", "hollow_tree", "burrow",
     "lighthouse", "lighthouse_lamp", "menhir", "meteorite",
     "tree_far", "pine_far", "tree_mid", "bush_far",
     "grass_short_far", "grass_tall_far", "flower_far",
     "icon_question", "icon_exclaim", "icon_plus", "icon_cross", "icon_bolt", "icon_coin", "icon_farm",
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "shadow", "ripple", "smoke", "sparkle", "gust", "door_glow",
-    "rune_circle",
+    "rune_circle", "falls_band",
     "rain_shaft", "bolt", "rain", "snow",
 };
 

@@ -2,6 +2,7 @@
 // houses, the tower's stair and roof, Cristi on the walls, saves made inside.
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/debug.hpp"
 #include "monstres/core/interior.hpp"
 #include "monstres/core/save.hpp"
 #include "test_helpers.hpp"
@@ -187,19 +188,33 @@ TEST_CASE("the tower's stair goes up to its trapdoor, out onto its roof, and bac
   REQUIRE(door_near(w).action == DoorAction::Enter);
   door(w);
   REQUIRE(w.place.kind == PlaceKind::Tower);
-  // Each step a little higher than the one before, close enough to step onto.
+  // Each step a little higher than the one before, close enough to step onto
+  // (its blocks: by the wall, inside; the landing last).
   std::vector<Object> steps;
   for (const Object& o : w.objects) {
-    if (o.kind == ObjectKind::Step) steps.push_back(o);
+    if (o.kind == ObjectKind::Step && o.variant != kLandingVariant) {
+      REQUIRE(o.variant == steps.size() / 2);
+      steps.push_back(o);
+    }
   }
-  REQUIRE(steps.size() > 20);
-  for (size_t k = 1; k < steps.size(); ++k) {
-    const Box a = object_box(steps[k - 1]), b = object_box(steps[k]);
-    CHECK(b.max.y - a.max.y <= rules::kStepHeight);
-    CHECK(b.max.y > a.max.y);
-    const float gap = std::max({a.min.x - b.max.x, b.min.x - a.max.x, a.min.z - b.max.z, b.min.z - a.max.z});
-    CHECK(gap < 0.05f);
+  for (const Object& o : w.objects) {
+    if (o.kind == ObjectKind::Step && o.variant == kLandingVariant) steps.push_back(o);
+  }
+  REQUIRE(steps.size() > 40);
+  const auto touching = [](const Box& a, const Box& b) {
+    return std::max({a.min.x - b.max.x, b.min.x - a.max.x, a.min.z - b.max.z, b.min.z - a.max.z}) < 0.05f;
+  };
+  for (size_t k = 0; k + 1 < steps.size(); k += 2) {
+    const Box in = object_box(steps[k]), out = object_box(steps[k + 1]);
+    CHECK(in.max.y == doctest::Approx(out.max.y));  // the two blocks of one step, side by side
+    CHECK(touching(in, out));
     CHECK(wall_distance(w.interior, steps[k].pos.x, steps[k].pos.z) > 0);
+    CHECK(wall_distance(w.interior, steps[k + 1].pos.x, steps[k + 1].pos.z) > 0);
+    const size_t next = k + 2 < steps.size() ? k + 2 : steps.size() - 1;
+    const Box b = object_box(steps[next]);
+    CHECK(b.max.y - in.max.y <= rules::kStepHeight);
+    CHECK(b.max.y > in.max.y);
+    CHECK((touching(in, b) || touching(out, b) || touching(in, object_box(steps[std::min(next + 1, steps.size() - 1)]))));
   }
   // Climbing it, step by step: the player walks from one onto the next.
   w.player.pos = {steps[0].pos.x, object_box(steps[0]).max.y, steps[0].pos.z};
@@ -380,4 +395,14 @@ TEST_CASE("the Way out spell, free, leads back to the door from the far end of t
     out = door_near(w).action == DoorAction::Leave;
   }
   CHECK(out);
+}
+
+TEST_CASE("inside, the teleporters outside are still listed (not found anew on coming out)") {
+  World w = at_cave();
+  Vec3 at;
+  REQUIRE(teleporter_position(w, TeleporterId::Village, at));
+  door(w);
+  REQUIRE(inside(w));
+  CHECK(teleporter_position(w, TeleporterId::Village, at));
+  CHECK(teleporters_json(w).find("\"place\":\"village\"") != std::string::npos);
 }

@@ -66,6 +66,7 @@ TEST_CASE("no object is placed on the path") {
     const World& w = cached_game(seed);
     CHECK(w.path == make_path(seed));
     for (const Object& o : w.objects) {
+      if (o.kind == ObjectKind::Bridge) continue;  // the path's own bridge, over the river
       CHECK(distance_to_path(w.path, o.pos.x, o.pos.z) > rules::kPathHalfWidth + 0.3f);
     }
   }

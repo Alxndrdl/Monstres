@@ -36,7 +36,7 @@ test('the game starts in a 3D world', async ({ page }) => {
   expect(s.creatures[0].species).toBe('companion');
   const bySpecies = {};
   for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
-  expect(bySpecies.villager).toBe(17);  // with Isidore, the old magician, and the west's eight
+  expect(bySpecies.villager).toBe(18);  // with Isidore, the old magician, and the west's nine
   expect(bySpecies.companion).toBeGreaterThanOrEqual(1);  // the companion (and now and then a wild Pompon)
   expect(bySpecies.crow).toBeGreaterThan(0);
   expect(bySpecies.fish).toBeGreaterThan(0);

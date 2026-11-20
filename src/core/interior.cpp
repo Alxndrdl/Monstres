@@ -67,7 +67,7 @@ bool is_house(ObjectKind k) {
 }
 
 PlaceKind place_of(ObjectKind k) {
-  if (k == ObjectKind::CaveMouth) return PlaceKind::Cave;
+  if (k == ObjectKind::CaveMouth || k == ObjectKind::HiddenCave) return PlaceKind::Cave;
   if (is_house(k)) return PlaceKind::House;
   if (k == ObjectKind::Tower) return PlaceKind::Tower;
   if (k == ObjectKind::Burrow) return PlaceKind::Burrow;
@@ -116,6 +116,10 @@ struct DoorFrame {
 };
 DoorFrame frame_of(ObjectKind k) {
   if (k == ObjectKind::CaveMouth) return {0, 2.0f, {0, 1.9f, 4.55f}, 4.3f, 3.7f, 0, -1.8f};
+  if (k == ObjectKind::HiddenCave) {
+    constexpr float s = rules::kHiddenCaveScale;
+    return {0, 1.2f * s, {0, 1.9f * s, 3.0f * s}, 4.3f * s, 3.7f * s, 0, -1.5f * s};
+  }
   if (k == ObjectKind::Tower) return {0, -2.9f, {0, 1.25f, -2.45f}, 1.24f, 2.5f, 0, -3.8f};
   if (k == ObjectKind::HollowTree) return {0, -4.9f, {0, 1.3f, -4.25f}, 1.4f, 2.6f, 0, -5.8f};
   if (k == ObjectKind::Lighthouse) return {0, -3.2f, {0, 1.2f, -2.66f}, 1.1f, 2.3f, 0, -4.0f};
@@ -251,6 +255,28 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
       in.pieces.push_back({at, at, r, {}, height, 1.4f});
       chambers.push_back({at, r});
     }
+    // The hidden way out, behind the river's waterfall (ObjectKind::HiddenCave):
+    // a narrow tunnel from the deepest chamber, the way most clear of the others.
+    const Chamber* deep = &chambers[0];
+    for (const Chamber& c : chambers) {
+      if (c.at.z < deep->at.z) deep = &c;
+    }
+    Vec2 way{0, -1};
+    float clearest = -1e9f;
+    for (int k = 0; k < 16; ++k) {
+      const Vec2 a = dir16(static_cast<Angle16>(k * 4096));
+      const Vec2 end{deep->at.x + a.x * (deep->r + 9.0f), deep->at.z + a.z * (deep->r + 9.0f)};
+      if (end.z > -12.0f) continue;  // not back towards the mouth
+      float clear = 1e9f;
+      for (const RoomPiece& p : in.pieces) clear = std::min(clear, -piece_distance(p, end.x, end.z, 0));
+      if (clear > clearest) {
+        clearest = clear;
+        way = a;
+      }
+    }
+    const Vec2 end{deep->at.x + way.x * (deep->r + 8.0f), deep->at.z + way.z * (deep->r + 8.0f)};
+    in.pieces.push_back({deep->at, end, 1.8f, {}, 3.2f, 0.3f});
+    in.exits.push_back({{end.x - way.x * 0.6f, 0, end.z - way.z * 0.6f}, {-way.x, -way.z}, ExitKind::Hidden});
   } else if (tall(kind)) {
     // One tall round hall; a stair along its wall up to a landing under the trapdoor.
     const Hall h = hall_of(kind);
@@ -459,15 +485,18 @@ void furnish_house(const Interior& in, const Object& door, Rng& rng, std::vector
 void furnish_tower(const Interior& in, Rng& rng, std::vector<Object>& out) {
   const Hall h = hall_of(in.kind);
   const float R = h.radius, ring = h.ring;
-  // The stair: one step every 0.304 rad along the wall, 0.3 m higher each.
+  // The stair: one step every 0.304 rad along the wall, 0.3 m higher each,
+  // from the wall to a meter inside the stair's circle (drawn whole by the
+  // room's mesh): two blocks each to stand on, one by the wall, one inside.
   for (int i = 0; i < h.steps; ++i) {
     const Vec2 a = dir16(static_cast<Angle16>(kStairStart + kStairStep * i));
-    Object o = thing(ObjectKind::Step, ring * a.x, 0.3f * static_cast<float>(i), -R + ring * a.z, 0,
-                     static_cast<uint8_t>(i));
-    o.size = {0.55f, 0.15f, 0.55f};
-    out.push_back(o);
+    for (const float r : {ring - 0.45f, ring + 0.45f}) {
+      Object o = thing(ObjectKind::Step, r * a.x, 0.3f * static_cast<float>(i), -R + r * a.z, 0, static_cast<uint8_t>(i));
+      o.size = {0.48f, 0.15f, 0.48f};
+      out.push_back(o);
+    }
   }
-  Object landing = thing(ObjectKind::Step, in.top.x, in.top.y - 0.3f, in.top.z, 0, 200);
+  Object landing = thing(ObjectKind::Step, in.top.x, in.top.y - 0.3f, in.top.z, 0, kLandingVariant);
   landing.size = {1.3f, 0.15f, 1.3f};
   out.push_back(landing);
   Object hatch = thing(ObjectKind::Hatch, in.top.x, in.pieces[0].height - 0.02f, in.top.z);
@@ -561,10 +590,16 @@ DoorNear door_near(const World& w, float reach) {
       best.building = w.place.door < w.outdoors.objects.size() ? w.outdoors.objects[w.place.door].kind : ObjectKind::Count;
       best.object = w.place.door;
       best.distance = d;
+      best.hidden = e.kind == ExitKind::Hidden;
       if (e.kind == ExitKind::Roof) {
         best.at = {e.at.x, w.interior.pieces[0].height - 0.06f, e.at.z};  // the trapdoor overhead
         best.facing = {0, 0};  // lying flat: the trapdoor
         best.width = best.height = 1.1f;
+      } else if (e.kind == ExitKind::Hidden) {  // the tunnel's end, daylight through the falling water
+        best.at = {e.at.x - e.facing.x * 0.9f, 1.4f, e.at.z - e.facing.z * 0.9f};
+        best.facing = e.facing;
+        best.width = 2.2f;
+        best.height = 2.4f;
       } else if (w.place.kind == PlaceKind::Cave) {
         best.at = {0, 1.8f, 3.4f};
         best.facing = {0, -1};
@@ -606,7 +641,8 @@ DoorNear door_near(const World& w, float reach) {
     const float d = distance2d(p.x - use.x, p.z - use.z);
     if (d >= best.distance || std::fabs(p.y - o.pos.y) > 1.5f) return;
     const Vec2 g = local_to_world(o, f.glow.x, f.glow.z);
-    best = {DoorAction::Enter, place, o.kind, k, {g.x, o.pos.y + f.glow.y, g.z}, front_of(o.yaw), f.width, f.height, d};
+    best = {DoorAction::Enter, place, o.kind, k, {g.x, o.pos.y + f.glow.y, g.z}, front_of(o.yaw), f.width, f.height, d,
+            o.kind == ObjectKind::HiddenCave};
   });
   return best;
 }
@@ -629,7 +665,7 @@ void bring_companion(World& w) {
   c.timer = 0;
 }
 
-void leave(World& w, bool to_roof) {
+void leave(World& w, bool to_roof, bool hidden = false) {
   if (!inside(w) || w.place.door >= w.outdoors.objects.size()) return;
   Creature companion = w.creatures.empty() ? Creature{} : w.creatures[0];
   const bool had_companion = !w.creatures.empty();
@@ -640,7 +676,12 @@ void leave(World& w, bool to_roof) {
   w.creatures.clear();
   if (had_companion) w.creatures.push_back(companion);
   for (Creature& c : out.creatures) w.creatures.push_back(std::move(c));
-  const Object door = w.objects[w.place.door];
+  Object door = w.objects[w.place.door];
+  if (hidden) {  // out behind the waterfall
+    for (const Object& o : w.objects) {
+      if (o.kind == ObjectKind::HiddenCave) door = o;
+    }
+  }
   w.place = {};
   w.interior = {};
   w.outdoors = {};
@@ -666,6 +707,19 @@ void leave(World& w, bool to_roof) {
 
 bool enter_place(World& w, Place place, bool from_roof) {
   if (inside(w) || place.door >= w.objects.size()) return false;
+  // Behind the waterfall: into the crystal cave (the one of its mouth), at
+  // the end of its hidden tunnel.
+  const bool hidden = w.objects[place.door].kind == ObjectKind::HiddenCave;
+  if (hidden) {
+    bool found = false;
+    for (size_t k = 0; k < w.objects.size() && !found; ++k) {
+      if (w.objects[k].kind == ObjectKind::CaveMouth) {
+        place.door = static_cast<uint32_t>(k);
+        found = true;
+      }
+    }
+    if (!found) return false;
+  }
   const Object door = w.objects[place.door];
   if (place_of(door.kind) != place.kind || place.kind == PlaceKind::Outside) return false;
   Outdoors& out = w.outdoors;
@@ -688,6 +742,12 @@ bool enter_place(World& w, Place place, bool from_roof) {
   p.pos = top ? w.interior.top : w.interior.entry;
   p.facing_x = top ? 0.0f : w.interior.entry_facing.x;
   p.facing_z = top ? 1.0f : w.interior.entry_facing.z;
+  for (const Exit& e : w.interior.exits) {
+    if (!hidden || e.kind != ExitKind::Hidden) continue;
+    p.pos = {e.at.x + e.facing.x * 1.6f, 0, e.at.z + e.facing.z * 1.6f};  // a little in, looking into the cave
+    p.facing_x = e.facing.x;
+    p.facing_z = e.facing.z;
+  }
   bring_companion(w);
   map_way_out(w.interior, w.objects);
   if (place.kind == PlaceKind::Cave) spawn_cristis(w);
@@ -701,7 +761,7 @@ bool use_door(World& w) {
   switch (d.action) {
     case DoorAction::Enter: if (!enter_place(w, {d.place, d.object}, false)) return false; break;
     case DoorAction::Descend: if (!enter_place(w, {d.place, d.object}, true)) return false; break;
-    case DoorAction::Leave: leave(w, false); break;
+    case DoorAction::Leave: leave(w, false, d.hidden); break;
     case DoorAction::Climb: leave(w, true); break;
     default: return false;
   }

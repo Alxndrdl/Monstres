@@ -2858,6 +2858,87 @@ def windmill_sails():
     return m
 
 
+def water_mill():
+    """The water mill on the river's bank: a stone base (down to 2.5 m below
+    its floor, the bank slopes there), plastered walls, a red roof; its door
+    at -Z, the river at +Z where its wheel turns (mill_wheel, its axle at
+    local (0, 0.6, 3.0)). 6 x 5 m (collision: half 3.0 x 2.4 x 2.5)."""
+    m = Mesh()
+    hx, hz, wall = 3.0, 2.5, 2.7
+    box(m, (0, -1.15, 0), (hx + 0.15, 1.35, hz + 0.15), STONE)
+    for k in range(5):  # courses of stones on the base
+        y = -2.3 + 0.45 * k
+        box(m, (0, y, 0), (hx + 0.17, 0.025, hz + 0.17), shade(STONE, 0.75))
+    box(m, (0, wall / 2 + 0.2, 0), (hx, wall / 2, hz), PLASTER)
+    for x in (-hx, hx):  # timber corners
+        for z in (-hz, hz):
+            box(m, (x, wall / 2 + 0.2, z), (0.12, wall / 2, 0.12), TIMBER)
+    gable_walls(m, hx, hz, wall + 0.2, 4.9, PLASTER)
+    gable_roof(m, hx, hz, wall + 0.2, 4.9, 0.4, ROOF_RED)
+    door(m, (0, 1.15, -hz - 0.02), 0.5, 0.95, (0, 0, -1))
+    for x in (-1.8, 1.8):
+        window(m, (x, 1.7, -hz - 0.02), 0.35, 0.32, (0, 0, -1))
+    window(m, (-1.6, 1.7, hz + 0.02), 0.3, 0.3, (0, 0, 1))
+    # The axle out of the wall, its bearing.
+    box(m, (0, 0.6, hz + 0.25), (0.22, 0.22, 0.3), TIMBER)
+    box(m, (0, 0.6, hz + 0.05), (0.4, 0.4, 0.06), METAL)
+    # Sacks of flour by the door.
+    for k, (x, z) in enumerate(((2.2, -3.1), (2.65, -3.25), (2.4, -3.6))):
+        blob(m, (x, 0.32, z), (0.28, 0.33, 0.24), 0.08, 3300 + k, solid(shade(CANVAS, 1.05)), detail=0)
+    return m
+
+
+def mill_wheel():
+    """The water mill's wheel: 2.2 m of radius, 0.8 m wide, turning about
+    its axle (local Z, at the origin): two rims, spokes, paddles."""
+    m = Mesh()
+    r, half = 2.2, 0.4
+    segments = 20
+    for side in (-half, half):
+        for i in range(segments):
+            a0, a1 = TAU * i / segments, TAU * (i + 1) / segments
+            o0 = (r * math.cos(a0), r * math.sin(a0), side)
+            o1 = (r * math.cos(a1), r * math.sin(a1), side)
+            i0 = ((r - 0.22) * math.cos(a0), (r - 0.22) * math.sin(a0), side)
+            i1 = ((r - 0.22) * math.cos(a1), (r - 0.22) * math.sin(a1), side)
+            m.quad_facing(o0, o1, i1, i0, shade(TIMBER, 1.1), (0, 0, 1 if side > 0 else -1))
+            m.quad_facing(o0, o1, (o1[0], o1[1], -side), (o0[0], o0[1], -side), shade(TIMBER, 0.95),
+                          (math.cos((a0 + a1) / 2), math.sin((a0 + a1) / 2), 0))
+    for k in range(8):  # spokes
+        a = TAU * k / 8
+        c, s_ = math.cos(a), math.sin(a)
+        for side in (-half + 0.05, half - 0.05):
+            frustum(m, lambda p, c=c, s_=s_, side=side: (c * p[1] - s_ * p[0], s_ * p[1] + c * p[0], side + p[2]),
+                    0.07, 0.07, r - 0.2, 4, TIMBER, flat=True)
+    for k in range(16):  # paddles across the rims
+        a = TAU * (k + 0.5) / 16
+        c, s_ = math.cos(a), math.sin(a)
+        def at(u, v, w):
+            return (c * u - s_ * v, s_ * u + c * v, w)
+        m.quad_facing(at(r - 0.6, 0, -half), at(r + 0.05, 0, -half), at(r + 0.05, 0, half), at(r - 0.6, 0, half),
+                      shade(PLANKS, 0.9 + 0.1 * (k % 2)), (-s_, c, 0))
+        m.quad_facing(at(r - 0.6, -0.04, -half), at(r + 0.05, -0.04, -half), at(r + 0.05, -0.04, half),
+                      at(r - 0.6, -0.04, half), shade(PLANKS, 0.8), (s_, -c, 0))
+    frustum(m, lambda p: (p[0], p[2], p[1] - half - 0.2), 0.25, 0.25, 2 * half + 0.4, 8, METAL, flat=True)
+    return m
+
+
+def falls_band():
+    """One band of a waterfall, 1 m high (y from 0 down to -1), 2.8 m wide
+    along X, bowed out a little at -Z: streaks of water and foam, drawn
+    transparent and stacked (the game tints and fades each band, the bands
+    going down)."""
+    m = Mesh(transparent=True, double_sided=True)
+    columns = 14
+    for i in range(columns):
+        x0, x1 = -1.4 + 2.8 * i / columns, -1.4 + 2.8 * (i + 1) / columns
+        bow = lambda x: -0.25 * (1 - (x / 1.4) ** 2)
+        k = hash01(3400, i)
+        c = (0.78 + 0.2 * k, 0.88 + 0.1 * k, 0.95, 0.55 + 0.35 * k)
+        m.quad_facing((x0, 0, bow(x0)), (x1, 0, bow(x1)), (x1, -1, bow(x1)), (x0, -1, bow(x0)), c, (0, 0, -1))
+    return m
+
+
 def cabin():
     """The woodcutter's log cabin: 6 x 5 m, walls 2.4 m, its ridge at 4.2 m
     along X (owls perch there), its door at -Z (collision: half 3.0 x 2.1 x 2.5)."""
@@ -3260,6 +3341,9 @@ def all_models():
         "haystack": haystack(),
         "windmill": windmill(),
         "windmill_sails": windmill_sails(),
+        "water_mill": water_mill(),
+        "mill_wheel": mill_wheel(),
+        "falls_band": falls_band(),
         "cabin": cabin(),
         "tent": tent(),
         "campfire": campfire(),

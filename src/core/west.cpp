@@ -165,7 +165,7 @@ float distance_to_stream(const Stream& s, float x, float z, float limit, float* 
 }
 
 WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout& village, const RuinsLayout&,
-                            const ForestLayout& forest, const CaveLayout&, const CastleLayout&) {
+                            const ForestLayout& forest, const CaveLayout& cave, const CastleLayout&) {
   WestLayout w;
   if (village.lake.radius_x <= 0 || path.points.empty()) return w;  // hand-made worlds
   std::vector<Disc> taken;
@@ -260,20 +260,130 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     make_chunks(w.road.points, w.road.chunks);
   }
 
-  // The stream: from the hills in the north, east of the farm, under the
-  // road, down south, then west to the sea.
+  // ---- The terrace and the river -------------------------------------------------
+  // Inland (north and east) the land is higher: a terrace, its edge a line of
+  // cliffs here, slopes there (the relief draws it: heightmap.cpp), the cave in
+  // a spur of it. The river (the west's stream) comes from the Forêt Profonde
+  // in the east along the terrace, falls over its edge by the cave into a pool,
+  // then runs west, south under the road's bridge, and out to the sea.
+  const Vec2 east{1, 0};
+  const Vec2 cave_at = cave.radius > 0 ? cave.center : Vec2{path_x_at(path, -110.0f) - 62.0f, -110.0f};
+  const bool cave_west = cave_at.x < path_x_at(path, cave_at.z);
+  {
+    const Vec2 C = cave_at;
+    const auto j = [&](uint64_t k, float a) { return (hash01(seed, 900 + k) - 0.5f) * 2 * a; };
+    std::vector<Vec2> c{{C.x - 175 + j(1, 20), -rules::kReliefHalfSize - 90.0f},
+                        {C.x - 150 + j(8, 20), std::max(C.z - 430.0f, -rules::kReliefHalfSize + 20.0f)},
+                        {C.x - 118 + j(2, 15), C.z - 230 + j(3, 20)},
+                        {C.x - 95 + j(4, 8), C.z - 115 + j(5, 10)},
+                        {C.x - 62 + j(6, 5), C.z - 55 + j(7, 5)},
+                        {C.x - 38, C.z - 14}, {C.x - 24, C.z + 10}, {C.x - 4, C.z + 23}, {C.x + 16, C.z + 12},
+                        {C.x + 21, C.z - 4}, {C.x + 24, C.z - 24}, {C.x + 44, C.z - 36}};
+    for (float x = C.x + 92; x < rules::kReliefHalfSize + 90; x += 55) {
+      c.push_back({x, std::min(C.z - 40.0f + j(static_cast<uint64_t>(x + 2000), 15), -128.0f)});
+    }
+    w.scarp.points = spline(c, 2.0f);
+    make_chunks(w.scarp.points, w.scarp.chunks);
+    float best = 1e30f;
+    for (const Vec2& p : w.scarp.points) {
+      const float d = distance_to_path(path, p.x, p.z, best);
+      if (d < best) {
+        best = d;
+        w.ramp = p;
+      }
+    }
+  }
+  // The waterfall: the edge's point by the cave's far side; the pool below,
+  // the hidden cleft at the cliff's foot beside the falling water.
+  {
+    const Vec2 want{cave_at.x - 36.0f, cave_at.z - 6.0f};
+    size_t best = 1;
+    for (size_t i = 1; i + 1 < w.scarp.points.size(); ++i) {
+      if (distance(w.scarp.points[i], want) < distance(w.scarp.points[best], want)) best = i;
+    }
+    const Vec2 d = normalized(w.scarp.points[std::min(best + 2, w.scarp.points.size() - 1)] - w.scarp.points[best - 1]);
+    w.falls = w.scarp.points[best];
+    w.falls_out = {-d.z, d.x};  // the valley's side
+    w.cove = w.falls + w.falls_out * 8.0f;
+    const Vec2 lat{-w.falls_out.z, w.falls_out.x};
+    w.hidden = w.falls + lat * 4.8f + w.falls_out * 1.4f;
+  }
   {
     const float x_cross = std::min(w.farm.x + rules::kFarmRadius + 30.0f, -154.0f);
-    std::vector<Vec2> c;
+    const Vec2 F = w.falls, out = w.falls_out, lat{-out.z, out.x};
+    std::vector<Vec2> pins;  // where the river is held (no bends added there)
+    // Up on the terrace: its way in on the relief's edge, towards the Forêt Profonde.
+    Vec2 deep{850.0f, -470.0f};
+    for (const Landmark& l : continent_landmarks()) {
+      if (l.region == Region::Forest) deep = l.at;
+    }
+    std::vector<Vec2> anchors;  // from upstream, down to the falls
+    Vec2 up_cross{};
+    if (cave_west) {
+      float z = cave_at.z - 75.0f;
+      while (z > -rules::kReliefHalfSize + 80 && scarp_side(w, path_x_at(path, z), z) > -25.0f) z -= 10.0f;
+      up_cross = {path_x_at(path, z), z};
+      anchors = {up_cross + east * 10.0f, up_cross - east * 10.0f, {cave_at.x + 12, cave_at.z - 54}};
+      pins.push_back(up_cross);
+    } else {
+      anchors = {{cave_at.x + 30, cave_at.z - 64}, {cave_at.x + 4, cave_at.z - 52}};
+    }
+    anchors.push_back(F - out * 26.0f + lat * 4.0f);
+    anchors.push_back(F - out * 11.0f);
+    const Vec2 to_deep = normalized(deep - anchors.front());
+    const float edge = rules::kReliefHalfSize + 6.0f;
+    Vec2 spring = anchors.front() + to_deep * ((edge - anchors.front().x) / std::max(to_deep.x, 0.2f));
+    spring.z = std::clamp(spring.z + (hash01(seed, 90) - 0.5f) * 60.0f, -rules::kReliefHalfSize + 60.0f, -200.0f);
+    std::vector<Vec2> c{spring + east * 14.0f, spring};
+    pins.push_back(spring);
+    // Along the lowest ground of the terrace (away from its edge), a bit at random.
+    Vec2 at = spring;
+    for (int step = 0; step < 80 && distance(at, anchors.front()) > 50.0f; ++step) {
+      const Vec2 to = normalized(anchors.front() - at);
+      float best = 1e30f;
+      Vec2 next = at + to * 32.0f;
+      for (int k = -3; k <= 3; ++k) {
+        const float a = 0.2f * static_cast<float>(k);
+        const Vec2 dd{to.x * std::cos(a) - to.z * std::sin(a), to.x * std::sin(a) + to.z * std::cos(a)};
+        const Vec2 p = at + dd * 32.0f;
+        float cost = natural_height(seed, p.x, p.z) + 1.2f * std::fabs(a) + 2.5f * hash01(seed, 700 + static_cast<uint64_t>(step * 8 + k + 3));
+        if (scarp_side(w, p.x, p.z) > -30.0f) cost += 1000.0f;  // on the terrace, away from its edge
+        if (forest.radius_x > 0 && outline_distance(forest.center, forest.radius_x, forest.radius_z, kForestOutline, p.x, p.z) < 1.3f) {
+          cost += 1000.0f;
+        }
+        if (in_village(village, p.x, p.z, 30.0f) || in_cave_hill(cave, p.x, p.z, 15.0f)) cost += 1000.0f;
+        if (cost < best) {
+          best = cost;
+          next = p;
+        }
+      }
+      c.push_back(next);
+      at = next;
+    }
+    for (const Vec2& a : anchors) c.push_back(a);
+    // Over the edge, the pool, then down the valley.
+    c.push_back(F);
+    pins.push_back(F);
+    c.push_back(w.cove);
+    pins.push_back(w.cove);
+    c.push_back(w.cove + out * 11.0f + lat * 2.0f);
+    if (!cave_west) {  // back west under the path
+      const float z = w.cove.z + 16.0f;
+      const Vec2 low{path_x_at(path, z), z};
+      c.push_back(low + east * 10.0f);
+      c.push_back(low - east * 10.0f);
+      pins.push_back(low);
+    }
+    const Vec2 last = c.back();
+    c.push_back({0.55f * last.x + 0.45f * x_cross, last.z + 10.0f + 10.0f * hash01(seed, 101)});
     constexpr float kSouth = 205.0f;
-    for (int k = 0; k <= 15; ++k) {
-      const float z = -240.0f + 30.0f * static_cast<float>(k);
-      if (z > kSouth) break;
-      float x = x_cross + (hash01(seed, 100 + static_cast<uint64_t>(k)) - 0.5f) * 26.0f;
+    for (float z = last.z + 45.0f; z <= kSouth; z += 30.0f) {
+      float x = x_cross + (hash01(seed, 100 + static_cast<uint64_t>(z + 1000)) - 0.5f) * 10.0f;
       if (std::fabs(z - road_line) < 34.0f) x = x_cross;
-      if (std::fabs(z - w.farm.z) < rules::kFarmRadius + 24.0f) x = std::max(x, w.farm.x + rules::kFarmRadius + 16.0f);
+      if (std::fabs(z - w.farm.z) < rules::kFarmRadius + 24.0f) x = std::max(x, w.farm.x + rules::kFarmRadius + 18.0f);
       c.push_back({x, z});
     }
+    pins.push_back({x_cross, road_line});
     // Its mouth: where the sea comes closest, south of the woods.
     float mouth_z = kSouth + 15.0f, nearest = -1e30f;
     for (float z = kSouth + 5.0f; z <= kSouth + 125.0f; z += 10.0f) {
@@ -283,18 +393,120 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
         mouth_z = z;
       }
     }
+    const Vec2 turn = c.back();
+    c.push_back({turn.x - 16.0f, 0.5f * (turn.z + mouth_z) + 6.0f});  // a bend, not a corner
     for (int k = 1; k < 24; ++k) {
-      const float x = x_cross - 30.0f * static_cast<float>(k);
-      const float z = mouth_z + (hash01(seed, 200 + static_cast<uint64_t>(k)) - 0.5f) * 14.0f;
-      c.push_back({x, z});
-      // Well out at sea (its last stretch under the water), or at the world's edge.
-      if (continent_height(seed, x, z) < rules::kSeaLevel - 3.0f || x < -rules::kWorldHalfSize + 30.0f) break;
+      const float x = turn.x - 30.0f * static_cast<float>(k) - 10.0f;
+      c.push_back({x, mouth_z});
+      if (continent_height(seed, x, mouth_z) < rules::kSeaLevel - 3.0f || x < -rules::kReliefHalfSize + 40.0f) break;
     }
-    w.stream.points = spline(c, 1.0f);
+    {  // its very end where the sea is deepest around there (not on a shoal)
+      Vec2& end = c.back();
+      float deepest = continent_height(seed, end.x, end.z);
+      const float z0 = end.z;
+      for (float z = z0 - 40.0f; z <= z0 + 40.0f; z += 5.0f) {
+        const float h = continent_height(seed, end.x, z);
+        if (h < deepest - 0.3f) {
+          deepest = h;
+          end.z = z;
+        }
+      }
+    }
+    pins.push_back(c.back());
+    std::vector<Vec2> pts = spline(c, 1.0f);
+
+    // Meanders: the line swings from side to side, in bends of changing size,
+    // held still at the pins (the falls, the pool, the bridges, its ends).
+    {
+      const size_t n = pts.size();
+      std::vector<float> s(n, 0.0f), pin_s;
+      for (size_t i = 1; i < n; ++i) s[i] = s[i - 1] + distance(pts[i], pts[i - 1]);
+      for (const Vec2& p : pins) {
+        size_t best = 0;
+        for (size_t i = 0; i < n; ++i) {
+          if (distance(pts[i], p) < distance(pts[best], p)) best = i;
+        }
+        pin_s.push_back(s[best]);
+      }
+      const float falls_s = pin_s[cave_west ? 2 : 1];
+      std::vector<Vec2> moved(pts);
+      float phase = 6.2831853f * hash01(seed, 102);
+      for (size_t i = 0; i < n; ++i) {
+        if (i > 0) phase += 6.2831853f * (s[i] - s[i - 1]) / (70.0f + 80.0f * value_noise(seed + 120, s[i] / 260.0f, 0, 1.0f));
+        float held = 1e9f;
+        for (const float p : pin_s) held = std::min(held, std::fabs(s[i] - p));
+        const float e = [&] {
+          const float t = std::clamp((held - 12.0f) / 30.0f, 0.0f, 1.0f);
+          return t * t * (3 - 2 * t);
+        }();
+        const float amp = 5.0f + 14.0f * value_noise(seed + 121, s[i] / 210.0f, 0.5f, 1.0f);
+        float off = e * amp * (std::sin(phase) + 0.35f * std::sin(2.3f * phase + 1.1f));
+        const Vec2 t = normalized(pts[std::min(i + 15, n - 1)] - pts[i >= 15 ? i - 15 : 0]);
+        const Vec2 nrm{-t.z, t.x};
+        for (int tries = 0; tries < 3; ++tries) {
+          const Vec2 p = pts[i] + nrm * off;
+          const bool upstream = s[i] < falls_s;
+          if ((upstream && scarp_side(w, p.x, p.z) > -18.0f) || (!upstream && scarp_side(w, p.x, p.z) < 6.0f && s[i] > falls_s + 25) ||
+              in_farm(w, p.x, p.z, 14.0f) || in_village(village, p.x, p.z, 20.0f)) {
+            off *= 0.3f;
+          }
+        }
+        moved[i] = pts[i] + nrm * off;
+      }
+      pts = std::move(moved);
+    }
+    w.stream.points = std::move(pts);
     make_chunks(w.stream.points, w.stream.chunks);
+    // Its shape along it: narrow up on the terrace, wider down the valley,
+    // a pool below the falls, narrower under the bridges, an estuary at the sea.
+    {
+      Stream& st = w.stream;
+      const size_t n = st.points.size();
+      std::vector<float> s(n, 0.0f);
+      for (size_t i = 1; i < n; ++i) s[i] = s[i - 1] + distance(st.points[i], st.points[i - 1]);
+      const auto closest = [&](Vec2 p) {
+        size_t best = 0;
+        for (size_t i = 0; i < n; ++i) {
+          if (distance(st.points[i], p) < distance(st.points[best], p)) best = i;
+        }
+        return best;
+      };
+      st.falls = closest(F);
+      const float sF = s[st.falls], sK = s[closest(w.cove)], sEnd = s[n - 1];
+      std::vector<float> narrow;
+      for (const Vec2& p : pins) narrow.push_back(s[closest(p)]);
+      const auto smoothstep = [](float e0, float e1, float x) {
+        const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+        return t * t * (3 - 2 * t);
+      };
+      st.width.assign(n, 0);
+      st.depth.assign(n, 0);
+      st.bend.assign(n, 0);
+      for (size_t i = 0; i < n; ++i) {
+        const Vec2 a = normalized(st.points[i] - st.points[i >= 7 ? i - 7 : 0]);
+        const Vec2 b = normalized(st.points[std::min(i + 7, n - 1)] - st.points[i]);
+        st.bend[i] = std::clamp(std::atan2(a.x * b.z - a.z * b.x, a.x * b.x + a.z * b.z) / 0.5f, -1.0f, 1.0f);
+        float W = s[i] < sF ? 1.4f + 0.9f * s[i] / std::max(sF, 1.0f) : 2.4f + 0.8f * std::min(1.0f, (s[i] - sF) / 900.0f);
+        W *= 0.78f + 0.44f * value_noise(seed + 130, s[i] / 70.0f, 0, 1.0f);
+        W += 0.5f * (value_noise(seed + 131, s[i] / 11.0f, 0, 1.0f) - 0.5f);
+        W += 0.35f * std::fabs(st.bend[i]);
+        W += 4.3f * std::exp(-((s[i] - sK) / 7.5f) * ((s[i] - sK) / 7.5f)) * (0.8f + 0.4f * value_noise(seed + 132, s[i] / 5.0f, 0, 1.0f));
+        for (const float p : narrow) {
+          if (std::fabs(s[i] - p) < 14.0f && std::fabs(p - sK) > 1.0f && std::fabs(p - sF) > 1.0f) W = std::min(W, 2.7f);
+        }
+        if (std::fabs(s[i] - sF) < 5.0f) W = std::min(W, 2.2f);  // gathered at the lip
+        W *= 1 + 2.3f * smoothstep(sEnd - 120.0f, sEnd, s[i]);  // opening into the sea
+        float D = 0.42f + 0.35f * value_noise(seed + 133, s[i] / 45.0f, 0, 1.0f) + 0.25f * std::fabs(st.bend[i]);
+        D += 1.1f * std::exp(-((s[i] - sF - 6.0f) / 5.0f) * ((s[i] - sF - 6.0f) / 5.0f));  // the plunge pool
+        D *= 1 - 0.45f * smoothstep(sEnd - 120.0f, sEnd, s[i]);
+        if (s[i] < 160.0f) D *= 0.8f;
+        st.width[i] = W;
+        st.depth[i] = D;
+      }
+    }
   }
 
-  // The bridge: where the road crosses the stream.
+  // The bridges: where the road crosses the river, and where the path does.
   {
     float best = 1e30f;
     for (size_t i = 1; i + 1 < w.road.points.size(); ++i) {
@@ -306,7 +518,50 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
         w.bridge_along = normalized(w.road.points[i + 1] - w.road.points[i - 1]);
       }
     }
+    best = 1e30f;
+    for (size_t i = 1; i + 1 < path.points.size(); ++i) {
+      const Vec2 p = path.points[i];
+      if (p.z > -40.0f) continue;  // north of the start
+      const float d = distance_to_stream(w.stream, p.x, p.z, best);
+      if (d < best) {
+        best = d;
+        w.path_bridge = p;
+        w.path_bridge_along = normalized(path.points[i + 1] - path.points[i - 1]);
+      }
+    }
   }
+  // The water mill: up the river from the path's bridge (above the falls), on
+  // a straight reach; its wheel in the water by the southern bank, the house
+  // beside it on the bank.
+  {
+    const Stream& st = w.stream;
+    size_t bridge_at = 0;
+    float near = 1e30f;
+    for (size_t i = 0; i < st.points.size(); ++i) {
+      const float d = distance(st.points[i], w.path_bridge);
+      if (d < near) {
+        near = d;
+        bridge_at = i;
+      }
+    }
+    size_t i = std::min(bridge_at, st.falls > 60 ? st.falls - 60 : size_t{0});
+    float gone = 0;
+    while (i > 30 && gone < rules::kWaterMillUpstream) {
+      gone += distance(st.points[i], st.points[i - 1]);
+      --i;
+    }
+    for (size_t k = i > 25 ? i - 25 : 0; k < std::min(i + 25, st.points.size()); ++k) {
+      if (std::fabs(st.bend[k]) < std::fabs(st.bend[i])) i = k;
+    }
+    i = std::clamp<size_t>(i, 3, st.points.size() - 4);
+    const Vec2 along = normalized(st.points[i + 3] - st.points[i - 3]);
+    Vec2 side{-along.z, along.x};
+    if (side.z < 0) side = side * -1.0f;
+    w.water_wheel = st.points[i] + side * (st.width[i] - 0.45f);
+    w.water_mill = w.water_wheel + side * 3.0f;
+    w.water_mill_along = along;
+  }
+
   // The cart: by the road, on the side of the start.
   {
     const size_t i = std::min(static_cast<size_t>(rules::kCartFromFork), w.road.points.size() - 2);
@@ -404,7 +659,10 @@ bool in_west_place(const WestLayout& west, float x, float z, float margin) {
          distance(p, west.burrow) < rules::kBurrowRadius + margin || in_woods_clearing(west, x, z, margin) ||
          distance(p, west.lighthouse) < rules::kLighthouseRadius + 2.0f + margin ||
          distance(p, west.menhirs) < rules::kMenhirsRadius + margin || in_crater(west, x, z, margin) ||
-         distance(p, west.cart) < 5.0f + margin || distance(p, west.bridge) < 7.0f + margin;
+         distance(p, west.cart) < 5.0f + margin || distance(p, west.bridge) < rules::kBridgeHalf + 2.0f + margin ||
+         distance(p, west.path_bridge) < rules::kBridgeHalf + 2.0f + margin ||
+         distance(p, west.cove) < 18.0f + margin || distance(p, west.hidden) < 6.0f + margin ||
+         distance(p, west.water_mill) < 13.0f + margin;
 }
 
 Vec2 farm_point(const WestLayout& west, float u, float v) {
@@ -512,9 +770,30 @@ size_t build_west(World& w) {
                       {0.35f, 0.35f, 0.35f});
   add(crate);
 
-  // The bridge (its height set after the others settle).
+  // The bridges, the road's and the path's (their height set after the others settle).
   const size_t bridge_index = w.objects.size();
-  add(make(ObjectKind::Bridge, west.bridge, yaw_along(west.bridge_along), 0, {5.4f, 0.5f, 1.4f}));
+  add(make(ObjectKind::Bridge, west.bridge, yaw_along(west.bridge_along), 0, {rules::kBridgeHalf, 0.5f, 1.4f}));
+  add(make(ObjectKind::Bridge, west.path_bridge, yaw_along(west.path_bridge_along), 1, {rules::kBridgeHalf, 0.5f, 1.4f}));
+  // The water mill on its bank, its door away from the river (its height set after too).
+  const size_t mill_index = w.objects.size();
+  {
+    Vec2 to_river{west.water_mill_along.z, -west.water_mill_along.x};
+    if (distance_to_stream(west.stream, west.water_mill.x + to_river.x * 3.0f, west.water_mill.z + to_river.z * 3.0f, 30.0f) >
+        distance_to_stream(west.stream, west.water_mill.x, west.water_mill.z, 30.0f)) {
+      to_river = to_river * -1.0f;
+    }
+    // Its front (-Z) away from the river: local +Z towards it.
+    const float yaw = std::atan2(to_river.x, to_river.z);  // local +Z along to_river
+    Object mill = make(ObjectKind::WaterMill, west.water_mill, static_cast<Angle16>(std::lround(yaw / 6.2831853f * 65536.0f) & 0xFFFF), v8(),
+                       {3.0f, 2.4f, 2.5f});
+    add(mill);
+  }
+  // Behind the waterfall, the hidden way into the cave, looking out (north).
+  {
+    Object cleft = make(ObjectKind::HiddenCave, west.hidden, 0, 0);
+    cleft.yaw = static_cast<Angle16>(std::lround(std::atan2(-west.falls_out.x, -west.falls_out.z) / 6.2831853f * 65536.0f) & 0xFFFF);
+    add(cleft);
+  }
 
   // The farm.
   const Vec2 f = west.farm_front;
@@ -682,21 +961,30 @@ size_t build_west(World& w) {
     add_if_free(make(ObjectKind::Crystal, west.crater + d * r, yaw, variant, {s, s, s}));
   }
   settle_objects(w, first);
-  // The bridge's deck: a little above the banks at both of its ends.
-  Object& bridge = w.objects[bridge_index];
-  {
+  // The bridges' decks: a little above the banks at both of their ends.
+  for (size_t k = bridge_index; k < bridge_index + 2; ++k) {
+    Object& bridge = w.objects[k];
+    const Vec2 middle{bridge.pos.x, bridge.pos.z};
+    const Vec2 along = k == bridge_index ? west.bridge_along : west.path_bridge_along;
     const Box b = object_box(bridge);
     float lowest = 1e30f, banks = -1e30f;
     for (float x = b.min.x; x <= b.max.x + 0.01f; x += 0.5f) {
       for (float z = b.min.z; z <= b.max.z + 0.01f; z += 0.5f) lowest = std::min(lowest, w.ground.height(x, z));
     }
     for (const float t : {-1.0f, 1.0f}) {
-      const Vec2 end = west.bridge + west.bridge_along * (t * 5.2f);
+      const Vec2 end = middle + axis_of(along) * (t * (rules::kBridgeHalf - 0.2f));
       banks = std::max(banks, w.ground.height(end.x, end.z));
     }
     const float deck = banks + 0.22f;
     bridge.pos.y = lowest - 0.1f;
     bridge.size.y = std::max(0.3f, (deck - bridge.pos.y) * 0.5f);
+  }
+  // The water mill's floor: a meter above the river (its stone base goes down the bank).
+  {
+    Object& mill = w.objects[mill_index];
+    float level = 0;
+    distance_to_stream(west.stream, mill.pos.x, mill.pos.z, 40.0f, &level);
+    mill.pos.y = std::max(level + 1.1f, w.ground.height(mill.pos.x, mill.pos.z) - 1.0f);
   }
   return first;
 }
@@ -748,6 +1036,7 @@ void add_west_npcs(World& w) {
       {npc::kRomane, west.camp + Vec2{2.4f, 1.5f}},
       {npc::kLucien, front_of_object(ObjectKind::Windmill, west.mill, 4.5f)},
       {npc::kYvon, front_of_object(ObjectKind::Lighthouse, west.lighthouse, 4.0f)},
+      {npc::kMathurin, front_of_object(ObjectKind::WaterMill, west.water_mill, 4.2f)},
   };
   for (const Who& who : people) {
     if (npc_index(w, who.npc) >= 0) continue;
@@ -823,6 +1112,38 @@ bool mill_sails(const World& w, Vec3& hub, Vec2& facing) {
 
 bool mill_turning(const World& w) {
   return (w.quests[static_cast<size_t>(QuestId::Mill)].progress & kMillTurning) != 0;
+}
+
+Vec2 wheel_spot(const WestLayout& west) {
+  return west.water_wheel - west.water_mill_along * 6.0f;  // in the river by the wheel, a little upstream
+}
+
+float stream_segment(const Stream& s, float x, float z, float limit, size_t& seg, float& t) {
+  if (s.points.size() < 2) return limit;
+  return polyline_distance(s.points, s.chunks, x, z, limit, &seg, &t);
+}
+
+float scarp_side(const WestLayout& west, float x, float z) {
+  const auto& pts = west.scarp.points;
+  if (pts.size() < 2) return 1e9f;
+  size_t seg = 0;
+  float t = 0;
+  const float d = polyline_distance(pts, west.scarp.chunks, x, z, 1e9f, &seg, &t);
+  const Vec2 a = pts[seg], b = pts[seg + 1];
+  const float qx = a.x + (b.x - a.x) * t, qz = a.z + (b.z - a.z) * t;
+  const float cross = (b.x - a.x) * (z - qz) - (b.z - a.z) * (x - qx);
+  return cross >= 0 ? d : -d;
+}
+
+uint32_t wheel_raiders_left(const World& w) {
+  const QuestState& q = w.quests[static_cast<size_t>(QuestId::WaterWheel)];
+  if (q.stage != QuestStage::Active) return 0;
+  return q.progress >= rules::kWheelRaiders ? 0 : rules::kWheelRaiders - q.progress;
+}
+
+bool wheel_turning(const World& w) {
+  const QuestState& q = w.quests[static_cast<size_t>(QuestId::WaterWheel)];
+  return q.stage == QuestStage::Done || (q.stage == QuestStage::Active && q.progress >= rules::kWheelRaiders);
 }
 
 uint32_t raiders_left(const World& w) {
@@ -931,7 +1252,7 @@ void keep_raiders(World& w) {
   const Vec2 orchard = orchard_center(w.west);
   if (left == 0 || !lived_in(w, orchard)) return;
   for (const Creature& c : w.creatures) {
-    if (c.tag == Tag::Raider) return;  // they are there
+    if (c.tag == Tag::Raider && distance(c.home, orchard) < 1.0f) return;  // they are there
   }
   Rng rng(w.seed ^ 0x5241494445525321ULL, visits(w, orchard));  // "RAIDERS!"
   for (uint32_t k = 0; k < left; ++k) {
@@ -945,6 +1266,31 @@ void keep_raiders(World& w) {
     c.tag = Tag::Raider;
     free_spot(w, c, orchard + dir16(static_cast<Angle16>(k * 13107)) * 3.0f);
     c.home = orchard;
+    c.timer = static_cast<uint16_t>(rng.below(2 * rules::kTicksPerSecond));
+    add_creature(w, c);
+  }
+}
+
+// The Ploufis that jammed the water mill's wheel: aggressive, in the river by it.
+void keep_wheel_raiders(World& w) {
+  const uint32_t left = wheel_raiders_left(w);
+  const Vec2 spot = wheel_spot(w.west);
+  if (left == 0 || !lived_in(w, spot)) return;
+  for (const Creature& c : w.creatures) {
+    if (c.tag == Tag::Raider && distance(c.home, spot) < 1.0f) return;  // they are there
+  }
+  Rng rng(w.seed ^ 0x574845454CULL, visits(w, spot));  // "WHEEL"
+  for (uint32_t k = 0; k < left; ++k) {
+    Creature c;
+    c.species = Species::Axolotl;
+    c.genes = roll_genes(Species::Axolotl, Zone::River, rng);
+    c.genes.chromatic = c.genes.elemental = false;
+    const bool leader = k == 0 && left == rules::kWheelRaiders;
+    c.genes.form = leader ? Form::Alpha : Form::Normal;
+    c.level = leader ? rules::kWheelLeaderLevel : rules::kWheelRaiderLevel;
+    c.tag = Tag::Raider;
+    free_spot(w, c, spot + dir16(static_cast<Angle16>(k * 21845)) * 2.5f);
+    c.home = spot;
     c.timer = static_cast<uint16_t>(rng.below(2 * rules::kTicksPerSecond));
     add_creature(w, c);
   }
@@ -987,6 +1333,7 @@ void keep_west(World& w) {
   keep_flock(w);
   keep_lambs(w);
   keep_raiders(w);
+  keep_wheel_raiders(w);
   keep_boarders(w);
 }
 
@@ -1109,6 +1456,11 @@ bool roaming_raider(const World& w, float x, float z, uint32_t roll) {
 
 void raider_down(World& w, const Creature& c) {
   if (c.tag != Tag::Raider) return;
+  if (w.west.valid() && distance(c.home, wheel_spot(w.west)) < 1.0f) {  // one of the wheel's
+    QuestState& q = w.quests[static_cast<size_t>(QuestId::WaterWheel)];
+    if (q.stage == QuestStage::Active && q.progress < rules::kWheelRaiders) ++q.progress;
+    return;
+  }
   QuestState& q = w.quests[static_cast<size_t>(QuestId::Orchard)];
   if (q.stage == QuestStage::Active && q.progress < rules::kRaiders) ++q.progress;
 }

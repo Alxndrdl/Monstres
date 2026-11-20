@@ -1,4 +1,5 @@
 #include "monstres/core/world.hpp"
+#include "monstres/core/debug.hpp"
 #include "test_helpers.hpp"
 
 using namespace monstres;
@@ -23,7 +24,11 @@ TEST_CASE("new_game builds a valid world") {
       CHECK(b.min.y == Approx(o.pos.y));
       if (o.kind == ObjectKind::Collider) continue;  // raised: the roof of a gate or a cave
       // The west's bridge spans the stream; its fields are walked through, flat on the ground.
-      if (o.kind == ObjectKind::Bridge || o.kind == ObjectKind::Crops) continue;
+      // The water mill's stone base goes down the river's bank.
+      if (o.kind == ObjectKind::Bridge || o.kind == ObjectKind::Crops || o.kind == ObjectKind::WaterMill) continue;
+      CAPTURE(std::string(object_kind_name(o.kind)));
+      CAPTURE(o.pos.x);
+      CAPTURE(o.pos.z);
       CHECK(o.pos.y < w.ground.height(o.pos.x, o.pos.z));
       CHECK(o.pos.y >= w.ground.height(o.pos.x, o.pos.z) - 0.05f - 0.4f * height - 1e-4f);
       for (float x : {b.min.x, b.max.x}) {
@@ -34,7 +39,9 @@ TEST_CASE("new_game builds a valid world") {
       CHECK(b.max.x <= bound);
       CHECK(b.min.x >= -bound);
       // Boxy objects turn by quarters (fallen logs lie any way: solid through their pieces).
-      if (!is_round(o.kind) && o.kind != ObjectKind::Log) CHECK((o.yaw & 0x3FFF) == 0);
+      // The water mill turns along its river (its box is square).
+      if (!is_round(o.kind) && o.kind != ObjectKind::Log && o.kind != ObjectKind::WaterMill &&
+          o.kind != ObjectKind::HiddenCave) CHECK((o.yaw & 0x3FFF) == 0);
     }
     std::vector<Box> boxes;
     for (const Object& o : w.objects) boxes.push_back(object_box(o));

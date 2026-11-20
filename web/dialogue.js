@@ -9,7 +9,7 @@
   const LORE = window.MonstresLore;
   const { $, el, whenReady } = window.MonstresUtil;
   const QUEST_INDEX = { lostPiou: 0, teleporters: 1, giantChampi: 2, combat: 3, healing: 4, main: 5,
-    merchant: 6, delivery: 7, transfer: 8, orchard: 9, shepherd: 10, mill: 11 };  // QuestId
+    merchant: 6, delivery: 7, transfer: 8, orchard: 9, shepherd: 10, mill: 11, waterWheel: 12 };  // QuestId
   const MIRABELLE = 1;
   const GASPARD = 2;
   const LISON = 3;
@@ -24,6 +24,7 @@
   const ROMANE = 15;
   const LUCIEN = 16;
   const YVON = 17;
+  const MATHURIN = 22;
 
   let game = null;
   const box = $('dialogue');
@@ -613,6 +614,32 @@
     }
   }
 
+  // ---- Mathurin: the water mill's wheel ----
+  function mathurin() {
+    const q = quest('waterWheel');
+    if (q.stage === 'unknown') {
+      show('Regarde ma roue ! Des Ploufi en colère y ont coincé des branches, et ils montent la garde dans la rivière. ' +
+        'Dès que je m’approche, ils m’arrosent et me mordent les mollets. Tu pourrais les chasser ?', [
+        ['Je m’en occupe', () => {
+          game.acceptQuest(QUEST_INDEX.waterWheel);
+          afterTick(() => show('Méfie-toi, ils sont agressifs : ils attaquent dès qu’on s’approche. Et leur chef est costaud !'));
+        }, 'accept-quest'],
+        ['Plus tard', close],
+      ]);
+    } else if (q.stage === 'active' && q.ready) {
+      show('Elle tourne ! Écoute ce bruit d’eau… Le moulin va pouvoir moudre de nouveau. Tiens, tu l’as bien mérité.', [
+        ['Merci, Mathurin', () => {
+          game.completeQuest(QUEST_INDEX.waterWheel);
+          afterTick(() => show('Reviens quand tu veux : la rivière est calme maintenant, grâce à toi.'));
+        }, 'complete-quest'],
+      ]);
+    } else if (q.stage === 'active') {
+      show(`Il reste des Ploufi près de la roue : ${q.steps.of - q.steps.beaten} encore. Courage !`);
+    } else {
+      villager(MATHURIN);
+    }
+  }
+
   // ---- The other villagers: rumors about the quests, and chatter ----
   function villager(n) {
     const quests = game.quests();
@@ -654,6 +681,7 @@
     else if (c.npc === BASILE) basile();
     else if (c.npc === ROMANE) romane(c);
     else if (c.npc === LUCIEN) lucien();
+    else if (c.npc === MATHURIN) mathurin();
     else if (c.wanderer) wanderer(c);
     else villager(c.npc);
     // Walking away ends the talk.

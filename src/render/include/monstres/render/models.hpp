@@ -63,6 +63,7 @@ enum class MeshId : size_t {
   Table, Chair, Bed, Shelf, Hearth, HearthFire, Rug, Step, Hatch,
   // The west (west.hpp).
   Cart, CartUp, Goods, Bridge, Farmhouse, Barn, FruitTree, CropsWheat, CropsCabbage, Haystack, Windmill, WindmillSails,
+  WaterMill, MillWheel,
   Cabin, Tent, Campfire, CampfireFire, Woodpile, HollowTree, Burrow, Lighthouse, LighthouseLamp, Menhir, Meteorite,
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar,
@@ -83,6 +84,7 @@ enum class MeshId : size_t {
   Gust,        // an air monster's throw: swirling wind
   DoorGlow,    // the light in a door's opening, when the player comes near
   RuneCircle,  // the capture seal
+  FallsBand,   // a band of a waterfall (stacked, each fading as it goes down)
   RainShaft, Bolt,  // the weather (far pass)
   Rain, Snow,       // around the camera
   Count
@@ -106,7 +108,7 @@ inline MeshGroup mesh_group(MeshId id) {
     case MeshId::CloudLow0: case MeshId::CloudLow1: case MeshId::CloudLow2: case MeshId::RainShaft: case MeshId::Bolt:
       return MeshGroup::Sky;
     case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::RuneCircle:
-    case MeshId::DoorGlow: case MeshId::Gust:
+    case MeshId::DoorGlow: case MeshId::Gust: case MeshId::FallsBand:
     case MeshId::Rain: case MeshId::Snow:
       return MeshGroup::Effects;
     default: break;

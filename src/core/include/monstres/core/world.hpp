@@ -188,6 +188,8 @@ enum class ObjectKind : uint8_t {
   Lighthouse,    // the lighthouse on the coast, its door at -Z, its gallery on top (interior.hpp)
   Menhir,        // a tall standing stone of the circle. size.y = height
   Meteorite,     // the black stone fallen in the crater, glowing veins. size.x = scale
+  WaterMill,     // the water mill on the river's bank, its door at -Z, its wheel at +Z in the river (WaterWheel quest)
+  HiddenCave,    // behind the waterfall, a cleft in the cliff: the hidden way into the crystal cave (interior.hpp)
   Count
 };
 
@@ -400,7 +402,7 @@ const MonsterStats& monster_stats(Species species);
 // Coast, Hills and Plains: the wilds around the valley (the west coast, the
 // north towards the mountains, the rest).
 // Farm, Woods, Crater: the west's (west.hpp).
-enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Coast, Hills, Plains, Farm, Woods, Crater, Count };
+enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Coast, Hills, Plains, Farm, Woods, Crater, River, Count };
 
 // What the player knows of each variant of each species (bestiary): every
 // variant listed by variants.hpp, in the same order.
@@ -637,6 +639,8 @@ inline constexpr uint8_t kLast = kYvon;  // the villagers saved
 inline constexpr uint8_t kWanderer = 18;
 inline constexpr uint8_t kWandererCount = 4;
 inline constexpr bool wanderer(uint8_t n) { return n >= kWanderer && n < kWanderer + kWandererCount; }
+// The river (west.hpp), after the trainers passing by.
+inline constexpr uint8_t kMathurin = 22;  // the water miller: aquatic monsters jammed his wheel
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
@@ -652,10 +656,11 @@ inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Cou
 // The main quest goes on in the west: the strange stone to bring to the farm
 // (Delivery, from Isidore), the transfer to try (Transfer), the orchard's
 // raiders (Orchard), both from Capucine. And the west's own quests: the
-// merchant's goods (Merchant), the shepherd's lambs (Shepherd), the mill (Mill).
+// merchant's goods (Merchant), the shepherd's lambs (Shepherd), the mill (Mill),
+// the water mill's wheel on the river (WaterWheel).
 enum class QuestId : uint8_t {
   LostPiou, Teleporters, GiantChampi, Combat, Healing, Main,
-  Merchant, Delivery, Transfer, Orchard, Shepherd, Mill,
+  Merchant, Delivery, Transfer, Orchard, Shepherd, Mill, WaterWheel,
   Count
 };
 inline constexpr size_t kQuestCount = static_cast<size_t>(QuestId::Count);
@@ -724,7 +729,7 @@ struct RoomPiece {
 
 // A way out of an interior (or up, or down): where it is, which way it faces
 // (into the room), and where it leads.
-enum class ExitKind : uint8_t { Out, Roof };
+enum class ExitKind : uint8_t { Out, Roof, Hidden };  // Hidden: the cave's way out behind the waterfall
 struct Exit {
   Vec3 at;
   Vec2 facing;
@@ -934,6 +939,8 @@ Zone zone_at(const World& world, float x, float z);
 // floats on a slope. Low objects sink at most 40 % of their height (an edge
 // may float a little).
 void settle_objects(World& world, size_t first = 0);
+// Ground too steep to stand a tree or a rock on (the terrace's cliffs, the river's cut banks).
+bool steep_ground(const World& world, float x, float z);
 
 // The wilds around the valley: trees, rocks, bushes, logs... from the seed
 // (their own random stream), over the whole relief beyond the valley:

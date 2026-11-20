@@ -153,11 +153,23 @@ private:
   std::vector<std::vector<Box>> cells_;
 };
 
+// Ground too steep to stand a tree or a rock on (the terrace's cliffs, the river's cut banks).
+bool steep_here(const World& w, float x, float z) {
+  if (w.ground.empty()) return false;
+  const float h = w.ground.height(x, z);
+  float most = 0;
+  for (const auto& [dx, dz] : {std::pair{1.6f, 0.0f}, {-1.6f, 0.0f}, {0.0f, 1.6f}, {0.0f, -1.6f}}) {
+    most = std::max(most, std::fabs(w.ground.height(x + dx, z + dz) - h));
+  }
+  return most > 1.1f;
+}
+
 // Whether (x, z) belongs to a place built by hand, or the forest's clearing
 // (no random trees or rocks there).
 bool in_a_place(const World& w, float x, float z) {
   return in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.5f) || in_ruins(w.ruins, x, z, 2.0f) ||
-         in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f) || in_west_place(w.west, x, z, 1.0f);
+         in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f) || in_west_place(w.west, x, z, 1.0f) ||
+         steep_here(w, x, z);
 }
 
 // A number in [0, 1) for a spot of the world (the same each time).
@@ -635,14 +647,17 @@ void move_flyer(const Surroundings& s, Body& b, const BodyShape& shape, float di
   move_axis(s, b, shape, 0, dir_x * speed * rules::kDt, medium);
   move_axis(s, b, shape, 2, dir_z * speed * rules::kDt, medium);
   // Over the lake: above the water, not its bed.
-  const float floor = std::max(s.ground.height(b.pos.x, b.pos.z),
-                               in_lake(s.lake, b.pos.x, b.pos.z) ? rules::kWaterLevel : -1e9f);
-  const float wanted = floor + hover;
+  const bool lake = in_lake(s.lake, b.pos.x, b.pos.z);
+  const float floor = std::max(s.ground.height(b.pos.x, b.pos.z), lake ? rules::kWaterLevel : -1e9f);
+  // A bird going nowhere, not made to climb, comes down and perches on the
+  // ground (not on the water); it takes off again as soon as it moves.
+  const bool perch = over_water && !lake && speed <= 0.0f && hover <= companion_hover(Species::Crow) + 1e-3f;
+  const float wanted = perch ? floor : floor + hover;
   const float climb = 4.0f * rules::kDt;
   b.pos.y += std::clamp(wanted - b.pos.y, -climb, climb);
   b.pos.y = std::max(b.pos.y, floor);
   b.velocity_y = 0;
-  b.on_ground = false;
+  b.on_ground = perch && b.pos.y <= floor + 1e-3f;
   const float dx = b.pos.x - x0, dz = b.pos.z - z0;
   b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
 }
@@ -828,6 +843,23 @@ void step_villager(World& w, const Surroundings& s, Creature& c) {
   move_body(s, b, info.shape, dir_x, dir_z, speed, false, info.jump_speed);
 }
 
+// What a flyer keeps above at (x, z): the ground, what stands there, and the
+// hollow tree's crown of leaves (much wider than its trunk's box).
+float flight_floor(const World& w, float x, float z) {
+  float top = w.ground.height(x, z);
+  constexpr float kCrown = 10.0f;  // the leaves' reach from the trunk's middle
+  const Box area{{x - kCrown, -1e9f, z - kCrown}, {x + kCrown, 1e9f, z + kCrown}};
+  for_objects_near(w, area, [&](uint32_t k, const Box& b) {
+    const Object& o = w.objects[k];
+    if (o.kind == ObjectKind::HollowTree) {
+      if (std::hypot(x - o.pos.x, z - o.pos.z) < kCrown) top = std::max(top, o.pos.y + rules::kHollowTreeTop + 4.5f);
+    } else if (x > b.min.x - 0.6f && x < b.max.x + 0.6f && z > b.min.z - 0.6f && z < b.max.z + 0.6f) {
+      top = std::max(top, b.max.y + 0.4f);
+    }
+  });
+  return top;
+}
+
 void step_crow(World& w, const std::vector<Vec3>& perches, Creature& c) {
   const SpeciesInfo& info = species_info(c.species);
   Body& b = c.body;
@@ -869,12 +901,19 @@ void step_crow(World& w, const std::vector<Vec3>& perches, Creature& c) {
   float dir_x, dir_z;
   const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
   const float step = info.run_speed * rules::kDt;
-  const float horizontal = std::min(step, d);
+  float horizontal = std::min(step, d);
+  // Over what is in the way (the hills, the hollow tree's crown), never
+  // through it: up first while it is too high, here or a little ahead. (Not
+  // in the last glide, down onto the perch: that is on top of it.)
+  const bool cruising = d > 2.5f;
+  const float above = cruising ? std::max(flight_floor(w, b.pos.x, b.pos.z),
+                                          flight_floor(w, b.pos.x + dir_x * 3.0f, b.pos.z + dir_z * 3.0f))
+                               : 0.0f;
+  if (cruising && b.pos.y < above - 0.2f) horizontal = 0;
   b.pos.x += dir_x * horizontal;
   b.pos.z += dir_z * horizontal;
-  // Over the hills, never through them.
   const float floor = w.ground.height(b.pos.x, b.pos.z);
-  const float wanted_y = d > 2.5f ? std::max(c.target_y, floor) + 3.0f : c.target_y;
+  const float wanted_y = cruising ? std::max({c.target_y + 3.0f, floor + 3.0f, above + 1.0f}) : c.target_y;
   const float climb = 3.0f * rules::kDt;
   b.pos.y += std::clamp(wanted_y - b.pos.y, -climb, climb);
   b.pos.y = std::max(b.pos.y, floor);
@@ -952,10 +991,12 @@ Box body_box(const Body& b, const BodyShape& shape) {
 
 Box player_box(const Player& p) { return body_box(p, kPlayerShape); }
 
+bool steep_ground(const World& w, float x, float z) { return steep_here(w, x, z); }
+
 float companion_hover(Species species) {
   switch (species) {
     case Species::Crow:
-    case Species::Owl: return 1.3f;
+    case Species::Owl: return 0.7f;  // low (and on the ground when it stops: move_flyer)
     case Species::Fish: return 0.7f;
     default: return 0;
   }
@@ -1016,6 +1057,7 @@ std::span<const Odds> zone_odds(Zone zone) {
   static constexpr Odds kFarm[] = {{40, Raccoon}, {25, Bird}, {20, Slime}, {15, Mole}};
   static constexpr Odds kWoods[] = {{30, Mushroom}, {22, Raccoon}, {20, Bird}, {14, Slime}, {14, Axolotl}};
   static constexpr Odds kCrater[] = {{45, Cristi}, {30, Spark}, {25, Slime}};
+  static constexpr Odds kRiver[] = {{55, Axolotl}, {20, Slime}, {25, Bird}};  // Ploufis along the river
   switch (zone) {
     case Zone::Forest: return kForest;
     case Zone::Cave: return kCave;
@@ -1028,6 +1070,7 @@ std::span<const Odds> zone_odds(Zone zone) {
     case Zone::Farm: return kFarm;
     case Zone::Woods: return kWoods;
     case Zone::Crater: return kCrater;
+    case Zone::River: return kRiver;
     default: return kOpen;
   }
 }
@@ -1849,12 +1892,21 @@ void build_cave(World& w) {
   w.objects.push_back(collider(mouth, 0, 5.0f, {2.05f, 1.85f, 0.45f}));
   w.objects.push_back(collider(mouth, 0, 1.95f, {2.05f, 1.4f, 2.5f}, 3.8f));
   // Glowing crystals inside, and around the hill.
+  // Not on ground sloping too much under it (it would float on one side).
+  const auto level_enough = [&](const Object& o) {
+    const Box box = object_box(o);
+    float lowest = w.ground.height(o.pos.x, o.pos.z);
+    for (float cx : {box.min.x, box.max.x}) {
+      for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+    }
+    return w.ground.height(o.pos.x, o.pos.z) - lowest < 0.15f * (box.max.y - box.min.y);
+  };
   auto crystal = [&](Vec2 p, float scale) {
     const auto yaw = static_cast<Angle16>(rng.below(65536));  // one draw per statement: same order everywhere
     const auto variant = static_cast<uint8_t>(rng.below(256));
     Object o = village_object(ObjectKind::Crystal, p, yaw, variant);
     o.size = {scale, scale, scale};
-    if (!can_place(w, o, 0.2f, true)) return false;
+    if (!level_enough(o) || !can_place(w, o, 0.2f, true)) return false;
     w.objects.push_back(o);
     return true;
   };
@@ -1865,25 +1917,36 @@ void build_cave(World& w) {
     const auto variant = static_cast<uint8_t>(rng.below(256));
     Object o = village_object(ObjectKind::Crystal, local_to_world(mouth, lx, lz), yaw, variant);
     o.size = {scale, scale, scale};
+    if (steep_ground(w, o.pos.x, o.pos.z) || !level_enough(o)) continue;  // (the ravine's floor can slope down to the river)
     w.objects.push_back(o);
   }
-  for (int n = 0, attempt = 0; n < 10 && attempt < 100; ++attempt) {
+  // Around the hill: along the foot of the terrace's cliffs about the cave
+  // (the round hill of hand-made worlds: around it).
+  const bool cliffs = w.west.valid() && !w.west.scarp.points.empty();
+  const auto at_foot = [&](Vec2 p, float lo, float hi) {
+    if (!cliffs) return true;
+    const float sd = scarp_side(w.west, p.x, p.z);
+    return sd > lo && sd < hi && !steep_ground(w, p.x, p.z);
+  };
+  for (int n = 0, attempt = 0; n < 10 && attempt < 200; ++attempt) {
     const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
-    const float d = cave.radius + random_range(rng, 0.5f, 3.0f);
+    const float d = cliffs ? random_range(rng, 12.0f, 40.0f) : cave.radius + random_range(rng, 0.5f, 3.0f);
     const float scale = random_range(rng, 0.4f, 0.9f);
     const Vec2 p{cave.center.x + sc.cos * d, cave.center.z + sc.sin * d};
     if (sc.cos * cave.facing.x + sc.sin * cave.facing.z > 0.85f) continue;  // keep the ravine free
+    if (!at_foot(p, 1.5f, 6.0f)) continue;
     if (crystal(p, scale)) ++n;
   }
   // Big rocks fallen from the cliffs.
   for (int n = 0, attempt = 0; n < 16 && attempt < 200; ++attempt) {
     const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
-    const float d = cave.radius + random_range(rng, 1.5f, 6.0f);
+    const float d = cliffs ? random_range(rng, 12.0f, 50.0f) : cave.radius + random_range(rng, 1.5f, 6.0f);
     const auto yaw = static_cast<Angle16>(rng.below(4) << 14);
     const auto variant = static_cast<uint8_t>(rng.below(256));
     Object o = village_object(ObjectKind::Rock, {cave.center.x + sc.cos * d, cave.center.z + sc.sin * d}, yaw, variant);
     const float sx = random_range(rng, 1.0f, 2.2f), sy = random_range(rng, 0.8f, 1.8f), sz = random_range(rng, 1.0f, 2.2f);
     o.size = {sx, sy, sz};
+    if (!at_foot({o.pos.x, o.pos.z}, 2.0f, 10.0f)) continue;
     if (sc.cos * cave.facing.x + sc.sin * cave.facing.z > 0.8f) continue;  // keep the ravine free
     // Not on a slope too steep for it (it would float).
     const Box box = object_box(o);
@@ -1956,9 +2019,13 @@ void build_teleporters(World& w, TeleporterId only) {
 }
 
 bool teleporter_position(const World& w, TeleporterId id, Vec3& at) {
-  for (const Object& o : w.objects) {
+  // Inside (interior.hpp), the world outside as it was left: its teleporters
+  // are still there (not found anew on coming out).
+  const bool in = w.place.kind != PlaceKind::Outside;
+  const Heightmap& ground = in ? w.outdoors.ground : w.ground;
+  for (const Object& o : in ? w.outdoors.objects : w.objects) {
     if (o.kind == ObjectKind::Teleporter && o.variant == static_cast<uint8_t>(id)) {
-      at = {o.pos.x, w.ground.height(o.pos.x, o.pos.z), o.pos.z};
+      at = {o.pos.x, ground.height(o.pos.x, o.pos.z), o.pos.z};
       return true;
     }
   }
@@ -1983,6 +2050,9 @@ Zone zone_at(const World& w, float x, float z) {
   if (in_forest(w.forest, x, z)) return Zone::Forest;
   // The west's places.
   if (in_farm(w.west, x, z, 8.0f)) return Zone::Farm;
+  if (w.west.valid() && distance_to_stream(w.west.stream, x, z, rules::kStreamChannel + 4.0f) < rules::kStreamChannel + 3.0f) {
+    return Zone::River;  // on its banks, in its water
+  }
   if (in_crater(w.west, x, z, 6.0f)) return Zone::Crater;
   if (in_woods(w.west, x, z)) return Zone::Woods;
   // Beyond the valley: the wilds.
@@ -2121,6 +2191,8 @@ Box object_box(const Object& o) {
     case ObjectKind::Lighthouse:   half = {2.6f, 0.5f * rules::kLighthouseGallery, 2.6f}; break;  // up to its gallery
     case ObjectKind::Menhir:       half = {0.45f, 0.5f * s.y, 0.45f}; break;
     case ObjectKind::Meteorite:    half = {0.9f * s.x, 0.7f * s.x, 0.9f * s.x}; break;
+    case ObjectKind::WaterMill:    half = {3.0f, 2.4f, 3.0f}; break;  // turned along the river: square
+    case ObjectKind::HiddenCave:   half = {0, 0, 0}; break;  // a cleft in the cliff: walked into
     default:                half = s; break;  // Crate, Collider, Step
   }
   if (o.mount != 0) half = {0, 0, 0};  // on a wall or the ceiling: out of the way
@@ -2449,6 +2521,8 @@ void step(World& w, const Input& in) {
       } else if (const float hover = i == 0 ? companion_hover(c.species) : 0.0f; hover > 0) {
         move_flyer(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, hover + (steered ? w.battle.ally.lift : 0.0f),
                    flies(c.species));
+      } else if (c.species == Species::Slime && st.speed > 0) {  // a slime goes by hopping, steered too
+        move_body(s, c.body, info.shape, st.dir_x, st.dir_z, c.body.on_ground ? 0.0f : st.speed, true, info.jump_speed);
       } else {
         move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
       }

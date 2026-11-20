@@ -1,8 +1,11 @@
 #include "monstres/render/scene.hpp"
 #include "monstres/core/continent.hpp"
+#include "monstres/render/terrain_mesh.hpp"
+#include "monstres/render/far_terrain.hpp"
 #include "test_helpers.hpp"
 
 #include <cmath>
+#include <set>
 
 using namespace monstres;
 using doctest::Approx;
@@ -335,4 +338,61 @@ TEST_CASE("every teleporter can be tapped, the west's too (the farm's, the stand
     const Vec3 middle = project(v.view_projection, {at.x, at.y + 0.6f, at.z});
     CHECK(pick_object(w, v, middle.x, middle.y) == index);
   }
+}
+
+TEST_CASE("the sea's water covers all the ground below it, up to the shore") {
+  for (uint32_t seed : {3u, 42u}) {
+    const World& w = cached_game(seed);
+    const MeshData m = build_water_mesh(w);
+    // The sea's squares (their vertices at the sea's level), on a 16 m grid.
+    constexpr float kCell = 16.0f, d = terrain::kDetailHalfSize;
+    const int n = static_cast<int>(2 * d / kCell);
+    std::vector<char> covered(static_cast<size_t>(n * n), 0);
+    for (size_t v = 0; v + 2 < m.vertex_count(); v += 3) {
+      const auto at = [&](size_t k, int c) { return m.vertices[(v + k) * MeshData::kFloatsPerVertex + c]; };
+      if (std::fabs(at(0, 1) - rules::kSeaLevel) > 1e-4f) continue;
+      const float cx = (at(0, 0) + at(1, 0) + at(2, 0)) / 3, cz = (at(0, 2) + at(1, 2) + at(2, 2)) / 3;
+      const int i = static_cast<int>(std::floor((cx + d) / kCell)), j = static_cast<int>(std::floor((cz + d) / kCell));
+      if (i >= 0 && j >= 0 && i < n && j < n) covered[static_cast<size_t>(i * n + j)] = 1;
+    }
+    int bare = 0;
+    for (float x = -d + 1; x < d; x += 2) {
+      for (float z = -d + 1; z < d; z += 2) {
+        if (w.ground.height(x, z) > rules::kSeaLevel - 0.3f || !w.ground.sea(x, z)) continue;
+        const int i = static_cast<int>(std::floor((x + d) / kCell)), j = static_cast<int>(std::floor((z + d) / kCell));
+        if (!covered[static_cast<size_t>(i * n + j)]) ++bare;
+      }
+    }
+    INFO("seed " << seed);
+    CHECK(bare == 0);
+  }
+}
+
+TEST_CASE("the continent's water covers all its ground below the sea, beyond the relief") {
+  const Continent k = make_continent(3);
+  const MeshData m = build_far_water_mesh(k);
+  // Its squares of 80 m (vertices at the sea's level).
+  constexpr float kCell = 80.0f;
+  const float x0 = Continent::kMinX + 10.0f, z0 = Continent::kMinZ + 10.0f;
+  std::set<std::pair<int, int>> covered;
+  for (size_t v = 0; v + 2 < m.vertex_count(); v += 3) {
+    const auto at = [&](size_t i, int c) { return m.vertices[(v + i) * MeshData::kFloatsPerVertex + c]; };
+    if (std::fabs(at(0, 1) - rules::kSeaLevel) > 1e-4f) continue;
+    const float cx = (at(0, 0) + at(1, 0) + at(2, 0)) / 3, cz = (at(0, 2) + at(1, 2) + at(2, 2)) / 3;
+    covered.insert({static_cast<int>(std::floor((cx - x0) / kCell)), static_cast<int>(std::floor((cz - z0) / kCell))});
+  }
+  int bare = 0;
+  // (Beyond its last whole squares, strips out to the horizon.)
+  const float ex = x0 + kCell * std::floor((Continent::kMaxX - 10 - x0) / kCell);
+  const float ez = z0 + kCell * std::floor((Continent::kMaxZ - 10 - z0) / kCell);
+  for (float x = x0 + 5; x < ex; x += 10) {
+    for (float z = z0 + 5; z < ez; z += 10) {
+      if (std::max(std::fabs(x), std::fabs(z)) < rules::kReliefHalfSize) continue;
+      if (far_vertex_height(k, 0, x, z) > rules::kSeaLevel - 0.3f) continue;
+      if (!covered.count({static_cast<int>(std::floor((x - x0) / kCell)), static_cast<int>(std::floor((z - z0) / kCell))})) {
+        ++bare;
+      }
+    }
+  }
+  CHECK(bare == 0);
 }
