@@ -167,6 +167,11 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::Cairn: return MeshId::Cairn;
     case ObjectKind::HotSpring: return MeshId::HotSpring;
     case ObjectKind::MineProp: return MeshId::MineProp;
+    case ObjectKind::Arena: return MeshId::Arena;
+    case ObjectKind::Grotto: return MeshId::Grotto;
+    case ObjectKind::Shrine: return MeshId::Shrine;
+    case ObjectKind::Bench: return MeshId::Bench;
+    case ObjectKind::Stall: return MeshId::Stall;
     default:                return MeshId::Crate;
   }
 }
@@ -256,7 +261,7 @@ void add_village_effects(const World& w, float time, DrawList& list, float wind)
   const Vec2 blow = wind_velocity(w.seed);
   const float lean = (0.6f + 3.4f * wind) / weather::kWindSpeed;
   constexpr int kPuffs = 7;
-  for (const Object& o : valley_objects(w)) {
+  for (const Object& o : w.objects) {  // (the valley's, Rochebrune's, the inn's)
     if (o.kind != ObjectKind::HouseChimney) continue;
     // Chimney top, in the house's space (see house_chimney in tools/make_models.py).
     const SinCos sc = sincos16(o.yaw);

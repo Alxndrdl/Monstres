@@ -1,6 +1,7 @@
 #include "monstres/render/terrain_mesh.hpp"
 
 #include "monstres/core/north.hpp"
+#include "monstres/core/roads.hpp"
 
 #include "monstres/core/west.hpp"
 
@@ -723,7 +724,8 @@ bool under_bridge(const World& world, Vec2 p) {
   return false;
 }
 
-void add_path_strip(MeshData& m, const World& world, const std::vector<Vec2>& pts, float half_width, uint64_t salt) {
+void add_path_strip(MeshData& m, const World& world, const std::vector<Vec2>& pts, float half_width, uint64_t salt,
+                    bool fade_start = true) {
   if (pts.size() < 2) return;
   const size_t n = pts.size();
   // Across the path: soft edge, dirt, center, dirt, soft edge.
@@ -743,7 +745,7 @@ void add_path_strip(MeshData& m, const World& world, const std::vector<Vec2>& pt
     z = pts[i].z + tx * w;
     const float shade = 0.92f + 0.12f * value_noise(world.seed + 10, x, z, 1.5f);
     // Fade out over the last few meters at both ends.
-    const float end_fade = std::min(smooth(0.0f, 8.0f, static_cast<float>(i)),
+    const float end_fade = std::min(fade_start ? smooth(0.0f, 8.0f, static_cast<float>(i)) : smooth(0.0f, 1.5f, static_cast<float>(i)),
                                     smooth(0.0f, 8.0f, static_cast<float>(n - 1 - i)));
     c = {kPath.r * shade, kPath.g * shade, kPath.b * shade, alphas[col] * end_fade};
   };
@@ -784,6 +786,9 @@ MeshData build_path_mesh(const World& world) {
   m.transparent = true;
   add_path_strip(m, world, world.path.points, rules::kPathHalfWidth, 0);
   if (world.west.valid()) add_path_strip(m, world, world.west.road.points, rules::kRoadHalfWidth, 100);
+  for (size_t k = 0; k < world.roads.lanes.size(); ++k) {
+    add_path_strip(m, world, world.roads.lanes[k].points, rules::kLaneHalfWidth, 200 + k, false);  // out of the way it leaves
+  }
   face_up(m);  // swaps vertices within triangles: the parts stay the same
   return m;
 }

@@ -68,6 +68,7 @@ MeshData cave_mesh(const Interior& in) {
     for (int k = 0; k < nz; ++k) {
       const Vec3 p = point(i, 0, k);
       const float walls = wall_distance(in, p.x, p.z), ceiling = ceiling_height(in, p.x, p.z);
+      const float floor = floor_height(in, p.x, p.z);
       for (int j = 0; j < ny; ++j) {
         const float y = b.min.y + h * static_cast<float>(j);
         const float r = in.rounding;
@@ -75,7 +76,7 @@ MeshData cave_mesh(const Interior& in) {
           const float t = std::max(r - std::fabs(a - c), 0.0f) / r;
           return std::min(a, c) - t * t * r * 0.25f;
         };
-        field[at(i, j, k)] = smin(smin(y, walls), ceiling - y);
+        field[at(i, j, k)] = smin(smin(y - floor, walls), ceiling - y);
       }
     }
   }
@@ -120,10 +121,11 @@ MeshData cave_mesh(const Interior& in) {
     // The burrow: earth, not rock (roots in its ceiling).
     const bool earth = in.kind == PlaceKind::Burrow;
     Color rock = earth ? kEarth : kRock, floor = earth ? kEarthFloor : kRockFloor, dark = earth ? kEarthDark : kRockDark;
-    if (in.kind == PlaceKind::Mine) {  // the mine: brownish rock, a dusty floor of earth
-      rock = mixc(kRock, kEarth, 0.35f);
-      floor = mixc(kEarthFloor, kRockFloor, 0.4f);
-      dark = mixc(kRockDark, kEarthDark, 0.5f);
+    if (in.kind == PlaceKind::Mine) {  // the mine: brownish rock, a dusty floor of earth (the natural cave: grey rock)
+      const float nat = natural_at(in, p.x, p.z);
+      rock = mixc(mixc(kRock, kEarth, 0.35f), kRock, nat);
+      floor = mixc(mixc(kEarthFloor, kRockFloor, 0.4f), kRockFloor, nat);
+      dark = mixc(mixc(kRockDark, kEarthDark, 0.5f), kRockDark, nat);
     }
     Color col = n.y > 0.6f ? mixc(rock, floor, std::min(1.0f, (n.y - 0.6f) * 4)) : n.y < -0.5f ? dark : rock;
     col = shade(col, 0.82f + 0.3f * grain + 0.12f * (streak - 0.5f));

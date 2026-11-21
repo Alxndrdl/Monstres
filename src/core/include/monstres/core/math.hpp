@@ -56,4 +56,8 @@ inline Angle16 angle16_from_radians(double radians) {
 
 inline double radians_from_angle16(Angle16 a) { return a * (2 * kPi / 65536.0); }
 
+// Deterministic sine of an angle in radians (to a 65536th of a turn): for
+// shapes drawn from the seed, identical on every platform.
+inline float wave_sin(float radians) { return sincos16(angle16_from_radians(radians)).sin; }
+
 }  // namespace monstres

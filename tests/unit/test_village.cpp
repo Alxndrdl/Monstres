@@ -58,7 +58,8 @@ TEST_CASE("the village has houses of every type, a well, signs, fences and lamps
     const World& w = cached_game(seed);
     size_t houses = 0;
     for (const Object& o : w.objects) {
-      if (!is_house(o.kind)) continue;
+      // (The valley's: Rochebrune, the inn, the farmstead have their own, north.hpp, roads.hpp.)
+      if (!is_house(o.kind) || std::max(std::fabs(o.pos.x), std::fabs(o.pos.z)) > rules::kValleyHalfSize) continue;
       ++houses;
       ++types[static_cast<size_t>(o.kind) - static_cast<size_t>(ObjectKind::HouseCottage)];
       CHECK(in_village(w.village, o.pos.x, o.pos.z));
@@ -149,7 +150,7 @@ TEST_CASE("crows start on roofs and fly to another perch when the player comes")
 
 TEST_CASE("villagers stay around the village and greet the player") {
   World w = cached_game(8);
-  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1 + 9 + 2);  // and Isidore, the west's (the water miller too), the north's
+  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1 + 9 + 2 + 3 + 2);  // Isidore, the west, the north, Rochebrune, the roads
   run(w, move(0, 0), 30 * rules::kTicksPerSecond);
   for (const Creature& c : w.creatures) {
     if (c.species != Species::Villager) continue;

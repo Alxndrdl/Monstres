@@ -197,6 +197,10 @@ window.monstres = {
   // The farm (Capucine): the team and the monsters kept there; swap team[slot]
   // with farm[kept] (slot -1: take it back; kept -1: leave team[slot] there).
   farm: () => JSON.parse(UTF8ToString(_monstres_farm_json())),
+  // Rochebrune's arena (Barnabé): the cups (won, open, level, coins), the
+  // tournament going on (cup, round of rounds); enter cup 0, 1 or 2.
+  tournament: () => JSON.parse(UTF8ToString(_monstres_tournament_json())),
+  enterTournament: (cup) => monstresCommand('tournament', cup),
   farmSwap: (slot, kept) => monstresCommand('farmSwap', (slot < 0 ? 7 : slot) + 8 * (kept < 0 ? 8191 : kept)),
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),

@@ -601,10 +601,22 @@ jusqu'au niveau 12 environ près du col) :
 - **La vieille mine** de Gaston, en face du refuge de l'autre côté du
   sentier : une entrée boisée (`ObjectKind::MineEntrance`) au pied d'une
   butte rocheuse, des wagonnets sur leurs rails dans sa cour. Dedans
-  (`PlaceKind::Mine`, `interior.cpp`) : des galeries droites qui tournent à
-  angle droit, tenues par des étais (`ObjectKind::MineProp`), des lanternes,
-  des wagonnets, des éboulis et des filons qui brillent, quelques salles ; la
-  plus profonde, la plus grande. Caillou et Taupi y creusent (niveaux 7 à 10,
+  (`PlaceKind::Mine`, `interior.cpp`) : des galeries creusées en tous sens,
+  coudées, qui se ramifient (une branche part parfois du milieu d'une autre),
+  tenues par des étais (`ObjectKind::MineProp`), des lanternes, des wagonnets
+  là où c'est plat, des éboulis et des filons qui brillent, quelques salles.
+  Beaucoup **descendent** (jusqu'à une quinzaine de mètres sous l'entrée,
+  des pentes douces) : le sol des intérieurs n'est plus forcément plat
+  (`FloorPiece`, `floor_height` : chaque tronçon a la hauteur de son sol à
+  ses deux bouts, les tronçons se fondent les uns dans les autres là où ils se
+  rejoignent ; la physique, le maillage des parois et les objets suivent ce
+  sol). La plus profonde mène à la **salle du gardien**, bien plus grande
+  (rayon 11 m) et haute (9,5 m). Une autre galerie a crevé une **grotte
+  naturelle** (des salles rondes et irrégulières, de la roche grise, des
+  cristaux au sol et à la voûte) qui débouche loin de là, à la **Grotte des
+  Givres** (`ObjectKind::Grotto`, `ExitKind::Far`), au flanc de la vallée du
+  col : on peut aussi entrer par là. Caillou et Taupi creusent dans les
+  galeries, Givri et Caillou vivent dans la grotte (niveaux 7 à 10,
   `spawn_miners`).
 - **Le refuge du Col**, au bord du sentier : un chalet de pierre et de bois
   (`ObjectKind::Chalet`, une maison dedans), sa cheminée qui fume, un
@@ -628,6 +640,30 @@ jusqu'au niveau 12 environ près du col) :
   lac gelé au contour irrégulier (`outline_scale`), sa glace plate au niveau
   le plus bas de sa rive (on marche dessus), ses rives praticables. Les Givri
   y vivent.
+- **Rochebrune**, le village au pied des montagnes (z ≈ −968, sur le
+  sentier, entre les sources et le lac ; son sol aplani, la vallée du col
+  repart de lui) : des maisons le long du sentier, un puits, un petit marché
+  (`ObjectKind::Stall`), des bancs et des lanternes, un téléporteur. Agathe
+  y soigne l'équipe. D'un côté du sentier, **l'arène** (`ObjectKind::Arena` :
+  du sable dans trois gradins de pierre et un mur, une porte sous un arc à
+  bannières, des drapeaux ; pleine grâce à deux anneaux de Colliders) et
+  Barnabé, son maître ; de l'autre, **l'Élevage des Cimes** : une grange et
+  un enclos où broutent des monstres laissés à l'exploitation (les suivants
+  après ceux du paddock de Capucine), et Margaux, l'éleveuse : reliée à la
+  pierre de transfert de Capucine, elle échange les monstres de l'équipe avec
+  ceux de l'exploitation (`Command::FarmSwap`), comme Capucine.
+
+**Les tournois de l'arène** (`battle.hpp`, `Command::Tournament`, Barnabé) :
+trois coupes, Bronze, Argent et Or (monstres de niveau 10, 17 et 25 environ),
+chacune ouverte une fois la précédente gagnée. Un tournoi, ce sont trois
+combats de dresseurs d'affilée sur le sable de l'arène (`npc::kContender`,
+un concurrent différent à chaque manche : deux monstres, puis trois, puis
+trois dont un alpha, deux niveaux de plus à chaque manche) ; l'équipe est
+soignée avant chaque manche. Les trois battus, la coupe est gagnée
+(`World::cups`, sauvegardé) : 80, 160 ou 320 pièces et 3 potions ; la première
+fois, chaque concurrent rapporte aussi de l'expérience. Perdu ou fui (ou parti
+de l'arène entre deux manches), le tournoi s'arrête et l'équipe est soignée.
+Le tournoi en cours n'est pas sauvegardé.
 
 Les reliefs des lieux (le replat du refuge, celui des sources et leur bassin,
 la cour de la mine et sa butte, la vallée, le lac) sont posés après le reste,
@@ -650,6 +686,39 @@ Monstres du nord (types : voir Combats) :
   recourbées ou torsadées, barbiche (alpages, mélèzes, pentes) ;
 - **Givri** (hermine du givre, Glace) : longue, rapide, le bout de la queue
   noir (pentes, lac gelé).
+
+## Les chemins et leurs lieux
+
+Règles dans `src/core/roads.hpp` / `roads.cpp` (`make_roads`, tiré de la
+graine et des autres plans, non sauvegardé). Vus de loin, les tracés ne sont
+plus alignés sur la grille : le sentier fait de grandes boucles au-delà de la
+vallée (au nord, après la traversée de la rivière ; jusqu'à 260 m de côté),
+la route de l'Ouest ondule, le bord de la terrasse forme des baies et des
+avancées (et reste toujours à 60 m à l'ouest du sentier au nord), la rivière
+fait de larges méandres au sud de la route.
+
+Des **chemins** (`RoadsLayout::lanes`) partent du sentier, de la route ou
+d'un chemin déjà tracé vers les lieux des gens : la porte du château, le
+moulin à vent, la bergerie, le moulin à eau, le cercle de menhirs, la cabane
+du bûcheron, la mine, le refuge, les sources chaudes, l'arène et l'élevage de
+Rochebrune, la Grotte des Givres, et les lieux du bord du chemin. Chacun
+cherche son trajet le moins coûteux sur une grille de 7 m (Dijkstra : la
+longueur, la pente, un peu de bruit pour qu'il serpente ; fermés : l'eau, les
+falaises de la terrasse sauf là où monte le sentier, les lieux), puis il est
+lissé et ondule doucement. Le relief s'y adoucit comme le long du sentier, pas
+d'herbe ni d'arbre dessus, un panneau à chaque embranchement, parfois un
+**oratoire** (`ObjectKind::Shrine`) et un banc.
+
+Le long du sentier :
+- **l'Auberge du Chemin** (z ≈ −515) : une grande maison, des tables et des
+  bancs dehors, des tonneaux ; Aubin, l'aubergiste, soigne l'équipe (« un bon
+  repas ») ;
+- **la Ferme des Genêts** (z ≈ −380) : une maison, une grange, des champs,
+  des meules, quelques pommiers ; Bertille, la fermière ;
+- **la Scierie**, dans les mélèzes (z ≈ −800) : une cabane, des troncs
+  empilés, des souches ;
+- çà et là au bord du sentier : des bancs, des tas de bois, des meules, des
+  tonneaux, des oratoires.
 
 ## Modèles 3D
 
@@ -750,8 +819,10 @@ laquelle il est entré (pas de carte de l'intérieur pour l'instant).
   dehors tel qu'il a été laissé, puis l'intérieur et la place du joueur
   (version 22) : au chargement, on se retrouve au même endroit.
 - **La vieille mine** (version 27, le Nord) : des galeries tenues par des
-  étais (voir Le Nord) ; le compagnon y montre aussi la sortie ; le refuge,
-  une pièce meublée.
+  étais, qui descendent, une grotte naturelle au-delà et sa sortie lointaine
+  (voir Le Nord) ; le compagnon y montre aussi la sortie ; le refuge, une
+  pièce meublée. Sauvegardée au fond de la mine, la partie s'y recharge, sur
+  son sol.
 - **L'Ouest** (version 23) : le terrier (galeries de terre, comme la grotte),
   l'arbre creux et le phare (de hautes salles rondes avec un escalier jusqu'à
   une trappe, comme la tour : dehors sur la cime, ou sur la galerie), la
@@ -1395,6 +1466,13 @@ Version 27 : le monde agrandi au nord (les cases des monstres en rectangle :
 29 × 45 ; les anciennes sont décalées de 16 rangées), 9 téléporteurs (sur
 16 bits), 17 espèces, 14 quêtes (la mine). Les sauvegardes plus anciennes se
 chargent : Solène et Gaston arrivent.
+
+Version 28 : Rochebrune (10 téléporteurs) et les coupes de l'arène gagnées.
+Les tracés du monde ont changé au-delà de la vallée (le sentier, la route, le
+bord de la terrasse, la rivière) et des chemins mènent aux lieux : les arbres
+et rochers sauvegardés de la vallée qui se trouvent sur un chemin
+disparaissent. Les sauvegardes plus anciennes se chargent : aucune coupe,
+Barnabé, Margaux, Agathe, Aubin et Bertille arrivent.
 
 Version 24 : quatre sorts d'aventure et quatre sorts de capture. Les
 sauvegardes plus anciennes se chargent : les deux derniers emplacements

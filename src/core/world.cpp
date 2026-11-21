@@ -5,6 +5,7 @@
 #include "monstres/core/north.hpp"
 #include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
+#include "monstres/core/roads.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
 
@@ -358,8 +359,10 @@ void generate_objects(World& w, Rng& rng, bool forest_only = false) {
 void generate_wilds(World& w) {
   if (w.ground.empty() || w.wild_objects > 0) return;  // hand-made worlds; already there
   // The west's buildings first (the valley's trees and rocks in their way go), then the north's.
+  clear_lanes(w);
   const size_t first = build_west(w);
   build_north(w);
+  build_roads(w);
   Rng rng(w.seed ^ 0x57494C44535F3031ULL, 3);  // "WILDS_01": its own stream
   PlacementGrid grid(w.objects);
   const float gap = rules::kObjectGap;
@@ -370,7 +373,7 @@ void generate_wilds(World& w) {
   const auto grow = [&](float x, float z, uint32_t roll, Object o) {
     if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize - 2.0f) return;  // the valley's own
     // The west's places stay clear; its woods have their own trees (below).
-    if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z)) return;
+    if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z) || in_roadside_place(w.roads, x, z, 1.5f)) return;
     if (steep_here(w, x, z) || wet_here(w, x, z)) return;  // not on the cliffs, not in the water
     const float h = w.ground.height(x, z);
     // How likely an object is here: woods in patches, the continent's forest
@@ -405,6 +408,8 @@ void generate_wilds(World& w) {
     const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
     const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
     if (distance_to_path(w.path, x, z, keep_off + 1) < keep_off) return;
+    const float lane_off = rules::kLaneHalfWidth + reach + 0.3f;
+    if (distance_to_lanes(w.roads, x, z, lane_off + 1) < lane_off) return;
     Box wide = b;
     wide.min = wide.min - Vec3{gap, 0, gap};
     wide.max = wide.max + Vec3{gap, 0, gap};
@@ -460,6 +465,7 @@ void generate_wilds(World& w) {
       const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
       const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
       if (distance_to_path(w.path, x, z, keep_off + 1) < keep_off) continue;
+      if (distance_to_lanes(w.roads, x, z, keep_off + 1) < keep_off - 0.15f) continue;
       Box wide = b;
       wide.min = wide.min - Vec3{gap, 0, gap};
       wide.max = wide.max + Vec3{gap, 0, gap};
@@ -492,6 +498,8 @@ void generate_wilds(World& w) {
       }
       if (h - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
       const Box b = footprint(o);
+      const float lane_off = rules::kLaneHalfWidth + 0.5f * std::max(b.max.x - b.min.x, b.max.z - b.min.z) + 0.3f;
+      if (distance_to_lanes(w.roads, x, z, lane_off + 1) < lane_off) continue;
       Box wide = b;
       wide.min = wide.min - Vec3{gap, 0, gap};
       wide.max = wide.max + Vec3{gap, 0, gap};
@@ -1507,6 +1515,8 @@ void keep_rival(World& w, uint8_t trainer) {
 
 }  // namespace
 
+void keep_trainer_monster(World& w, uint8_t trainer) { keep_rival(w, trainer); }
+
 size_t add_creature(World& w, Creature c) {
   c.id = w.next_id++;
   w.creatures.push_back(c);
@@ -1557,6 +1567,7 @@ void update_population(World& w) {
   keep_giant(w);
   keep_rival(w, npc::kBastien);
   keep_rival(w, npc::kRomane);
+  if (w.tournament.on) keep_rival(w, npc::kContender);
   keep_west(w);
 }
 
@@ -1633,6 +1644,7 @@ void spawn_creatures(World& w) {
   if (has_village) add_mentor(w);
   add_west_npcs(w);
   add_north_npcs(w);
+  add_road_npcs(w);
   // The wild monsters around the player.
   update_population(w);
 }
@@ -2333,6 +2345,11 @@ Box object_box(const Object& o) {
     case ObjectKind::Cairn:        half = {0.4f * s.x, 0.65f * s.x, 0.4f * s.x}; break;
     case ObjectKind::HotSpring:    half = {0, 0, 0}; break;  // walked into
     case ObjectKind::MineProp:     half = {0.13f, 1.35f, 0.13f}; break;  // its post
+    case ObjectKind::Arena:        // solid through its Colliders
+    case ObjectKind::Grotto:       half = {0, 0, 0}; break;  // walked into (its rocks: Colliders)
+    case ObjectKind::Shrine:       half = {0.4f, 0.95f, 0.4f}; break;
+    case ObjectKind::Bench:        half = {0.8f, 0.25f, 0.25f}; break;
+    case ObjectKind::Stall:        half = {1.3f, 1.2f, 0.8f}; break;
     default:                half = s; break;  // Crate, Collider, Step
   }
   if (o.mount != 0) half = {0, 0, 0};  // on a wall or the ceiling: out of the way
@@ -2391,7 +2408,8 @@ void build_layouts(World& w) {
   w.castle = make_castle_layout(w.seed, w.path);
   w.west = make_west_layout(w.seed, w.path, w.village, w.ruins, w.forest, w.cave, w.castle);
   w.north = make_north_layout(w.seed, w.path, w.west);
-  w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle, &w.west});
+  w.roads = make_roads(w.seed, w.path, w.village, w.ruins, w.forest, w.cave, w.castle, w.west, w.north);
+  w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle, &w.west, &w.roads});
   shape_north(w.ground, w.north, w.path, w.seed);
 }
 
@@ -2741,6 +2759,7 @@ void step(World& w, const Input& in) {
   quests_step(w);
   west_step(w);
   north_step(w);
+  tournament_step(w);
   if (w.tick % rules::kPopulationEveryTicks == 0) update_population(w);
 }
 

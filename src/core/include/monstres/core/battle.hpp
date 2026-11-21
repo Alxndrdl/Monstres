@@ -82,6 +82,14 @@ inline constexpr float kRivalSpacing = 10.0f;       // a trainer's battle: the m
 inline constexpr uint16_t kPrepareMaxTicks = 6 * rules::kTicksPerSecond;  // then everyone is at its place
 inline constexpr uint16_t kRivalNextTicks = 90;     // a trainer sends its next monster after this
 inline constexpr uint32_t kRivalXpPerLevel = 8;     // the first victory against a trainer
+// Rochebrune's arena (north.hpp): its tournaments, three cups, each three
+// contenders one after the other (two monsters, then three, then three);
+// the team is healed before each round. Each cup needs the one before won.
+inline constexpr uint8_t kCups = 3;
+inline constexpr uint8_t kTournamentRounds = 3;
+inline constexpr std::array<uint8_t, kCups> kCupLevels = {10, 17, 25};    // the first contender's monsters (then 2 more a round)
+inline constexpr std::array<uint32_t, kCups> kCupCoins = {80, 160, 320};  // the cup's prize
+inline constexpr uint16_t kRoundPause = 4 * kTicksPerSecond;             // between two rounds
 inline constexpr uint16_t kAwayTicks = 5 * rules::kTicksPerSecond;  // out of reach this long: the battle ends
 inline constexpr float kKnockedOutRecall = 15.0f;   // a knocked out companion goes back into the crystal from this far
 inline constexpr uint16_t kHealPoints = 10;
@@ -240,6 +248,16 @@ void seal_step(World& world, const Input& in);
 int seal_lit(const World& world, float* glow = nullptr);
 // The bar, 0..100 %, as drawn now (it moves after each rune).
 float seal_bar(const World& world);
+
+// Can the player enter the arena's cup now (close to Barnabé, no battle, no
+// tournament going on, a monster standing, the cup before won)? Entered
+// (Command::Tournament), the team is healed and the first contender comes
+// into the arena; beaten, the next one comes after a while; the third beaten,
+// the cup is won (World::cups): its coins, three potions, and only the
+// first time each contender's experience. Lost or fled: the tournament ends.
+bool can_enter_tournament(const World& world, uint8_t cup);
+// Each tick (step): the next round starts, or the tournament ends.
+void tournament_step(World& world);
 
 // Can the player challenge the trainer `npc` now (close to it, a monster out, no battle)?
 bool can_challenge(const World& world, uint8_t npc);

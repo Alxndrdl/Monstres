@@ -74,6 +74,13 @@ std::vector<Vec2> spline(const std::vector<Vec2>& c, float step) {
   return out;
 }
 
+// Beside the path at z, `off` meters across it (right of its way north for off > 0).
+Vec2 beside_path(const Path& path, float z, float off) {
+  Vec2 t{path_x_at(path, z - 1.0f) - path_x_at(path, z + 1.0f), -2.0f};
+  t = t * (1.0f / length(t));
+  return Vec2{path_x_at(path, z), z} + Vec2{-t.z, t.x} * off;
+}
+
 // The valley's floor up to the col, at z (going up gently towards it).
 float valley_floor(const NorthLayout& n, float z) {
   return n.floor_start + rules::kValleyRise * std::max(0.0f, rules::kFrostFrom - z);
@@ -124,12 +131,66 @@ NorthLayout make_north_layout(uint64_t seed, const Path& path, const WestLayout&
   // The mine across the path, looking towards it.
   const float ms = find(-665.0f, 60.0f, 80.0f, 40.0f, -side, rules::kMineRiseRadius, 300, n.mine);
   n.mine_front = {-ms, 0};
-  // The springs further up, on either side.
-  find(-935.0f, 60.0f, 38.0f, 25.0f, hash01(seed, 3) < 0.5f ? -1.0f : 1.0f, rules::kSpringsRadius + 4.0f, 600, n.springs);
+  // Rochebrune, on the path at the foot of the mountains: the arena on one
+  // side, the breeding farm on the other, houses along the path.
+  {
+    const float z = rules::kHamletZ + 16.0f * (hash01(seed, 20) - 0.5f);
+    n.hamlet = {path_x_at(path, z), z};
+    const float ahead = path_x_at(path, z - 8.0f), behind = path_x_at(path, z + 8.0f);
+    Vec2 along{ahead - behind, -16.0f};
+    along = along * (1.0f / length(along));
+    n.hamlet_along = along;
+    const Vec2 across{-along.z, along.x};
+    // The arena on the side with more room in the world.
+    float as = hash01(seed, 21) < 0.5f ? -1.0f : 1.0f;
+    if (!rules::in_world(n.hamlet.x + across.x * as * 60.0f, z, 0.0f)) as = -as;
+    // (The path bends: what stands beside it is moved away from it as far as needed.)
+    const auto off_path = [&](Vec2 c, Vec2 away, float need) {
+      for (int k = 0; k < 60 && distance_to_path(path, c.x, c.z, need + 1.0f) < need; ++k) c = c + away;
+      return c;
+    };
+    n.arena = n.hamlet + across * (as * rules::kArenaFromPath) + along * (6.0f * (hash01(seed, 22) - 0.5f));
+    n.arena = off_path(n.arena, across * as, rules::kArenaRadius + 7.0f);
+    n.arena_front = across * -as;
+    // The breeding farm across the path: its barn, its paddock beside it (further from the path).
+    Vec2 ranch_at = n.hamlet - across * (as * rules::kRanchFromPath) + along * 4.0f;
+    ranch_at = off_path(ranch_at, across * -as, 22.0f);
+    {  // its doors look towards the path, along an axis
+      const Vec2 to_path = n.hamlet - ranch_at;
+      n.ranch_front = std::fabs(to_path.x) >= std::fabs(to_path.z) ? Vec2{to_path.x > 0 ? 1.0f : -1.0f, 0}
+                                                                   : Vec2{0, to_path.z > 0 ? 1.0f : -1.0f};
+    }
+    n.ranch = ranch_at + along * 9.0f;
+    n.paddock_hx = 9.0f;
+    n.paddock_hz = 7.0f;
+    if (std::fabs(n.ranch_front.z) > 0.5f) std::swap(n.paddock_hx, n.paddock_hz);
+    n.paddock = ranch_at - along * 9.0f - n.ranch_front * 3.0f;
+    // The houses along the path, their doors towards it; the well and the market by it.
+    const struct {
+      float u, v;
+    } spots[] = {{18.0f, 13.0f}, {-17.0f, 14.0f}, {30.0f, -12.5f}, {-28.0f, -13.0f}, {-2.0f, -15.5f}};
+    for (const auto& sp : spots) {
+      const float hs = sp.v > 0 ? as : -as;
+      const Vec2 c = off_path(n.hamlet + along * sp.u + across * (hs * std::fabs(sp.v)), across * hs, 9.5f);
+      if (distance(c, n.arena) < rules::kArenaRadius + 6.0f || distance(c, n.ranch) < 10.0f ||
+          distance(c, n.paddock) < std::max(n.paddock_hx, n.paddock_hz) + 5.0f) {
+        continue;
+      }
+      const Vec2 to_path = Vec2{path_x_at(path, c.z), c.z} - c;
+      n.houses.push_back(c);
+      n.house_fronts.push_back(std::fabs(to_path.x) >= std::fabs(to_path.z) ? Vec2{to_path.x > 0 ? 1.0f : -1.0f, 0}
+                                                                            : Vec2{0, to_path.z > 0 ? 1.0f : -1.0f});
+    }
+    n.well = off_path(n.hamlet + across * (as * 5.5f) - along * 3.0f, across * as, 4.0f);
+    n.market = off_path(n.hamlet - across * (as * 6.5f) + along * 10.0f, across * -as, 5.0f);
+    n.hamlet_teleporter = off_path(n.hamlet - along * 36.0f + across * (as * 7.0f), across * as, 6.0f);
+  }
+  // The springs further down, in the larches, on either side.
+  find(-872.0f, 40.0f, 38.0f, 25.0f, hash01(seed, 3) < 0.5f ? -1.0f : 1.0f, rules::kSpringsRadius + 4.0f, 600, n.springs);
   // The col, where the path leaves the world; the frozen lake in the valley below it.
   n.col = {path_x_at(path, -1185.0f), -1185.0f};
   const float cs = hash01(seed, 4) < 0.5f ? -1.0f : 1.0f;
-  n.col_teleporter = n.col + Vec2{cs * 7.0f, 4.0f};
+  n.col_teleporter = beside_path(path, n.col.z + 4.0f, cs * 7.0f);
   n.lake_rx = 26.0f + 8.0f * hash01(seed, 5);
   n.lake_rz = 17.0f + 6.0f * hash01(seed, 6);
   {
@@ -139,11 +200,21 @@ NorthLayout make_north_layout(uint64_t seed, const Path& path, const WestLayout&
     n.lake = {path_x_at(path, z) + ls * off, z};
     if (!rules::in_world(n.lake.x, n.lake.z, n.lake_rx + 15.0f)) n.lake.x = path_x_at(path, z) - ls * off;
   }
-  // The cairns along the path, from the larches up to the col.
+  // The cairns along the path, from the larches up to the col (not in the village).
   for (int k = 0; k < 7; ++k) {
     const float z = -880.0f - 52.0f * static_cast<float>(k);
     const float s = k % 2 == 0 ? 1.0f : -1.0f;
-    n.cairns.push_back({path_x_at(path, z) + s * (rules::kPathHalfWidth + 1.7f), z});
+    const Vec2 c = beside_path(path, z, s * (rules::kPathHalfWidth + 1.7f));
+    if (distance(c, n.hamlet) > rules::kHamletRadius + 6.0f && distance(c, n.springs) > rules::kSpringsRadius + 6.0f) n.cairns.push_back(c);
+  }
+  // The grotto: the natural cave the mine leads into opens here, on the
+  // valley's side up to the col, across from the lake.
+  {
+    const float z = -1048.0f + 14.0f * (hash01(seed, 23) - 0.5f);
+    const float gs = n.lake.x > path_x_at(path, n.lake.z) ? -1.0f : 1.0f;
+    n.grotto = {path_x_at(path, z) + gs * (rules::kValleyHalf + 4.0f), z};
+    if (!rules::in_world(n.grotto.x, n.grotto.z, 30.0f)) n.grotto.x = path_x_at(path, z) - gs * (rules::kValleyHalf + 4.0f);
+    n.grotto_front = {n.grotto.x > path_x_at(path, z) ? -1.0f : 1.0f, 0};
   }
   // The pastures' dry-stone walls: a few curving lines off the path.
   Rng rng(seed ^ 0x4D555245545321ULL, 61);  // "MURETS!"
@@ -164,6 +235,7 @@ NorthLayout make_north_layout(uint64_t seed, const Path& path, const WestLayout&
     for (const Vec2& p : pts) {
       ok = ok && rules::in_world(p.x, p.z, 20.0f) && distance_to_path(path, p.x, p.z, 6.0f) >= 5.0f &&
            distance(p, n.refuge) > rules::kRefugeRadius + 8.0f && distance(p, n.mine) > rules::kMineRiseRadius + 6.0f &&
+           distance(p, n.hamlet) > rules::kHamletRadius + 8.0f &&
            natural_height(seed, p.x, p.z) + (west.scarp.points.size() >= 2 && scarp_side(west, p.x, p.z) < -30.0f ? rules::kTerraceHeight : 0.0f) >
                rules::kSeaLevel + 4.0f &&
            (west.scarp.points.size() < 2 || std::fabs(scarp_side(west, p.x, p.z)) > 12.0f);
@@ -227,23 +299,44 @@ void shape_north(Heightmap& m, NorthLayout& n, const Path& path, uint64_t seed) 
       const float wobble = 3.0f * (value_noise(seed + 810, x, z, 9.0f) - 0.5f) + 1.2f * (value_noise(seed + 811, x, z, 3.0f) - 0.5f);
       const float d = std::hypot(x - c.x, z - c.z) + wobble;
       const float along = (x - n.mine.x) * f.x + (z - n.mine.z) * f.z;  // out of the entrance
-      const float behind = smooth(0.6f, -2.2f, along);  // a face right behind the entrance
+      const float behind = smooth(-0.3f, -2.6f, along);  // a face right behind the entrance (its sill at the yard's level)
       const float rise = rules::kMineRise * (1 - smooth(rules::kMineRiseRadius * 0.3f, rules::kMineRiseRadius, d)) * behind;
       h = std::max(h, top + rise);
     });
   }
   // The valley up to the col: the mountains' slopes cut back around the path
   // (a flat floor going up gently, walkable sides), and around the lake.
+  // Rochebrune's flat ground: at the height of the ground around its middle;
+  // the valley's floor goes on up from it.
+  n.hamlet_level = std::max(mean(n.hamlet, 22.0f), rules::kSeaLevel + 4.0f);
   n.floor_start = std::max(m.height(path_x_at(path, rules::kFrostFrom), rules::kFrostFrom), rules::kSeaLevel + 4.0f);
+  if (n.hamlet.z - rules::kHamletRadius < rules::kFrostFrom + 10.0f) n.floor_start = n.hamlet_level;
   n.lake_level = valley_floor(n, n.lake.z) + 0.2f;
-  const float from = rules::kFrostFrom + 50.0f;
+  // (From Rochebrune's middle on: past its flat ground, the mountains are cut back all through.)
+  const float from = std::max(rules::kFrostFrom + 50.0f, n.hamlet.z + 10.0f);
+  // The distance to the path every kCoarse points (far from it, between
+  // them is near enough: it changes by at most a meter a meter).
+  constexpr int kCoarse = 4;
+  const int rows = static_cast<int>((from - Heightmap::kMinZ) / Heightmap::kCellSize) + 1;
+  const int cx = (Heightmap::kPointsX - 1) / kCoarse + 2, cz = rows / kCoarse + 2;
+  std::vector<float> coarse(static_cast<size_t>(cx * cz));
+  for (int a = 0; a < cx; ++a) {
+    for (int b = 0; b < cz; ++b) {
+      coarse[static_cast<size_t>(a * cz + b)] = distance_to_path(path, Heightmap::x_of(a * kCoarse), Heightmap::z_of(b * kCoarse), 170.0f);
+    }
+  }
   for (int j = 0; j < Heightmap::kPointsZ && Heightmap::z_of(j) < from; ++j) {
     const float z = Heightmap::z_of(j);
     const float k = smooth(from, rules::kFrostFrom, z);
     const float floor = valley_floor(n, z);
     for (int i = 0; i < Heightmap::kPointsX; ++i) {
       const float x = Heightmap::x_of(i);
-      const float d = distance_to_path(path, x, z, 400.0f);
+      const int a = i / kCoarse, b = j / kCoarse;
+      const float tx = static_cast<float>(i % kCoarse) / kCoarse, tz = static_cast<float>(j % kCoarse) / kCoarse;
+      const auto at = [&](int p, int q) { return coarse[static_cast<size_t>(p * cz + q)]; };
+      const float between = (at(a, b) * (1 - tx) + at(a + 1, b) * tx) * (1 - tz) + (at(a, b + 1) * (1 - tx) + at(a + 1, b + 1) * tx) * tz;
+      // (Farther than 160 m, the cut is far above the ground: none.)
+      const float d = between < 50.0f ? distance_to_path(path, x, z, 60.0f) : std::min(between, 160.0f);
       const auto side = [](float dd) { return 0.03f * std::min(dd, rules::kValleyHalf) + rules::kValleySlope * std::max(0.0f, dd - rules::kValleyHalf); };
       float cap = floor + side(d);
       // Around the lake: its shore at its ice's level.
@@ -268,6 +361,31 @@ void shape_north(Heightmap& m, NorthLayout& n, const Path& path, uint64_t seed) 
       lowest = std::min(lowest, m.height(p.x, p.z));
     }
     n.lake_level = lowest - 0.05f;
+  }
+  // Rochebrune, flat (over the valley's start).
+  {
+    const Vec2 c = n.hamlet;
+    each_point(c, rules::kHamletRadius + 34.0f, [&](float x, float z, float& h) {
+      const float wobble = 6.0f * (value_noise(seed + 840, x, z, 17.0f) - 0.5f);
+      const float k = 1 - smooth(rules::kHamletRadius, rules::kHamletRadius + 30.0f, std::hypot(x - c.x, z - c.z) + wobble);
+      h += (n.hamlet_level - h) * k;
+    });
+  }
+  // The grotto: a flat spot before its opening, a rocky slope rising behind it.
+  {
+    const Vec2 f = n.grotto_front;
+    const Vec2 pad = n.grotto + f * 3.5f;
+    const float top = m.height(pad.x, pad.z);
+    level(pad, top, 4.5f, 10.0f);
+    const Vec2 c = n.grotto - f * 12.0f;
+    each_point(c, 24.0f, [&](float x, float z, float& h) {
+      const float wobble = 2.5f * (value_noise(seed + 850, x, z, 8.0f) - 0.5f) + 1.0f * (value_noise(seed + 851, x, z, 3.0f) - 0.5f);
+      const float d = std::hypot(x - c.x, z - c.z) + wobble;
+      const float along = (x - n.grotto.x) * f.x + (z - n.grotto.z) * f.z;
+      const float behind = smooth(-0.3f, -2.4f, along);
+      const float rise = rules::kGrottoRise * (1 - smooth(6.0f, 20.0f, d)) * behind;
+      if (rise > 0) h = std::max(h, top + rise);  // (only behind it: before it the ground stays)
+    });
   }
   // Its banks walkable all around (cut back where the ground rose steeply).
   const float near = std::min(n.lake_rx, n.lake_rz);
@@ -299,9 +417,19 @@ bool in_springs(const NorthLayout& n, float x, float z) {
   return n.valid() && std::hypot(x - n.springs.x, z - n.springs.z) < rules::kSpringsPool - 0.3f;
 }
 
+bool in_hamlet(const NorthLayout& n, float x, float z, float margin) {
+  return n.valid() && std::hypot(x - n.hamlet.x, z - n.hamlet.z) < rules::kHamletRadius + margin;
+}
+
+bool in_paddock(const NorthLayout& n, float x, float z, float margin) {
+  return n.valid() && std::fabs(x - n.paddock.x) < n.paddock_hx + margin && std::fabs(z - n.paddock.z) < n.paddock_hz + margin;
+}
+
 bool in_north_place(const NorthLayout& n, float x, float z, float margin) {
   if (!n.valid()) return false;
   const Vec2 p{x, z};
+  if (in_hamlet(n, x, z, margin)) return true;
+  if (distance(p, n.grotto - n.grotto_front * 6.0f) < 9.0f + margin) return true;
   if (distance(p, n.refuge) < rules::kRefugeRadius + margin) return true;
   if (distance(p, n.springs) < rules::kSpringsRadius + margin) return true;
   if (distance(p, n.mine + n.mine_front * 4.0f) < rules::kMineYard + 3.0f + margin) return true;
@@ -470,6 +598,102 @@ void build_north(World& w) {
       last = at;
     }
   }
+  // Rochebrune.
+  {
+    // The arena: its tiers solid all around (but its gate), benches and lanterns by the gate.
+    const Vec2 g = std::fabs(n.arena_front.x) >= std::fabs(n.arena_front.z) ? Vec2{n.arena_front.x > 0 ? 1.0f : -1.0f, 0}
+                                                                            : Vec2{0, n.arena_front.z > 0 ? 1.0f : -1.0f};
+    const Object arena = make(ObjectKind::Arena, n.arena, yaw_facing(g), v8());
+    add(arena);
+    // (Two rings of boxes, never overlapping: 1.75 m apart along each, the rings 1.75 m apart.)
+    for (const float r : {10.4f, 12.15f}) {
+      const int count = static_cast<int>(6.2831853f * r / 1.75f);
+      const int half_step = r > 11.0f ? 65536 / count / 2 : 0;
+      for (int k = 0; k < count; ++k) {
+        const Vec2 d = dir16(static_cast<Angle16>(k * 65536 / count + half_step));
+        const float ahead = d.x * g.x + d.z * g.z, side = std::fabs(d.x * g.z - d.z * g.x);
+        if (ahead > 0 && side * r < 2.4f) continue;  // the gate
+        Object c = make(ObjectKind::Collider, n.arena + d * r, 0, 0);
+        c.size = {0.6f, r < 11.0f ? 0.9f : 1.7f, 0.6f};
+        add(c);
+      }
+    }
+    const Vec2 gate = n.arena + g * (rules::kArenaRadius + 1.2f), gside{-g.z, g.x};
+    add(make(ObjectKind::Lamp, gate + gside * 2.6f, 0));
+    add(make(ObjectKind::Lamp, gate - gside * 2.6f, 0));
+    add(make(ObjectKind::Sign, gate + gside * 3.6f + g * 1.5f, yaw_facing(g)));
+    add_if_free(make(ObjectKind::Bench, n.arena + g * (rules::kArenaRadius + 3.2f) + gside * 6.0f, yaw_facing(g)));
+    add_if_free(make(ObjectKind::Bench, n.arena + g * (rules::kArenaRadius + 3.2f) - gside * 6.0f, yaw_facing(g)));
+    // The breeding farm: its barn, the paddock's fences (a gate towards the path), hay, a trough.
+    const Object barn = make(ObjectKind::Barn, n.ranch, yaw_facing(n.ranch_front), v8());
+    add(barn);
+    {
+      const Vec2 to_path = n.hamlet - n.paddock;
+      for (int side = 0; side < 4; ++side) {
+        const bool along_x = side < 2;
+        const float sign = side % 2 == 0 ? -1.0f : 1.0f;
+        const float half = along_x ? n.paddock_hx : n.paddock_hz;
+        const int segments = static_cast<int>(half);  // 2 m each
+        const bool gated = along_x ? (to_path.z * sign > 0 && std::fabs(to_path.z) >= std::fabs(to_path.x))
+                                   : (to_path.x * sign > 0 && std::fabs(to_path.x) > std::fabs(to_path.z));
+        for (int k = 0; k < segments; ++k) {
+          const float t = -half + 1.0f + 2.0f * static_cast<float>(k);
+          if (gated && std::fabs(t) < 1.5f) continue;
+          // (The sides along Z just outside the others' ends: the corners never overlap.)
+          const Vec2 at = along_x ? n.paddock + Vec2{t, sign * n.paddock_hz} : n.paddock + Vec2{sign * (n.paddock_hx + 0.08f), t};
+          // (Not into the barn, where the paddock comes close to it: a gap in the fence there.)
+          const Object fence = make(ObjectKind::Fence, at, along_x ? Angle16{0} : Angle16{16384}, v8());
+          if (!overlaps(object_box(fence), object_box(barn))) add(fence);
+        }
+      }
+    }
+    add_if_free(make(ObjectKind::Haystack, n.paddock + Vec2{n.paddock_hx - 2.0f, n.paddock_hz - 2.0f}, 0, v8()));
+    add_if_free(make(ObjectKind::Haystack, local_to_world(barn, -6.0f, 1.0f), 0, v8()));
+    add_if_free(make(ObjectKind::Barrel, n.paddock + Vec2{-(n.paddock_hx - 1.5f), n.paddock_hz - 1.5f}, 0, v8()));
+    add_if_free(make(ObjectKind::Lamp, local_to_world(barn, 5.4f, -3.0f), 0));
+    // The houses, a barrel or a woodpile beside each.
+    const ObjectKind kinds[] = {ObjectKind::Chalet, ObjectKind::HouseChimney, ObjectKind::HouseCottage, ObjectKind::Chalet,
+                                ObjectKind::HouseChimney};
+    for (size_t k = 0; k < n.houses.size(); ++k) {
+      const Object house = make(kinds[k % std::size(kinds)], n.houses[k], yaw_facing(n.house_fronts[k]), v8());
+      add_if_free(house);
+      if (k % 2 == 0) {
+        add_if_free(make(ObjectKind::Woodpile, local_to_world(house, 0, 3.9f), house.yaw, v8()));
+      } else {
+        add_if_free(make(ObjectKind::Barrel, local_to_world(house, 3.0f, -1.2f), 0, v8()));
+      }
+    }
+    // The well; the market's stalls, crates and barrels around them; benches.
+    add_if_free(make(ObjectKind::Well, n.well, 0, v8()));
+    {
+      const Vec2 to_path = n.hamlet - n.market;
+      const Vec2 f = std::fabs(to_path.x) >= std::fabs(to_path.z) ? Vec2{to_path.x > 0 ? 1.0f : -1.0f, 0}
+                                                                  : Vec2{0, to_path.z > 0 ? 1.0f : -1.0f};
+      const Vec2 side{-f.z, f.x};
+      for (const float u : {-1.6f, 1.6f}) add_if_free(make(ObjectKind::Stall, n.market + side * u, yaw_facing(f), v8()));
+      Object crate = make(ObjectKind::Crate, n.market + side * 3.6f - f * 0.3f, 0, v8(), {0.35f, 0.35f, 0.35f});
+      add_if_free(crate);
+      add_if_free(make(ObjectKind::Barrel, n.market - side * 3.5f, 0, v8()));
+    }
+    add_if_free(make(ObjectKind::Bench, n.well + Vec2{2.4f, 0}, Angle16{16384}));
+    // Lanterns along the path through the village.
+    for (int k = -3; k <= 3; ++k) {
+      const float z = n.hamlet.z + 13.0f * static_cast<float>(k);
+      const float sx = k % 2 == 0 ? 1.0f : -1.0f;
+      add_if_free(make(ObjectKind::Lamp, beside_path(w.path, z, sx * (rules::kPathHalfWidth + 1.3f)), 0));
+    }
+    add(make(ObjectKind::Teleporter, n.hamlet_teleporter, 0, static_cast<uint8_t>(TeleporterId::Hamlet)));
+  }
+  // The grotto's opening, its rocks solid on both sides.
+  {
+    const Object mouth = make(ObjectKind::Grotto, n.grotto, yaw_facing(n.grotto_front), v8());
+    add(mouth);
+    for (const float side : {-1.0f, 1.0f}) {
+      Object c = make(ObjectKind::Collider, local_to_world(mouth, side * 2.6f, 0.6f), mouth.yaw, 0);
+      c.size = {1.1f, 1.8f, 1.2f};
+      add(c);
+    }
+  }
   // The cairns; the col's teleporter, a cairn on each side of the path there.
   for (const Vec2& c : n.cairns) {
     const float s = 0.8f + static_cast<float>(rng.below(50)) / 100.0f;
@@ -477,7 +701,7 @@ void build_north(World& w) {
   }
   add(make(ObjectKind::Teleporter, n.col_teleporter, 0, static_cast<uint8_t>(TeleporterId::Col)));
   for (const float s : {-1.0f, 1.0f}) {
-    add(make(ObjectKind::Cairn, n.col + Vec2{s * (rules::kPathHalfWidth + 1.6f), -1.0f}, any_yaw(), v8(), {1.35f, 1.35f, 1.35f}));
+    add(make(ObjectKind::Cairn, beside_path(w.path, n.col.z - 1.0f, s * (rules::kPathHalfWidth + 1.6f)), any_yaw(), v8(), {1.35f, 1.35f, 1.35f}));
   }
 }
 
@@ -529,6 +753,9 @@ void add_north_npcs(World& w) {
   const Who people[] = {
       {npc::kSolene, n.refuge + n.refuge_front * 5.6f + Vec2{0, 1.6f}},
       {npc::kGaston, n.mine + n.mine_front * 5.0f + Vec2{n.mine_front.z, n.mine_front.x} * 2.0f},
+      {npc::kBarnabe, n.arena + n.arena_front * (rules::kArenaRadius + 2.4f) + Vec2{-n.arena_front.z, n.arena_front.x} * 3.4f},
+      {npc::kMargaux, n.paddock + (n.hamlet - n.paddock) * (std::max(n.paddock_hx, n.paddock_hz) / std::max(distance(n.hamlet, n.paddock), 1.0f)) * 1.15f},
+      {npc::kAgathe, n.well + Vec2{-2.2f, 1.4f}},
   };
   const BodyShape& shape = species_info(Species::Villager).shape;
   for (const Who& who : people) {
@@ -571,17 +798,17 @@ void spawn_miners(World& w) {
   const Interior& in = w.interior;
   if (in.kind != PlaceKind::Mine || in.pieces.size() < 2) return;
   Rng& rng = w.rng;
-  // The deepest gallery's end: the guardian, until it is beaten.
+  // The widest hall (the deepest one): the guardian, until it is beaten.
   const RoomPiece* deep = &in.pieces[1];
   for (const RoomPiece& p : in.pieces) {
-    if (p.b.z < deep->b.z) deep = &p;
+    if (p.a == p.b && !p.natural && (!(deep->a == deep->b) || p.radius > deep->radius)) deep = &p;
   }
   const QuestState& q = w.quests[static_cast<size_t>(QuestId::MineGuardian)];
   const bool guardian = q.stage != QuestStage::Done && !(q.progress & kGuardianBeaten);
   const auto place = [&](Species species, Vec2 at, uint8_t level, Genes genes, Tag tag) {
     Creature c;
     c.species = species;
-    c.body.pos = {at.x, 0, at.z};
+    c.body.pos = {at.x, floor_height(in, at.x, at.z), at.z};
     c.home = at;
     c.genes = genes;
     c.level = level;
@@ -601,14 +828,17 @@ void spawn_miners(World& w) {
       if (place(Species::Golem, at, rules::kGuardianLevel, g, Tag::None)) break;
     }
   }
-  const uint32_t count = 5 + rng.below(3);
+  const uint32_t count = 8 + rng.below(4);
   for (uint32_t made = 0, attempt = 0; made < count && attempt < 150; ++attempt) {
     const RoomPiece& p = in.pieces[1 + rng.below(static_cast<uint32_t>(in.pieces.size() - 1))];
     const float t = static_cast<float>(rng.below(1000)) / 1000.0f;
     const Vec2 a = dir16(static_cast<Angle16>(rng.below(65536)));
     const float d = p.radius * 0.6f * static_cast<float>(rng.below(1000)) / 1000.0f;
     const Vec2 at{p.a.x + (p.b.x - p.a.x) * t + a.x * d, p.a.z + (p.b.z - p.a.z) * t + a.z * d};
-    const Species species = rng.below(100) < 65 ? Species::Golem : Species::Mole;
+    // (In the natural cave beyond the galleries: Givris of the cold rock, and Cailloux.)
+    const bool natural = natural_at(in, at.x, at.z) > 0.5f;
+    const Species species = natural ? (rng.below(100) < 55 ? Species::Ermine : Species::Golem)
+                                    : rng.below(100) < 65 ? Species::Golem : Species::Mole;
     const Genes genes = roll_genes(species, Zone::Mine, rng);
     const auto level = static_cast<uint8_t>(7 + rng.below(4));
     if (wall_distance(in, at.x, at.z) < 0.8f || std::hypot(at.x, at.z) < 6.0f) continue;  // not by the way in

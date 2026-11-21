@@ -885,6 +885,10 @@ const std::array<RivalMonster, kRivalTeamSize>& rival_team(const World& w, uint8
     count = 3;
     return kRomane;
   }
+  if (n == npc::kContender) {  // the arena's: this round's
+    count = w.tournament.count;
+    return w.tournament.team;
+  }
   count = n == npc::kBastien ? 2 : 0;
   return kBastien;
 }
@@ -900,6 +904,14 @@ bool rival_arena(const World& w, uint8_t trainer, Vec2& center, Vec2& axis) {
     dz = l > 1e-3f ? dz / l : 0.0f;
     center = {(t.x + w.player.pos.x) / 2, (t.z + w.player.pos.z) / 2};
     axis = {dx, dz};
+    return true;
+  }
+  if (trainer == npc::kContender) {  // on the arena's sand, across it from the gate's side
+    if (!w.north.valid()) return false;
+    const Vec2 f = w.north.arena_front;
+    const Vec2 g = std::fabs(f.x) >= std::fabs(f.z) ? Vec2{f.x > 0 ? 1.0f : -1.0f, 0} : Vec2{0, f.z > 0 ? 1.0f : -1.0f};
+    center = w.north.arena;
+    axis = {-g.z, g.x};
     return true;
   }
   if (trainer == npc::kRomane) {  // in her camp's clearing, south of the fire
@@ -1092,7 +1104,8 @@ const char* cannot_cast(const World& w, size_t slot) {
 }
 
 bool can_heal_team(const World& w, uint8_t n) {
-  return (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene) && w.battle.phase == BattlePhase::None && near_npc(w, n);
+  return (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene || n == npc::kAgathe || n == npc::kAubin) &&
+         w.battle.phase == BattlePhase::None && near_npc(w, n);
 }
 
 namespace {
@@ -1214,6 +1227,111 @@ void force_challenge(World& w, uint8_t n) {
   if (!ready_to_fight(w)) return;
   challenge(w, n);
   w.battle.forced = w.battle.phase == BattlePhase::Prepare;
+}
+
+namespace {
+
+// The contenders' monsters: of the whole land, stronger each round.
+void draw_contender(World& w) {
+  Tournament& t = w.tournament;
+  static constexpr Species kPool[] = {Species::Slime, Species::Mushroom, Species::Bird,   Species::Spark,
+                                      Species::Axolotl, Species::Raccoon, Species::Owl,  Species::Sheep,
+                                      Species::Mole,  Species::Golem,    Species::Goat,   Species::Ermine};
+  Rng rng(w.seed ^ 0x544F55524E4F49ULL ^ (uint64_t{t.tries} * 977u + uint64_t{t.cup} * 31u + t.round), 71);  // "TOURNOI"
+  t.count = t.round == 0 ? 2 : 3;
+  t.team = {};
+  for (uint8_t k = 0; k < t.count; ++k) {
+    RivalMonster& m = t.team[k];
+    m.species = kPool[rng.below(static_cast<uint32_t>(std::size(kPool)))];
+    m.genes = roll_genes(m.species, Zone::Alpine, rng);
+    m.genes.form = t.round == rules::kTournamentRounds - 1 && k == t.count - 1 ? Form::Alpha : Form::Normal;  // the finalist's last
+    m.level = static_cast<uint8_t>(rules::kCupLevels[t.cup] + 2 * t.round + rng.below(2));
+  }
+}
+
+// The contender comes into the arena, its first monster beside it; the team
+// is healed; both sides take their places.
+void start_round(World& w) {
+  Tournament& t = w.tournament;
+  for (Monster& m : w.team) m.hp = monster_fight_stats(m).hp;
+  if (w.active >= 0 && companion(w).mind == Mind::KnockedOut) companion(w).mind = Mind::Idle;
+  w.healed_tick = w.tick;
+  Rng looks(w.seed ^ 0x434F4E54454E44ULL ^ (uint64_t{t.tries} << 8) ^ (uint64_t{t.cup} << 4) ^ t.round, 73);  // "CONTEND"
+  const auto look = static_cast<uint8_t>(looks.below(256));
+  int i = npc_index(w, npc::kContender);
+  if (i < 0) {
+    Creature c;
+    c.species = Species::Villager;
+    c.npc = npc::kContender;
+    const Vec2 at = w.north.arena;
+    c.body.pos = {at.x, w.ground.height(at.x, at.z), at.z};
+    c.home = at;
+    add_creature(w, c);
+    i = npc_index(w, npc::kContender);
+  }
+  w.creatures[static_cast<size_t>(i)].variant = look;
+  w.creatures[static_cast<size_t>(i)].beaten = false;
+  keep_trainer_monster(w, npc::kContender);
+  if (!ready_to_fight(w)) {
+    t.on = false;
+    return;
+  }
+  challenge(w, npc::kContender);
+  if (w.battle.phase != BattlePhase::Prepare) t.on = false;
+}
+
+// A contender beaten: the next one, or the cup.
+void round_won(World& w) {
+  Tournament& t = w.tournament;
+  if (!t.on) return;
+  if (++t.round >= rules::kTournamentRounds) {
+    w.cups = static_cast<uint8_t>(w.cups | (1u << t.cup));
+    w.bag[static_cast<size_t>(Item::Coin)] += rules::kCupCoins[t.cup];
+    w.bag[static_cast<size_t>(Item::ManaPotion)] += 3;
+    t.on = false;
+    t.next_in = 0;
+    return;
+  }
+  draw_contender(w);
+  t.next_in = rules::kRoundPause;
+}
+
+}  // namespace
+
+bool can_enter_tournament(const World& w, uint8_t cup) {
+  const bool earned = cup == 0 || ((w.cups >> (cup - 1)) & 1u);
+  const bool standing = std::any_of(w.team.begin(), w.team.end(), [](const Monster& m) { return m.hp > 0; });
+  return cup < rules::kCups && earned && standing && !w.tournament.on && w.battle.phase == BattlePhase::None && w.north.valid() &&
+         !inside(w) && near_npc(w, npc::kBarnabe);
+}
+
+void tournament_step(World& w) {
+  Tournament& t = w.tournament;
+  if (!t.on) {
+    // Over: the contender and its monster go (not in a battle).
+    if (w.battle.phase != BattlePhase::None) return;
+    for (size_t i = w.creatures.size(); i-- > 1;) {
+      if (w.creatures[i].npc == npc::kContender) remove_creature(w, i);
+    }
+    return;
+  }
+  if (w.battle.phase != BattlePhase::None) return;
+  if (t.next_in > 0) {
+    if (--t.next_in > 0) return;
+    // (Gone away meanwhile: it is over.)
+    const float dx = w.player.pos.x - w.north.arena.x, dz = w.player.pos.z - w.north.arena.z;
+    if (inside(w) || dx * dx + dz * dz > 60.0f * 60.0f) {
+      t.on = false;
+      return;
+    }
+    start_round(w);
+    return;
+  }
+  // No battle, no round to come: the last one was lost, or fled. The arena's carers heal the team.
+  t.on = false;
+  for (Monster& m : w.team) m.hp = monster_fight_stats(m).hp;
+  if (w.active >= 0 && companion(w).mind == Mind::KnockedOut) companion(w).mind = Mind::Idle;
+  w.healed_tick = w.tick;
 }
 
 namespace {
@@ -1415,6 +1533,15 @@ void battle_command(World& w, const Input& in) {
       slots[slot] = spell;
       break;
     }
+    case Command::Tournament:
+      if (in.target >= rules::kCups || !can_enter_tournament(w, static_cast<uint8_t>(in.target))) break;
+      w.tournament.on = true;
+      w.tournament.cup = static_cast<uint8_t>(in.target);
+      w.tournament.round = 0;
+      ++w.tournament.tries;
+      draw_contender(w);
+      w.tournament.next_in = 1;  // the first round starts (tournament_step)
+      break;
     case Command::HealTeam:
     case Command::Door:
       if (in.target >= 256 || !can_heal_team(w, static_cast<uint8_t>(in.target))) break;
@@ -1926,7 +2053,11 @@ void battle_resolve(World& w) {
       uint32_t levels = 0;
       for (uint8_t k = 0; k < r.count; ++k) levels += r.team[k].level;
       uint8_t passing = 0;  // a trainer passing by: met once
-      uint8_t& wins = npc::wanderer(r.npc) ? passing : r.npc == npc::kRomane ? w.romane_wins : w.rival_wins;
+      uint8_t contender = static_cast<uint8_t>((w.cups >> w.tournament.cup) & 1u);  // the cup won once: no more
+      uint8_t& wins = npc::wanderer(r.npc)            ? passing
+                      : r.npc == npc::kContender ? contender
+                      : r.npc == npc::kRomane    ? w.romane_wins
+                                                 : w.rival_wins;
       xp = wins == 0 ? rules::kRivalXpPerLevel * levels : 0;
       if (xp == 0) b.no_xp = NoXp::Trainer;
       if (wins == 0) w.bag[static_cast<size_t>(Item::Coin)] += 4 * levels;
@@ -1935,6 +2066,7 @@ void battle_resolve(World& w) {
         w.creatures[static_cast<size_t>(t)].beaten = true;
         w.creatures[static_cast<size_t>(t)].tag = Tag::None;
       }
+      if (r.npc == npc::kContender) round_won(w);
     } else {
       w.bag[static_cast<size_t>(Item::Coin)] += (b.won_xp + 3) / 4;  // what the beaten ones dropped
     }

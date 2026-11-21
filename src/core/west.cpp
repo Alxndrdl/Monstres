@@ -241,7 +241,10 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     for (int k = 1; k < legs; ++k) {
       const float t = static_cast<float>(k) / static_cast<float>(legs);
       const float x = start + (east_end - start) * t;
-      const float wobble = x < -40.0f ? (hash01(seed, 10 + static_cast<uint64_t>(k)) - 0.5f) * 10.0f : 0.0f;
+      // Bends (not a line drawn across the land), none by the fork nor by the farm.
+      const float fade = wave_sin(3.1415927f * t) * std::clamp((-40.0f - x) / 40.0f, 0.0f, 1.0f);
+      const float wobble = fade * (17.0f * wave_sin(0.85f * static_cast<float>(k) + 6.2831853f * hash01(seed, 9)) +
+                                   (hash01(seed, 10 + static_cast<uint64_t>(k)) - 0.5f) * 8.0f);
       c.push_back({x, fork.z + (front_line - fork.z) * t + wobble});
     }
     c.push_back({east_end, front_line});
@@ -252,7 +255,8 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     const int more = std::max(1, static_cast<int>((west_end - door.x) / 28.0f));
     for (int k = 1; k < more; ++k) {
       const float t = static_cast<float>(k) / static_cast<float>(more);
-      const float wobble = (hash01(seed, 40 + static_cast<uint64_t>(k)) - 0.5f) * 8.0f;
+      const float wobble = wave_sin(3.1415927f * t) * (11.0f * wave_sin(1.1f * static_cast<float>(k) + 6.2831853f * hash01(seed, 39)) +
+                                                      (hash01(seed, 40 + static_cast<uint64_t>(k)) - 0.5f) * 6.0f);
       c.push_back({west_end + (door.x - west_end) * t, front_line + (door.z - front_line) * t + wobble});
     }
     c.push_back(door);
@@ -275,7 +279,11 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     // (Its first point beyond the relief's north, which goes further north
     // than it did: the edge goes on up there as it went.)
     std::vector<Vec2> c{{C.x - 182 + j(1, 20), -rules::kReliefNorth - 90.0f},
+                        {C.x - 215 + j(11, 30), -1120.0f},
+                        {C.x - 140 + j(12, 30), -990.0f},
+                        {C.x - 205 + j(13, 30), -850.0f},
                         {C.x - 175 + j(1, 20), -rules::kReliefHalfSize - 90.0f},
+                        {C.x - 115 + j(14, 25), -600.0f},
                         {C.x - 150 + j(8, 20), std::max(C.z - 430.0f, -rules::kReliefHalfSize + 20.0f)},
                         {C.x - 118 + j(2, 15), C.z - 230 + j(3, 20)},
                         {C.x - 95 + j(4, 8), C.z - 115 + j(5, 10)},
@@ -285,11 +293,26 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     const float k = cave.radius > 0 && cave.facing.x < 0 ? -1.0f : 1.0f;
     std::vector<Vec2> spur{{-38, -14}, {-24, 10}, {-4, 23}, {16, 12}, {21, -4}, {24, -24}, {44, -36}};
     if (k < 0) std::reverse(spur.begin(), spur.end());
+    // (Northwards the path bends widely: the edge stays well west of it, the path on the terrace.)
+    for (Vec2& p : c) {
+      if (p.z < -330.0f) p.x = std::min(p.x, path_x_at(path, std::max(p.z, -rules::kReliefNorth)) - 60.0f);
+    }
     for (const Vec2& p : spur) c.push_back({C.x + k * p.x, C.z + p.z});
-    for (float x = C.x + 92; x < rules::kReliefHalfSize + 90; x += 55) {
-      c.push_back({x, std::min(C.z - 40.0f + j(static_cast<uint64_t>(x + 2000), 15), -128.0f)});
+    // Eastwards, in wide bays and headlands (not along a line).
+    const float bay = 6.2831853f * hash01(seed, 950);
+    for (float x = C.x + 92; x < rules::kReliefHalfSize + 90; x += 40) {
+      // (Not much further north than it was: the river runs on the terrace beyond it.)
+      const float wave = 24.0f * wave_sin((x - C.x) / 70.0f + bay) + 10.0f * wave_sin((x - C.x) / 31.0f + 2.0f * bay);
+      const float grow = std::clamp((x - C.x - 92.0f) / 90.0f, 0.0f, 1.0f);
+      c.push_back({x, std::min(C.z - 40.0f - grow * std::max(10.0f - wave, -25.0f) + j(static_cast<uint64_t>(x + 2000), 8), -128.0f)});
     }
     w.scarp.points = spline(c, 2.0f);
+    // (All along, not only at its control points: the path's bends between them.)
+    for (Vec2& p : w.scarp.points) {
+      if (p.z > -300.0f) continue;
+      const float gap = 60.0f * std::clamp((-300.0f - p.z) / 120.0f, 0.0f, 1.0f);
+      p.x = std::min(p.x, path_x_at(path, std::max(p.z, -rules::kReliefNorth)) - gap);
+    }
     make_chunks(w.scarp.points, w.scarp.chunks);
     float best = 1e30f;
     for (const Vec2& p : w.scarp.points) {
@@ -411,7 +434,11 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     c.push_back({0.55f * last.x + 0.45f * x_cross, last.z + 10.0f + 10.0f * hash01(seed, 101)});
     constexpr float kSouth = 205.0f;
     for (float z = last.z + 45.0f; z <= kSouth; z += 30.0f) {
-      float x = x_cross + (hash01(seed, 100 + static_cast<uint64_t>(z + 1000)) - 0.5f) * 10.0f;
+      // Wide swings (held where the road crosses it).
+      // (South of the road only: north of it, the farm's places want their room.)
+      const float swing = 18.0f * wave_sin((z - road_line) / 48.0f + 6.2831853f * hash01(seed, 103)) *
+                          std::clamp((z - road_line - 30.0f) / 40.0f, 0.0f, 1.0f);
+      float x = x_cross + swing + (hash01(seed, 100 + static_cast<uint64_t>(z + 1000)) - 0.5f) * 10.0f;
       if (std::fabs(z - road_line) < 34.0f) x = x_cross;
       if (std::fabs(z - w.farm.z) < rules::kFarmRadius + 24.0f) x = std::max(x, w.farm.x + rules::kFarmRadius + 18.0f);
       c.push_back({x, z});
@@ -1392,22 +1419,25 @@ void keep_wheel_raiders(World& w) {
   }
 }
 
-void keep_boarders(World& w) {
-  const Vec2 paddock = paddock_center(w.west);
-  const size_t wanted = lived_in(w, paddock) ? std::min<size_t>(w.farm.size(), rules::kBoardersShown) : 0;
+// The monsters left at the farm graze in a paddock: farm[first..last) in
+// this one (its middle: their home), while its square is lived in.
+void keep_boarders(World& w, Vec2 paddock, size_t first, size_t last) {
+  last = std::min(last, w.farm.size());
+  const size_t wanted = lived_in(w, paddock) && last > first ? last - first : 0;
   // As they are, or drawn again.
   bool same = true;
   size_t have = 0;
   for (const Creature& c : w.creatures) {
-    if (c.tag != Tag::Boarder) continue;
+    if (c.tag != Tag::Boarder || !(c.home == paddock)) continue;
     ++have;
-    same = same && c.variant < w.farm.size() && w.farm[c.variant].species == c.species && w.farm[c.variant].genes == c.genes;
+    same = same && c.variant >= first && c.variant < last && w.farm[c.variant].species == c.species &&
+           w.farm[c.variant].genes == c.genes;
   }
   if (same && have == wanted) return;
   for (size_t i = w.creatures.size(); i-- > 1;) {
-    if (w.creatures[i].tag == Tag::Boarder && foe_slot(w, i) < 0) remove_creature(w, i);
+    if (w.creatures[i].tag == Tag::Boarder && w.creatures[i].home == paddock && foe_slot(w, i) < 0) remove_creature(w, i);
   }
-  for (size_t k = 0; k < wanted; ++k) {
+  for (size_t k = first; k < first + wanted; ++k) {
     const Monster& m = w.farm[k];
     Creature c;
     c.species = m.species;
@@ -1430,7 +1460,12 @@ void keep_west(World& w) {
   keep_lambs(w);
   keep_raiders(w);
   keep_wheel_raiders(w);
-  keep_boarders(w);
+  keep_boarders(w, paddock_center(w.west), 0, rules::kBoardersShown);
+  // Rochebrune's breeding farm: the next ones (or the same, when there are few).
+  if (w.north.valid()) {
+    const size_t from = w.farm.size() > rules::kBoardersShown ? rules::kBoardersShown : 0;
+    keep_boarders(w, w.north.paddock, from, from + rules::kBoardersShown);
+  }
 }
 
 // ---- Each tick -----------------------------------------------------------------------------
@@ -1697,7 +1732,8 @@ void west_command(World& w, const Input& in) {
       break;
     }
     case Command::FarmSwap: {
-      if (!farm_open(w) || !near_npc(w, npc::kCapucine) || w.battle.phase != BattlePhase::None) break;
+      // (Capucine, or Margaux at Rochebrune's breeding farm: the same monsters.)
+      if (!farm_open(w) || (!near_npc(w, npc::kCapucine) && !near_npc(w, npc::kMargaux)) || w.battle.phase != BattlePhase::None) break;
       heal_farm(w);  // those taken back come out healed
       const size_t slot = in.target % 8, kept = in.target / 8;
       QuestState& q = w.quests[static_cast<size_t>(QuestId::Transfer)];

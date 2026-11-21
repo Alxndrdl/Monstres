@@ -119,8 +119,9 @@ enum class Command : uint8_t {
   FarmSwap,   // at the farm (Capucine): team slot Input::target % 8 (7: none) with the farm's monster
               // Input::target / 8 (8191: none): swapped, taken back, or left there (west.hpp)
   Rune,       // capturing (Battle::seal): the player touches rune Input::target of the circle
+  Tournament, // Rochebrune's arena (Barnabé close by): enter the cup Input::target (battle.hpp)
 };
-inline constexpr size_t kCommandCount = static_cast<size_t>(Command::Rune) + 1;  // the last one
+inline constexpr size_t kCommandCount = static_cast<size_t>(Command::Tournament) + 1;  // the last one
 
 // The magician's spells (see battle.hpp: what each does, where it can be cast).
 // Replay to Hint: the capture spells (Battle::seal); Home: an adventure one.
@@ -224,6 +225,12 @@ enum class ObjectKind : uint8_t {
   Cairn,         // a pile of stones marking the way. size.x = scale
   HotSpring,     // a steaming pool in a ring of stones (walked into: no collision)
   MineProp,      // inside the mine: a timber frame holding up the gallery, across its yaw (its posts are solid)
+  // The village at the foot of the mountains, and along the roads (north.hpp, roads.hpp):
+  Arena,         // the arena: a round of stone tiers around its sand, its gate at -Z (solid through its Colliders)
+  Grotto,        // a natural cave's opening in a rocky slope, at -Z: the mine's far way out (interior.hpp; its rocks: Colliders)
+  Shrine,        // a wayside shrine: a little stone niche on a pillar
+  Bench,         // a wooden bench, along X
+  Stall,         // a market stall under its awning, its front at -Z
   Count
 };
 
@@ -566,6 +573,19 @@ struct Rival {
   bool operator==(const Rival&) const = default;
 };
 
+// A tournament in Rochebrune's arena (battle.hpp): its cup, the round (three
+// contenders one after the other), the next contender's team. Not saved.
+struct Tournament {
+  bool on = false;
+  uint8_t cup = 0;
+  uint8_t round = 0;
+  uint16_t next_in = 0;  // ticks before the next round starts (0: one is fought, or none)
+  uint32_t tries = 0;    // tournaments entered (each its contenders)
+  std::array<RivalMonster, kRivalTeamSize> team{};
+  uint8_t count = 0;
+  bool operator==(const Tournament&) const = default;
+};
+
 // Capturing (battle.hpp): a circle of runes around the foe; some light up
 // one after the other (a series), the player touches them in the same order.
 // The world holds still meanwhile.
@@ -690,12 +710,19 @@ inline constexpr uint8_t kMathurin = 22;  // the water miller: aquatic monsters 
 // The north (north.hpp).
 inline constexpr uint8_t kSolene = 23;    // the refuge's keeper: she heals the team, for free
 inline constexpr uint8_t kGaston = 24;    // the old miner, by the mine: a guardian took his mine
+// Rochebrune, the village at the foot of the mountains, and along the roads (north.hpp, roads.hpp).
+inline constexpr uint8_t kBarnabe = 25;   // the arena's master: its tournaments
+inline constexpr uint8_t kMargaux = 26;   // the breeder: the monsters left at the farm are kept by her too
+inline constexpr uint8_t kContender = 27; // a tournament's contender, in the arena (not saved)
+inline constexpr uint8_t kAubin = 28;     // the innkeeper by the road: a good meal heals the team
+inline constexpr uint8_t kBertille = 29;   // the farmer of the farmstead by the path (Bertille)
+inline constexpr uint8_t kAgathe = 30;    // the healer of Rochebrune
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
 // some places. Walking near one makes it known; from one, the player can go
 // to any other known one.
-enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Farm, Menhirs, Refuge, Col, Count };
+enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Farm, Menhirs, Refuge, Col, Hamlet, Count };
 inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Count);
 
 // Quests (see quests.hpp).
@@ -778,12 +805,16 @@ struct RoomPiece {
   Vec2 half;             // box (radius 0)
   float height = 3;      // of the ceiling
   float wobble = 0;      // caves: how much the walls wander (meters)
+  float ya = 0, yb = 0;  // the floor's height at a and at b (the mine's galleries go down; height: above it)
+  bool natural = false;  // the mine: dug by nature (the cave it breaks into), not by the miners
   bool operator==(const RoomPiece&) const = default;
 };
 
 // A way out of an interior (or up, or down): where it is, which way it faces
 // (into the room), and where it leads.
-enum class ExitKind : uint8_t { Out, Roof, Hidden };  // Hidden: the cave's way out behind the waterfall
+// Hidden: the cave's way out behind the waterfall; Far: the mine's, through
+// the natural cave it breaks into, out of the grotto (ObjectKind::Grotto).
+enum class ExitKind : uint8_t { Out, Roof, Hidden, Far };
 struct Exit {
   Vec3 at;
   Vec2 facing;
@@ -801,6 +832,7 @@ struct Interior {
   Vec2 entry_facing;
   Vec3 top;              // the tower: where one arrives from the roof
   std::vector<Exit> exits;
+  std::vector<FloorPiece> floor;  // the floor going up and down (the mine); empty: flat at y = 0
   // The way out (the WayOut spell): the floor on a grid of kNavCell, each
   // cell how many steps from the door (kNoWay: not walkable, or no way).
   static constexpr float kNavCell = 0.5f;
@@ -833,6 +865,7 @@ struct World {
   CastleLayout castle; // derived from the seed (not saved)
   WestLayout west;     // the west, towards the sea (west.hpp): derived from the seed (not saved)
   NorthLayout north;   // the north, up to the mountains (north.hpp): derived from the seed (not saved)
+  RoadsLayout roads;   // the side roads and the places along them (roads.hpp): derived from the seed (not saved)
   Heightmap ground;    // derived from the seed (not saved)
   Body player;
   std::vector<Object> objects;
@@ -868,6 +901,8 @@ struct World {
   // How many monsters of each species the player captured, beat (wild ones), let go.
   std::array<uint16_t, kSpeciesCount> captured_count{}, beaten_count{}, released_count{};
   uint32_t battles_won = 0;    // victories, wild monsters' and trainers'
+  uint8_t cups = 0;            // the arena's cups won (a bit each, battle.hpp)
+  Tournament tournament;       // not saved: the one going on
   uint16_t detect_ticks = 0;   // the Detection spell: ticks left
   std::array<SpellId, kCombatSlots> combat_spells{SpellId::Heal, SpellId::Shield};  // chosen out of battles
   std::array<SpellId, kAdventureSlots> adventure_spells{SpellId::Heal, SpellId::None, SpellId::None, SpellId::None};
@@ -891,6 +926,9 @@ struct World {
   Angle16 climb_yaw = 0;
   bool operator==(const World&) const = default;
 };
+
+// A trainer's monster stands beside it (the first of its team), brought if missing.
+void keep_trainer_monster(World& world, uint8_t trainer);
 
 World new_game(uint64_t seed);
 

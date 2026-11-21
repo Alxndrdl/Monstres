@@ -262,8 +262,9 @@ uint8_t npc_marks(const World& w, uint8_t n) {
     if (quest_giver(id) == n && stage == QuestStage::Unknown && quest_available(w, id)) marks |= kMarkNewQuest;
     if (quest_receiver(id) == n && stage == QuestStage::Active) marks |= kMarkQuest;
   }
-  if (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene) marks |= kMarkHeal;
+  if (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene || n == npc::kAgathe || n == npc::kAubin) marks |= kMarkHeal;
   if (n == npc::kBastien || n == npc::kRomane) marks |= kMarkFight;
+  if (n == npc::kBarnabe && !w.tournament.on && w.cups != (1u << rules::kCups) - 1) marks |= kMarkFight;  // a cup to win
   if (npc::wanderer(n)) {  // a trainer passing by: until beaten (an aggressive one: the bolt, not this)
     const int i = npc_index(w, n);
     if (i > 0 && !w.creatures[static_cast<size_t>(i)].beaten && w.creatures[static_cast<size_t>(i)].tag != Tag::Raider) {
@@ -271,7 +272,7 @@ uint8_t npc_marks(const World& w, uint8_t n) {
     }
   }
   if (n == npc::kAnselme && w.quests[static_cast<size_t>(QuestId::Merchant)].stage == QuestStage::Done) marks |= kMarkShop;
-  if (n == npc::kCapucine && farm_open(w)) marks |= kMarkFarm;
+  if ((n == npc::kCapucine || n == npc::kMargaux) && farm_open(w)) marks |= kMarkFarm;
   return marks;
 }
 

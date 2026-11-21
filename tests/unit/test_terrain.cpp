@@ -1,5 +1,6 @@
 #include "monstres/core/terrain.hpp"
 #include "monstres/render/terrain_mesh.hpp"
+#include "monstres/core/roads.hpp"
 #include "monstres/core/west.hpp"
 #include "monstres/core/continent.hpp"
 #include "test_helpers.hpp"
@@ -37,10 +38,16 @@ TEST_CASE("the path crosses the world (southwards up to the sea) and passes by t
     CHECK((end.z > rules::kWorldHalfSize || continent_height(seed, end.x, end.z + 2.0f) < rules::kSeaLevel + 0.6f));
     CHECK(end.z > rules::kPathExtent);
     CHECK(distance_to_path(path, 0, 0) <= 1.0f + 1e-4f);
+    // Beyond the valley it bends widely (seen from afar, not a line down the world).
+    float widest = 0;
+    for (const Vec2& p : path.points) {
+      if (p.z < -rules::kPathBendNorthFrom - 150.0f) widest = std::max(widest, std::fabs(p.x));
+    }
+    CHECK(widest > 50.0f);
     for (size_t i = 0; i < path.points.size(); ++i) {
       // Within the valley as it always was; beyond it, winding farther.
       const bool valley = std::fabs(path.points[i].z) < rules::kPathExtent - 6.0f;
-      CHECK(std::fabs(path.points[i].x) <= (valley ? rules::kPathMaxX : rules::kPathFarMaxX) + 0.5f);
+      CHECK(std::fabs(path.points[i].x) <= (valley ? rules::kPathMaxX : rules::kPathBendMaxX) + 0.5f);
       if (i > 0) CHECK(path.points[i].z > path.points[i - 1].z);  // by increasing z
       if (i > 0) {
         const float dx = path.points[i].x - path.points[i - 1].x;
@@ -119,9 +126,10 @@ TEST_CASE("the path mesh is a ribbon on the path, with soft edges") {
   for (size_t i = 0; i < path.vertices.size(); i += MeshData::kFloatsPerVertex) {
     const float* v = &path.vertices[i];
     CHECK(v[1] == Approx(ground_height(w, v[0], v[2]) + terrain::kPathHeight));  // just above the ground
-    // On the path, or on the west's road (west.hpp).
-    CHECK(std::min(distance_to_path(w.path, v[0], v[2]) / rules::kPathHalfWidth,
-                   distance_to_road(w.west.road, v[0], v[2]) / rules::kRoadHalfWidth) <= 1.5f);
+    // On the path, on the west's road (west.hpp), or on a lane (roads.hpp).
+    CHECK(std::min({distance_to_path(w.path, v[0], v[2]) / rules::kPathHalfWidth,
+                    distance_to_road(w.west.road, v[0], v[2]) / rules::kRoadHalfWidth,
+                    distance_to_lanes(w.roads, v[0], v[2]) / rules::kLaneHalfWidth}) <= 1.5f);
     min_alpha = std::min(min_alpha, v[9]);
     max_alpha = std::max(max_alpha, v[9]);
   }

@@ -69,6 +69,10 @@ std::string continent_json(const Continent& continent);
 // three attacks (identifier, shape, element, power, cooldown in seconds).
 std::string team_json(const World& world);
 
+// The arena's tournaments (battle.hpp): {"cups": [{"won", "open", "level",
+// "coins"}...], "on", "cup", "round", "rounds", "nextIn"}.
+std::string tournament_json(const World& world);
+
 // The battle going on ("phase": "fight", "flee", "training" or "none"),
 // with both sides (hit points, state, cooldowns left in seconds, last
 // hits; when training the magician's shield) and whether the enemy can be

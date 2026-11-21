@@ -43,6 +43,7 @@ constexpr const char* kNames[kMeshCount] = {
     "windmill", "windmill_sails", "water_mill", "mill_wheel", "cabin", "tent", "campfire", "campfire_fire", "woodpile", "hollow_tree", "burrow",
     "lighthouse", "lighthouse_lamp", "menhir", "meteorite",
     "chalet", "mine_entrance", "minecart", "minecart_loaded", "larch", "stone_wall", "cairn", "hot_spring", "mine_prop",
+    "arena", "grotto", "shrine", "bench", "stall",
     "tree_far", "pine_far", "tree_mid", "bush_far", "larch_far",
     "grass_short_far", "grass_tall_far", "flower_far",
     "tree_bare", "tree_bare_far", "leaf_litter", "leaves",

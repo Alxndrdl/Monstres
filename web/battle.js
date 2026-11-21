@@ -138,7 +138,8 @@
       return d.action === 'climb' ? doors.roofs[d.place] : doors[d.place];
     }
     if (d.place === 'burrow') return doors.burrow;
-    if (d.place === 'mine') return doors.mine;
+    if (d.place === 'mine') return d.far || d.building === 'grotto' ? doors.grotto : doors.mine;
+    if (d.spot && doors.spots[d.spot]) return doors.spots[d.spot];  // the refuge, the inn...
     return doors.house[d.building] || doors.house.cottage;
   }
 
@@ -262,7 +263,7 @@
           contextActions.replaceChildren(...villagerActions(c, marks, heal));
           contextNote.textContent = !c.talk ? 'Approche-toi pour lui parler.'
             : marks.includes('heal') && !heal ? 'Tes monstres sont en pleine forme, ton mana est plein.'
-              : marks.includes('fight') && !c.challenge ? 'Fais d’abord sortir un monstre en forme de ton cristal.' : '';
+              : marks.includes('fight') && !c.challenge && c.npc !== 25 ? 'Fais d’abord sortir un monstre en forme de ton cristal.' : '';
         };
       } else {
         key = `monster/${c.index}/${c.engage}`;
@@ -294,7 +295,9 @@
       buttons.push(action('heal', 'Soigner', near && heal, () => game.healTeam(c.npc)));
     }
     if (marks.includes('shop')) buttons.push(action('shop', 'Boutique', near, () => window.monstresDialogue.open(game.selected(), 'shop')));
-    if (marks.includes('fight')) buttons.push(action('fight', 'Combattre', near && c.challenge, () => game.challenge(c.npc)));
+    // (Barnabé: the arena's tournaments, chosen talking to him.)
+    if (marks.includes('fight') && c.npc === 25) buttons.push(action('fight', 'Tournoi', near, talk));
+    else if (marks.includes('fight')) buttons.push(action('fight', 'Combattre', near && c.challenge, () => game.challenge(c.npc)));
     if (marks.includes('farm')) buttons.push(action('farm', 'Mes monstres', near, () => window.monstresDialogue.openFarm()));
     if (!buttons.length) buttons.push(action('talk', 'Parler', near, talk));
     return buttons;

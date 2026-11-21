@@ -12,6 +12,8 @@ inline constexpr float kPathFullExtent = 650.0f;  // ...then on across the world
 inline constexpr float kPathNorthExtent = 1290.0f;  // northwards, further: up to the mountains (the world grew north)
 inline constexpr float kPathFarMaxX = 90.0f;      // beyond the valley it winds farther
 inline constexpr float kPathMaxX = 22.0f;      // and winds at most this far from x = 0
+inline constexpr float kPathBendMaxX = 260.0f;  // its wide bends beyond the valley: at most this far
+inline constexpr float kPathBendNorthFrom = 330.0f;  // northwards they start this far (z < -330), past the river
 }
 
 struct Vec2 {

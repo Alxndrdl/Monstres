@@ -36,7 +36,7 @@ test('the game starts in a 3D world', async ({ page }) => {
   expect(s.creatures[0].species).toBe('companion');
   const bySpecies = {};
   for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
-  expect(bySpecies.villager).toBe(20);  // with Isidore, the old magician, the west's nine and the north's two
+  expect(bySpecies.villager).toBe(25);  // with Isidore, the old magician, the west's nine, the north's two, Rochebrune's three, the roads' two
   expect(bySpecies.companion).toBeGreaterThanOrEqual(1);  // the companion (and now and then a wild Pompon)
   expect(bySpecies.crow).toBeGreaterThan(0);
   expect(bySpecies.fish).toBeGreaterThan(0);
@@ -1379,12 +1379,36 @@ test.describe('the bigger world', () => {
     expect((await page.evaluate(() => window.monstres.teleporters().list)).filter((t) => t.known)).toHaveLength(0);
     await page.locator('#settings-button').click();
     await page.locator('#unlock-teleporters').click();
-    await expect(page.locator('#unlock-teleporters-note')).toContainText('Les 9 téléporteurs sont connus');
+    await expect(page.locator('#unlock-teleporters-note')).toContainText('Les 10 téléporteurs sont connus');
     const list = await page.evaluate(() => window.monstres.teleporters().list);
-    expect(list).toHaveLength(9);
+    expect(list).toHaveLength(10);
     expect(list.every((t) => t.known)).toBe(true);
-    // The north's: the refuge's and the col's, up there.
-    expect(list.filter((t) => t.z < -700)).toHaveLength(2);
+    // The north's: the refuge's, Rochebrune's and the col's, up there.
+    expect(list.filter((t) => t.z < -700)).toHaveLength(3);
+  });
+
+  test('Rochebrune: Barnabé offers the arena\'s cups, the first contender comes; lanes on the map', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const map = await page.evaluate(() => window.monstres.map());
+    expect(map.roads.lanes.length).toBeGreaterThanOrEqual(12);
+    expect(map.north.arena).toHaveLength(2);
+    // Next to Barnabé, by the arena's gate.
+    const at = await page.evaluate(() => window.monstres.state().creatures.find((c) => c.npc === 25));
+    await page.evaluate(([x, z]) => {
+      window.monstres.teleport(x + 1.2, z);
+      window.monstres.step(5);
+    }, [at.x, at.z]);
+    const index = await page.evaluate(() => window.monstres.state().creatures.findIndex((c) => c.npc === 25));
+    await page.evaluate((i) => window.monstres.select(i), index);
+    await page.evaluate(() => window.monstresDialogue.open(window.monstres.selected()));
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Barnabé');
+    await expect(page.locator('#cup-0')).toBeVisible();
+    await expect(page.locator('#cup-1')).toHaveCount(0);  // the bronze one first
+    await page.locator('#cup-0').click();
+    await page.evaluate(() => window.monstres.step(10));
+    expect((await page.evaluate(() => window.monstres.tournament())).on).toBe(true);
+    await expect(page.locator('#toast')).toContainText('Coupe de Bronze');
+    expect((await page.evaluate(() => window.monstres.battle())).phase).toBe('prepare');
   });
 
   test('the north: the refuge, the old mine and its guardian on the map and in the journal', async ({ page }) => {

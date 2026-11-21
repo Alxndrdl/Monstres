@@ -1,6 +1,7 @@
 #include "monstres/core/terrain.hpp"
 
 #include "monstres/core/continent.hpp"
+#include "monstres/core/heightmap.hpp"
 
 #include "monstres/core/rng.hpp"
 
@@ -65,15 +66,41 @@ Path make_path(uint64_t seed) {
     all[i] = std::clamp(all[i + 1] + step + pull, -rules::kPathFarMaxX, rules::kPathFarMaxX);
   }
 
-  Path path;
   const float z0 = -kControlStep * static_cast<float>(middle + kNorthControlPoints);
+  // Beyond the valley, wide bends of changing size (seen from afar, not a
+  // line down the world): nothing in the valley, growing past it.
+  {
+    const uint64_t s = seed ^ 0x42454E4453ULL;  // "BENDS"
+    for (int dir : {1, -1}) {
+      float phase = 6.2831853f * value_noise(s, dir * 7.0f, 3.0f, 1.0f);
+      const int from = kNorthControlPoints + middle;
+      for (int i = from; i >= 0 && i < kAll; i += dir) {
+        const float z = z0 + kControlStep * static_cast<float>(i);
+        // (Northwards, past the river's way across the terrace: it crosses the path once.)
+        const float out = std::fabs(z) - (z < 0 ? rules::kPathBendNorthFrom : rules::kPathExtent + 25.0f);
+        if (out <= 0) continue;
+        const float wave = 240.0f + 220.0f * value_noise(s + 1, z / 380.0f, dir * 5.0f, 1.0f);
+        phase += 6.2831853f * kControlStep / wave;
+        const float grow = std::min(1.0f, out / 140.0f);
+        // (Never too steep across: the path still goes on north or south.)
+        const float amp = std::min(40.0f + 70.0f * value_noise(s + 2, z / 330.0f, dir * 9.0f, 1.0f), 0.27f * wave) *
+                          grow * grow * (3 - 2 * grow);
+        all[i] = std::clamp(all[i] + amp * wave_sin(phase), -rules::kPathBendMaxX, rules::kPathBendMaxX);
+      }
+    }
+  }
+
+  Path path;
   for (int seg = 0; seg + 1 < kAll; ++seg) {
     const float p0 = all[std::max(seg - 1, 0)];
     const float p1 = all[seg];
     const float p2 = all[seg + 1];
     const float p3 = all[std::min(seg + 2, kAll - 1)];
-    for (int s = 0; s < kSamplesPerSegment; ++s) {
-      const float t = static_cast<float>(s) / kSamplesPerSegment;
+    // (More samples where it bends across: about a point every 0.9 m or closer.)
+    const float across = p2 - p1;
+    const int samples = std::max(kSamplesPerSegment, static_cast<int>(std::ceil(std::sqrt(across * across + kControlStep * kControlStep) / 0.9f)));
+    for (int s = 0; s < samples; ++s) {
+      const float t = static_cast<float>(s) / static_cast<float>(samples);
       path.points.push_back({catmull_rom(p0, p1, p2, p3, t),
                              z0 + kControlStep * (static_cast<float>(seg) + t)});
     }

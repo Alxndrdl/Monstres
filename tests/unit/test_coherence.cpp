@@ -89,7 +89,9 @@ TEST_CASE("the path and the road stay dry but on their bridges, whose ends meet 
     int k = 0;
     for (const Object& o : w.objects) {
       if (o.kind != ObjectKind::Bridge) continue;
-      const Vec2 a = k++ == 0 ? v.bridge_along : v.path_bridge_along;
+      const Vec2 way = k++ == 0 ? v.bridge_along : v.path_bridge_along;
+      // (Its deck along X or Z, the axis nearest the way's: where it meets the banks.)
+      const Vec2 a = std::fabs(way.x) >= std::fabs(way.z) ? Vec2{way.x >= 0 ? 1.0f : -1.0f, 0} : Vec2{0, way.z >= 0 ? 1.0f : -1.0f};
       const float deck = o.pos.y + 2 * o.size.y;
       for (const float t : {-1.0f, 1.0f}) {
         const float g = w.ground.height(o.pos.x + a.x * t * (rules::kBridgeHalf - 0.3f), o.pos.z + a.z * t * (rules::kBridgeHalf - 0.3f));

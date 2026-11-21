@@ -500,8 +500,10 @@ window.MonstresLore = {
     tower: 'Tour des ruines',
     roof: 'Toit de la tour',
     house: { cottage: 'Maison', chimney: 'Grande maison', hut: 'Hutte', farmhouse: 'Ferme de Capucine', cabin: 'Cabane du bûcheron',
-      chalet: 'Refuge du Col' },
+      chalet: 'Chalet' },
+    spots: { refuge: 'Refuge du Col', inn: 'Auberge du Chemin', farmstead: 'Ferme des Genêts', sawmill: 'Scierie' },
     mine: 'Vieille mine',
+    grotto: 'Grotte des Givres',
     burrow: 'Terrier',
     hollowTree: 'Arbre creux',
     lighthouse: 'Phare',
@@ -555,12 +557,15 @@ window.MonstresLore = {
   teleporters: {
     village: 'Village', ruins: 'Ruines de la Tour', forest: 'Forêt des Murmures', cave: 'Grotte aux Cristaux',
     castle: 'Château de Corbeval', farm: 'Exploitation de Capucine', menhirs: 'Cercle des Menhirs',
-    refuge: 'Refuge du Col', col: 'Col des Givres',
+    refuge: 'Refuge du Col', col: 'Col des Givres', hamlet: 'Rochebrune',
   },
   // The north's places (north.hpp), for the map.
   northPlaces: {
     refuge: 'Refuge du Col', mine: 'Vieille mine', springs: 'Sources chaudes', lake: 'Lac des Givres', col: 'Col des Givres',
+    hamlet: 'Rochebrune', arena: 'Arène', ranch: 'Élevage des Cimes', grotto: 'Grotte des Givres',
   },
+  // Along the roads (roads.hpp), for the map.
+  roadPlaces: { inn: 'Auberge du Chemin', farmstead: 'Ferme des Genêts', sawmill: 'Scierie' },
   // The west's places (west.hpp), for the map.
   westPlaces: {
     cart: 'Charrette d’Anselme', bridge: 'Pont de la Route', pathBridge: 'Pont du Sentier', cove: 'Crique de la Cascade',
@@ -628,6 +633,23 @@ window.MonstresLore = {
     24: { name: 'Gaston', chatter: ['J’ai creusé cette mine pendant quarante ans. Des filons qui brillaient comme des étoiles…',
       'Les Caillou dorment sur les pentes. Si un rocher a des yeux, passe ton chemin… ou prépare-toi !',
       'Les Cabri grimpent partout. Une fois, j’en ai trouvé un sur le toit du refuge !'] },
+    // Rochebrune, at the foot of the mountains, and along the roads.
+    25: { name: 'Barnabé', trainer: true, chatter: ['Dans mon arène, on vient de tout le pays se mesurer aux meilleurs !',
+      'Trois coupes, trois manches chacune. Personne n’a encore gagné la Coupe d’Or cette saison…',
+      'Entre deux manches, nos soigneurs remettent tes monstres sur pied. Ici, on se bat à la loyale.'] },
+    26: { name: 'Margaux', chatter: ['J’élève les monstres que les magiciens me confient. Capucine et moi, on est reliées par sa pierre de transfert.',
+      'Un monstre bien soigné est un monstre heureux. Regarde comme ils gambadent dans l’enclos !',
+      'Les monstres que tu laisses à l’exploitation, tu peux aussi les reprendre ici. Pratique, non ?'] },
+    27: { name: 'Concurrent', trainer: true, chatter: ['On se retrouve dans l’arène !'] },
+    28: { name: 'Aubin', healer: true, chatter: ['Une bonne soupe et un coin de feu : rien de tel pour remettre d’aplomb voyageurs et monstres.',
+      'Les voyageurs qui montent à Rochebrune s’arrêtent tous chez moi. Les nouvelles vont vite, à l’auberge !',
+      'On dit que la vieille mine débouche quelque part dans la montagne. Gaston en saurait plus que moi.'] },
+    29: { name: 'Bertille', chatter: ['Mes genêts fleurissent jaune tout le printemps. D’où le nom de la ferme !',
+      'Les Laini sauvages viennent brouter mon blé la nuit. Je les laisse faire, ils sont trop mignons.',
+      'Suis le chemin vers le nord : il y a une auberge, puis les alpages, puis Rochebrune au pied des montagnes.'] },
+    30: { name: 'Agathe', healer: true, chatter: ['Je soigne les monstres des concurrents de l’arène. Il y a du travail, crois-moi !',
+      'L’air des montagnes fait du bien aux monstres. Et aux guérisseuses aussi.',
+      'De l’autre côté de la vallée, il y a une grotte dans la montagne. Elle est glaciale.'] },
   },
   // What the other villagers say about the quests (any of them, see web/dialogue.js).
   rumors: {
@@ -655,6 +677,10 @@ window.MonstresLore = {
     north: ['Au nord, le sentier monte vers les alpages, et jusqu’au col des Monts Givrés. Il y a un refuge en chemin.',
       'Le vieux Gaston ne parle que de sa mine, là-haut au nord. Il paraît qu’un monstre énorme s’y est installé.',
       'On dit qu’il y a des sources chaudes dans les montagnes, au milieu de la neige !'],
+    rochebrune: ['Au pied des montagnes, il y a Rochebrune, avec son arène. On y organise des tournois !',
+      'À Rochebrune, Margaux élève les monstres des magiciens, comme Capucine à l’exploitation.',
+      'L’arène de Rochebrune décerne trois coupes : bronze, argent et or. Il faut gagner trois combats d’affilée.',
+      'Aubin tient une auberge sur le chemin du nord. Sa soupe ferait revenir un Caillou à la vie !'],
   },
   // The quests (src/core/quests.hpp): the journal, in the grimoire.
   quests: {

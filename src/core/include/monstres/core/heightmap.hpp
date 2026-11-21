@@ -31,6 +31,18 @@ inline constexpr float kSeaLevel = -2.0f;        // the ocean: walkers do not go
 // Plain arithmetic only: identical on every platform.
 float value_noise(uint64_t seed, float x, float z, float cell_size);
 
+// Inside (interior.hpp), a floor going up and down (the mine's galleries
+// going down): pieces of floor, capsules from a to b (a disc where a == b),
+// the floor's height at a and at b (in between, along the line). Where they
+// meet, their heights blend (each weighs more the further inside it is).
+struct FloorPiece {
+  Vec2 a, b;
+  float radius = 0;
+  float ya = 0, yb = 0;
+  bool operator==(const FloorPiece&) const = default;
+};
+float floor_height(const std::vector<FloorPiece>& floor, float x, float z);
+
 // The relief of the ground: heights on a 2 m grid. Between grid points the
 // ground is made of two triangles per cell, split along the diagonal from
 // (x0, z0) to (x1, z1): exactly the triangles the renderer draws, so what
@@ -56,6 +68,8 @@ struct Heightmap {
   static constexpr int kLandPointsX = static_cast<int>(2 * rules::kReliefHalfSize / kLandCell) + 1;
   static constexpr int kLandPointsZ = static_cast<int>((rules::kReliefHalfSize + rules::kReliefNorth) / kLandCell) + 1;
   std::vector<float> land;  // index i * kLandPointsZ + j
+  // Inside (no heights): the floor's slopes, if any (empty: flat at y = 0).
+  std::vector<FloorPiece> floor;
 
   bool empty() const { return heights.empty(); }
   float at(int i, int j) const { return heights[index(i, j)]; }
@@ -92,6 +106,7 @@ struct Places {
   // mill and the lighthouse, the crater's bowl, the stream's bed. Its stream
   // gets its water's level here (going down along it, under the ground).
   WestLayout* west = nullptr;
+  const RoadsLayout* roads = nullptr;  // the side roads (roads.hpp): gentle along them, as along the path
 };
 
 // The terrace inland (west.hpp): how much higher the ground is there (0 in

@@ -1,6 +1,7 @@
 #include "monstres/core/heightmap.hpp"
 
 #include "monstres/core/continent.hpp"
+#include "monstres/core/roads.hpp"
 #include "monstres/core/west.hpp"
 #include "monstres/core/world.hpp"
 
@@ -69,9 +70,10 @@ float shape_west(const WestLayout& west, const WestTops& t, float x, float z, fl
   h = level_at(h, west.mill, x, z, t.mill, rules::kMillRadius, rules::kMillKnoll + 6.0f);
   h = level_at(h, west.pasture, x, z, t.pasture, rules::kPastureRadius - 4.0f, rules::kPastureRadius + 10.0f);
   h = level_at(h, west.burrow, x, z, t.burrow, 5.0f, rules::kBurrowRadius + 6.0f);
-  h = level_at(h, west.camp, x, z, t.camp, rules::kCampRadius - 2.0f, rules::kCampRadius + 6.0f);
-  h = level_at(h, west.hollow_tree, x, z, t.hollow, 6.0f, rules::kHollowClearing + 6.0f);
-  h = level_at(h, west.cabin, x, z, t.cabin, 5.0f, rules::kCabinClearing + 6.0f);
+  // (The woods' clearings blend into the ground over a dozen meters: never a cliff by a hill.)
+  h = level_at(h, west.camp, x, z, t.camp, rules::kCampRadius - 2.0f, rules::kCampRadius + 12.0f);
+  h = level_at(h, west.hollow_tree, x, z, t.hollow, 6.0f, rules::kHollowClearing + 12.0f);
+  h = level_at(h, west.cabin, x, z, t.cabin, 5.0f, rules::kCabinClearing + 12.0f);
   h = level_at(h, west.lighthouse, x, z, t.lighthouse, 6.5f, rules::kLighthouseRadius + 24.0f);
   h = level_at(h, west.menhirs, x, z, t.menhirs, rules::kMenhirsRadius - 2.0f, rules::kMenhirsRadius + 20.0f);
   // The crater: its rim around a bowl, the ground leveled around it.
@@ -109,7 +111,7 @@ struct Coarse {
   static constexpr float kStep = 16.0f;
   static constexpr float kSlack = 11.4f;  // farthest from the nearest point (half a diagonal)
   int nx = 0, nz = 0;
-  std::vector<float> path, road, stream, scarp;
+  std::vector<float> path, road, stream, scarp, lanes;
   std::vector<float> lowest_land;  // the continent's lowest ground around (by the sea: below its level)
   float at(const std::vector<float>& v, float x, float z) const {
     const int i = std::clamp(static_cast<int>(std::lround((x - Heightmap::kMinX) / kStep)), 0, nx - 1);
@@ -169,6 +171,10 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
   if (places.west && places.west->valid()) {
     const float d = near(coarse.road, 7.0f, [&] { return distance_to_road(places.west->road, x, z, 7.0f); });
     near_path = std::max(near_path, 1 - smooth(1.5f, 7.0f, d));
+  }
+  if (places.roads && !places.roads->lanes.empty()) {
+    const float d = near(coarse.lanes, 6.0f, [&] { return distance_to_lanes(*places.roads, x, z, 6.0f); });
+    near_path = std::max(near_path, 1 - smooth(1.2f, 6.0f, d));
   }
   float h = hills(seed, x, z) + (value_noise(seed + 42, x, z, 6.0f) - 0.5f) * 0.8f * (1 - near_path);
   // The river runs down a gentle valley of its own: the hills (not the
@@ -271,10 +277,15 @@ void embank_bridges(Heightmap& m, const WestLayout& west) {
   const auto index_z = [](float v) { return Heightmap::j_of(v); };
   const std::pair<Vec2, Vec2> bridges[] = {{west.bridge, west.bridge_along}, {west.path_bridge, west.path_bridge_along}};
   constexpr float L = rules::kBridgeHalf, kRamp = 12.0f;
-  for (const auto& [c, a] : bridges) {
-    if (a.x == 0 && a.z == 0) continue;
-    const float top = std::max(m.height(c.x + a.x * (L - 0.2f), c.z + a.z * (L - 0.2f)),
-                               m.height(c.x - a.x * (L - 0.2f), c.z - a.z * (L - 0.2f)));
+  for (const auto& [c, way] : bridges) {
+    if (way.x == 0 && way.z == 0) continue;
+    // (Along its deck: turned by quarters, along X or Z, the axis nearest the way's.)
+    const Vec2 a = std::fabs(way.x) >= std::fabs(way.z) ? Vec2{way.x >= 0 ? 1.0f : -1.0f, 0} : Vec2{0, way.z >= 0 ? 1.0f : -1.0f};
+    // (The higher bank's top at its ends, or just beyond them where a bank goes on rising.)
+    float top = -1e30f;
+    for (const float u : {L - 0.2f, L + 0.8f, L + 1.8f}) {
+      top = std::max({top, m.height(c.x + a.x * u, c.z + a.z * u), m.height(c.x - a.x * u, c.z - a.z * u)});
+    }
     const float r = L + kRamp + 6.0f;
     for (int i = index_x(c.x - r); i <= std::min(index_x(c.x + r) + 1, Heightmap::kPointsX - 1); ++i) {
       for (int j = index_z(c.z - r); j <= std::min(index_z(c.z + r) + 1, Heightmap::kPointsZ - 1); ++j) {
@@ -282,7 +293,7 @@ void embank_bridges(Heightmap& m, const WestLayout& west) {
         const float z = Heightmap::z_of(j);
         const float u = std::fabs((x - c.x) * a.x + (z - c.z) * a.z);
         const float v = std::fabs(-(x - c.x) * a.z + (z - c.z) * a.x);
-        if (u < L - 2.0f || u > L + kRamp || v > 6.0f) continue;
+        if (u < L - 3.2f || u > L + kRamp || v > 6.0f) continue;  // (from a grid cell before its end: the ground right at it raised all through)
         const float k = (1 - smooth(L, L + kRamp, u)) * (1 - smooth(3.5f, 6.0f, v));
         float& h = m.heights[Heightmap::index(i, j)];
         if (h < top) h += (top - h) * k;
@@ -473,8 +484,24 @@ float value_noise(uint64_t seed, float x, float z, float cell) {
   return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sz;
 }
 
+float floor_height(const std::vector<FloorPiece>& floor, float x, float z) {
+  float sum = 0, weights = 0;
+  for (const FloorPiece& p : floor) {
+    const float abx = p.b.x - p.a.x, abz = p.b.z - p.a.z;
+    const float len2 = abx * abx + abz * abz;
+    const float t = len2 > 0 ? std::clamp(((x - p.a.x) * abx + (z - p.a.z) * abz) / len2, 0.0f, 1.0f) : 0.0f;
+    const float dx = x - (p.a.x + abx * t), dz = z - (p.a.z + abz * t);
+    const float inside = p.radius - std::sqrt(dx * dx + dz * dz);  // positive inside
+    const float k = std::max(inside + 3.0f, 0.0f);
+    const float w = k * k * k * k + 1e-4f;
+    sum += (p.ya + (p.yb - p.ya) * t) * w;
+    weights += w;
+  }
+  return weights > 0 ? sum / weights : 0.0f;
+}
+
 float Heightmap::height(float x, float z) const {
-  if (heights.empty()) return 0;
+  if (heights.empty()) return floor.empty() ? 0.0f : floor_height(floor, x, z);
   const float fx = std::clamp((x - kMinX) / kCellSize, 0.0f, static_cast<float>(kCellsX));
   const float fz = std::clamp((z - kMinZ) / kCellSize, 0.0f, static_cast<float>(kCellsZ));
   const int i = std::min(static_cast<int>(fx), kCellsX - 1);
@@ -555,11 +582,11 @@ Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) 
     tops.menhirs = natural(west->menhirs);
     tops.crater = natural(west->crater);
   }
-  const Places with_tops{places.village, places.ruins, places.cave, places.castle, west};
+  const Places with_tops{places.village, places.ruins, places.cave, places.castle, west, places.roads};
   Coarse coarse;
   coarse.nx = static_cast<int>(2 * rules::kReliefHalfSize / Coarse::kStep) + 1;
   coarse.nz = static_cast<int>((rules::kReliefHalfSize + rules::kReliefNorth) / Coarse::kStep) + 1;
-  for (auto* v : {&coarse.path, &coarse.road, &coarse.stream, &coarse.scarp, &coarse.lowest_land}) {
+  for (auto* v : {&coarse.path, &coarse.road, &coarse.stream, &coarse.scarp, &coarse.lanes, &coarse.lowest_land}) {
     v->assign(static_cast<size_t>(coarse.nx * coarse.nz), 1e9f);
   }
   for (int i = 0; i < coarse.nx; ++i) {
@@ -568,6 +595,7 @@ Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) 
       const float z = Heightmap::kMinZ + static_cast<float>(j) * Coarse::kStep;
       const auto k = static_cast<size_t>(i * coarse.nz + j);
       coarse.path[k] = distance_to_path(path, x, z, 1e9f);
+      if (places.roads) coarse.lanes[k] = distance_to_lanes(*places.roads, x, z, 1e9f);
       for (float dx = -24; dx <= 24; dx += 12) {
         for (float dz = -24; dz <= 24; dz += 12) coarse.lowest_land[k] = std::min(coarse.lowest_land[k], land_at(x + dx, z + dz));
       }

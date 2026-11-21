@@ -4,7 +4,9 @@
 
 namespace monstres {
 
-// Interiors: the crystal cave, the village's houses, the tower of the ruins.
+// Interiors: the crystal cave, the village's houses, the tower of the ruins,
+// the burrow, the mine (its galleries going down, a natural cave beyond them
+// leading out of the grotto in the mountains)...
 //
 // The player goes in through a door (Command::Door, near it). The world
 // then becomes the interior's: World::objects are its furniture, rocks and
@@ -55,6 +57,7 @@ struct DoorNear {
   float width = 1, height = 2;  // of the opening
   float distance = 0;
   bool hidden = false;   // the cave's hidden way, behind the waterfall (ObjectKind::HiddenCave)
+  bool far = false;      // the mine's far way, out of the grotto (ObjectKind::Grotto)
 };
 DoorNear door_near(const World& world, float reach = rules::kDoorReach);
 
@@ -76,7 +79,10 @@ const Body& map_body(const World& world);
 
 // The interior's shape. Distances in meters, positive in the open.
 float wall_distance(const Interior& in, float x, float z);  // to the walls, across the floor
-float ceiling_height(const Interior& in, float x, float z);
+float floor_height(const Interior& in, float x, float z);   // 0 but where the floor goes up and down (the mine)
+float ceiling_height(const Interior& in, float x, float z); // its height (not above the floor)
+// How much (x, z) is in a natural part (the cave the mine broke into): 0 dug, 1 natural.
+float natural_at(const Interior& in, float x, float z);
 float open_distance(const Interior& in, Vec3 p);            // to the nearest surface (floor, walls, ceiling)
 Vec3 surface_normal(const Interior& in, Vec3 p);            // unit, towards the open
 

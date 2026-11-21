@@ -4,6 +4,8 @@
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/continent.hpp"
+#include "monstres/core/north.hpp"
+#include "monstres/core/roads.hpp"
 #include "monstres/core/save.hpp"
 #include "monstres/core/west.hpp"
 #include "test_helpers.hpp"
@@ -34,7 +36,9 @@ TEST_CASE("the wilds: many objects around the valley, the valley's own unchanged
   for (size_t k = valley.size(); k < w.objects.size(); ++k) {
     const Object& o = w.objects[k];
     // Nature (and the pieces of logs), and the west's buildings (west.hpp, drawn again at each load too).
+    // (And the north's, and those along the roads: roads.hpp.)
     if (in_west_place(w.west, o.pos.x, o.pos.z, 4.0f) || o.kind > ObjectKind::Crate) continue;
+    if (in_north_place(w.north, o.pos.x, o.pos.z, 4.0f) || in_roadside_place(w.roads, o.pos.x, o.pos.z, 4.0f)) continue;
     CHECK((o.kind <= ObjectKind::Bush || o.kind == ObjectKind::Collider));
     if (o.kind == ObjectKind::Collider) continue;  // a piece of a log, along it
     CHECK(chebyshev(o.pos.x, o.pos.z) >= rules::kValleyHalfSize - 2.0f);

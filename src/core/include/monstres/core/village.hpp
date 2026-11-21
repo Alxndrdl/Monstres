@@ -200,9 +200,36 @@ struct NorthLayout {
   float floor_start = 0;        // the valley's floor up to the col: its height where the mountains begin (set with the relief)
   std::vector<std::vector<Vec2>> walls;  // the alpine pastures' dry-stone walls (a point every 1.1 m)
   std::vector<Vec2> cairns;     // along the path, up to the col
+  // The village at the foot of the mountains (Rochebrune), on the path.
+  Vec2 hamlet, hamlet_along;    // its middle (on the path); the path's way there (unit, northwards)
+  float hamlet_level = 0;       // its flat ground (set with the relief)
+  Vec2 arena, arena_front;      // the arena's middle; the way its gate looks (unit, towards the path)
+  Vec2 ranch, ranch_front;      // the breeding farm: its barn's middle; the way its doors look (an axis)
+  Vec2 paddock;                 // its paddock's middle (a rectangle of fences along X and Z)
+  float paddock_hx = 0, paddock_hz = 0;
+  Vec2 hamlet_teleporter, well, market;
+  std::vector<Vec2> houses, house_fronts;  // their middles; the way their doors look (axes)
+  Vec2 grotto, grotto_front;    // the natural cave's opening (the mine's far way out), on a slope; the way it looks (an axis)
   bool valid() const { return refuge.x != 0 || refuge.z != 0; }
   bool operator==(const NorthLayout&) const = default;
 };
 inline constexpr uint64_t kNorthLakeOutline = 4;
+
+// Along the roads (roads.hpp): the side roads (lanes) branching off the path
+// and the west's road to the places people go to, and the places along them.
+// Derived from the seed and the other layouts (not saved).
+enum class LaneTo : uint8_t {
+  Castle, Windmill, Pen, WaterMill, Menhirs, Cabin, Inn, Farmstead, Mine, Refuge, Springs, Sawmill, Arena, Ranch, Grotto, Count
+};
+struct RoadsLayout {
+  std::vector<Road> lanes;      // from where each leaves the path, the road or another lane, to its place
+  std::vector<LaneTo> lane_to;  // where each leads
+  Vec2 inn, inn_front;          // the inn by the path; the way its door looks (an axis)
+  Vec2 farmstead, farmstead_front;  // the farmstead: its house; the way its door looks (an axis)
+  Vec2 sawmill, sawmill_front;  // the sawmill in the larches: its cabin
+  std::vector<Vec2> shrines;    // wayside shrines (at some forks)
+  bool valid() const { return inn.x != 0 || inn.z != 0; }
+  bool operator==(const RoadsLayout&) const = default;
+};
 
 }  // namespace monstres

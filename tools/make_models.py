@@ -3486,6 +3486,173 @@ def mine_prop():
     return m
 
 
+# Rochebrune, the village at the foot of the mountains, and along the roads.
+
+ARENA_STONE = (0.68, 0.64, 0.58, 1)
+ARENA_SAND = (0.86, 0.76, 0.56, 1)
+BANNER_BLUE = (0.20, 0.34, 0.70, 1)
+AWNING_RED = (0.78, 0.22, 0.20, 1)
+AWNING_WHITE = (0.94, 0.91, 0.84, 1)
+
+
+def arena():
+    """Rochebrune's arena: its sand (9.6 m wide, radius) inside three tiers of
+    stone seats, an outer wall 3.4 m high up to 13 m; its gate at -Z (4.4 m
+    wide) under an arch with banners; flags around the top. Solid through its
+    Colliders (two rings, the gate open)."""
+    m = Mesh()
+    segs = 56
+    gate = 2.3  # half width of the gate
+
+    def in_gate(a, r):
+        x, z = r * math.cos(a), r * math.sin(a)
+        return z < 0 and abs(x) < gate
+
+    # The sand (a little rough, darker by the tiers).
+    for i in range(segs):
+        a0, a1 = TAU * i / segs, TAU * (i + 1) / segs
+        for (ra, rb, c) in ((0.0, 6.0, ARENA_SAND), (6.0, 9.6, shade(ARENA_SAND, 0.92))):
+            p0 = (ra * math.cos(a0), 0.03, ra * math.sin(a0))
+            p1 = (ra * math.cos(a1), 0.03, ra * math.sin(a1))
+            q0 = (rb * math.cos(a0), 0.03, rb * math.sin(a0))
+            q1 = (rb * math.cos(a1), 0.03, rb * math.sin(a1))
+            if ra == 0:
+                m.tri((0, 0.03, 0), q1, q0, c)
+            else:
+                m.quad_facing(p0, p1, q1, q0, c, (0, 1, 0))
+    # The tiers: a step every 1.1 m outwards, each 0.6 m higher; the outer wall.
+    tiers = [(9.6, 10.7, 0.6), (10.7, 11.8, 1.2), (11.8, 12.6, 1.8)]
+    for i in range(segs):
+        a0, a1 = TAU * i / segs, TAU * (i + 1) / segs
+        am = 0.5 * (a0 + a1)
+        if in_gate(am, 11.0):
+            continue
+        c = shade(ARENA_STONE, 0.9 + 0.12 * hash01(9100, i))
+        for (ri, ro, top) in tiers:
+            i0 = (ri * math.cos(a0), top, ri * math.sin(a0))
+            i1 = (ri * math.cos(a1), top, ri * math.sin(a1))
+            o0 = (ro * math.cos(a0), top, ro * math.sin(a0))
+            o1 = (ro * math.cos(a1), top, ro * math.sin(a1))
+            m.quad_facing(i0, i1, o1, o0, shade(c, 1.04), (0, 1, 0))
+            b0 = (ri * math.cos(a0), top - 0.6, ri * math.sin(a0))
+            b1 = (ri * math.cos(a1), top - 0.6, ri * math.sin(a1))
+            m.quad_facing(b0, b1, i1, i0, shade(c, 0.86), (-math.cos(am), 0, -math.sin(am)))
+        # The wall behind the last tier, up to 3.4 m, its outer face down to the ground.
+        ri, ro, top = 12.6, 13.0, 3.4
+        w0 = (ri * math.cos(a0), 1.8, ri * math.sin(a0))
+        w1 = (ri * math.cos(a1), 1.8, ri * math.sin(a1))
+        t0 = (ri * math.cos(a0), top, ri * math.sin(a0))
+        t1 = (ri * math.cos(a1), top, ri * math.sin(a1))
+        m.quad_facing(w0, w1, t1, t0, shade(c, 0.9), (-math.cos(am), 0, -math.sin(am)))
+        u0 = (ro * math.cos(a0), top, ro * math.sin(a0))
+        u1 = (ro * math.cos(a1), top, ro * math.sin(a1))
+        m.quad_facing(t0, t1, u1, u0, shade(c, 1.05), (0, 1, 0))
+        g0 = (ro * math.cos(a0), -0.3, ro * math.sin(a0))
+        g1 = (ro * math.cos(a1), -0.3, ro * math.sin(a1))
+        m.quad_facing(g0, g1, u1, u0, shade(c, 0.8), (math.cos(am), 0, math.sin(am)))
+        if i % 2 == 0:  # merlons
+            box(m, (12.8 * math.cos(am), top + 0.25, 12.8 * math.sin(am)), (0.35, 0.25, 0.25), shade(c, 0.95))
+    # The gate's sides: walls along it, from the sand out.
+    for x in (-gate, gate):
+        box(m, (x + (0.25 if x > 0 else -0.25), 1.7, -11.3), (0.25, 1.7, 1.75), ARENA_STONE)
+    # Its arch, its banners.
+    for x in (-gate - 0.3, gate + 0.3):
+        box(m, (x, 2.3, -13.2), (0.35, 2.3, 0.35), shade(ARENA_STONE, 0.9))
+    box(m, (0, 4.75, -13.2), (gate + 0.7, 0.3, 0.4), shade(ARENA_STONE, 0.95))
+    box(m, (0, 5.25, -13.2), (1.0, 0.25, 0.3), shade(ARENA_STONE, 1.05))
+    for x, col in ((-gate - 0.3, BANNER_RED), (gate + 0.3, BANNER_BLUE)):
+        box(m, (x, 3.2, -13.6), (0.28, 1.0, 0.02), col)
+    # Flags on poles around the top.
+    for k in range(8):
+        a = TAU * (k + 0.5) / 8
+        if in_gate(a, 12.8):
+            continue
+        x, z = 12.8 * math.cos(a), 12.8 * math.sin(a)
+        frustum(m, lambda p, x=x, z=z: (x + p[0], 3.4 + p[1], z + p[2]), 0.05, 0.04, 2.6, 5, METAL, open_ends=True)
+        col = BANNER_RED if k % 2 == 0 else BANNER_BLUE
+        box(m, (x + 0.35 * math.cos(a + 1.57), 5.6, z + 0.35 * math.sin(a + 1.57)), (0.33, 0.22, 0.02), col)
+    return m
+
+
+def grotto():
+    """A natural cave's opening in a rocky slope (the mine's far way out):
+    dark inside, 2.6 m wide and 2.8 m high, its middle at local z -1.2, the
+    opening at -Z; boulders around it going back into the slope (+Z), a few
+    icicles. Walked into (its rocks: Colliders)."""
+    m = Mesh()
+    box(m, (0, 1.4, 0.1), (1.2, 1.4, 1.0), CAVE_DARK)
+    for k, (c, r) in enumerate([((-2.3, 1.1, -0.2), (1.2, 1.5, 1.4)), ((2.4, 1.2, -0.1), (1.2, 1.6, 1.4)),
+                                ((-1.2, 3.2, 0.2), (1.6, 0.9, 1.5)), ((1.3, 3.3, 0.2), (1.6, 1.0, 1.5)),
+                                ((0, 3.9, 1.2), (2.2, 1.1, 1.8)), ((-3.0, 2.6, 1.2), (1.1, 1.3, 1.6)),
+                                ((3.1, 2.8, 1.3), (1.1, 1.3, 1.6)), ((0.2, 2.95, -0.9), (1.4, 0.35, 0.45))]):
+        blob(m, c, r, 0.22, 9200 + k, jitter(CAVE_ROCK, 9200 + k, 0.12))
+    for k in range(6):  # icicles under its lip
+        x = -1.0 + 0.4 * k
+        frustum(m, lambda p, x=x, k=k: (x + p[0], 2.75 - p[1], -1.15 + p[2]), 0.07, 0.0, 0.3 + 0.25 * hash01(9210, k), 5,
+                (0.86, 0.94, 1.0, 1), open_ends=True)
+    for k in range(4):  # stones at its foot
+        blob(m, (-1.6 + 1.1 * k, 0.12, -1.9 - 0.3 * hash01(9220, k)), (0.3, 0.16, 0.26), 0.2, 9225 + k,
+             jitter(CAVE_ROCK, 9225 + k, 0.12), detail=0)
+    return m
+
+
+def shrine():
+    """A wayside shrine: a stone pillar (1.5 m), a little niche on it under a
+    roof of slates, a statuette inside, flowers at its foot."""
+    m = Mesh()
+    box(m, (0, 0.08, 0), (0.42, 0.08, 0.42), shade(WALL_STONE, 0.9))
+    box(m, (0, 0.75, 0), (0.24, 0.6, 0.24), WALL_STONE)
+    box(m, (0, 1.55, 0), (0.36, 0.22, 0.3), shade(WALL_STONE, 1.05))
+    box(m, (0, 1.55, -0.2), (0.24, 0.16, 0.12), CAVE_DARK)  # the niche, at -Z
+    blob(m, (0, 1.52, -0.22), (0.07, 0.13, 0.06), 0.1, 9300, solid(CREAM), detail=0)
+    for side in (-1, 1):
+        a = (side * 0.46, 1.8, -0.4)
+        b = (side * 0.46, 1.8, 0.4)
+        top_ = (0, 2.1, 0.4)
+        top0 = (0, 2.1, -0.4)
+        m.quad_facing(a, b, top_, top0, ROOF_SLATE, (side * 0.6, 0.8, 0))
+    for k in range(5):
+        a = TAU * k / 5 + 0.4
+        blob(m, (0.5 * math.cos(a), 0.12, 0.5 * math.sin(a)), (0.08, 0.08, 0.08), 0.2, 9310 + k,
+             solid((0.95, 0.55 + 0.3 * hash01(9310, k), 0.3 + 0.5 * hash01(9311, k), 1)), detail=0)
+    return m
+
+
+def bench():
+    """A wooden bench along X: its seat 1.6 m long, 0.45 m high, a backrest at +Z."""
+    m = Mesh()
+    box(m, (0, 0.45, 0), (0.8, 0.04, 0.2), PLANKS)
+    for x in (-0.65, 0.65):
+        box(m, (x, 0.22, 0), (0.05, 0.22, 0.18), shade(PLANKS, 0.75))
+        box(m, (x, 0.65, 0.17), (0.04, 0.2, 0.03), shade(PLANKS, 0.75))
+    box(m, (0, 0.78, 0.18), (0.8, 0.07, 0.02), shade(PLANKS, 0.95))
+    return m
+
+
+def stall():
+    """A market stall, its front at -Z: a counter 2.6 m wide, crates of fruit
+    and cheeses on it, posts holding a striped awning."""
+    m = Mesh()
+    box(m, (0, 0.45, 0), (1.3, 0.45, 0.55), shade(PLANKS, 0.9))
+    box(m, (0, 0.92, 0), (1.35, 0.03, 0.6), PLANKS)
+    for x in (-1.25, 1.25):
+        for z in (-0.55, 0.55):
+            box(m, (x, 1.25 if z < 0 else 1.45, z), (0.05, 1.25 if z < 0 else 1.45, 0.05), TIMBER)
+    stripes = 8
+    for k in range(stripes):
+        x0 = -1.4 + 2.8 * k / stripes
+        x1 = -1.4 + 2.8 * (k + 1) / stripes
+        c = AWNING_RED if k % 2 == 0 else AWNING_WHITE
+        m.quad_facing((x0, 2.3, -0.85), (x1, 2.3, -0.85), (x1, 2.9, 0.6), (x0, 2.9, 0.6), c, (0, 0.9, -0.4))
+        m.quad_facing((x0, 2.3, -0.85), (x1, 2.3, -0.85), (x1, 2.9, 0.6), (x0, 2.9, 0.6), shade(c, 0.8), (0, -0.9, 0.4))
+    for k, (x, col) in enumerate(((-0.8, (0.86, 0.22, 0.18, 1)), (-0.2, (0.95, 0.74, 0.20, 1)), (0.45, (0.42, 0.66, 0.22, 1)))):
+        box(m, (x, 1.03, -0.15), (0.26, 0.09, 0.2), CRATE_PLANK)
+        for j in range(4):
+            blob(m, (x - 0.12 + 0.08 * j, 1.16, -0.2 + 0.1 * (j % 2)), (0.06, 0.06, 0.06), 0.15, 9400 + k * 10 + j, solid(col), detail=0)
+    frustum(m, lambda p: (0.95 + p[0], 0.95 + p[1], 0.1 + p[2]), 0.2, 0.2, 0.14, 10, (0.95, 0.82, 0.45, 1))  # a cheese
+    return m
+
+
 # The north's monsters walk on four legs, as Pompon (their rigs: src/render/characters.cpp).
 
 def golem_body():
@@ -3858,6 +4025,11 @@ def all_models():
         "cairn": cairn(),
         "hot_spring": hot_spring(),
         "mine_prop": mine_prop(),
+        "arena": arena(),
+        "grotto": grotto(),
+        "shrine": shrine(),
+        "bench": bench(),
+        "stall": stall(),
         "golem_body": golem_body(),
         "golem_head": golem_head(),
         "golem_ear": golem_ear(),

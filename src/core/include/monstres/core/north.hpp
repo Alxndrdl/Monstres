@@ -38,6 +38,14 @@ inline constexpr float kValleySlope = 0.55f;       // its sides, beyond (walkabl
 inline constexpr float kValleyRise = 0.15f;        // its floor goes up this much a meter towards the col
 inline constexpr float kWallHeight = 0.62f;        // the dry-stone walls: stepped over
 inline constexpr uint8_t kGuardianLevel = 14, kGuardianEscortLevel = 10;
+// Rochebrune, the village at the foot of the mountains.
+inline constexpr float kHamletZ = -968.0f;         // about there, on the path
+inline constexpr float kHamletRadius = 50.0f;      // its flat ground (no trees nor rocks inside)
+inline constexpr float kArenaFromPath = 33.0f;     // the arena's middle, beside the path
+inline constexpr float kArenaRadius = 13.0f;       // its outer wall
+inline constexpr float kArenaSand = 9.6f;          // its sand, inside the tiers (where battles are fought)
+inline constexpr float kRanchFromPath = 30.0f;     // the breeding farm, across the path from the arena
+inline constexpr float kGrottoRise = 8.0f;         // the rocky slope above the grotto's opening
 }  // namespace rules
 
 // QuestState::progress of the mine's quest.
@@ -53,6 +61,11 @@ NorthLayout make_north_layout(uint64_t seed, const Path& path, const WestLayout&
 // back around the path: walkable), the frozen lake's flat ice. Sets the
 // lake's level and the valley's floor.
 void shape_north(Heightmap& ground, NorthLayout& north, const Path& path, uint64_t seed);
+
+// Whether (x, z) is in Rochebrune (its flat ground, moved out by `margin`).
+bool in_hamlet(const NorthLayout& north, float x, float z, float margin = 0);
+// The breeding farm's paddock (moved out by `margin`).
+bool in_paddock(const NorthLayout& north, float x, float z, float margin = 0);
 
 // Whether (x, z) is in the frozen lake (its ice), moved out by `margin`; and
 // how far, in its radii: 0 in the middle, 1 on its shore.

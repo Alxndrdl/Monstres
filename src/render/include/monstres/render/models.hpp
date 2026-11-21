@@ -71,6 +71,8 @@ enum class MeshId : size_t {
   Cabin, Tent, Campfire, CampfireFire, Woodpile, HollowTree, Burrow, Lighthouse, LighthouseLamp, Menhir, Meteorite,
   // The north (north.hpp).
   Chalet, MineEntrance, Minecart, MinecartLoaded, Larch, StoneWall, Cairn, HotSpring, MineProp,
+  // Rochebrune and along the roads (north.hpp, roads.hpp).
+  Arena, Grotto, Shrine, Bench, Stall,
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar, LarchFar,
   GrassShortFar, GrassTallFar, FlowerFar,

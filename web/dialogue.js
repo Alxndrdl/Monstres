@@ -27,6 +27,12 @@
   const MATHURIN = 22;
   const SOLENE = 23;
   const GASTON = 24;
+  const BARNABE = 25;
+  const MARGAUX = 26;
+  const CONTENDER = 27;
+  const AUBIN = 28;
+  const AGATHE = 30;
+  const CUPS = ['de Bronze', 'd’Argent', 'd’Or'];
 
   let game = null;
   const box = $('dialogue');
@@ -676,6 +682,55 @@
   // ---- Solène: the refuge's keeper, a healer (north.hpp) ----
   function solene() { healer(SOLENE); }
 
+  // ---- Barnabé: the arena's tournaments (battle.hpp) ----
+  function barnabe() {
+    const t = game.tournament();
+    if (t.on) {
+      show(`La Coupe ${CUPS[t.cup]} est en cours : manche ${t.round + 1} sur ${t.rounds}. ` +
+        'Ton adversaire t’attend sur le sable, file !');
+      return;
+    }
+    const enter = (k) => () => {
+      game.enterTournament(k);
+      close();
+    };
+    const offers = [];
+    t.cups.forEach((c, k) => {
+      if (c.open) offers.push([`Coupe ${CUPS[k]}${c.won ? ' ✓' : ''}`, enter(k), `cup-${k}`]);
+    });
+    const won = t.cups.filter((c) => c.won).length;
+    const standing = game.team().some((m) => m.hp > 0);
+    let line = 'Bienvenue à l’arène de Rochebrune ! Un tournoi, c’est trois combats de dresseurs d’affilée, chacun plus ' +
+      'coriace que le précédent. Nos soigneurs remettent ton équipe sur pied entre deux manches. ';
+    line += won === 0 ? `Commence par la Coupe de Bronze (monstres de niveau ${t.cups[0].level} environ) : ` +
+      `${t.cups[0].coins} pièces au vainqueur !`
+      : won < t.cups.length ? `Tu as déjà ${won === 1 ? 'une coupe' : `${won} coupes`} ! La suivante t’attend : ` +
+        `des monstres de niveau ${t.cups[won].level} environ, et ${t.cups[won].coins} pièces à la clé.`
+        : 'Tu as gagné les trois coupes ! Reviens défendre ton titre quand tu veux.';
+    if (!standing) line += ' Mais aucun de tes monstres ne tient debout : fais-les soigner d’abord.';
+    show(line, [...offers, ['Encore un mot ?', () => villager(BARNABE)], ['Au revoir', close]]);
+  }
+
+  // ---- Margaux: the breeding farm (the farm's monsters, kept by her too) ----
+  function margaux() {
+    const farm = game.farm();
+    if (!farm.open) {
+      show('J’élève les monstres que les magiciens confient à Capucine, à l’exploitation de l’ouest. ' +
+        'Pour me confier les tiens, il te faudrait une pierre de transfert… Va voir Capucine !',
+        [['Encore un mot ?', () => villager(MARGAUX)], ['Au revoir', close]]);
+      return;
+    }
+    show('Bienvenue à l’Élevage des Cimes ! Les monstres que tu as laissés à l’exploitation sont aussi chez moi : ' +
+      'la pierre de transfert de Capucine nous relie. Tu veux en reprendre, ou en laisser ?', [
+      ['Voir mes monstres', () => { close(); openFarm(); }, 'open-farm'],
+      ['Encore un mot ?', () => villager(MARGAUX)], ['Au revoir', close]]);
+  }
+
+  // ---- The arena's contender ----
+  function contender() {
+    show('Je t’attends sur le sable. Que le meilleur gagne !');
+  }
+
   // ---- The other villagers: rumors about the quests, and chatter ----
   function villager(n) {
     const quests = game.quests();
@@ -695,6 +750,7 @@
     if (n !== ODETTE && n % 3 === 2 && n <= ISIDORE) add(LORE.rumors.odette, 0);  // and to her
     if (n <= ISIDORE && n % 2 === 1) add(LORE.rumors.west, 0);
     if ((n <= ISIDORE && n % 2 === 0) || n === 23) add(LORE.rumors.north, 0);
+    if (n % 2 === 0 || n === 28 || n === 29) add(LORE.rumors.rochebrune, 0);  // Rochebrune, its arena, its breeder
     for (const line of (LORE.npcs[n] || {}).chatter || []) pool.push(line);
     const k = said[n] = (said[n] || 0) + 1;
     show(pool[(k - 1) % pool.length] || 'Bonjour !', [['Encore un mot ?', () => villager(n)], ['Au revoir', close]]);
@@ -721,6 +777,10 @@
     else if (c.npc === MATHURIN) mathurin();
     else if (c.npc === SOLENE) solene();
     else if (c.npc === GASTON) gaston();
+    else if (c.npc === BARNABE) barnabe();
+    else if (c.npc === MARGAUX) margaux();
+    else if (c.npc === CONTENDER) contender();
+    else if (c.npc === AUBIN || c.npc === AGATHE) healer(c.npc);
     else if (c.wanderer) wanderer(c);
     else villager(c.npc);
     // Walking away ends the talk.
@@ -753,6 +813,7 @@
   }
   let known = null;
   let lastRescue = null;
+  let lastTournament = null;
   let before = null;  // the quests as they were
   // Another world is played (saves.js): its teleporters and quests are not news.
   // After the arrival of a new game: Isidore waits (said once, when the flight is over).
@@ -762,6 +823,7 @@
     known = null;
     before = null;
     lastRescue = null;
+    lastTournament = null;
     close();
     if (!farmPanel.hidden) closeFarm();
   });
@@ -790,6 +852,20 @@
       note('Ramené à l’exploitation !', 'Ta magie t’a téléporté loin du danger. Violette peut soigner tes monstres.');
     }
     lastRescue = rescue;
+    // The arena's tournament: a new round, the cup won, or it ends.
+    if (typeof game.tournament === 'function') {
+      const t = game.tournament();
+      const was = lastTournament;
+      if (was && t.on && (!was.on || t.round !== was.round)) {
+        note(`Coupe ${CUPS[t.cup]} · manche ${t.round + 1} sur ${t.rounds}`,
+          t.round === 0 ? 'Ton premier adversaire entre dans l’arène !' : 'Un nouvel adversaire entre dans l’arène !');
+      } else if (was && was.on && !t.on) {
+        const cup = was.cup;
+        if (t.cups[cup].won && !was.cups[cup].won) note(`Coupe ${CUPS[cup]} gagnée !`, `+${t.cups[cup].coins} pièces, 3 potions de mana`);
+        else note('Tournoi terminé', 'Tes monstres ont été soignés. Barnabé t’attend pour une revanche.');
+      }
+      lastTournament = t;
+    }
     // After the arrival: Isidore waits.
     const main = quests.find((q) => q.id === 'main');
     if (!welcomed && main && main.stage === 'unknown' && !game.introOn() && !game.needsCreation()) {

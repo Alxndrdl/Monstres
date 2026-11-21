@@ -2,6 +2,7 @@
 
 #include "monstres/core/interior.hpp"
 #include "monstres/core/north.hpp"
+#include "monstres/core/roads.hpp"
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/quests.hpp"
@@ -130,6 +131,7 @@ constexpr size_t kSpeciesCountV26 = 14;  // before Caillou, Cabri and Givri
 constexpr size_t kQuestCountV26 = 13;    // before the mine's
 constexpr uint8_t kTeleportersV22 = 5;
 constexpr uint8_t kTeleportersV26 = 7;  // before the north's
+constexpr uint8_t kTeleportersV27 = 9;  // before Rochebrune's
 constexpr uint8_t kPlacesV22 = 4;        // outside, cave, house, tower
 
 // Chromatic (1), elemental (2), the build (bits 2-3).
@@ -206,7 +208,10 @@ void write_world(Writer& out, const World& w) {
   }
   // The farm's grazing monsters are drawn again from World::farm, the
   // trainers passing by come no more (not saved).
-  const auto kept = [](const Creature& c) { return c.tag != Tag::Boarder && !npc::wanderer(c.npc); };
+  // Nor the arena's contender and its monster (a tournament is not saved).
+  const auto kept = [](const Creature& c) {
+    return c.tag != Tag::Boarder && !npc::wanderer(c.npc) && c.npc != npc::kContender;
+  };
   out.u32(static_cast<uint32_t>(std::count_if(w.creatures.begin(), w.creatures.end(), kept)));
   for (const Creature& c : w.creatures) {
     if (!kept(c)) continue;
@@ -277,6 +282,7 @@ void write_world(Writer& out, const World& w) {
   for (uint32_t n : w.bag) out.u32(n);
   out.u16(static_cast<uint16_t>(w.farm.size()));
   for (const Monster& m : w.farm) write_monster(out, m);
+  out.u8(w.cups);  // version 28
 }
 
 }  // namespace
@@ -340,6 +346,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_river = version >= 25;       // the river's water mill: its quest
   const bool with_falls_moved = version >= 26;  // the waterfall away from the cave (the river elsewhere there)
   const bool with_north = version >= 27;        // the world grown north: its squares, its places, teleporters, species
+  const bool with_arena = version >= 28;        // Rochebrune: its teleporter, the arena's cups
   // Species in the bestiary and the counts: two more from version 19.
   const size_t species_saved = with_north    ? kSpeciesCount
                                : with_west   ? kSpeciesCountV26
@@ -536,7 +543,10 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     uint8_t quests = 0;
     // Before version 18 there were two quests (the giant Champi's came then),
     // before 19 three (fighting, healing and the main quest came then).
-    const uint8_t teleporters = with_north ? static_cast<uint8_t>(kTeleporterCount) : with_west ? kTeleportersV26 : kTeleportersV22;
+    const uint8_t teleporters = with_arena   ? static_cast<uint8_t>(kTeleporterCount)
+                                : with_north ? kTeleportersV27
+                                : with_west  ? kTeleportersV26
+                                             : kTeleportersV22;
     uint8_t old_teleporters = 0;
     if (with_north ? !in.u16(w.teleporters) : !in.u8(old_teleporters)) return fail(error, LoadError::Corrupt);
     if (!with_north) w.teleporters = old_teleporters;
@@ -596,6 +606,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     }
     heal_farm(w);  // cared for there
   }
+  if (with_arena && (!in.u8(w.cups) || w.cups >= (1u << rules::kCups))) return fail(error, LoadError::Corrupt);
   // Where the player is: inside a cave, a house, the tower (version 22).
   uint8_t place = 0;
   Body inner;
@@ -711,10 +722,22 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   if (grown && !with_builds) settle_objects(w);
   // Before version 21: a smaller forest, no clearing, its teleporter in its middle.
   if (!with_new_forest) regrow_forest(w);
-  generate_wilds(w);
+  {
+    // (Saved inside: its door, where it is in the list once the places along
+    // the roads made their way: the valley's trees and rocks on a lane go.)
+    const bool by_door = place != 0 && w.place.door < w.objects.size();
+    const Object door = by_door ? w.objects[w.place.door] : Object{};
+    generate_wilds(w);
+    if (by_door && !(w.place.door < w.objects.size() && w.objects[w.place.door] == door)) {
+      for (size_t k = 0; k < w.objects.size(); ++k) {
+        if (w.objects[k] == door) w.place.door = static_cast<uint32_t>(k);
+      }
+    }
+  }
   // The west's villagers (before version 23: they come).
   add_west_npcs(w);
   add_north_npcs(w);
+  add_road_npcs(w);
   // Before version 19: Isidore comes to the village (and Bastien's lesson is
   // learned if he was beaten already: told to him, it is done).
   if (!with_looks) add_mentor(w);
@@ -731,7 +754,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
       const Interior& room = w.interior;
       const Vec3 p = inner.pos;
       const bool fits = p.x > room.bounds.min.x && p.x < room.bounds.max.x && p.z > room.bounds.min.z &&
-                        p.z < room.bounds.max.z && p.y >= 0 && p.y < room.bounds.max.y &&
+                        p.z < room.bounds.max.z && p.y >= floor_height(room, p.x, p.z) - 0.3f && p.y < room.bounds.max.y &&
                         wall_distance(room, p.x, p.z) > 0.3f && open_distance(room, p + Vec3{0, 0.5f, 0}) > 0.2f;
       if (fits) {
         w.player.pos = p;

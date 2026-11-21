@@ -1,6 +1,7 @@
 #include "monstres/render/landscape.hpp"
 
 #include "monstres/core/north.hpp"
+#include "monstres/core/roads.hpp"
 
 #include "monstres/core/interior.hpp"
 #include "monstres/core/west.hpp"
@@ -197,6 +198,9 @@ LandscapeCache::Item make_item(const World& w, const Object& o) {
     case ObjectKind::Minecart: shadow(1.0f, 0.65f, yaw, 0.6f); break;
     case ObjectKind::StoneWall: shadow(0.8f, 0.45f, yaw, 0.5f); break;
     case ObjectKind::Cairn: shadow(0.6f * s.x, 0.6f * s.x, 0, 0.6f); break;
+    case ObjectKind::Shrine: shadow(0.6f, 0.6f, 0, 0.6f); break;
+    case ObjectKind::Bench: shadow(1.0f, 0.4f, yaw, 0.5f); break;
+    case ObjectKind::Stall: shadow(1.6f, 1.0f, yaw, 0.6f); break;
     default: break;
   }
   return item;
@@ -242,6 +246,7 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
   const float z = -kDecorationHalfSize + (static_cast<float>(j) + rand01(w.seed, 2000 + ui, uj));
   const float on_path = distance_to_path(w.path, x, z, 2 * rules::kPathHalfWidth) / rules::kPathHalfWidth;
   if (on_path < 0.75f) return;
+  if (distance_to_lanes(w.roads, x, z, 2 * rules::kLaneHalfWidth) < 0.8f * rules::kLaneHalfWidth) return;
   // The north's snow and ice: no grass (north.hpp).
   if (w.north.valid() && z < rules::kFrostFrom + 120.0f) {
     if (in_frozen_lake(w.north, x, z) || north_snow(w.north, x, z, w.ground.height(x, z)) > 0.45f) return;

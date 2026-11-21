@@ -950,6 +950,7 @@
     crops: 'rgba(214, 186, 96, 0.85)', haystack: '#d8b860', windmill: '#a8a298', cabin: '#7a5534', tent: '#d8cca8',
     campfire: '#e07a30', woodpile: '#7a5534', hollowTree: '#4e3a26', burrow: '#7a5a3a', lighthouse: '#e8e4dc',
     menhir: '#a8a39a', meteorite: '#3a2f46', waterMill: '#c9b89a', hiddenCave: '#2a2630',
+    arena: '#b4ab9c', grotto: '#2a2630', shrine: '#a8a39a', bench: '#8a6a44', stall: '#c0473a',
     chalet: '#8a6a50', mineEntrance: '#2a2630', minecart: '#7a5534', larch: 'rgba(92, 138, 62, 0.9)',
     stoneWall: '#9a968e', cairn: '#a8a39a', hotSpring: '#7fd8d8', mineProp: '#7a5534',
   };
@@ -1211,6 +1212,8 @@
       }
       line(data.west.road, 'rgba(176, 140, 96, 0.95)', 2.6);
     }
+    // The side roads (roads.hpp), narrower.
+    if (data.roads) for (const lane of data.roads.lanes) line(lane, 'rgba(176, 140, 96, 0.9)', 1.9);
     // The path.
     ctx.strokeStyle = 'rgba(176, 140, 96, 0.95)';
     ctx.lineWidth = 2.2 * PX_PER_M;
@@ -1231,10 +1234,17 @@
           kind === 'well' || kind === 'rubble' || kind === 'stump' || kind === 'castleTower' || kind === 'crystal' ||
           kind === 'fruitTree' || kind === 'haystack' || kind === 'windmill' || kind === 'hollowTree' ||
           kind === 'lighthouse' || kind === 'menhir' || kind === 'meteorite' || kind === 'campfire' ||
-          kind === 'larch' || kind === 'cairn' || kind === 'hotSpring' || kind === 'stoneWall') {
+          kind === 'larch' || kind === 'cairn' || kind === 'hotSpring' || kind === 'stoneWall' || kind === 'arena' ||
+          kind === 'shrine') {
         ctx.beginPath();
         ctx.arc(toX(x), toZ(z), Math.max(kind === 'hotSpring' ? 3.6 : hx, 0.3) * PX_PER_M, 0, Math.PI * 2);
         ctx.fill();
+        if (kind === 'arena') {  // its sand inside the tiers
+          ctx.fillStyle = 'rgba(222, 196, 140, 1)';
+          ctx.beginPath();
+          ctx.arc(toX(x), toZ(z), 9.6 * PX_PER_M, 0, Math.PI * 2);
+          ctx.fill();
+        }
         if (kind === 'tower') {
           ctx.lineWidth = 0.5 * PX_PER_M;
           ctx.strokeStyle = '#4a4650';
@@ -1419,13 +1429,19 @@
           label(name, w[id][0], w[id][1] + below, big.includes(id) ? size : size - 1);
         }
       }
+      // Along the roads (roads.hpp).
+      if (data.roads && k >= 1.2) {
+        for (const [id, name] of Object.entries(LORE.roadPlaces)) {
+          if (data.roads[id]) label(name, data.roads[id][0], data.roads[id][1] - 9, size - 1);
+        }
+      }
       // The north's (north.hpp).
       if (data.north) {
         const n = data.north;
-        const big = ['refuge', 'lake', 'col', 'mine'];
+        const big = ['refuge', 'lake', 'col', 'mine', 'hamlet'];
         for (const [id, name] of Object.entries(LORE.northPlaces)) {
           if (!n[id] || (k < 1.2 && !big.includes(id))) continue;
-          const below = id === 'lake' ? 0 : id === 'mine' ? -12 : -9;
+          const below = id === 'lake' ? 0 : id === 'mine' ? -12 : id === 'hamlet' ? -n.arenaR - 26 : id === 'arena' ? -n.arenaR - 4 : -9;
           label(name, n[id][0], n[id][1] + below, big.includes(id) ? size : size - 1);
         }
         if (k < 1.2) {  // the belts' names, a little off the path

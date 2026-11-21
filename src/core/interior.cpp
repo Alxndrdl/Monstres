@@ -72,7 +72,7 @@ PlaceKind place_of(ObjectKind k) {
   if (is_house(k)) return PlaceKind::House;
   if (k == ObjectKind::Tower) return PlaceKind::Tower;
   if (k == ObjectKind::Burrow) return PlaceKind::Burrow;
-  if (k == ObjectKind::MineEntrance) return PlaceKind::Mine;
+  if (k == ObjectKind::MineEntrance || k == ObjectKind::Grotto) return PlaceKind::Mine;
   if (k == ObjectKind::HollowTree) return PlaceKind::HollowTree;
   if (k == ObjectKind::Lighthouse) return PlaceKind::Lighthouse;
   return PlaceKind::Outside;
@@ -128,6 +128,7 @@ DoorFrame frame_of(ObjectKind k) {
   if (k == ObjectKind::Lighthouse) return {0, -3.2f, {0, 1.2f, -2.66f}, 1.1f, 2.3f, 0, -4.0f};
   if (k == ObjectKind::Burrow) return {0, -2.7f, {0, 0.6f, -1.95f}, 1.3f, 1.2f, 0, -3.4f};
   if (k == ObjectKind::MineEntrance) return {0, -2.2f, {0, 1.25f, -0.9f}, 2.0f, 2.4f, 0, -3.2f};
+  if (k == ObjectKind::Grotto) return {0, -2.4f, {0, 1.4f, -1.2f}, 2.6f, 2.8f, 0, -3.8f};
   const float f = house_front(k);
   return {0, -f - 0.7f, {0, 0.95f, -f - 0.05f}, 0.9f, 1.9f, 0, -f - 1.4f};
 }
@@ -164,6 +165,19 @@ float wall_distance(const Interior& in, float x, float z) {
   return d;
 }
 
+float floor_height(const Interior& in, float x, float z) { return in.floor.empty() ? 0.0f : floor_height(in.floor, x, z); }
+
+float natural_at(const Interior& in, float x, float z) {
+  float sum = 0, weights = 0;
+  for (const RoomPiece& p : in.pieces) {
+    const float k = std::max(piece_distance(p, x, z, 0) + 2.0f, 0.0f);
+    const float w = k * k * k * k + 1e-4f;
+    sum += p.natural ? w : 0.0f;
+    weights += w;
+  }
+  return weights > 0 ? sum / weights : 0.0f;
+}
+
 float ceiling_height(const Interior& in, float x, float z) {
   float sum = 0, weights = 0;
   for (const RoomPiece& p : in.pieces) {
@@ -173,12 +187,12 @@ float ceiling_height(const Interior& in, float x, float z) {
   }
   float h = weights > 0 ? sum / weights : 3.0f;
   if (in.rounding > 0) h += (value_noise(in.noise + 2, x, z, 5.0f) - 0.5f) * 1.6f;
-  return h;
+  return h + floor_height(in, x, z);
 }
 
 float open_distance(const Interior& in, Vec3 p) {
   const float k = in.rounding;
-  return smin(smin(p.y, wall_distance(in, p.x, p.z), k), ceiling_height(in, p.x, p.z) - p.y, k);
+  return smin(smin(p.y - floor_height(in, p.x, p.z), wall_distance(in, p.x, p.z), k), ceiling_height(in, p.x, p.z) - p.y, k);
 }
 
 Vec3 surface_normal(const Interior& in, Vec3 p) {
@@ -226,51 +240,156 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
       dens.push_back({at, r});
     }
   } else if (kind == PlaceKind::Mine) {
-    // Straight galleries dug at right angles, held up by timbers, a few wider
-    // halls where they meet; the deepest one the widest (the guardian's).
-    in.rounding = 0.35f;
+    // Galleries dug every which way, held up by timbers, branching off one
+    // another, some going down; wider halls where they meet; the deepest one
+    // the widest and highest (the guardian's). One of them broke into a
+    // natural cave (its chambers rounder, wilder), which leads far away:
+    // out of the grotto in the mountains (ExitKind::Far).
+    in.rounding = 0.45f;
     in.entry = {0, 0, -0.5f};
     in.exits[0] = {{0, 0, 1.3f}, {0, -1}, ExitKind::Out};
     in.pieces.push_back({{0, 1.0f}, {0, -12.0f}, 2.1f, {}, 3.3f, 0.12f});
     struct End {
       Vec2 at;
-      Vec2 dir;
+      Angle16 dir;  // the way it goes on
+      float y;      // its floor
     };
-    std::vector<End> ends{{{0, -12.0f}, {0, -1}}};
-    std::vector<std::pair<Vec2, Vec2>> runs{{{0, 1.0f}, {0, -12.0f}}};
+    std::vector<End> ends{{{0, -12.0f}, Angle16{49152}, 0.0f}};
     Rng rng(s, 95);
-    // Too close to a gallery already dug (but the one it starts from).
-    const auto crosses = [&](Vec2 a, Vec2 b, size_t skip) {
-      for (size_t r = 0; r < runs.size(); ++r) {
-        if (r == skip) continue;
-        for (float t = 0.25f; t <= 1.0f; t += 0.25f) {
+    // Clear of what is dug already (but the pieces `from` is in): every point
+    // of a..b at least `gap` meters beyond them.
+    const auto clear = [&](Vec2 from, Vec2 a, Vec2 b, float gap) {
+      for (const RoomPiece& p : in.pieces) {
+        if (piece_distance(p, from.x, from.z, 0) > -1.0f) continue;  // where it starts
+        for (float t = 0; t <= 1.0f; t += 0.125f) {
           const Vec2 q{a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t};
-          RoomPiece probe{runs[r].first, runs[r].second, 2.1f, {}, 3.3f, 0};
-          if (piece_distance(probe, q.x, q.z, 0) > -4.5f) return true;
+          if (piece_distance(p, q.x, q.z, 0) > -gap) return false;
         }
       }
-      return false;
+      return true;
     };
-    for (int attempt = 0; attempt < 80 && runs.size() < 8; ++attempt) {
-      const size_t from = rng.below(static_cast<uint32_t>(ends.size()));
-      const End e = ends[from];
-      const uint32_t turn = rng.below(3);  // ahead, left, right
-      const Vec2 d = turn == 0 ? e.dir : turn == 1 ? Vec2{-e.dir.z, e.dir.x} : Vec2{e.dir.z, -e.dir.x};
-      if (d.z > 0.5f) continue;  // not back towards the way in
-      const float len = range(rng, 9.0f, 16.0f);
+    int galleries = 0;
+    for (int attempt = 0; attempt < 300 && galleries < 16; ++attempt) {
+      const End e = ends[rng.below(static_cast<uint32_t>(ends.size()))];
+      const auto turn = static_cast<Angle16>(e.dir + static_cast<int>(rng.below(25000)) - 12500);  // up to ±69°
+      const Vec2 d = dir16(turn), side{-d.z, d.x};
+      if (d.z > 0.45f) continue;  // not back towards the way in
+      const float len = range(rng, 10.0f, 17.0f);
+      const float bend = range(rng, -2.4f, 2.4f);
+      const uint32_t slope = rng.below(100);
+      const float drop = slope < 40 ? -range(rng, 2.4f, 4.2f) : slope < 50 ? range(rng, 0.6f, 1.4f) : range(rng, -0.3f, 0.3f);
+      const Vec2 mid{e.at.x + d.x * len * 0.5f + side.x * bend, e.at.z + d.z * len * 0.5f + side.z * bend};
       const Vec2 to{e.at.x + d.x * len, e.at.z + d.z * len};
-      if (crosses(e.at, to, from < runs.size() ? from : runs.size())) continue;
-      in.pieces.push_back({e.at, to, 2.0f, {}, 3.2f, 0.12f});
-      runs.push_back({e.at, to});
-      if (rng.below(3) == 0) in.pieces.push_back({to, to, range(rng, 3.6f, 4.6f), {}, 4.2f, 0.35f});  // a hall
-      ends.push_back({to, d});
+      if (!clear(e.at, mid, to, 4.6f) || distance2d(to.x, to.z - 1.0f) < 10.0f) continue;
+      const float y_mid = e.y + drop * 0.5f, y_to = e.y + drop;
+      RoomPiece a{e.at, mid, 2.0f, {}, 3.2f, 0.12f};
+      a.ya = e.y;
+      a.yb = y_mid;
+      RoomPiece b{mid, to, 2.0f, {}, 3.2f, 0.12f};
+      b.ya = y_mid;
+      b.yb = y_to;
+      in.pieces.push_back(a);
+      in.pieces.push_back(b);
+      ++galleries;
+      // (Its second half turned back by the bend: the way it goes on.)
+      const auto on = static_cast<Angle16>(turn + static_cast<int>(-bend / (0.5f * len) * 10430.4f));
+      if (rng.below(3) == 0) {  // a hall where it ends
+        RoomPiece hall{to, to, range(rng, 3.6f, 4.6f), {}, 4.4f, 0.35f};
+        hall.ya = hall.yb = y_to;
+        in.pieces.push_back(hall);
+      }
+      ends.push_back({to, on, y_to});
+      if (rng.below(4) == 0) {  // and another way off its middle
+        ends.push_back({mid, static_cast<Angle16>(turn + (rng.below(2) ? 16384 : 49152)), y_mid});
+      }
     }
-    // The deepest end: a wide hall.
-    const End* deep = &ends[0];
-    for (const End& e : ends) {
-      if (e.at.z < deep->at.z) deep = &e;
+    // The guardian's hall: off the deepest end it fits by (the deeper, the further, the better).
+    std::vector<size_t> order(ends.size());
+    for (size_t k = 0; k < order.size(); ++k) order[k] = k;
+    const auto worth = [&](const End& e) { return -3.0f * e.y + 0.4f * distance2d(e.at.x, e.at.z); };
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return worth(ends[a]) > worth(ends[b]); });
+    size_t boss = 0;
+    bool placed = false;
+    for (const float r : {11.0f, 9.0f, 7.0f}) {
+      for (size_t k = 0; k < order.size() && !placed; ++k) {
+        const End& e = ends[order[k]];
+        const Vec2 d = dir16(e.dir);
+        const Vec2 c{e.at.x + d.x * (r + 2.5f), e.at.z + d.z * (r + 2.5f)};
+        if (!clear(e.at, c, c, r + 2.0f) || distance2d(c.x, c.z) < r + 12.0f) continue;
+        RoomPiece way{e.at, c, 2.3f, {}, 3.8f, 0.15f};
+        way.ya = e.y;
+        way.yb = e.y - 1.0f;
+        RoomPiece hall{c, c, r, {}, 9.5f, 0.5f};
+        hall.ya = hall.yb = e.y - 1.0f;
+        in.pieces.push_back(way);
+        in.pieces.push_back(hall);
+        boss = order[k];
+        placed = true;
+      }
     }
-    in.pieces.push_back({deep->at, deep->at, 6.5f, {}, 5.5f, 0.45f});
+    // The natural cave: broken into from another end, towards the most room.
+    for (size_t k = order.size(); k-- > 0;) {
+      if (order[k] == boss && placed) continue;
+      const End& e = ends[order[k]];
+      if (distance2d(e.at.x, e.at.z) < 14.0f) continue;
+      Vec2 way{0, -1};
+      float clearest = -1e9f;
+      for (int a = 0; a < 16; ++a) {
+        const Vec2 d = dir16(static_cast<Angle16>(a * 4096));
+        if (d.z > 0.3f) continue;
+        const Vec2 far{e.at.x + d.x * 22.0f, e.at.z + d.z * 22.0f};
+        float room = 1e9f;
+        for (const RoomPiece& p : in.pieces) room = std::min(room, -piece_distance(p, far.x, far.z, 0));
+        if (room > clearest) {
+          clearest = room;
+          way = d;
+        }
+      }
+      if (clearest < 12.0f) continue;
+      std::vector<RoomPiece> cave;
+      // Chambers one after the other, each turning a little, going up and down.
+      Vec2 at = e.at, d = way;
+      float y = e.y, last_r = 2.0f;
+      bool ok = true;
+      const int chambers = 3 + static_cast<int>(rng.below(2));
+      for (int c = 0; c < chambers && ok; ++c) {
+        const float r = range(rng, 5.0f, 7.5f);
+        const float gap = range(rng, 5.0f, 8.0f);
+        const Vec2 next{at.x + d.x * (last_r + gap + r), at.z + d.z * (last_r + gap + r)};
+        const float ny = y + range(rng, -2.2f, 1.2f);
+        // (Clear of the mine, and of the cave's own chambers but the last.)
+        for (const RoomPiece& p : in.pieces) ok = ok && (piece_distance(p, next.x, next.z, 0) < -(r + 3.0f) || piece_distance(p, at.x, at.z, 0) > -1.0f);
+        for (size_t q = 0; q + 2 < cave.size(); ++q) ok = ok && piece_distance(cave[q], next.x, next.z, 0) < -(r + 2.0f);
+        if (!ok) break;
+        RoomPiece tunnel{at, next, range(rng, 2.3f, 2.9f), {}, 4.0f, 0.6f};
+        tunnel.ya = y;
+        tunnel.yb = ny;
+        tunnel.natural = c > 0;  // the first: the gallery dug into it
+        RoomPiece room{next, next, r, {}, range(rng, 6.0f, 9.0f), 1.3f};
+        room.ya = room.yb = ny;
+        room.natural = true;
+        cave.push_back(tunnel);
+        cave.push_back(room);
+        at = next;
+        y = ny;
+        last_r = r;
+        const Vec2 turned = dir16(static_cast<Angle16>(rng.below(14000) - 7000));
+        d = {d.x * turned.x - d.z * turned.z, d.x * turned.z + d.z * turned.x};
+      }
+      if (!ok || cave.size() < 4) continue;
+      // Out of the last chamber, a narrow way up to daylight: the grotto.
+      const Vec2 end{at.x + d.x * (last_r + 7.0f), at.z + d.z * (last_r + 7.0f)};
+      RoomPiece out{at, end, 1.8f, {}, 3.2f, 0.3f};
+      out.ya = y;
+      out.yb = y + 1.0f;
+      out.natural = true;
+      cave.push_back(out);
+      for (const RoomPiece& p : cave) in.pieces.push_back(p);
+      in.exits.push_back({{end.x - d.x * 0.6f, y + 1.0f, end.z - d.z * 0.6f}, {-d.x, -d.z}, ExitKind::Far});
+      break;
+    }
+    // The floor going up and down.
+    for (const RoomPiece& p : in.pieces) in.floor.push_back({p.a, p.b, p.radius, p.ya, p.yb});
   } else if (kind == PlaceKind::Cave) {
     // A corridor from the mouth, then chambers joined by tunnels, each away
     // from the others (deeper into the hill, towards -Z).
@@ -341,7 +460,7 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
     }
   }
   // Around everything.
-  in.bounds = {{1e9f, 0, 1e9f}, {-1e9f, 0, -1e9f}};
+  in.bounds = {{1e9f, 1e9f, 1e9f}, {-1e9f, 0, -1e9f}};
   for (const RoomPiece& p : in.pieces) {
     const float reach = p.radius > 0 ? p.radius + p.wobble + 0.5f : 0.5f;
     const float hx = p.radius > 0 ? reach : p.half.x + reach, hz = p.radius > 0 ? reach : p.half.z + reach;
@@ -351,9 +470,10 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
       in.bounds.min.z = std::min(in.bounds.min.z, c.z - hz);
       in.bounds.max.z = std::max(in.bounds.max.z, c.z + hz);
     }
-    in.bounds.max.y = std::max(in.bounds.max.y, p.height + 1.5f);
+    in.bounds.max.y = std::max(in.bounds.max.y, p.height + std::max(p.ya, p.yb) + 1.5f);
+    in.bounds.min.y = std::min(in.bounds.min.y, std::min(p.ya, p.yb) - 0.5f);
   }
-  in.bounds.min.y = -0.5f;
+  in.bounds.min.y = std::min(in.bounds.min.y, -0.5f);
   if (tall(kind)) {
     // The landing (see interior_objects): the way up to the roof.
     const Hall h = hall_of(kind);
@@ -613,10 +733,12 @@ void furnish_burrow(const Interior& in, Rng& rng, std::vector<Object>& out) {
 void furnish_mine(const Interior& in, Rng& rng, std::vector<Object>& out) {
   // Along each gallery, timber frames every few meters (their posts by the
   // walls, their beams across); lanterns now and then; carts on bits of
-  // rails; rubble and glowing ore in the halls.
+  // rails where it is level; rubble and glowing ore in the halls. The
+  // natural cave beyond: fallen rocks, crystals on its floor and its vaults.
+  const auto floor_at = [&](float x, float z) { return floor_height(in, x, z); };
   for (size_t k = 0; k < in.pieces.size(); ++k) {
     const RoomPiece& p = in.pieces[k];
-    if (p.a == p.b) continue;
+    if (p.a == p.b || p.natural) continue;
     const float dx = p.b.x - p.a.x, dz = p.b.z - p.a.z;
     const float len = std::sqrt(dx * dx + dz * dz);
     if (len < 1e-3f) continue;
@@ -627,40 +749,66 @@ void furnish_mine(const Interior& in, Rng& rng, std::vector<Object>& out) {
     for (float t = 2.5f; t < len - 1.0f; t += 3.6f, ++frame) {
       const Vec2 c{p.a.x + d.x * t, p.a.z + d.z * t};
       if (distance2d(c.x, c.z) < 2.0f) continue;  // not right at the way in
+      if (natural_at(in, c.x, c.z) > 0.3f) continue;
       for (const float side : {-1.0f, 1.0f}) {
         const float reach = p.radius - 0.35f;
-        Object post = thing(ObjectKind::MineProp, c.x - across.x * side * reach, 0, c.z - across.z * side * reach,
+        const float x = c.x - across.x * side * reach, z = c.z - across.z * side * reach;
+        Object post = thing(ObjectKind::MineProp, x, std::min(floor_at(x, z), floor_at(c.x, c.z)), z,
                             side < 0 ? static_cast<Angle16>(yaw + 32768) : yaw, static_cast<uint8_t>(rng.below(256)));
         post.size = {reach, 2.7f, 1};
         out.push_back(post);
       }
       if (frame % 3 == 1) {
-        Object lamp = thing(ObjectKind::Lamp, c.x + across.x * (p.radius - 0.75f), 0, c.z + across.z * (p.radius - 0.75f));
-        out.push_back(lamp);
+        const float x = c.x + across.x * (p.radius - 0.75f), z = c.z + across.z * (p.radius - 0.75f);
+        out.push_back(thing(ObjectKind::Lamp, x, floor_at(x, z), z));
       }
     }
-    if (rng.below(2) == 0 && len > 8.0f) {
-      const float t = range(rng, 3.0f, len - 3.0f);
+    if (rng.below(2) == 0 && len > 7.0f && std::fabs(p.yb - p.ya) < 0.5f) {
+      const float t = range(rng, 2.5f, len - 2.5f);
       const float side = rng.below(2) ? 1.0f : -1.0f;
       const Vec2 c{p.a.x + d.x * t + across.x * side * 0.9f, p.a.z + d.z * t + across.z * side * 0.9f};
-      // Along X or Z (the galleries run so), its rails along it.
-      const Angle16 cart_yaw = std::fabs(d.x) > std::fabs(d.z) ? Angle16{0} : Angle16{16384};
-      out.push_back(thing(ObjectKind::Minecart, c.x, 0, c.z, cart_yaw, static_cast<uint8_t>(rng.below(256))));
+      // Its rails along the gallery.
+      const Angle16 cart_yaw = angle16_from_radians(std::atan2(-d.z, d.x));
+      Object cart = thing(ObjectKind::Minecart, c.x, floor_at(c.x, c.z), c.z, cart_yaw, static_cast<uint8_t>(rng.below(256)));
+      if (wall_distance(in, c.x, c.z) > 1.0f) out.push_back(cart);
     }
+  }
+  // The halls: rubble and ore; the widest (the guardian's) more of them, bigger.
+  float widest = 0;
+  for (const RoomPiece& p : in.pieces) {
+    if (p.a == p.b && !p.natural) widest = std::max(widest, p.radius);
   }
   for (const RoomPiece& p : in.pieces) {
     if (!(p.a == p.b)) continue;
-    for (int n = 0; n < 5; ++n) {
+    const bool big = !p.natural && p.radius >= widest;
+    const int count = p.natural ? 9 : big ? 14 : 5;
+    for (int n = 0; n < count; ++n) {
       const Vec2 a = dir16(any_angle(rng));
-      const float dd = p.radius * range(rng, 0.45f, 0.8f);
+      const float dd = p.radius * range(rng, 0.4f, 0.85f);
       const float x = p.a.x + a.x * dd, z = p.a.z + a.z * dd;
-      const bool ore = rng.below(3) == 0;
+      const bool ore = rng.below(p.natural ? 2 : 3) == 0;
       const auto variant = static_cast<uint8_t>(rng.below(256));
-      const float sc = range(rng, 0.4f, 0.8f);
+      const float sc = range(rng, 0.4f, big || p.natural ? 1.2f : 0.8f);
       if (wall_distance(in, x, z) < 1.0f || distance2d(x, z) < 5.0f) continue;
-      Object o = thing(ore ? ObjectKind::Crystal : ObjectKind::Rock, x, -0.05f, z, ore ? any_angle(rng) : 0, variant);
+      const Angle16 yaw = ore ? any_angle(rng) : static_cast<Angle16>(rng.below(4) * kQuarter);
+      Object o = thing(ore ? ObjectKind::Crystal : ObjectKind::Rock, x, floor_at(x, z) - 0.05f, z, yaw, variant);
       o.size = ore ? Vec3{sc, sc, sc} : Vec3{sc, sc * 0.8f, sc};
       out.push_back(o);
+    }
+    if (!p.natural) continue;
+    for (int n = 0, attempt = 0; n < 7 && attempt < 40; ++attempt) {  // crystals hanging from its vault
+      const Vec2 a = dir16(any_angle(rng));
+      const float dd = p.radius * std::sqrt(unit(rng)) * 0.85f;
+      const float x = p.a.x + a.x * dd, z = p.a.z + a.z * dd;
+      const float scale = range(rng, 0.4f, 0.9f);
+      const auto yaw = any_angle(rng);
+      Vec3 hit;
+      if (wall_distance(in, x, z) < 1.0f || !cast(in, {x, floor_at(x, z) + 1.0f, z}, {0, 1, 0}, 14.0f, hit)) continue;
+      Object o = thing(ObjectKind::Crystal, hit.x, hit.y + 0.05f, hit.z, yaw, static_cast<uint8_t>(rng.below(256)));
+      o.size = {scale, scale, scale};
+      o.mount = Object::kHanging;
+      out.push_back(o);
+      ++n;
     }
   }
 }
@@ -697,7 +845,13 @@ DoorNear door_near(const World& w, float reach) {
       best.object = w.place.door;
       best.distance = d;
       best.hidden = e.kind == ExitKind::Hidden;
-      if (e.kind == ExitKind::Roof) {
+      best.far = e.kind == ExitKind::Far;
+      if (e.kind == ExitKind::Far) {  // the narrow way's end, daylight from the grotto
+        best.at = {e.at.x - e.facing.x * 0.9f, e.at.y + 1.3f, e.at.z - e.facing.z * 0.9f};
+        best.facing = e.facing;
+        best.width = 2.2f;
+        best.height = 2.4f;
+      } else if (e.kind == ExitKind::Roof) {
         best.at = {e.at.x, w.interior.pieces[0].height - 0.06f, e.at.z};  // the trapdoor overhead
         best.facing = {0, 0};  // lying flat: the trapdoor
         best.width = best.height = 1.1f;
@@ -753,7 +907,7 @@ DoorNear door_near(const World& w, float reach) {
     if (d >= best.distance || std::fabs(p.y - o.pos.y) > 1.5f) return;
     const Vec2 g = local_to_world(o, f.glow.x, f.glow.z);
     best = {DoorAction::Enter, place, o.kind, k, {g.x, o.pos.y + f.glow.y, g.z}, front_of(o.yaw), f.width, f.height, d,
-            o.kind == ObjectKind::HiddenCave};
+            o.kind == ObjectKind::HiddenCave, o.kind == ObjectKind::Grotto};
   });
   return best;
 }
@@ -776,7 +930,7 @@ void bring_companion(World& w) {
   c.timer = 0;
 }
 
-void leave(World& w, bool to_roof, bool hidden = false) {
+void leave(World& w, bool to_roof, bool hidden = false, bool far = false) {
   if (!inside(w) || w.place.door >= w.outdoors.objects.size()) return;
   Creature companion = w.creatures.empty() ? Creature{} : w.creatures[0];
   const bool had_companion = !w.creatures.empty();
@@ -788,9 +942,9 @@ void leave(World& w, bool to_roof, bool hidden = false) {
   if (had_companion) w.creatures.push_back(companion);
   for (Creature& c : out.creatures) w.creatures.push_back(std::move(c));
   Object door = w.objects[w.place.door];
-  if (hidden) {  // out behind the waterfall
+  if (hidden || far) {  // out behind the waterfall; out of the grotto
     for (const Object& o : w.objects) {
-      if (o.kind == ObjectKind::HiddenCave) door = o;
+      if (o.kind == (hidden ? ObjectKind::HiddenCave : ObjectKind::Grotto)) door = o;
     }
   }
   w.place = {};
@@ -820,11 +974,13 @@ bool enter_place(World& w, Place place, bool from_roof) {
   if (inside(w) || place.door >= w.objects.size()) return false;
   // Behind the waterfall: into the crystal cave (the one of its mouth), at
   // the end of its hidden tunnel.
+  // Into the grotto: into the mine (the one of its entrance), at the far end of its natural cave.
   const bool hidden = w.objects[place.door].kind == ObjectKind::HiddenCave;
-  if (hidden) {
+  const bool far = w.objects[place.door].kind == ObjectKind::Grotto;
+  if (hidden || far) {
     bool found = false;
     for (size_t k = 0; k < w.objects.size() && !found; ++k) {
-      if (w.objects[k].kind == ObjectKind::CaveMouth) {
+      if (w.objects[k].kind == (hidden ? ObjectKind::CaveMouth : ObjectKind::MineEntrance)) {
         place.door = static_cast<uint32_t>(k);
         found = true;
       }
@@ -846,6 +1002,7 @@ bool enter_place(World& w, Place place, bool from_roof) {
   w.ground = Heightmap{};
   w.place = place;
   w.interior = make_interior(w.seed, place.kind, door);
+  w.ground.floor = w.interior.floor;
   w.objects = interior_objects(w.seed, w.interior, door);
   Body& p = w.player;
   p = Body{};
@@ -854,8 +1011,9 @@ bool enter_place(World& w, Place place, bool from_roof) {
   p.facing_x = top ? 0.0f : w.interior.entry_facing.x;
   p.facing_z = top ? 1.0f : w.interior.entry_facing.z;
   for (const Exit& e : w.interior.exits) {
-    if (!hidden || e.kind != ExitKind::Hidden) continue;
-    p.pos = {e.at.x + e.facing.x * 1.6f, 0, e.at.z + e.facing.z * 1.6f};  // a little in, looking into the cave
+    if (!(hidden && e.kind == ExitKind::Hidden) && !(far && e.kind == ExitKind::Far)) continue;
+    const float x = e.at.x + e.facing.x * 1.6f, z = e.at.z + e.facing.z * 1.6f;
+    p.pos = {x, floor_height(w.interior, x, z), z};  // a little in, looking into the cave
     p.facing_x = e.facing.x;
     p.facing_z = e.facing.z;
   }
@@ -875,7 +1033,7 @@ bool use_door(World& w) {
   switch (d.action) {
     case DoorAction::Enter: if (!enter_place(w, {d.place, d.object}, false)) return false; break;
     case DoorAction::Descend: if (!enter_place(w, {d.place, d.object}, true)) return false; break;
-    case DoorAction::Leave: leave(w, false, d.hidden); break;
+    case DoorAction::Leave: leave(w, false, d.hidden, d.far); break;
     case DoorAction::Climb: leave(w, true); break;
     default: return false;
   }

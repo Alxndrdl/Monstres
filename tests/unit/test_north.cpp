@@ -103,13 +103,20 @@ TEST_CASE("the north's places, in every world") {
     CHECK(n.walls.size() >= 3);
     CHECK(n.cairns.size() >= 5);
     // Its objects and teleporters.
-    CHECK(count_kind(w, ObjectKind::Chalet) == 1);
+    Vec3 at;
+    CHECK(count_kind(w, ObjectKind::Chalet) >= 1);  // the refuge (and Rochebrune's houses)
+    CHECK(count_kind(w, ObjectKind::Arena) == 1);
+    CHECK(count_kind(w, ObjectKind::Grotto) == 1);
+    CHECK(teleporter_position(w, TeleporterId::Hamlet, at));
+    CHECK(npc_index(w, npc::kBarnabe) > 0);
+    CHECK(npc_index(w, npc::kMargaux) > 0);
+    CHECK(npc_index(w, npc::kAgathe) > 0);
+    CHECK(n.houses.size() >= 3);
     CHECK(count_kind(w, ObjectKind::MineEntrance) == 1);
     CHECK(count_kind(w, ObjectKind::HotSpring) == 1);
     CHECK(count_kind(w, ObjectKind::StoneWall) > 30);
     CHECK(count_kind(w, ObjectKind::Cairn) >= 7);
     CHECK(count_kind(w, ObjectKind::Larch) > 200);
-    Vec3 at;
     CHECK(teleporter_position(w, TeleporterId::Refuge, at));
     CHECK(teleporter_position(w, TeleporterId::Col, at));
     // Its villagers.

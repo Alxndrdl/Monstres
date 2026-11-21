@@ -280,8 +280,9 @@ TEST_CASE("villagers show what they have for the player: quests to take or going
   DrawList list;
   list.batches.resize(kMeshCount);
   add_characters(w, 0, list);
-  CHECK(count(list, MeshId::IconPlus) == 3);   // Odette, Violette at the farm, Solène at the refuge
-  CHECK(count(list, MeshId::IconCross) == 2);  // Bastien, and Romane in the woods
+  // Odette, Violette at the farm, Solène at the refuge, Agathe at Rochebrune, Aubin at the inn
+  CHECK(count(list, MeshId::IconPlus) == 5);
+  CHECK(count(list, MeshId::IconCross) == 3);  // Bastien, Romane in the woods, Barnabé at the arena
   // A quest to take: a white "!" (Mirabelle, Gaspard, Lison, Bastien, Odette...); "?" no more.
   CHECK(count(list, MeshId::IconExclaim) >= 4);
   CHECK(count(list, MeshId::IconQuestion) == 0);

@@ -6,6 +6,7 @@
 #include "monstres/core/continent.hpp"
 #include "monstres/core/interior.hpp"
 #include "monstres/core/quests.hpp"
+#include "monstres/core/roads.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
 
@@ -87,7 +88,8 @@ std::string command_names_json() {
   static const char* kNames[] = {"none",        "engage",    "flee",          "capture", "summon",    "release",
                                  "train",       "teleport",  "questAccept",   "questGive", "questComplete", "target",
                                  "challenge",   "ready",     "cast",          "equipSpell", "healTeam", "door",
-                                 "useItem",     "discard",   "buy",           "farmSwap",   "rune"};
+                                 "useItem",     "discard",   "buy",           "farmSwap",   "rune",
+                                 "tournament"};
   static_assert(std::size(kNames) == kCommandCount);
   static_assert(static_cast<size_t>(Command::Engage) == 1 && static_cast<size_t>(Command::Train) == 6 &&
                 static_cast<size_t>(Command::Target) == 11 && static_cast<size_t>(Command::HealTeam) == 16);
@@ -199,7 +201,8 @@ std::string creature_json(const World& w, int index) {
       s += "]";
     }
     if (c.npc == npc::kAnselme) s += std::string(",\"shop\":") + (npc_marks(w, c.npc) & kMarkShop ? "true" : "false");
-    if (c.npc == npc::kCapucine) s += std::string(",\"farm\":") + (farm_open(w) ? "true" : "false");
+    if (c.npc == npc::kCapucine || c.npc == npc::kMargaux) s += std::string(",\"farm\":") + (farm_open(w) ? "true" : "false");
+    if (c.npc == npc::kBarnabe) s += ",\"arena\":" + tournament_json(w);
   }
   s += ",\"x\":" + num(p.x) + ",\"y\":" + num(p.y) + ",\"z\":" + num(p.z);
   s += ",\"distance\":" + num(std::sqrt(dx * dx + dz * dz));
@@ -283,7 +286,8 @@ const char* object_kind_name(ObjectKind kind) {
                                  "cart", "bridge", "farmhouse", "barn", "fruitTree", "crops", "haystack", "windmill",
                                  "cabin", "tent", "campfire", "woodpile", "hollowTree", "burrow", "lighthouse",
                                  "menhir", "meteorite", "waterMill", "hiddenCave",
-                                 "chalet", "mineEntrance", "minecart", "larch", "stoneWall", "cairn", "hotSpring", "mineProp"};
+                                 "chalet", "mineEntrance", "minecart", "larch", "stoneWall", "cairn", "hotSpring", "mineProp",
+                                 "arena", "grotto", "shrine", "bench", "stall"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -463,7 +467,7 @@ std::string bestiary_json(const World& w) {
 namespace {
 
 const char* teleporter_name(TeleporterId id) {
-  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle", "farm", "menhirs", "refuge", "col"};
+  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle", "farm", "menhirs", "refuge", "col", "hamlet"};
   static_assert(std::size(kNames) == kTeleporterCount);
   return kNames[static_cast<size_t>(id)];
 }
@@ -783,17 +787,38 @@ std::string map_json(const World& w) {
     s += ",\"north\":{\"frost\":" + num(rules::kFrostFrom) + ",\"floor\":" + num(north.floor_start) +
          ",\"rise\":" + num(rules::kValleyRise);
     s += at("refuge", north.refuge) + at("mine", north.mine) + at("springs", north.springs) + at("col", north.col) +
-         at("lake", north.lake);
+         at("lake", north.lake) + at("hamlet", north.hamlet) + at("arena", north.arena) + at("ranch", north.ranch) +
+         at("paddock", north.paddock) + at("grotto", north.grotto);
+    s += ",\"arenaR\":" + num(rules::kArenaRadius) + ",\"paddockHx\":" + num(north.paddock_hx) + ",\"paddockHz\":" + num(north.paddock_hz);
     s += ",\"lakeRx\":" + num(north.lake_rx) + ",\"lakeRz\":" + num(north.lake_rz) +
          ",\"lakeOutline\":" + numbers(outline_phases(north.lake, kNorthLakeOutline)) + "}";  // (numbers: as the lake's above)
   } else {
     s += ",\"north\":null";
+  }
+  // The side roads and the places along them (roads.hpp).
+  if (w.roads.valid()) {
+    const auto at = [&](const char* name, Vec2 p) { return std::string(",\"") + name + "\":[" + num(p.x) + "," + num(p.z) + "]"; };
+    s += ",\"roads\":{\"lanes\":[";
+    for (size_t lane = 0; lane < w.roads.lanes.size(); ++lane) {
+      if (lane) s += ",";
+      s += "[";
+      const auto& pts = w.roads.lanes[lane].points;
+      for (size_t i = 0; i < pts.size(); i += 2) s += std::string(i ? "," : "") + num(pts[i].x) + "," + num(pts[i].z);
+      s += "]";
+    }
+    s += "]" + at("inn", w.roads.inn) + at("farmstead", w.roads.farmstead) + at("sawmill", w.roads.sawmill) + "}";
+  } else {
+    s += ",\"roads\":null";
   }
   s += ",\"objects\":[";
   for (size_t i = 0; i < w.objects.size(); ++i) {
     const Object& o = w.objects[i];
     Box b = object_box(o);
     if (o.kind == ObjectKind::CastleGate) b = {o.pos - Vec3{4, 0, 4}, o.pos + Vec3{4, 0, 4}};  // its colliders
+    if (o.kind == ObjectKind::Arena) {
+      const float ar = rules::kArenaRadius;
+      b = {o.pos - Vec3{ar, 0, ar}, o.pos + Vec3{ar, 0, ar}};
+    }
     if (o.kind == ObjectKind::Collider) continue;
     if (o.kind == ObjectKind::Crops) b = {o.pos - o.size, o.pos + o.size};  // walked through, but drawn
     if (s.back() != '[') s += ',';
@@ -1061,7 +1086,20 @@ std::string battle_json(const World& w) {
       static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse", "mine"};
       static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
       s += std::string(",\"door\":{\"action\":\"") + kActions[static_cast<size_t>(d.action)] + "\",\"place\":\"" +
-           kPlaces[static_cast<size_t>(d.place)] + "\",\"building\":\"" + object_kind_name(d.building) + "\"}";
+           kPlaces[static_cast<size_t>(d.place)] + "\",\"building\":\"" + object_kind_name(d.building) + "\"";
+      if (d.far) s += ",\"far\":true";  // the mine's far way, out of the grotto
+      // A house with a name: the refuge, the inn, the farmstead, the sawmill (by where it stands).
+      const std::vector<Object>& outside = inside(w) ? w.outdoors.objects : w.objects;
+      if (d.object < outside.size()) {
+        const Vec2 at{outside[d.object].pos.x, outside[d.object].pos.z};
+        const auto by = [&](Vec2 p) { return std::hypot(at.x - p.x, at.z - p.z) < 1.0f; };
+        const char* spot = w.north.valid() && by(w.north.refuge) ? "refuge"
+                           : w.roads.valid() && by(w.roads.inn) ? "inn"
+                           : w.roads.valid() && by(w.roads.farmstead) ? "farmstead"
+                           : w.roads.valid() && by(w.roads.sawmill) ? "sawmill" : nullptr;
+        if (spot) s += std::string(",\"spot\":\"") + spot + "\"";
+      }
+      s += "}";
     }
     return s + "}";
   }
@@ -1151,11 +1189,26 @@ std::string kept_monster_json(const Monster& m, size_t index) {
 }
 }  // namespace
 
+std::string tournament_json(const World& w) {
+  const Tournament& t = w.tournament;
+  std::string s = "{\"cups\":[";
+  for (uint8_t k = 0; k < rules::kCups; ++k) {
+    if (k) s += ",";
+    s += std::string("{\"won\":") + ((w.cups >> k) & 1u ? "true" : "false") +
+         ",\"open\":" + (can_enter_tournament(w, k) ? "true" : "false") + ",\"level\":" + std::to_string(rules::kCupLevels[k]) +
+         ",\"coins\":" + std::to_string(rules::kCupCoins[k]) + "}";
+  }
+  s += std::string("],\"on\":") + (t.on ? "true" : "false") + ",\"cup\":" + std::to_string(t.cup) +
+       ",\"round\":" + std::to_string(t.round) + ",\"rounds\":" + std::to_string(rules::kTournamentRounds) +
+       ",\"nextIn\":" + std::to_string(t.next_in) + "}";
+  return s;
+}
+
 std::string farm_json(const World& w) {
+  const bool near = near_npc(w, npc::kCapucine) || near_npc(w, npc::kMargaux);
   std::string s = std::string("{\"open\":") + (farm_open(w) ? "true" : "false");
-  s += std::string(",\"near\":") + (near_npc(w, npc::kCapucine) ? "true" : "false");
-  s += std::string(",\"usable\":") +
-       (farm_open(w) && near_npc(w, npc::kCapucine) && w.battle.phase == BattlePhase::None ? "true" : "false");
+  s += std::string(",\"near\":") + (near ? "true" : "false");
+  s += std::string(",\"usable\":") + (farm_open(w) && near && w.battle.phase == BattlePhase::None ? "true" : "false");
   s += ",\"teamSize\":" + std::to_string(rules::kTeamSize) + ",\"active\":" + std::to_string(w.active);
   s += ",\"team\":[";
   for (size_t k = 0; k < w.team.size(); ++k) s += (k ? "," : "") + kept_monster_json(w.team[k], k);

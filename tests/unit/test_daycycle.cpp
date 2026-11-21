@@ -30,9 +30,9 @@ TEST_CASE("the time of day is saved") {
   std::vector<uint8_t> bytes = serialize(w);
   // Past the end of the day: the clock's last byte, before the active member, the next id and the squares.
   // (then the teleporters and quests, Bastien's wins, the spells, the Detection and the counts, the victories,
-  // where the player is, the last adventure spells and the capture spells)
+  // the cups, where the player is, the last adventure spells and the capture spells)
   bytes[bytes.size() - 1 - (1 + 4 + 2 + 3 * kPopulationCellCount) - (2 + 1 + 2 * kQuestCount) - (1 + 2 + 2) -
-        (2 + 1 + 6 * kSpeciesCount) - 4 - (1 + 1 + 4 * kItemCount + 2) - 1 - (kAdventureSlots - 2 + kCaptureSlots)] = 0xff;
+        (2 + 1 + 6 * kSpeciesCount) - 4 - (1 + 1 + 4 * kItemCount + 2) - 1 - 1 - (kAdventureSlots - 2 + kCaptureSlots)] = 0xff;
   CHECK_FALSE(deserialize(bytes).has_value());
 }
 
