@@ -420,8 +420,9 @@ void take_places(World& w) {
   if (const int t = npc_index(w, r.npc); t > 0) put(w.creatures[static_cast<size_t>(t)].body, r.trainer_spot, -ax, -az);
 }
 
-// A hit on one side (on the companion: by foes[k]; else on foes[k]). Returns whether it landed.
-bool hit(World& w, bool on_ally, size_t k, uint16_t damage, bool melee) {
+// A hit on one side (on the companion: by foes[k]; else on foes[k]), by an
+// attack of type `element` (against the types of the one hit). Returns whether it landed.
+bool hit(World& w, bool on_ally, size_t k, uint16_t damage, Element element, bool melee) {
   Battle& b = w.battle;
   Fighter& target = on_ally ? b.ally : foe_fighter(w, k);
   if (target.state == FighterState::Dodge) return false;
@@ -429,9 +430,10 @@ bool hit(World& w, bool on_ally, size_t k, uint16_t damage, bool melee) {
     target.parried_tick = w.tick;
     return false;
   }
-  if (!on_ally && training(w)) {  // the magician's shield takes it (shows what it would have done)
+  if (!on_ally && training(w)) {  // the magician's shield takes it (shows what it would have done; no types)
     target.parried_tick = w.tick;
     target.last_damage = damage;
+    target.last_effect = 0;
     return false;
   }
   if (target.state == FighterState::Parry) {
@@ -443,6 +445,10 @@ bool hit(World& w, bool on_ally, size_t k, uint16_t damage, bool melee) {
     }
     return false;
   }
+  const Elements types = on_ally ? creature_elements(ally(w).species, ally(w).genes)
+                                 : creature_elements(foe_creature(w, k).species, foe_creature(w, k).genes);
+  const int effect = type_effect(element, types.first, types.second);
+  damage = type_damage(damage, effect);
   uint16_t& hp = on_ally ? ally(w).hp : b.foes[k].hp;
   uint16_t lost = std::min(hp, damage);
   if (!on_ally && b.mercy && lost >= hp) {  // the Mercy spell holds the blow back: 1 hit point left
@@ -456,6 +462,7 @@ bool hit(World& w, bool on_ally, size_t k, uint16_t damage, bool melee) {
   }
   target.hit_tick = w.tick;
   target.last_damage = damage;
+  target.last_effect = static_cast<int8_t>(effect);
   return true;
 }
 
@@ -490,6 +497,7 @@ void ally_attack(World& w, uint8_t slot, float look_x, float look_z) {
   f.state = FighterState::Recover;
   f.state_ticks = kRecoverTicks;
   const FightStats atk = ally_stats(w);
+  const Element type = move_element(m, a.species, a.genes);
   const size_t n = foe_count(w);
   const size_t aimed = b.target < n ? b.target : SIZE_MAX;
   if (aimed == SIZE_MAX && m.shape != Burst) {
@@ -529,7 +537,7 @@ void ally_attack(World& w, uint8_t slot, float look_x, float look_z) {
           best_d = d;
         }
       }
-      if (best != SIZE_MAX) hit(w, false, best, move_damage(m, atk, foe_stats(w, best)), true);
+      if (best != SIZE_MAX) hit(w, false, best, move_damage(m, atk, foe_stats(w, best)), type, true);
       break;
     }
     case Burst:
@@ -537,7 +545,7 @@ void ally_attack(World& w, uint8_t slot, float look_x, float look_z) {
         const Side o = foe_side(w, k);
         float ax, ay, az;
         if (aim(self, o, ax, ay, az) <= m.range + o.shape.half_width) {
-          hit(w, false, k, move_damage(m, atk, foe_stats(w, k)), false);
+          hit(w, false, k, move_damage(m, atk, foe_stats(w, k)), type, false);
         }
       }
       break;
@@ -553,7 +561,7 @@ void ally_attack(World& w, uint8_t slot, float look_x, float look_z) {
       } else if (n > 0) {
         damage = move_damage(m, atk, foe_stats(w, 0));
       }
-      throw_projectile(w, self, dx, dz, ax, ay, az, true, slot, move_element(m, a.species, a.genes), damage, m.range);
+      throw_projectile(w, self, dx, dz, ax, ay, az, true, slot, type, damage, m.range);
       break;
     }
   }
@@ -571,20 +579,21 @@ void foe_attack(World& w, size_t k, uint8_t slot) {
   const Move& m = species_moves(e.species)[slot];
   const Side self = foe_side(w, k), other = ally_side(w);
   const uint16_t damage = move_damage(m, foe_stats(w, k), ally_stats(w));
+  const Element type = move_element(m, e.species, e.genes);
   float dx, dz, ax, ay, az;
   const float d = flat_distance(*self.body, *other.body, dx, dz);
   const float d3 = aim(self, other, ax, ay, az);
   switch (m.shape) {
     case Melee:
       if (d <= self.shape.half_width + other.shape.half_width + m.range && vertical_gap(self, other) <= kMeleeHeight) {
-        hit(w, true, k, damage, true);
+        hit(w, true, k, damage, type, true);
       }
       break;
     case Burst:
-      if (d3 <= m.range + other.shape.half_width) hit(w, true, k, damage, false);
+      if (d3 <= m.range + other.shape.half_width) hit(w, true, k, damage, type, false);
       break;
     case Projectile:
-      throw_projectile(w, self, dx, dz, ax, ay, az, false, slot, move_element(m, e.species, e.genes), damage, m.range);
+      throw_projectile(w, self, dx, dz, ax, ay, az, false, slot, type, damage, m.range);
       break;
   }
 }
@@ -742,6 +751,50 @@ uint32_t monster_xp_to_next(uint16_t level) { return 20u * std::max<uint16_t>(le
 uint16_t move_damage(const Move& m, const FightStats& attacker, const FightStats& defender) {
   const uint32_t atk = m.shape == Melee ? attacker.attack : attacker.magic;
   const uint32_t d = uint32_t{m.power} * atk * 2u / (defender.defense + 10u);
+  return static_cast<uint16_t>(std::clamp<uint32_t>(d, 1, 9999));
+}
+
+namespace {
+
+// The types' chart (rows: the attack, columns: the monster hit), in the
+// order of Element. Each type resists itself, but Earth; Normal has no
+// strengths nor weaknesses.
+constexpr size_t kTypeCount = static_cast<size_t>(Element::Count);
+constexpr auto kTypeChart = [] {
+  std::array<std::array<int8_t, kTypeCount>, kTypeCount> c{};
+  const auto set = [&](Element a, Element d, int8_t v) { c[static_cast<size_t>(a)][static_cast<size_t>(d)] = v; };
+  using E = Element;
+  for (size_t t = 0; t < kTypeCount; ++t) {
+    if (t != static_cast<size_t>(E::Normal) && t != static_cast<size_t>(E::Earth)) c[t][t] = -1;
+  }
+  // The triangle: water > fire > nature > water, and the other way.
+  set(E::Water, E::Fire, 1), set(E::Fire, E::Nature, 1), set(E::Nature, E::Water, 1);
+  set(E::Fire, E::Water, -1), set(E::Nature, E::Fire, -1), set(E::Water, E::Nature, -1);
+  // Light and shadow, each against the other.
+  set(E::Light, E::Shadow, 1), set(E::Shadow, E::Light, 1);
+  set(E::Electric, E::Earth, -1), set(E::Electric, E::Air, 1), set(E::Earth, E::Air, -1);
+  set(E::Air, E::Fire, 1), set(E::Fire, E::Ice, 1);
+  set(E::Fire, E::Earth, -1), set(E::Water, E::Earth, 1);
+  set(E::Ice, E::Water, -1), set(E::Water, E::Ice, -1);
+  return c;
+}();
+
+}  // namespace
+
+int type_effect(Element attack, Element defense) {
+  const auto a = static_cast<size_t>(attack), d = static_cast<size_t>(defense);
+  return a < kTypeCount && d < kTypeCount ? kTypeChart[a][d] : 0;
+}
+
+int type_effect(Element attack, Element first, Element second) {
+  return type_effect(attack, first) + (second != first ? type_effect(attack, second) : 0);
+}
+
+uint16_t type_damage(uint16_t damage, int effect) {
+  uint32_t num = 1, den = 1;
+  for (int i = 0; i < effect; ++i) num *= 3, den *= 2;   // x1.5 each
+  for (int i = 0; i > effect; --i) num *= 2, den *= 3;   // /1.5 each
+  const uint32_t d = (uint32_t{damage} * num + den / 2) / den;
   return static_cast<uint16_t>(std::clamp<uint32_t>(d, 1, 9999));
 }
 
@@ -1796,11 +1849,11 @@ void battle_resolve(World& w) {
     if (!gone && p.from_ally) {
       for (size_t k = 0; k < foe_count(w) && !gone; ++k) {
         if (!touches(foe_side(w, k)) || foe_fighter(w, k).state == FighterState::Dodge) continue;  // a dodged one flies on
-        hit(w, false, k, p.damage, false);
+        hit(w, false, k, p.damage, p.element, false);
         gone = true;
       }
     } else if (!gone && has_ally && touches(ally_side(w)) && b.ally.state != FighterState::Dodge) {
-      hit(w, true, 0, p.damage, false);
+      hit(w, true, 0, p.damage, p.element, false);
       gone = true;
     }
     // Objects stop it, but not what a fighter stands on (the roof of a crow).

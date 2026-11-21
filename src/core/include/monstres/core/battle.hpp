@@ -35,8 +35,8 @@ namespace monstres {
 // companion's as the foes': time to parry it, or to get away; dodging
 // cancels the companion's. Parrying blocks the next hit and stuns a foe
 // whose bite was parried. Foes have the same attacks and delays, but show
-// theirs before (Windup); they circle, dodge, and fly if they can. No
-// elemental strengths or weaknesses yet.
+// theirs before (Windup); they circle, dodge, and fly if they can. An
+// attack does more or less to a monster by their types (type_effect).
 
 namespace rules {
 inline constexpr uint16_t kCompanionStartLevel = 3;
@@ -175,6 +175,18 @@ uint16_t windup_ticks(uint8_t slot);
 
 // Hit points dealt by `move` of an attacker with these characteristics.
 uint16_t move_damage(const Move& move, const FightStats& attacker, const FightStats& defender);
+
+// The types against each other: how an attack of type `attack` does on a
+// monster of type `defense`: +1 efficient, -1 inefficient, 0 nothing
+// particular. Also told in the guide (web/guide.js reads it from the game).
+int type_effect(Element attack, Element defense);
+// The types' effect on a monster with one or two types (`second`:
+// Element::Count when it has one): the sum of both (-2..2).
+int type_effect(Element attack, Element first, Element second);
+// Damage of an attack of that type on such a monster: x1.5 for each of its
+// types weak to it, /1.5 for each one resisting it (both count: x2.25, /2.25;
+// one of each: as is). Rounded, at least 1.
+uint16_t type_damage(uint16_t damage, int effect);
 
 // Experience for a team member (levels up, hit points grow) or the magician.
 void grant_monster_xp(Monster& monster, uint32_t xp);

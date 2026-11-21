@@ -541,14 +541,22 @@
     quiet = false;
   });
 
-  function floatText(index, text, className) {
+  function floatText(index, text, className, below = 0) {
     const at = game.creatureOnScreen(index);
     if (!at) return;
     const n = el('div', { className: `damage ${className}`, textContent: text });
     n.style.left = `${at.x + (Math.random() - 0.5) * 24}px`;
-    n.style.top = `${at.y - 30}px`;
+    n.style.top = `${at.y - 30 + below}px`;
     layer.append(n);
     setTimeout(() => n.remove(), 950);
+  }
+
+  // The types' effect on a hit (src/core/battle.cpp, type_effect), under its number.
+  function effectText(index, effect) {
+    if (effect > 1) floatText(index, 'Très efficace !', 'effect strong', 22);
+    else if (effect > 0) floatText(index, 'Efficace !', 'effect strong', 22);
+    else if (effect < -1) floatText(index, 'Très peu efficace…', 'effect weak', 22);
+    else if (effect < 0) floatText(index, 'Peu efficace…', 'effect weak', 22);
   }
 
   function renderHits(b) {
@@ -571,12 +579,16 @@
       const was = seenFoes.get(f.index) || { hit: e.hitTick, parried: e.parriedTick };
       if (held && f.hp === 1 && e.hitTick === mercy) floatText(f.index, 'Retenu ! 1 PV', 'mercy');
       else if (e.hitTick > was.hit) floatText(f.index, `${e.lastDamage}`, 'enemy');
+      if (e.hitTick > was.hit) effectText(f.index, e.lastEffect);
       if (e.parriedTick > was.parried) floatText(f.index, 'Paré !', 'blocked');
       seenFoes.set(f.index, { hit: e.hitTick, parried: e.parriedTick });
     }
     if (!b.ally) return;
     const a = b.ally.fighter;
-    if (a.hitTick > seen.allyHit) floatText(0, `${a.lastDamage}`, 'ally');
+    if (a.hitTick > seen.allyHit) {
+      floatText(0, `${a.lastDamage}`, 'ally');
+      effectText(0, a.lastEffect);
+    }
     if (a.parriedTick > seen.allyParried) floatText(0, 'Paré !', 'blocked');
     seen.allyHit = a.hitTick;
     seen.allyParried = a.parriedTick;

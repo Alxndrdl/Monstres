@@ -408,6 +408,31 @@
     .badges { display: flex; flex-wrap: wrap; gap: 5px 0; }
     .badge.family { background: rgba(255, 255, 255, 0.85); }
 
+    /* The guide (guide.js): the types, their strengths and weaknesses, the chart. */
+    .guide-detail h2 { margin: 0 0 6px; font-size: 22px; }
+    .guide-detail h3 { margin: 18px 0 6px; font-size: 15px; color: #f2c94c; }
+    .guide-detail .description { margin: 0; font-size: 14px; }
+    .type-icon {
+      display: inline-flex; align-items: center; justify-content: center; flex: none;
+      padding: 3px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+    }
+    .type-icon svg { display: block; }
+    .type-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+    .type-list li { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .table-scroll { overflow-x: auto; max-width: 100%; }
+    .type-table, .type-matrix { border-collapse: collapse; font-size: 13px; }
+    .type-table th, .type-table td { padding: 4px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); text-align: left; vertical-align: middle; }
+    .type-table thead th { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.75); white-space: nowrap; }
+    .type-icons { display: flex; flex-wrap: wrap; gap: 3px; }
+    .type-table .none { color: rgba(255, 255, 255, 0.35); }
+    .type-matrix th, .type-matrix td { width: 28px; height: 28px; padding: 1px; text-align: center; }
+    .type-matrix td { font-size: 16px; font-weight: 700; border: 1px solid rgba(255, 255, 255, 0.08); }
+    .type-matrix td.plus { color: #7fe08a; background: rgba(127, 224, 138, 0.14); }
+    .type-matrix td.minus { color: #ff8a7a; background: rgba(255, 138, 122, 0.12); }
+    .type-matrix td.dot { color: rgba(255, 255, 255, 0.3); }
+    .type-matrix .corner { width: auto; font-size: 10px; font-weight: 400; color: rgba(255, 255, 255, 0.6); line-height: 1.2; text-align: left; padding-right: 4px; }
+    .type-matrix .corner span { display: block; white-space: nowrap; }
+
     /* Variants (DNA). */
     .dna-icon-box { display: inline-flex; vertical-align: -3px; }
     .dna-icon { width: 16px; height: 16px; }
@@ -919,6 +944,10 @@
     .damage.blocked { color: #a8d8ff; font-size: 16px; }
     .damage.mercy { color: #d9ecff; font-size: 16px; }
     .damage.shield { color: #bfe6ff; font-size: 18px; }
+    /* The types: an efficient hit, an inefficient one (under the number). */
+    .damage.effect { font-size: 14px; }
+    .damage.effect.strong { color: #7fe08a; }
+    .damage.effect.weak { color: #c9c2b8; }
     @keyframes float-up { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -46px; } }
 
     /* ---- Battle buttons: an arc around the dodge ---- */
@@ -1114,6 +1143,7 @@
         <button id="tab-button-quests" role="tab" type="button" aria-controls="tab-quests" data-tab="quests">Quêtes</button>
         <button id="tab-button-bestiary" role="tab" type="button" aria-controls="tab-bestiary" data-tab="bestiary">Bestiaire</button>
         <button id="tab-button-map" role="tab" type="button" aria-controls="tab-map" data-tab="map">Carte</button>
+        <button id="tab-button-guide" role="tab" type="button" aria-controls="tab-guide" data-tab="guide">Guide</button>
         <button id="menu-close" type="button" aria-label="Fermer">×</button>
       </div>
 
@@ -1169,6 +1199,13 @@
         <div class="bestiary">
           <ul id="bestiary-list" class="bestiary-list"></ul>
           <article id="bestiary-detail" class="bestiary-detail" aria-live="polite"></article>
+        </div>
+      </section>
+
+      <section id="tab-guide" class="tab-panel split" role="tabpanel" aria-labelledby="tab-button-guide" hidden>
+        <div class="bestiary">
+          <ul id="guide-list" class="bestiary-list"></ul>
+          <article id="guide-detail" class="guide-detail" aria-live="polite"></article>
         </div>
       </section>
 
@@ -1457,6 +1494,7 @@
   <script src="battle.js"></script>
   <script src="team.js"></script>
   <script src="spells.js"></script>
+  <script src="guide.js"></script>
   <script src="dialogue.js"></script>
   <script src="sound_recipes.js"></script>
   <script src="audio.js"></script>

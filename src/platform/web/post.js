@@ -180,6 +180,8 @@ window.monstres = {
   cast: (slot) => monstresCommand('cast', slot),
   equipSpell: (slot, spell) => monstresCommand('equipSpell', slot * 16 + spell),
   spells: () => JSON.parse(UTF8ToString(_monstres_spells_json())),
+  // The types' chart (web/guide.js): { types: ['fire', ...], chart: [[0, -1, ...], ...] }, rows: the attack.
+  typeChart: () => JSON.parse(UTF8ToString(_monstres_type_chart_json())),
   // The healer (Odette): heals the team.
   healTeam: (npc) => monstresCommand('healTeam', npc),
   // Through the door the player stands at (in, out, up, down: interior.hpp).

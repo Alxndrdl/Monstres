@@ -389,7 +389,8 @@ WizardStats wizard_stats(const Wizard& wizard);
 
 // Elements of magic, for monsters (and later spells).
 // Count also means "none" (a monster with a single element).
-enum class Element : uint8_t { Fire, Water, Nature, Air, Shadow, Light, Electric, Normal, Arcane, Count };
+// Earth and Ice have no species yet (their attacks would come from moves of their type).
+enum class Element : uint8_t { Fire, Water, Nature, Air, Shadow, Light, Electric, Normal, Arcane, Earth, Ice, Count };
 
 // Base characteristics of a monster species (bestiary). Villagers have none.
 struct MonsterStats {
@@ -445,6 +446,7 @@ struct Fighter {
   uint8_t attack_move = 0;
   uint64_t hit_tick = 0;     // last time it was hurt (last_damage: how much)
   uint16_t last_damage = 0;
+  int8_t last_effect = 0;    // of the types on that hit: +1 efficient, -1 inefficient (+2, -2: both its types)
   uint64_t parried_tick = 0; // last hit it blocked
   // Foes: how they move around (they circle the companion, one way or the other).
   int8_t strafe = 1;         // +1 / -1: which way it circles, 0: holds still

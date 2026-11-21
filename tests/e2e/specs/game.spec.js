@@ -621,7 +621,7 @@ test.describe('grimoire', () => {
     await expect(menu).toBeHidden();
     await page.locator('#menu-button').click();
     await expect(menu).toBeVisible();
-    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Sac', 'Sorts', 'Quêtes', 'Bestiaire', 'Carte']);
+    await expect(page.getByRole('tab')).toHaveText(['Personnage', 'Équipe', 'Sac', 'Sorts', 'Quêtes', 'Bestiaire', 'Carte', 'Guide']);
     const tick = (await state(page)).tick;
     await page.waitForTimeout(500);
     expect((await state(page)).tick).toBe(tick);  // paused
@@ -685,6 +685,51 @@ test.describe('grimoire', () => {
     await page.keyboard.press('b');
     await page.locator('.bestiary-entry[data-species="crow"]').click();
     await expect(page.locator('#bestiary-detail .badge')).toHaveText(['Oiseau', 'Ombre', 'Air']);
+  });
+
+  test('the guide tells the types; its two tables agree', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    await page.keyboard.press('h');
+    await expect(page.getByRole('tab', { name: 'Guide' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.guide-entry[data-entry="types"]')).toHaveAttribute('aria-current', 'true');
+    await expect(page.locator('#guide-detail .type-list li')).toHaveCount(11);
+    await expect(page.locator('#guide-detail .type-list li').first()).toHaveText('Feu');
+    // Read both tables: the summary's icons, the chart's signs.
+    const tables = await page.evaluate(() => {
+      const types = (node) => [...node.querySelectorAll('.type-icon')].map((i) => i.dataset.type);
+      const summary = {};
+      for (const row of document.querySelectorAll('#type-summary tbody tr')) {
+        const [strong, weak, resists, vulnerable] = [...row.querySelectorAll('td')].map(types);
+        summary[row.dataset.type] = { strong, weak, resists, vulnerable };
+      }
+      const chart = {};
+      for (const row of document.querySelectorAll('#type-matrix tbody tr')) {
+        chart[row.dataset.type] = Object.fromEntries([...row.querySelectorAll('td')].map((c) => [c.dataset.defense, c.textContent]));
+      }
+      return { summary, chart };
+    });
+    const { summary, chart } = tables;
+    const names = Object.keys(chart);
+    expect(names).toHaveLength(11);
+    for (const t of names) {
+      expect(summary[t].strong).toEqual(names.filter((d) => chart[t][d] === '+'));
+      expect(summary[t].weak).toEqual(names.filter((d) => chart[t][d] === '−'));
+      expect(summary[t].vulnerable).toEqual(names.filter((a) => chart[a][t] === '+'));
+      expect(summary[t].resists).toEqual(names.filter((a) => chart[a][t] === '−'));
+    }
+    // The rules asked for.
+    expect([chart.water.fire, chart.fire.nature, chart.nature.water]).toEqual(['+', '+', '+']);
+    expect([chart.fire.water, chart.nature.fire, chart.water.nature]).toEqual(['−', '−', '−']);
+    expect([chart.light.shadow, chart.shadow.light]).toEqual(['+', '+']);
+    for (const t of names) expect(chart[t][t]).toBe(t === 'normal' || t === 'earth' ? '·' : '−');
+    for (const t of names) expect([chart.normal[t], chart[t].normal]).toEqual(['·', '·']);
+    expect([chart.electric.earth, chart.electric.air, chart.earth.air]).toEqual(['−', '+', '−']);
+    expect([chart.air.fire, chart.fire.ice, chart.fire.earth, chart.water.earth]).toEqual(['+', '+', '−', '+']);
+    expect([chart.ice.water, chart.water.ice]).toEqual(['−', '−']);
+    // The guide is remembered: the menu opens on it again.
+    await page.keyboard.press('h');
+    await page.locator('#menu-button').click();
+    await expect(page.locator('#tab-guide')).toBeVisible();
   });
 
   test('the variants of a species: unknown, seen (greyed) and captured', async ({ page }) => {

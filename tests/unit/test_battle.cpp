@@ -978,3 +978,100 @@ TEST_CASE("capturing: two mistakes and the monster breaks free, the battle goes 
   CHECK(a.battle.outcome == BattleOutcome::Escaped);
   CHECK(a.team.size() == 1);
 }
+
+TEST_CASE("the types: the chart, as the guide tells it") {
+  using E = Element;
+  // Each type resists itself, but Earth; Normal has no strengths nor weaknesses.
+  for (size_t t = 0; t < static_cast<size_t>(E::Count); ++t) {
+    const auto e = static_cast<E>(t);
+    CHECK(type_effect(e, e) == (e == E::Normal || e == E::Earth ? 0 : -1));
+    CHECK(type_effect(E::Normal, e) == 0);
+    CHECK(type_effect(e, E::Normal) == 0);
+  }
+  // The triangle, and the other way.
+  CHECK(type_effect(E::Water, E::Fire) == 1);
+  CHECK(type_effect(E::Fire, E::Nature) == 1);
+  CHECK(type_effect(E::Nature, E::Water) == 1);
+  CHECK(type_effect(E::Fire, E::Water) == -1);
+  CHECK(type_effect(E::Nature, E::Fire) == -1);
+  CHECK(type_effect(E::Water, E::Nature) == -1);
+  CHECK(type_effect(E::Light, E::Shadow) == 1);
+  CHECK(type_effect(E::Shadow, E::Light) == 1);
+  CHECK(type_effect(E::Electric, E::Earth) == -1);
+  CHECK(type_effect(E::Electric, E::Air) == 1);
+  CHECK(type_effect(E::Earth, E::Air) == -1);
+  CHECK(type_effect(E::Air, E::Fire) == 1);
+  CHECK(type_effect(E::Fire, E::Ice) == 1);
+  CHECK(type_effect(E::Fire, E::Earth) == -1);
+  CHECK(type_effect(E::Water, E::Earth) == 1);
+  CHECK(type_effect(E::Ice, E::Water) == -1);
+  CHECK(type_effect(E::Water, E::Ice) == -1);
+  CHECK(type_effect(E::Fire, E::Air) == 0);  // not both ways
+  // Two types: both count.
+  CHECK(type_effect(E::Electric, E::Shadow, E::Air) == 1);         // a crow
+  CHECK(type_effect(E::Water, E::Fire, E::Earth) == 2);
+  CHECK(type_effect(E::Fire, E::Nature, E::Water) == 0);          // one of each
+  CHECK(type_effect(E::Fire, E::Water, E::Count) == -1);          // one type only
+  // The guide reads it from the game.
+  const std::string json = type_chart_json();
+  CHECK(json.find("\"types\":[\"fire\",\"water\",\"nature\",\"air\",\"shadow\",\"light\",\"electric\",\"normal\",\"arcane\","
+                  "\"earth\",\"ice\"]") != std::string::npos);
+  CHECK(json.find("\"chart\":[[-1,-1,1,0,0,0,0,0,0,-1,1],") != std::string::npos);  // fire's row
+}
+
+TEST_CASE("the types: x1.5 for each weak type, /1.5 for each resisting one") {
+  CHECK(type_damage(10, 0) == 10);
+  CHECK(type_damage(10, 1) == 15);
+  CHECK(type_damage(10, 2) == 23);   // 22.5
+  CHECK(type_damage(10, -1) == 7);   // 6.67
+  CHECK(type_damage(10, -2) == 4);   // 4.44
+  CHECK(type_damage(1, -2) == 1);    // at least 1
+}
+
+TEST_CASE("the types in a battle: on the foe hit, and on the companion") {
+  const auto ember = [](Species foe) {
+    World w = arena(foe);
+    engage(w);
+    w.battle.foes[0].fighter.state = FighterState::Stunned;  // still: no dodge
+    w.battle.foes[0].fighter.state_ticks = 200;
+    const uint16_t hp = w.battle.foes[0].hp;
+    step(w, attack_input(2));
+    for (int i = 0; i < 40 && !w.battle.projectiles.empty(); ++i) step(w, Input{});
+    const Creature& e = w.creatures[w.battle.foes[0].index];
+    const uint16_t plain = move_damage(species_moves(Species::Companion)[1], monster_fight_stats(w.team[0]),
+                                       monster_fight_stats(e.species, e.level, e.genes));
+    return std::array<int, 3>{hp - w.battle.foes[0].hp, w.battle.foes[0].fighter.last_effect, plain};
+  };
+  // The fire of Pompon: weak on the water of a Gloubi, strong on the nature of a Champi.
+  const auto on_slime = ember(Species::Slime);
+  CHECK(on_slime[1] == -1);
+  CHECK(on_slime[0] == type_damage(static_cast<uint16_t>(on_slime[2]), -1));
+  const auto on_mushroom = ember(Species::Mushroom);
+  CHECK(on_mushroom[1] == 1);
+  CHECK(on_mushroom[0] == type_damage(static_cast<uint16_t>(on_mushroom[2]), 1));
+  CHECK(on_mushroom[0] > on_mushroom[2]);
+
+  // The quick attack is Normal: as it is.
+  World w = arena();
+  engage(w);
+  w.creatures[0].body.pos = {0, 0, -2.2f};
+  step(w, attack_input(1));
+  CHECK(w.battle.foes[0].fighter.hit_tick == w.tick);
+  CHECK(w.battle.foes[0].fighter.last_effect == 0);
+
+  // A throw of water on Pompon (fire): efficient.
+  World on_ally = arena();
+  engage(on_ally);
+  Projectile p;
+  p.pos = on_ally.creatures[0].body.pos;
+  p.pos.y += 0.5f;
+  p.ticks = 10;
+  p.from_ally = false;
+  p.element = Element::Water;
+  p.damage = 6;
+  on_ally.battle.projectiles.push_back(p);
+  const uint16_t hp = on_ally.team[0].hp;
+  step(on_ally, Input{});
+  CHECK(on_ally.battle.ally.last_effect == 1);
+  CHECK(hp - on_ally.team[0].hp == 9);
+}

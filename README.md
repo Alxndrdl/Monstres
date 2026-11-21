@@ -82,8 +82,8 @@ Contrôles :
   s'affiche en bas de l'écran (voir Quêtes) ;
 - toucher un téléporteur (cercle de pierres à runes) : « Se téléporter » quand
   on se tient au milieu, puis choisir sa destination sur la carte ;
-- livre en haut à gauche (ou touches C, E, B, M) : le grimoire, qui met le jeu en
-  pause, avec six onglets :
+- livre en haut à gauche (ou touches C, E, I, P, J, B, M, H) : le grimoire, qui met le jeu en
+  pause, avec huit onglets :
   - Personnage : portrait du magicien, nom (choisi à la création de la
     partie), niveau, expérience, mana (barre bleue), où l'on se trouve, et
     ses statistiques : monstres capturés, combats gagnés, monstres battus ;
@@ -119,6 +119,14 @@ Contrôles :
     De près les lieux de la zone jouable, de loin les régions du continent ;
     les téléporteurs connus, et les icônes des villageois proches (« ! »,
     « + », « × »…) ; le bouton « Légende » affiche ou cache la légende ;
+  - Guide (touche H) : de l'aide pour jouer, une entrée par sujet
+    (`web/guide.js`). Pour l'instant, les types : les onze types et leur
+    icône (Feu, Eau, Nature, Terre, Air, Électrique, Glace, Lumière, Ombre,
+    Arcane, Normal), un tableau de leurs forces et faiblesses (fort et faible
+    contre, résiste et vulnérable à), et la table de toutes les rencontres
+    (l'attaquant à gauche, le défenseur en haut : +, − ou ·). Les deux
+    tableaux sont lus dans la table du jeu (`type_effect`, voir Combats), ils
+    concordent toujours. Terre et Glace n'ont encore aucun monstre ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (gérer les sauvegardes, voir
   Sauvegardes ; afficher les FPS et le détail du temps de calcul, voir Performances ; ces
@@ -158,7 +166,7 @@ web/                                index.html (gabarit Emscripten), util.js (ch
                                     premier : aides communes aux scripts), controls.js (joystick,
                                     saut, regard, clavier), ui.js (paramètres, FPS, fiche
                                     des monstres), saves.js (les sauvegardes), menu.js (grimoire : personnage,
-                                    bestiaire, cartes), lore.js (noms et textes du monde),
+                                    bestiaire, cartes), guide.js (le guide), lore.js (noms et textes du monde),
                                     audio.js (le son), sound_recipes.js (les sons, faits
                                     par code), sw.js, manifeste, icônes
 assets/models/                      modèles 3D .glb chargés par le jeu (générés par
@@ -748,7 +756,7 @@ source. Dans le bestiaire, la fiche d'une variante dit ses effets sur les
 aptitudes.
 
 Dans le grimoire, les pages en deux colonnes (Équipe, Sorts, Quêtes,
-Bestiaire) font défiler la liste de gauche et la fiche de droite chacune de
+Bestiaire, Guide) font défiler la liste de gauche et la fiche de droite chacune de
 son côté.
 
 Le bestiaire retient pour
@@ -1091,8 +1099,23 @@ L'icône du magicien en haut de l'écran (ou le magicien lui-même) se vise ou s
 « dévise » comme un adversaire. L'écran est celui d'un combat : le magicien
 en haut (sans points de vie : son bouclier encaisse tout), les points de vie
 du compagnon en bas. « Arrêter l'entraînement » (ou rappeler le compagnon) y
-met fin. Pas de forces ni de
-faiblesses entre éléments pour l'instant. Les combats ne sont pas sauvegardés :
+met fin.
+
+Les types (`type_effect`, `type_damage`, `battle.hpp`) : une attaque
+efficace sur le type du monstre touché fait 1,5 fois plus de dégâts, une
+attaque peu efficace 1,5 fois moins (arrondi, au moins 1). Un monstre à deux
+types compte les deux : × 2,25, ÷ 2,25, ou rien si l'un est vulnérable et
+l'autre résiste. L'attaque rapide est de type Normal, les deux attaques
+spéciales du type du monstre (le premier, ou celui de sa forme élémentaire).
+Sous le nombre de dégâts : « Efficace ! », « Très efficace ! », « Peu
+efficace… », « Très peu efficace… ». Pas de types à l'entraînement (le
+bouclier du magicien n'en a pas). La table entière est dans le guide du
+grimoire : Eau > Feu > Nature > Eau (et peu efficaces dans l'autre sens),
+Lumière et Ombre efficaces l'une sur l'autre, chaque type résiste à lui-même
+(sauf Terre, et Normal, qui n'a ni force ni faiblesse), Électrique efficace
+sur Air et peu efficace sur Terre, Terre peu efficace sur Air, Air efficace
+sur Feu, Feu efficace sur Glace et peu efficace sur Terre, Eau efficace sur
+Terre, Eau et Glace peu efficaces l'une sur l'autre. Les combats ne sont pas sauvegardés :
 une partie rechargée pendant un combat reprend sans lui.
 
 ### Sorts

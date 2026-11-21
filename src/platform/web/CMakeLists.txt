@@ -37,7 +37,7 @@ target_link_options(monstres_web PRIVATE
 add_custom_target(monstres_web_files ALL
   COMMAND ${CMAKE_COMMAND} -E make_directory "${SITE_DIR}"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${WEB_DIR}/sw.js" "${WEB_DIR}/manifest.webmanifest" "${WEB_DIR}/util.js" "${WEB_DIR}/lore.js" "${WEB_DIR}/controls.js" "${WEB_DIR}/ui.js" "${WEB_DIR}/saves.js" "${WEB_DIR}/create.js" "${WEB_DIR}/menu.js" "${WEB_DIR}/battle.js" "${WEB_DIR}/team.js" "${WEB_DIR}/dialogue.js" "${WEB_DIR}/spells.js" "${WEB_DIR}/audio.js" "${WEB_DIR}/sound_recipes.js" "${SITE_DIR}/"
+          "${WEB_DIR}/sw.js" "${WEB_DIR}/manifest.webmanifest" "${WEB_DIR}/util.js" "${WEB_DIR}/lore.js" "${WEB_DIR}/controls.js" "${WEB_DIR}/ui.js" "${WEB_DIR}/saves.js" "${WEB_DIR}/create.js" "${WEB_DIR}/menu.js" "${WEB_DIR}/battle.js" "${WEB_DIR}/team.js" "${WEB_DIR}/dialogue.js" "${WEB_DIR}/spells.js" "${WEB_DIR}/guide.js" "${WEB_DIR}/audio.js" "${WEB_DIR}/sound_recipes.js" "${SITE_DIR}/"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${WEB_DIR}/icons" "${SITE_DIR}/icons"
   VERBATIM
 )

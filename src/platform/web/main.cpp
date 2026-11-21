@@ -930,6 +930,8 @@ EMSCRIPTEN_KEEPALIVE const char* monstres_object_json(int index) {
 JSON_EXPORT(monstres_teleporters_json, teleporters_json(g_app->world))
 
 JSON_EXPORT(monstres_spells_json, spells_json(g_app->world))
+// The types' chart, for the guide (web/guide.js).
+JSON_EXPORT(monstres_type_chart_json, type_chart_json())
 
 JSON_EXPORT(monstres_quests_json, quests_json(g_app->world))
 JSON_EXPORT(monstres_bag_json, bag_json(g_app->world))

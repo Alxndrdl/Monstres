@@ -42,6 +42,10 @@ std::string wizard_json(const World& world);
 // and the ones that can be cast now (with their cooldowns).
 std::string spells_json(const World& world);
 
+// The types' chart (battle.hpp, type_effect), for the guide:
+// {"types":["fire",...],"chart":[[0,-1,...],...]} (rows: the attack, in the order of types).
+std::string type_chart_json();
+
 // Every monster species with its base characteristics, elements, family,
 // size, speeds and how many live in this world (villagers are not listed),
 // and all its variants: identifier, kind, rarity, zones where found (none:

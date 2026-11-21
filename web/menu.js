@@ -56,7 +56,7 @@
   }
 
   function show(tab) {
-    if (!['character', 'team', 'bag', 'spells', 'quests', 'bestiary', 'map'].includes(tab)) tab = 'character';
+    if (!['character', 'team', 'bag', 'spells', 'quests', 'bestiary', 'map', 'guide'].includes(tab)) tab = 'character';
     if (tab !== 'map') teleportMode = false;
     current = tab;
     prefs.set('menuTab', tab);
@@ -72,6 +72,7 @@
     else if (tab === 'spells') window.MonstresSpells.renderTab();
     else if (tab === 'quests') renderQuests();
     else if (tab === 'bestiary') renderBestiary();
+    else if (tab === 'guide') window.MonstresGuide.renderTab();
     else renderMap();
   }
 
@@ -83,9 +84,9 @@
   });
   for (const t of tabs) t.addEventListener('click', () => show(t.dataset.tab));
 
-  // Keyboard: Escape closes; C, E, B and M open a tab (not while typing a name).
+  // Keyboard: Escape closes; C, E, I, P, J, B, M and H open a tab (not while typing a name).
   // By letter, not by key position: M is not at the same place on AZERTY.
-  const SHORTCUTS = { c: 'character', e: 'team', i: 'bag', p: 'spells', j: 'quests', b: 'bestiary', m: 'map' };
+  const SHORTCUTS = { c: 'character', e: 'team', i: 'bag', p: 'spells', j: 'quests', b: 'bestiary', m: 'map', h: 'guide' };
   window.addEventListener('keydown', (event) => {
     const typing = event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(event.target.tagName);
     if (event.key === 'Escape' && releaseOpen()) {

@@ -289,6 +289,8 @@ Color element_glow(Element e) {
     case Element::Light: return {2.0f, 1.9f, 1.25f, 1};
     case Element::Electric: return {2.0f, 1.85f, 0.45f, 1};
     case Element::Arcane: return {1.75f, 0.6f, 2.1f, 1};
+    case Element::Earth: return {1.6f, 1.15f, 0.6f, 1};
+    case Element::Ice: return {1.3f, 1.9f, 2.1f, 1};
     default: return {1.5f, 1.5f, 1.5f, 1};
   }
 }

@@ -218,10 +218,24 @@ const char* zone_name(Zone zone) {
 }
 
 const char* element_name(Element element) {
-  static const char* kNames[] = {"fire", "water", "nature", "air", "shadow", "light", "electric", "normal", "arcane"};
+  static const char* kNames[] = {"fire", "water", "nature", "air", "shadow", "light", "electric", "normal", "arcane", "earth", "ice"};
   static_assert(std::size(kNames) == static_cast<size_t>(Element::Count));
   const auto i = static_cast<size_t>(element);
   return i < std::size(kNames) ? kNames[i] : "?";
+}
+
+std::string type_chart_json() {
+  constexpr auto n = static_cast<size_t>(Element::Count);
+  std::string types, chart;
+  for (size_t a = 0; a < n; ++a) {
+    types += std::string(a ? "," : "") + "\"" + element_name(static_cast<Element>(a)) + "\"";
+    chart += a ? ",[" : "[";
+    for (size_t d = 0; d < n; ++d) {
+      chart += (d ? "," : "") + std::to_string(type_effect(static_cast<Element>(a), static_cast<Element>(d)));
+    }
+    chart += "]";
+  }
+  return "{\"types\":[" + types + "],\"chart\":[" + chart + "]}";
 }
 
 const char* family_name(Family family) {
@@ -820,7 +834,8 @@ std::string fighter_json(const World& w, const Fighter& f, const Moves& moves, b
   if (ally) {
     s += ",\"dodgeCooldown\":" + seconds(f.dodge_cooldown) + ",\"parryCooldown\":" + seconds(f.parry_cooldown);
   }
-  s += ",\"hitTick\":" + std::to_string(f.hit_tick) + ",\"lastDamage\":" + std::to_string(f.last_damage);
+  s += ",\"hitTick\":" + std::to_string(f.hit_tick) + ",\"lastDamage\":" + std::to_string(f.last_damage) +
+       ",\"lastEffect\":" + std::to_string(f.last_effect);
   s += ",\"parriedTick\":" + std::to_string(f.parried_tick) + ",\"attackTick\":" + std::to_string(f.attack_tick);
   (void)w;
   return s + "}";

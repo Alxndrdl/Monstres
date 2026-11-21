@@ -258,7 +258,9 @@ window.MonstresLore = {
     fire: { name: 'Feu', color: '#ff9a5a' },
     water: { name: 'Eau', color: '#6cc4ff' },
     nature: { name: 'Nature', color: '#8fd16a' },
+    earth: { name: 'Terre', color: '#c9a06e' },  // only in the guide for now
     air: { name: 'Air', color: '#d6f0ff' },
+    ice: { name: 'Glace', color: '#a8e6f0' },    // only in the guide for now
     shadow: { name: 'Ombre', color: '#b39ad9' },
     light: { name: 'Lumière', color: '#fff3c4' },
     electric: { name: 'Électrique', color: '#ffd23f' },
