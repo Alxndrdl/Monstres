@@ -36,7 +36,7 @@ test('the game starts in a 3D world', async ({ page }) => {
   expect(s.creatures[0].species).toBe('companion');
   const bySpecies = {};
   for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
-  expect(bySpecies.villager).toBe(18);  // with Isidore, the old magician, and the west's nine
+  expect(bySpecies.villager).toBe(20);  // with Isidore, the old magician, the west's nine and the north's two
   expect(bySpecies.companion).toBeGreaterThanOrEqual(1);  // the companion (and now and then a wild Pompon)
   expect(bySpecies.crow).toBeGreaterThan(0);
   expect(bySpecies.fish).toBeGreaterThan(0);
@@ -649,9 +649,9 @@ test.describe('grimoire', () => {
     await page.locator('#menu-button').click();
     await page.getByRole('tab', { name: 'Bestiaire' }).click();
     const entries = page.locator('.bestiary-entry');
-    await expect(entries).toHaveCount(13);  // villagers are not monsters
+    await expect(entries).toHaveCount(16);  // villagers are not monsters
     await expect(entries.locator('strong')).toHaveText(['Pompon', 'Gloubi', 'Champi', 'Piou', 'Croa', 'Bloup', 'Zapou', 'Ploufi', 'Cristi',
-      'Chipou', 'Hulou', 'Laini', 'Taupi']);
+      'Chipou', 'Hulou', 'Laini', 'Taupi', 'Caillou', 'Cabri', 'Givri']);
     await page.locator('.bestiary-entry[data-species="mushroom"]').click();
     const detail = page.locator('#bestiary-detail');
     await expect(detail.locator('h2')).toHaveText('Champi');
@@ -1372,6 +1372,38 @@ test.describe('the bigger world', () => {
     await page.getByRole('button', { name: 'Montrer un monstre' }).click();
     await page.locator('#present-0').click();
     await expect(page.locator('#dialogue .dialogue-text')).toContainText('même pas un Piou');
+  });
+
+  test('the debug button makes every teleporter known, the north\'s too', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    expect((await page.evaluate(() => window.monstres.teleporters().list)).filter((t) => t.known)).toHaveLength(0);
+    await page.locator('#settings-button').click();
+    await page.locator('#unlock-teleporters').click();
+    await expect(page.locator('#unlock-teleporters-note')).toContainText('Les 9 téléporteurs sont connus');
+    const list = await page.evaluate(() => window.monstres.teleporters().list);
+    expect(list).toHaveLength(9);
+    expect(list.every((t) => t.known)).toBe(true);
+    // The north's: the refuge's and the col's, up there.
+    expect(list.filter((t) => t.z < -700)).toHaveLength(2);
+  });
+
+  test('the north: the refuge, the old mine and its guardian on the map and in the journal', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const map = await page.evaluate(() => window.monstres.map());
+    expect(map.worldNorth).toBe(1220);
+    expect(map.pointsZ).toBe(961);
+    expect(map.north.refuge[1]).toBeLessThan(-600);
+    // Into the mine, its guardian at the bottom.
+    await page.evaluate(([x, z]) => {
+      const n = window.monstres.map().north;
+      const out = n.refuge[0] < n.mine[0] ? -1 : 1;
+      window.monstres.teleport(x + out * 2.2, z);
+      window.monstres.step(2);
+      window.monstres.door();
+      window.monstres.step(5);
+    }, map.north.mine);
+    await expect.poll(async () => (await state(page)).player.place).toBe('mine');
+    expect((await state(page)).player.zone).toBe('mine');
   });
 
   test('teleporters: found by walking near, then a trip through the map', async ({ page }) => {

@@ -9,6 +9,7 @@ namespace rules {
 inline constexpr float kPathHalfWidth = 1.1f;  // the dirt path is 2.2 m wide
 inline constexpr float kPathExtent = 146.0f;   // the valley's part, from z = -150 to z = +150...
 inline constexpr float kPathFullExtent = 650.0f;  // ...then on across the world, past its edges
+inline constexpr float kPathNorthExtent = 1290.0f;  // northwards, further: up to the mountains (the world grew north)
 inline constexpr float kPathFarMaxX = 90.0f;      // beyond the valley it winds farther
 inline constexpr float kPathMaxX = 22.0f;      // and winds at most this far from x = 0
 }

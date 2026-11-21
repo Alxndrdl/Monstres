@@ -81,9 +81,9 @@ TEST_CASE("the ground mesh covers the playable area's relief and faces up (the c
   const MeshData ground = build_ground_mesh(w);
   CHECK_FALSE(ground.transparent);
   // In rings: far fewer triangles than the relief's 2 m cells everywhere.
-  const auto cells = static_cast<size_t>(2 * terrain::kDetailHalfSize / Heightmap::kCellSize);
-  CHECK(ground.vertex_count() / 3 < cells * cells * 2 / 6);
-  CHECK(ground.vertex_count() / 3 < 100000);
+  const auto cells = static_cast<size_t>(Heightmap::kCellsX) * static_cast<size_t>(Heightmap::kCellsZ);
+  CHECK(ground.vertex_count() / 3 < cells * 2 / 6);
+  CHECK(ground.vertex_count() / 3 < 150000);
   float max_x = 0;
   bool all_up = true;
   for_each_triangle(ground, [&](const float* a, const float* b, const float* c, float ny) {

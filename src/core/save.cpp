@@ -1,6 +1,7 @@
 #include "monstres/core/save.hpp"
 
 #include "monstres/core/interior.hpp"
+#include "monstres/core/north.hpp"
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/quests.hpp"
@@ -100,9 +101,8 @@ std::optional<World> fail(LoadError* error, LoadError e) {
 }
 
 bool inside_world(Vec3 p) {
-  const float limit = rules::kWorldHalfSize;
   // Heights: valleys and the lake bed are below 0, but never this deep.
-  return p.x >= -limit && p.x <= limit && p.z >= -limit && p.z <= limit && p.y >= -50 && p.y < 1000;
+  return rules::in_world(p.x, p.z) && p.y >= -50 && p.y < 1000;
 }
 
 }  // namespace
@@ -126,7 +126,10 @@ constexpr size_t kSpeciesCountV21 = 9;  // before Cristi
 constexpr size_t kSpeciesCountV22 = 10;  // before Chipou, Hulou, Laini and Taupi
 constexpr size_t kQuestCountV22 = 6;     // before the west's
 constexpr size_t kQuestCountV24 = 12;    // before the water mill's
+constexpr size_t kSpeciesCountV26 = 14;  // before Caillou, Cabri and Givri
+constexpr size_t kQuestCountV26 = 13;    // before the mine's
 constexpr uint8_t kTeleportersV22 = 5;
+constexpr uint8_t kTeleportersV26 = 7;  // before the north's
 constexpr uint8_t kPlacesV22 = 4;        // outside, cave, house, tower
 
 // Chromatic (1), elemental (2), the build (bits 2-3).
@@ -246,12 +249,13 @@ void write_world(Writer& out, const World& w) {
   out.u32(w.clock);
   out.u8(w.active < 0 ? 0xff : static_cast<uint8_t>(w.active));
   out.u32(w.next_id);
-  out.u8(static_cast<uint8_t>(rules::kPopulationCells));
+  out.u8(static_cast<uint8_t>(rules::kPopulationCellsX));
+  out.u8(static_cast<uint8_t>(rules::kPopulationCellsZ));
   for (size_t k = 0; k < kPopulationCellCount; ++k) {
     out.u8(w.population.active[k]);
     out.u16(w.population.visits[k]);
   }
-  out.u8(w.teleporters);
+  out.u16(w.teleporters);
   out.u8(static_cast<uint8_t>(kQuestCount));
   for (const QuestState& q : w.quests) {
     out.u8(static_cast<uint8_t>(q.stage));
@@ -335,8 +339,10 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_capture = version >= 24;     // four adventure spells, the capture spells
   const bool with_river = version >= 25;       // the river's water mill: its quest
   const bool with_falls_moved = version >= 26;  // the waterfall away from the cave (the river elsewhere there)
+  const bool with_north = version >= 27;        // the world grown north: its squares, its places, teleporters, species
   // Species in the bestiary and the counts: two more from version 19.
-  const size_t species_saved = with_west     ? kSpeciesCount
+  const size_t species_saved = with_north    ? kSpeciesCount
+                               : with_west   ? kSpeciesCountV26
                                : with_places ? kSpeciesCountV22
                                : with_looks  ? kSpeciesCountV21
                                              : kSpeciesCountV18;
@@ -497,18 +503,28 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   if (grown) {
     // Before version 18 the world was the valley: 7 squares a side, now in
     // the middle of the grown world's (the valley's edge on a square's edge).
-    uint8_t cells = 0;
-    constexpr int kOldCells = 7;
+    // Before version 27 the world was a square of 29 squares a side, its
+    // north edge 16 squares south of today's.
+    uint8_t cells = 0, cells_z = 0;
+    constexpr int kOldCells = 7, kSquareCells = static_cast<int>(2 * rules::kWorldHalfSize / rules::kPopulationCell);
+    constexpr int kNorthRows = rules::kPopulationCellsZ - kSquareCells;
     const int offset = static_cast<int>((rules::kWorldHalfSize - rules::kValleyHalfSize) / rules::kPopulationCell);
-    if (!in.u32(w.next_id) || !in.u8(cells) || cells != (with_builds ? rules::kPopulationCells : kOldCells)) {
-      return fail(error, LoadError::Corrupt);
+    if (!in.u32(w.next_id) || !in.u8(cells)) return fail(error, LoadError::Corrupt);
+    if (with_north) {
+      if (!in.u8(cells_z) || cells != rules::kPopulationCellsX || cells_z != rules::kPopulationCellsZ) {
+        return fail(error, LoadError::Corrupt);
+      }
+    } else {
+      if (cells != (with_builds ? kSquareCells : kOldCells)) return fail(error, LoadError::Corrupt);
+      cells_z = cells;
     }
-    for (int k = 0; k < cells * cells; ++k) {
+    for (int k = 0; k < cells * cells_z; ++k) {
       uint8_t active = 0;
       uint16_t visits = 0;
       if (!in.u8(active) || !in.u16(visits) || active > 1) return fail(error, LoadError::Corrupt);
-      const int i = k / cells + (with_builds ? 0 : offset), j = k % cells + (with_builds ? 0 : offset);
-      const auto at = static_cast<size_t>(i * rules::kPopulationCells + j);
+      const int i = k / cells_z + (with_builds ? 0 : offset);
+      const int j = k % cells_z + (with_north ? 0 : kNorthRows) + (with_builds ? 0 : offset);
+      const auto at = static_cast<size_t>(i * rules::kPopulationCellsZ + j);
       w.population.active[at] = active;
       w.population.visits[at] = visits;
     }
@@ -520,9 +536,12 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     uint8_t quests = 0;
     // Before version 18 there were two quests (the giant Champi's came then),
     // before 19 three (fighting, healing and the main quest came then).
-    const uint8_t teleporters = with_west ? static_cast<uint8_t>(kTeleporterCount) : kTeleportersV22;
-    if (!in.u8(w.teleporters) || w.teleporters >= (1u << teleporters) || !in.u8(quests) ||
-        quests != (with_river ? kQuestCount : with_west ? kQuestCountV24 : with_looks ? kQuestCountV22 : with_builds ? 3 : 2)) {
+    const uint8_t teleporters = with_north ? static_cast<uint8_t>(kTeleporterCount) : with_west ? kTeleportersV26 : kTeleportersV22;
+    uint8_t old_teleporters = 0;
+    if (with_north ? !in.u16(w.teleporters) : !in.u8(old_teleporters)) return fail(error, LoadError::Corrupt);
+    if (!with_north) w.teleporters = old_teleporters;
+    if (w.teleporters >= (1u << teleporters) || !in.u8(quests) ||
+        quests != (with_north ? kQuestCount : with_river ? kQuestCountV26 : with_west ? kQuestCountV24 : with_looks ? kQuestCountV22 : with_builds ? 3 : 2)) {
       return fail(error, LoadError::Corrupt);
     }
     for (size_t k = 0; k < quests; ++k) {
@@ -668,7 +687,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     const bool by_door = place != 0 && w.place.door < w.objects.size();
     const Object door = by_door ? w.objects[w.place.door] : Object{};
     std::erase_if(w.objects, [&](const Object& o) {
-      const bool nature = o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine || o.kind == ObjectKind::Rock ||
+      const bool nature = o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine || o.kind == ObjectKind::Larch || o.kind == ObjectKind::Rock ||
                           o.kind == ObjectKind::Bush || o.kind == ObjectKind::Stump;
       // The cave's teleporter was up on the cliff beside its mouth in some worlds: built again below.
       if (o.kind == ObjectKind::Teleporter && o.variant == static_cast<uint8_t>(TeleporterId::Cave)) return true;
@@ -695,6 +714,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   generate_wilds(w);
   // The west's villagers (before version 23: they come).
   add_west_npcs(w);
+  add_north_npcs(w);
   // Before version 19: Isidore comes to the village (and Bastien's lesson is
   // learned if he was beaten already: told to him, it is done).
   if (!with_looks) add_mentor(w);

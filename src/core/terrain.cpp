@@ -16,6 +16,8 @@ namespace {
 constexpr int kValleyControlPoints = 2 * (static_cast<int>(rules::kPathExtent / 6.0f) + 1) + 1;
 constexpr int kExtraControlPoints = static_cast<int>((rules::kPathFullExtent - rules::kPathExtent) / 6.0f) + 1;  // per end
 constexpr int kControlPoints = kValleyControlPoints + 2 * kExtraControlPoints;
+// Northwards, more of them before those (the world grew north).
+constexpr int kNorthControlPoints = static_cast<int>((rules::kPathNorthExtent - rules::kPathFullExtent) / 6.0f) + 1;
 constexpr float kControlStep = 6.0f;
 constexpr int kSamplesPerSegment = 8;
 
@@ -51,20 +53,32 @@ Path make_path(uint64_t seed) {
     }
   }
 
+  // Further north (its own stream again: the rest stays as it was), winding
+  // back towards the middle as it goes up to the mountains' col.
+  constexpr int kAll = kNorthControlPoints + kControlPoints;
+  float all[kAll];
+  std::copy(xs, xs + kControlPoints, all + kNorthControlPoints);
+  Rng north(seed ^ 0x504154484E4F5254ULL, 9);  // "PATHNORT"
+  for (int i = kNorthControlPoints - 1; i >= 0; --i) {
+    const float step = static_cast<float>(static_cast<int>(north.below(701)) - 350) / 100.0f;
+    const float pull = -0.02f * all[i + 1];
+    all[i] = std::clamp(all[i + 1] + step + pull, -rules::kPathFarMaxX, rules::kPathFarMaxX);
+  }
+
   Path path;
-  const float z0 = -kControlStep * static_cast<float>(middle);
-  for (int seg = 0; seg + 1 < kControlPoints; ++seg) {
-    const float p0 = xs[std::max(seg - 1, 0)];
-    const float p1 = xs[seg];
-    const float p2 = xs[seg + 1];
-    const float p3 = xs[std::min(seg + 2, kControlPoints - 1)];
+  const float z0 = -kControlStep * static_cast<float>(middle + kNorthControlPoints);
+  for (int seg = 0; seg + 1 < kAll; ++seg) {
+    const float p0 = all[std::max(seg - 1, 0)];
+    const float p1 = all[seg];
+    const float p2 = all[seg + 1];
+    const float p3 = all[std::min(seg + 2, kAll - 1)];
     for (int s = 0; s < kSamplesPerSegment; ++s) {
       const float t = static_cast<float>(s) / kSamplesPerSegment;
       path.points.push_back({catmull_rom(p0, p1, p2, p3, t),
                              z0 + kControlStep * (static_cast<float>(seg) + t)});
     }
   }
-  path.points.push_back({xs[kControlPoints - 1], z0 + kControlStep * (kControlPoints - 1)});
+  path.points.push_back({all[kAll - 1], z0 + kControlStep * (kAll - 1)});
   // Southwards it ends on the beach where it comes to the sea (not on into
   // it). (Northwards it goes up onto the terrace, whatever the continent's
   // ground below it.)

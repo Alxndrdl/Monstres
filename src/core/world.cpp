@@ -2,6 +2,7 @@
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/interior.hpp"
+#include "monstres/core/north.hpp"
 #include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
@@ -102,7 +103,7 @@ Box footprint(const Object& o) {
   Box b = object_extent(o);
   float r = 0;
   if (o.kind == ObjectKind::Tree) r = 1.2f * o.size.x;
-  if (o.kind == ObjectKind::Pine) r = 1.0f * o.size.x;
+  if (o.kind == ObjectKind::Pine || o.kind == ObjectKind::Larch) r = 1.0f * o.size.x;
   if (r > 0) {
     b.min.x = o.pos.x - r;
     b.max.x = o.pos.x + r;
@@ -118,9 +119,11 @@ class PlacementGrid {
 public:
   static constexpr float kCell = 8.0f;
   static constexpr float kHalf = rules::kReliefHalfSize + 8.0f;
-  static constexpr int kCells = static_cast<int>(2 * kHalf / kCell) + 1;
+  static constexpr float kNorth = rules::kReliefNorth + 8.0f;
+  static constexpr int kCellsX = static_cast<int>(2 * kHalf / kCell) + 1;
+  static constexpr int kCellsZ = static_cast<int>((kHalf + kNorth) / kCell) + 1;
 
-  explicit PlacementGrid(const std::vector<Object>& objects) : cells_(static_cast<size_t>(kCells * kCells)) {
+  explicit PlacementGrid(const std::vector<Object>& objects) : cells_(static_cast<size_t>(kCellsX * kCellsZ)) {
     for (const Object& o : objects) add(o);
   }
   // Seen from above: heights do not matter (objects settle on the ground afterwards).
@@ -143,11 +146,12 @@ public:
   }
 
 private:
-  static int cell_of(float v) { return std::clamp(static_cast<int>((v + kHalf) / kCell), 0, kCells - 1); }
+  static int cell_x(float v) { return std::clamp(static_cast<int>((v + kHalf) / kCell), 0, kCellsX - 1); }
+  static int cell_z(float v) { return std::clamp(static_cast<int>((v + kNorth) / kCell), 0, kCellsZ - 1); }
   template <typename F>
   void each_cell(const Box& b, F f) {
-    for (int i = cell_of(b.min.x); i <= cell_of(b.max.x); ++i) {
-      for (int j = cell_of(b.min.z); j <= cell_of(b.max.z); ++j) f(cells_[static_cast<size_t>(i * kCells + j)]);
+    for (int i = cell_x(b.min.x); i <= cell_x(b.max.x); ++i) {
+      for (int j = cell_z(b.min.z); j <= cell_z(b.max.z); ++j) f(cells_[static_cast<size_t>(i * kCellsZ + j)]);
     }
   }
   std::vector<std::vector<Box>> cells_;
@@ -193,6 +197,7 @@ bool wet_here(const World& w, float x, float z) { return under_water(w, x, z, 0.
 bool in_a_place(const World& w, float x, float z) {
   return in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.5f) || in_ruins(w.ruins, x, z, 2.0f) ||
          in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f) || in_west_place(w.west, x, z, 1.0f) ||
+         in_north_place(w.north, x, z, 1.0f) ||
          steep_here(w, x, z) || wet_here(w, x, z);
 }
 
@@ -352,63 +357,83 @@ void generate_objects(World& w, Rng& rng, bool forest_only = false) {
 
 void generate_wilds(World& w) {
   if (w.ground.empty() || w.wild_objects > 0) return;  // hand-made worlds; already there
-  // The west's buildings first (the valley's trees and rocks in their way go).
+  // The west's buildings first (the valley's trees and rocks in their way go), then the north's.
   const size_t first = build_west(w);
+  build_north(w);
   Rng rng(w.seed ^ 0x57494C44535F3031ULL, 3);  // "WILDS_01": its own stream
   PlacementGrid grid(w.objects);
   const float gap = rules::kObjectGap;
   constexpr float kStep = 5.0f;  // one try per square of 5 m (jittered)
   const float limit = rules::kReliefHalfSize - 20.0f;
   const int n = static_cast<int>(2 * limit / kStep);
+  // What grows at (x, z), drawn there (if anything stays).
+  const auto grow = [&](float x, float z, uint32_t roll, Object o) {
+    if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize - 2.0f) return;  // the valley's own
+    // The west's places stay clear; its woods have their own trees (below).
+    if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z)) return;
+    if (steep_here(w, x, z) || wet_here(w, x, z)) return;  // not on the cliffs, not in the water
+    const float h = w.ground.height(x, z);
+    // How likely an object is here: woods in patches, the continent's forest
+    // dense, the hills rocky with pines, the beach almost bare, none at sea;
+    // the north's pastures, larch woods and rocky slopes (north_wilds).
+    const float patches = value_noise(w.seed + 700, x, z, 90.0f);
+    float chance = 0.3f + 0.55f * std::clamp((patches - 0.55f) / 0.15f, 0.0f, 1.0f);
+    const Zone zone = zone_at(w, x, z);
+    if (region_at(x, z) == Region::Forest) chance = 0.75f;
+    if (zone == Zone::Hills) chance = std::max(chance, 0.3f);
+    if (w.ground.land_height(x, z) < rules::kSeaLevel + 1.0f && h < rules::kSeaLevel + 1.5f) chance = 0;
+    else if (zone == Zone::Coast) chance = 0.04f;
+    if (o.kind == ObjectKind::Crate) return;  // not in the wild
+    if (zone == Zone::Hills && o.kind == ObjectKind::Tree) o.kind = ObjectKind::Pine;
+    if (chance > 0 && zone != Zone::Coast) chance = north_wilds(w, o, x, z, chance);
+    if (static_cast<float>(roll) >= chance * 1000.0f) return;
+    if (!forest_ways(w, o, false)) return;
+    if (zone == Zone::Coast && (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine)) {
+      o.kind = ObjectKind::Rock;  // its size will do; turned by quarters, as rocks are
+      o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
+    }
+    // Not on a slope too steep for its size, not across the path, not on
+    // another one (tried at the height of the ground, as those around it).
+    o.pos.y = h;
+    const Box box = object_extent(o);
+    float lowest = h;
+    for (float cx : {box.min.x, box.max.x}) {
+      for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+    }
+    if (h - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) return;
+    const Box b = footprint(o);
+    const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
+    const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
+    if (distance_to_path(w.path, x, z, keep_off + 1) < keep_off) return;
+    Box wide = b;
+    wide.min = wide.min - Vec3{gap, 0, gap};
+    wide.max = wide.max + Vec3{gap, 0, gap};
+    if (grid.overlaps_any(wide)) return;
+    w.objects.push_back(o);
+    grid.add(o);
+    add_log_pieces(w.objects, o);
+  };
   for (int i = 0; i < n; ++i) {
     for (int j = 0; j < n; ++j) {
       // Every draw first (the same number whatever happens): stable layouts.
       const float x = -limit + kStep * (static_cast<float>(i) + random_range(rng, 0.1f, 0.9f));
       const float z = -limit + kStep * (static_cast<float>(j) + random_range(rng, 0.1f, 0.9f));
       const uint32_t roll = rng.below(1000);
-      Object o = random_object(rng, x, z, false);
-      if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize - 2.0f) continue;  // the valley's own
-      // The west's places stay clear; its woods have their own trees (below).
-      if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z)) continue;
-      if (steep_here(w, x, z) || wet_here(w, x, z)) continue;  // not on the cliffs, not in the water
-      const float h = w.ground.height(x, z);
-      // How likely an object is here: woods in patches, the continent's forest
-      // dense, the hills rocky with pines, the beach almost bare, none at sea.
-      const float patches = value_noise(w.seed + 700, x, z, 90.0f);
-      float chance = 0.3f + 0.55f * std::clamp((patches - 0.55f) / 0.15f, 0.0f, 1.0f);
-      const Zone zone = zone_at(w, x, z);
-      if (region_at(x, z) == Region::Forest) chance = 0.75f;
-      if (zone == Zone::Hills) chance = std::max(chance, 0.3f);
-      if (w.ground.land_height(x, z) < rules::kSeaLevel + 1.0f && h < rules::kSeaLevel + 1.5f) chance = 0;
-      else if (zone == Zone::Coast) chance = 0.04f;
-      if (static_cast<float>(roll) >= chance * 1000.0f) continue;
-      if (o.kind == ObjectKind::Crate) continue;  // not in the wild
-      if (zone == Zone::Hills && o.kind == ObjectKind::Tree) o.kind = ObjectKind::Pine;
-      if (!forest_ways(w, o, false)) continue;
-      if (zone == Zone::Coast && (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine)) {
-        o.kind = ObjectKind::Rock;  // its size will do; turned by quarters, as rocks are
-        o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
+      grow(x, z, roll, random_object(rng, x, z, false));
+    }
+  }
+  // Further north (the world grew north): its own stream, the same tries per square meter.
+  {
+    Rng north(w.seed ^ 0x57494C44534E4F52ULL, 4);  // "WILDSNOR"
+    const float north_limit = rules::kReliefNorth - 20.0f;
+    const int rows = static_cast<int>((north_limit - limit) / kStep);
+    for (int i = 0; i < n; ++i) {
+      for (int j = 0; j < rows; ++j) {
+        const float x = -limit + kStep * (static_cast<float>(i) + random_range(north, 0.1f, 0.9f));
+        const float z = -limit - kStep * (static_cast<float>(j + 1) - random_range(north, 0.1f, 0.9f));
+        const uint32_t roll = north.below(1000);
+        grow(x, z, roll, random_object(north, x, z, false));
       }
-      // Not on a slope too steep for its size, not across the path, not on
-      // another one (tried at the height of the ground, as those around it).
-      o.pos.y = h;
-      const Box box = object_extent(o);
-      float lowest = h;
-      for (float cx : {box.min.x, box.max.x}) {
-        for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
-      }
-      if (h - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) continue;
-      const Box b = footprint(o);
-      const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
-      const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
-      if (distance_to_path(w.path, x, z, keep_off + 1) < keep_off) continue;
-      Box wide = b;
-      wide.min = wide.min - Vec3{gap, 0, gap};
-      wide.max = wide.max + Vec3{gap, 0, gap};
-      if (grid.overlaps_any(wide)) continue;
-      w.objects.push_back(o);
-      grid.add(o);
-      add_log_pieces(w.objects, o);
     }
   }
   // The valley's forest past the valley's edge: as dense as inside it (the
@@ -559,8 +584,7 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
     const float hi = axis == 0 ? ob.max.x : ob.max.z;
     *coord = delta > 0 ? lo - h : hi + h;
   });
-  const float limit = rules::kWorldHalfSize - h;
-  *coord = std::clamp(*coord, -limit, limit);
+  *coord = axis == 0 ? rules::clamp_world_x(*coord, h) : rules::clamp_world_z(*coord, h);
   // Walkers cannot go up a slope steeper than kMaxWalkSlope (but can jump
   // onto it: the ground then is below their feet).
   const bool too_steep = medium == Medium::Land &&
@@ -653,6 +677,9 @@ constexpr SpeciesInfo kSpecies[] = {
     {{0.22f, 0.48f}, 0.0f, 5.5f, 0.0f},  // Owl: Hulou, flies at run_speed (as a crow)
     {{0.36f, 0.66f}, 1.6f, 4.2f, 4.5f},  // Sheep: Laini
     {{0.26f, 0.38f}, 1.8f, 3.6f, 3.6f},  // Mole: Taupi, low and stubby
+    {{0.34f, 0.62f}, 1.3f, 2.8f, 3.0f},  // Golem: Caillou, heavy
+    {{0.30f, 0.78f}, 2.2f, 6.2f, 7.0f},  // Goat: Cabri, leaps high
+    {{0.20f, 0.36f}, 2.8f, 6.6f, 5.5f},  // Ermine: Givri, quick
 };
 
 // A companion that flies: it moves like a walker (objects stop it) but stays
@@ -697,9 +724,8 @@ void fly_free(const Surroundings& s, Body& b, const Steer& st) {
     b.facing_z = st.dir_z / len;
   }
   const float x0 = b.pos.x, z0 = b.pos.z;
-  const float limit = rules::kWorldHalfSize - 1.0f;
-  b.pos.x = std::clamp(b.pos.x + st.dir_x * st.speed * rules::kDt, -limit, limit);
-  b.pos.z = std::clamp(b.pos.z + st.dir_z * st.speed * rules::kDt, -limit, limit);
+  b.pos.x = rules::clamp_world_x(b.pos.x + st.dir_x * st.speed * rules::kDt, 1.0f);
+  b.pos.z = rules::clamp_world_z(b.pos.z + st.dir_z * st.speed * rules::kDt, 1.0f);
   const float floor = s.ground.height(b.pos.x, b.pos.z);
   const float climb = 4.0f * rules::kDt;
   b.pos.y += std::clamp(floor + st.lift - b.pos.y, -climb, climb);
@@ -710,10 +736,7 @@ void fly_free(const Surroundings& s, Body& b, const Steer& st) {
   b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
 }
 
-Vec2 clamp_to_world(Vec2 p, float margin) {
-  const float limit = rules::kWorldHalfSize - margin;
-  return {std::clamp(p.x, -limit, limit), std::clamp(p.z, -limit, limit)};
-}
+Vec2 clamp_to_world(Vec2 p, float margin) { return {rules::clamp_world_x(p.x, margin), rules::clamp_world_z(p.z, margin)}; }
 
 
 // Unit direction from (x, z) towards the target, and the distance to it.
@@ -1066,11 +1089,17 @@ uint8_t level_in(Zone zone, Rng& rng, float x = 0, float z = 0) {
     case Zone::Crater: base = 6; break;
     case Zone::Coast:
     case Zone::Hills:
-    case Zone::Plains: {
+    case Zone::Plains:
+    // The north's, further and further up to the mountains (a level every 110 m, as everywhere).
+    case Zone::Alpine:
+    case Zone::Larches:
+    case Zone::Frost:
+    case Zone::FrozenLake: {
       const float beyond = std::max(std::fabs(x), std::fabs(z)) - rules::kValleyHalfSize;
-      base = static_cast<uint8_t>(2 + std::clamp(static_cast<int>(beyond / 110.0f), 0, 6));
+      base = static_cast<uint8_t>(2 + std::clamp(static_cast<int>(beyond / 110.0f), 0, 10));
       break;
     }
+    case Zone::Mine: base = 7; break;
     default: break;
   }
   return static_cast<uint8_t>(base + rng.below(3));
@@ -1101,6 +1130,12 @@ std::span<const Odds> zone_odds(Zone zone) {
   static constexpr Odds kWoods[] = {{30, Mushroom}, {22, Raccoon}, {20, Bird}, {14, Slime}, {14, Axolotl}};
   static constexpr Odds kCrater[] = {{45, Cristi}, {30, Spark}, {25, Slime}};
   static constexpr Odds kRiver[] = {{55, Axolotl}, {20, Slime}, {25, Bird}};  // Ploufis along the river
+  // The north: Cabri in the pastures and up the slopes, Caillou among the rocks, Givri in the snow.
+  static constexpr Odds kAlpine[] = {{26, Goat}, {22, Bird}, {16, Sheep}, {14, Mushroom}, {8, Golem}, {8, Spark}, {6, Slime}};
+  static constexpr Odds kLarches[] = {{24, Goat}, {22, Mushroom}, {18, Golem}, {16, Bird}, {12, Raccoon}, {8, Ermine}};
+  static constexpr Odds kFrost[] = {{34, Ermine}, {30, Golem}, {26, Goat}, {10, Bird}};
+  static constexpr Odds kFrozenLake[] = {{55, Ermine}, {25, Slime}, {20, Golem}};
+  static constexpr Odds kMine[] = {{65, Golem}, {35, Mole}};  // inside (north.cpp: spawn_miners)
   switch (zone) {
     case Zone::Forest: return kForest;
     case Zone::Cave: return kCave;
@@ -1114,6 +1149,11 @@ std::span<const Odds> zone_odds(Zone zone) {
     case Zone::Woods: return kWoods;
     case Zone::Crater: return kCrater;
     case Zone::River: return kRiver;
+    case Zone::Alpine: return kAlpine;
+    case Zone::Larches: return kLarches;
+    case Zone::Frost: return kFrost;
+    case Zone::FrozenLake: return kFrozenLake;
+    case Zone::Mine: return kMine;
     default: return kOpen;
   }
 }
@@ -1136,6 +1176,7 @@ uint32_t density_in(Zone zone) {
     case Zone::Lake: return 0;     // fish, see below
     case Zone::Meadow: return 35;
     case Zone::Coast: case Zone::Hills: case Zone::Plains: return 30;
+    case Zone::Alpine: case Zone::Larches: case Zone::Frost: return 30;
     default: return 50;
   }
 }
@@ -1156,10 +1197,10 @@ uint32_t species_chance(Species species, Zone zone) {
   return 0;
 }
 
-uint16_t species_habitat(Species species) {
-  uint16_t zones = 0;
+uint32_t species_habitat(Species species) {
+  uint32_t zones = 0;
   for (size_t z = 0; z < static_cast<size_t>(Zone::Count); ++z) {
-    if (species_chance(species, static_cast<Zone>(z)) > 0) zones = static_cast<uint16_t>(zones | (1u << z));
+    if (species_chance(species, static_cast<Zone>(z)) > 0) zones |= 1u << z;
   }
   return zones;
 }
@@ -1167,17 +1208,28 @@ uint16_t species_habitat(Species species) {
 namespace {
 
 Box cell_rect(int index, float& x0, float& z0) {
-  const int i = index / rules::kPopulationCells, j = index % rules::kPopulationCells;
+  const int i = index / rules::kPopulationCellsZ, j = index % rules::kPopulationCellsZ;
   x0 = -rules::kWorldHalfSize + rules::kPopulationCell * static_cast<float>(i);
-  z0 = -rules::kWorldHalfSize + rules::kPopulationCell * static_cast<float>(j);
+  z0 = -rules::kWorldNorth + rules::kPopulationCell * static_cast<float>(j);
   return {{x0, 0, z0}, {x0 + rules::kPopulationCell, 0, z0 + rules::kPopulationCell}};
 }
 
 int cell_index(float x, float z) {
-  const int n = rules::kPopulationCells;
-  const int i = std::clamp(static_cast<int>((x + rules::kWorldHalfSize) / rules::kPopulationCell), 0, n - 1);
-  const int j = std::clamp(static_cast<int>((z + rules::kWorldHalfSize) / rules::kPopulationCell), 0, n - 1);
-  return i * n + j;
+  const int nx = rules::kPopulationCellsX, nz = rules::kPopulationCellsZ;
+  const int i = std::clamp(static_cast<int>((x + rules::kWorldHalfSize) / rules::kPopulationCell), 0, nx - 1);
+  const int j = std::clamp(static_cast<int>((z + rules::kWorldNorth) / rules::kPopulationCell), 0, nz - 1);
+  return i * nz + j;
+}
+
+// A square's own random streams: as numbered when the world was a square of
+// 29 by 29 (the same monsters there as before it grew north), the new ones
+// beyond those numbers.
+uint64_t cell_stream(int index) {
+  const int i = index / rules::kPopulationCellsZ, j = index % rules::kPopulationCellsZ;
+  constexpr int kOld = static_cast<int>(2 * rules::kWorldHalfSize / rules::kPopulationCell);
+  constexpr int kNorthRows = rules::kPopulationCellsZ - kOld;
+  if (j >= kNorthRows) return static_cast<uint64_t>(i * kOld + (j - kNorthRows));
+  return static_cast<uint64_t>(kOld * kOld + i * kNorthRows + j);
 }
 
 float distance_to_rect(const Box& r, float x, float z) {
@@ -1198,7 +1250,7 @@ bool near_player(const World& w, float x, float z, float distance) {
 void add_wanderer(World& w, int index, float x0, float z0) {
   if (w.quests[static_cast<size_t>(QuestId::Combat)].stage != QuestStage::Done) return;
   const auto k = static_cast<size_t>(index);
-  Rng rng(w.seed ^ 0x545241494E4552ULL, static_cast<uint64_t>(index) * 65536u + w.population.visits[k]);  // "TRAINER"
+  Rng rng(w.seed ^ 0x545241494E4552ULL, cell_stream(index) * 65536u + w.population.visits[k]);  // "TRAINER"
   if (rng.below(100) >= rules::kWandererChance) return;
   uint32_t here = 0;
   int free_slot = -1;
@@ -1208,13 +1260,12 @@ void add_wanderer(World& w, int index, float x0, float z0) {
   }
   if (free_slot < 0 || here >= rules::kWanderersAtOnce) return;
   const uint8_t n = static_cast<uint8_t>(npc::kWanderer + free_slot);
-  const float limit = rules::kWorldHalfSize - 4.0f;
   for (int attempt = 0; attempt < 8; ++attempt) {
     const float x = random_range(rng, x0 + 2, x0 + rules::kPopulationCell - 2);
     const float z = random_range(rng, z0 + 2, z0 + rules::kPopulationCell - 2);
     const bool aggressive = rng.below(100) < rules::kAggressiveWanderers;
     const Zone zone = zone_at(w, x, z);
-    if (density_in(zone) == 0 || std::fabs(x) > limit || std::fabs(z) > limit ||
+    if (density_in(zone) == 0 || !rules::in_world(x, z, 4.0f) ||
         near_player(w, x, z, rules::kMonsterSpawnMinDistance + 6) || in_village(w.village, x, z, 8.0f) ||
         in_lake(w.village.lake, x, z, 3.0f) || in_cave_hill(w.cave, x, z, 2.0f) || w.ground.sea(x, z) ||
         (aggressive && !far_from_safety(w, x, z))) {
@@ -1267,9 +1318,8 @@ void populate_cell(World& w, int index) {
   float x0, z0;
   cell_rect(index, x0, z0);
   const auto k = static_cast<size_t>(index);
-  Rng rng(w.seed ^ 0x504F50554C415445ULL, static_cast<uint64_t>(index) * 65536u + w.population.visits[k]);
-  Rng aggro(w.seed ^ 0x524F414D494E47ULL, static_cast<uint64_t>(index) * 65536u + w.population.visits[k]);  // "ROAMING"
-  const float limit = rules::kWorldHalfSize - 3.0f;
+  Rng rng(w.seed ^ 0x504F50554C415445ULL, cell_stream(index) * 65536u + w.population.visits[k]);
+  Rng aggro(w.seed ^ 0x524F414D494E47ULL, cell_stream(index) * 65536u + w.population.visits[k]);  // "ROAMING"
   auto random_in_cell = [&](float& x, float& z) {
     x = random_range(rng, x0, x0 + rules::kPopulationCell);
     z = random_range(rng, z0, z0 + rules::kPopulationCell);
@@ -1291,7 +1341,7 @@ void populate_cell(World& w, int index) {
     const Species species = species_in(zone, rng);
     const SinCos sc = sincos16(static_cast<Angle16>(rng.below(65536)));
     const uint16_t timer = static_cast<uint16_t>(rng.below(3 * rules::kTicksPerSecond));
-    if (roll >= density_in(zone) || std::fabs(x) > limit || std::fabs(z) > limit) continue;
+    if (roll >= density_in(zone) || !rules::in_world(x, z, 3.0f)) continue;
     if (near_player(w, x, z, rules::kMonsterSpawnMinDistance)) continue;
     if (in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 1.0f) ||
         (w.ground.sea(x, z) && w.ground.height(x, z) < rules::kSeaLevel + 0.5f)) {  // not in the sea
@@ -1582,6 +1632,7 @@ void spawn_creatures(World& w) {
   }
   if (has_village) add_mentor(w);
   add_west_npcs(w);
+  add_north_npcs(w);
   // The wild monsters around the player.
   update_population(w);
 }
@@ -1628,7 +1679,7 @@ bool can_place(const World& w, const Object& o, float gap, bool keep_off_path) {
   for (float x : {b.min.x, b.max.x}) {
     for (float z : {b.min.z, b.max.z}) {
       if (in_lake(w.village.lake, x, z, 1.0f)) return false;
-      if (std::fabs(x) > rules::kWorldHalfSize - 1 || std::fabs(z) > rules::kWorldHalfSize - 1) return false;
+      if (!rules::in_world(x, z, 1.0f)) return false;
     }
   }
   if (keep_off_path) {
@@ -1758,6 +1809,10 @@ void settle_objects(World& w, size_t first) {
       for (float z : {b.min.z, b.max.z}) lowest = std::min(lowest, w.ground.height(x, z));
     }
     if (o.kind == ObjectKind::Bridge) continue;  // its deck spans the stream (build_west)
+    if (o.kind == ObjectKind::HotSpring) {  // its water at the level of the ground around its pool
+      o.pos.y = w.ground.height(o.pos.x + o.size.x * 1.25f, o.pos.z);
+      continue;
+    }
     if (o.kind == ObjectKind::Collider) {  // from its lowest point, raised by its variant (decimeters)
       o.pos.y = lowest + static_cast<float>(o.variant) / 10.0f;
       continue;
@@ -2101,6 +2156,7 @@ Zone zone_at(const World& w, float x, float z) {
     case PlaceKind::Burrow: return Zone::Plains;
     case PlaceKind::HollowTree: return Zone::Woods;
     case PlaceKind::Lighthouse: return Zone::Coast;
+    case PlaceKind::Mine: return Zone::Mine;
     default: break;
   }
   if (in_lake(w.village.lake, x, z, 1.5f)) return Zone::Lake;
@@ -2118,7 +2174,17 @@ Zone zone_at(const World& w, float x, float z) {
   if (in_woods(w.west, x, z)) return Zone::Woods;
   // Beyond the valley: the wilds.
   if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize + 10) return Zone::Meadow;
-  if (w.ground.land_height(x, z) < rules::kSeaLevel + 1.0f) return Zone::Coast;  // the shore
+  // The north (north.hpp), its belts wavy (the continent's ground is low up
+  // there, near the sea: the terrace lifts it; the shore only where it is low).
+  const bool shore = w.ground.land_height(x, z) < rules::kSeaLevel + 1.0f;
+  if (w.north.valid() && z < rules::kNorthFrom && (!shore || w.ground.height(x, z) > rules::kSeaLevel + 3.0f)) {
+    if (in_frozen_lake(w.north, x, z, 6.0f)) return Zone::FrozenLake;
+    const float wave = 40.0f * (value_noise(w.seed + 820, x, z, 120.0f) - 0.5f);
+    if (z + wave > rules::kLarchesFrom) return Zone::Alpine;
+    if (z + wave > rules::kFrostFrom) return Zone::Larches;
+    return Zone::Frost;
+  }
+  if (shore) return Zone::Coast;
   if (z < -260.0f) return Zone::Hills;
   return Zone::Plains;
 }
@@ -2147,6 +2213,9 @@ const MonsterStats& monster_stats(Species species) {
       {26, 7, 6, 11, 11, Element::Air, true},     // Owl: Hulou
       {42, 6, 10, 6, 7, Element::Normal, true},   // Sheep: Laini, a woolly cushion
       {34, 8, 9, 6, 6, Element::Nature, true},    // Mole: Taupi
+      {46, 9, 13, 4, 6, Element::Earth, true},    // Golem: Caillou, a little golem of stones
+      {36, 11, 8, 11, 6, Element::Earth, true, Element::Ice},  // Goat: Cabri, of the snowy slopes
+      {27, 8, 6, 14, 11, Element::Ice, true},     // Ermine: Givri, of frost
   };
   static_assert(std::size(kStats) == static_cast<size_t>(Species::Count));
   const auto i = static_cast<size_t>(species);
@@ -2186,7 +2255,8 @@ bool is_round(ObjectKind kind) {
          kind == ObjectKind::Crystal || kind == ObjectKind::Teleporter || kind == ObjectKind::FruitTree ||
          kind == ObjectKind::Haystack || kind == ObjectKind::Windmill || kind == ObjectKind::Campfire ||
          kind == ObjectKind::HollowTree || kind == ObjectKind::Lighthouse || kind == ObjectKind::Menhir ||
-         kind == ObjectKind::Meteorite;
+         kind == ObjectKind::Meteorite || kind == ObjectKind::Larch || kind == ObjectKind::StoneWall ||
+         kind == ObjectKind::Cairn || kind == ObjectKind::HotSpring || kind == ObjectKind::MineProp;
 }
 
 Box object_box(const Object& o) {
@@ -2254,6 +2324,15 @@ Box object_box(const Object& o) {
     case ObjectKind::Meteorite:    half = {0.9f * s.x, 0.7f * s.x, 0.9f * s.x}; break;
     case ObjectKind::WaterMill:    half = {3.0f, 2.4f, 3.0f}; break;  // turned along the river: square
     case ObjectKind::HiddenCave:   half = {0, 0, 0}; break;  // a cleft in the cliff: walked into
+    // The north (north.hpp): matching the models of tools/make_models.py.
+    case ObjectKind::Chalet:       half = {3.6f, 2.5f, 3.0f}; break;
+    case ObjectKind::MineEntrance: half = {0, 0, 0}; break;  // walked into (its rocks: Colliders)
+    case ObjectKind::Minecart:     half = {0.75f, 0.5f, 0.5f}; break;
+    case ObjectKind::Larch:        half = {0.22f * s.x, 1.6f * s.x, 0.22f * s.x}; break;
+    case ObjectKind::StoneWall:    half = {0.37f, 0.5f * rules::kWallHeight, 0.37f}; break;  // turned any way: square, stretches never overlapping
+    case ObjectKind::Cairn:        half = {0.4f * s.x, 0.65f * s.x, 0.4f * s.x}; break;
+    case ObjectKind::HotSpring:    half = {0, 0, 0}; break;  // walked into
+    case ObjectKind::MineProp:     half = {0.13f, 1.35f, 0.13f}; break;  // its post
     default:                half = s; break;  // Crate, Collider, Step
   }
   if (o.mount != 0) half = {0, 0, 0};  // on a wall or the ceiling: out of the way
@@ -2277,11 +2356,11 @@ const ObjectIndex& objects_index(const World& w) {
   ix.boxes.resize(w.objects.size());
   for (size_t i = 0; i < w.objects.size(); ++i) ix.boxes[i] = object_box(w.objects[i]);
   // Counting sort: how many per cell, then where each cell's start, then fill.
-  constexpr size_t kCellCount = static_cast<size_t>(ObjectIndex::kCells) * ObjectIndex::kCells;
+  constexpr size_t kCellCount = static_cast<size_t>(ObjectIndex::kCellsX) * ObjectIndex::kCellsZ;
   const auto each_cell = [](const Box& b, auto f) {
-    for (int cx = ObjectIndex::cell_of(b.min.x); cx <= ObjectIndex::cell_of(b.max.x); ++cx) {
-      for (int cz = ObjectIndex::cell_of(b.min.z); cz <= ObjectIndex::cell_of(b.max.z); ++cz) {
-        f(static_cast<size_t>(cx * ObjectIndex::kCells + cz));
+    for (int cx = ObjectIndex::cell_x(b.min.x); cx <= ObjectIndex::cell_x(b.max.x); ++cx) {
+      for (int cz = ObjectIndex::cell_z(b.min.z); cz <= ObjectIndex::cell_z(b.max.z); ++cz) {
+        f(static_cast<size_t>(cx * ObjectIndex::kCellsZ + cz));
       }
     }
   };
@@ -2311,7 +2390,9 @@ void build_layouts(World& w) {
   w.cave = make_cave_layout(w.seed, w.path);
   w.castle = make_castle_layout(w.seed, w.path);
   w.west = make_west_layout(w.seed, w.path, w.village, w.ruins, w.forest, w.cave, w.castle);
+  w.north = make_north_layout(w.seed, w.path, w.west);
   w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle, &w.west});
+  shape_north(w.ground, w.north, w.path, w.seed);
 }
 
 void regrow_forest(World& w) {
@@ -2659,6 +2740,7 @@ void step(World& w, const Input& in) {
   discover(w);
   quests_step(w);
   west_step(w);
+  north_step(w);
   if (w.tick % rules::kPopulationEveryTicks == 0) update_population(w);
 }
 

@@ -42,9 +42,9 @@ inline constexpr float kGrassFullRadius = 22.0f;
 // what the landscape is made of is computed chunk by chunk, when first
 // needed, and kept (LandscapeCache).
 inline constexpr float kChunk = 32.0f;
-inline constexpr float kChunkOrigin = -ObjectIndex::kHalf;
-inline constexpr int kChunks = ObjectIndex::kCells / 4;
-static_assert(ObjectIndex::kCell * 4 == kChunk && kChunks * 4 == ObjectIndex::kCells);
+inline constexpr float kChunkOriginX = -ObjectIndex::kHalf, kChunkOriginZ = -ObjectIndex::kNorth;
+inline constexpr int kChunksX = ObjectIndex::kCellsX / 4, kChunksZ = ObjectIndex::kCellsZ / 4;
+static_assert(ObjectIndex::kCell * 4 == kChunk && kChunksX * 4 == ObjectIndex::kCellsX && kChunksZ * 4 == ObjectIndex::kCellsZ);
 
 // The built landscape is sorted for culling: by sectors around its center,
 // those within kInnerBand first (each sector a part of every batch).
@@ -119,7 +119,7 @@ private:
   uint64_t seed_ = ~0ULL;
   size_t object_count_ = 0;
   const void* objects_ = nullptr;
-  std::vector<Chunk> chunks_;  // kChunks * kChunks, filled when needed
+  std::vector<Chunk> chunks_;  // kChunksX * kChunksZ (index cx * kChunksZ + cz), filled when needed
   // Scratch space for building (kept to reuse its memory).
   std::vector<std::vector<Instance>> bins_;
   std::vector<Aabb> bin_bounds_;

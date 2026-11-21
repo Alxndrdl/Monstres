@@ -9,7 +9,7 @@
   const LORE = window.MonstresLore;
   const { $, el, whenReady } = window.MonstresUtil;
   const QUEST_INDEX = { lostPiou: 0, teleporters: 1, giantChampi: 2, combat: 3, healing: 4, main: 5,
-    merchant: 6, delivery: 7, transfer: 8, orchard: 9, shepherd: 10, mill: 11, waterWheel: 12 };  // QuestId
+    merchant: 6, delivery: 7, transfer: 8, orchard: 9, shepherd: 10, mill: 11, waterWheel: 12, mineGuardian: 13 };  // QuestId
   const MIRABELLE = 1;
   const GASPARD = 2;
   const LISON = 3;
@@ -25,6 +25,8 @@
   const LUCIEN = 16;
   const YVON = 17;
   const MATHURIN = 22;
+  const SOLENE = 23;
+  const GASTON = 24;
 
   let game = null;
   const box = $('dialogue');
@@ -644,6 +646,36 @@
     }
   }
 
+  // ---- Gaston: the guardian of his old mine (north.hpp) ----
+  function gaston() {
+    const q = quest('mineGuardian');
+    if (q.stage === 'unknown') {
+      show('Ma mine… Ma belle mine ! Un Caillou gros comme une charrette s’est installé tout au fond, dans la grande salle. ' +
+        'Il ne laisse passer personne. Toi qui as des monstres, tu oserais descendre ?', [
+        ['J’y vais', () => {
+          game.acceptQuest(QUEST_INDEX.mineGuardian);
+          afterTick(() => show('Suis les galeries jusqu’au plus profond. Il est fort, très fort : soigne bien tes monstres avant, ' +
+            'Solène t’aidera au refuge. Et les Caillou de Terre craignent l’Eau !'));
+        }, 'accept-quest'],
+        ['Plus tard', close],
+      ]);
+    } else if (q.stage === 'active' && q.ready) {
+      show('Tu l’as fait ? Le gardien ne garde plus rien ? Ah, je vais pouvoir retourner voir mes filons ! Tiens, prends ça.', [
+        ['Merci, Gaston', () => {
+          game.completeQuest(QUEST_INDEX.mineGuardian);
+          afterTick(() => show('Si un jour tu trouves une pierre qui brille au fond d’une galerie, pense au vieux Gaston !'));
+        }, 'complete-quest'],
+      ]);
+    } else if (q.stage === 'active') {
+      show('Le gardien est tout au fond de la mine, dans la plus grande salle. Prends garde à toi.');
+    } else {
+      villager(GASTON);
+    }
+  }
+
+  // ---- Solène: the refuge's keeper, a healer (north.hpp) ----
+  function solene() { healer(SOLENE); }
+
   // ---- The other villagers: rumors about the quests, and chatter ----
   function villager(n) {
     const quests = game.quests();
@@ -662,6 +694,7 @@
     if (n !== BASTIEN && n % 3 === 1) add(LORE.rumors.bastien, 0);  // some of them send the player to him
     if (n !== ODETTE && n % 3 === 2 && n <= ISIDORE) add(LORE.rumors.odette, 0);  // and to her
     if (n <= ISIDORE && n % 2 === 1) add(LORE.rumors.west, 0);
+    if ((n <= ISIDORE && n % 2 === 0) || n === 23) add(LORE.rumors.north, 0);
     for (const line of (LORE.npcs[n] || {}).chatter || []) pool.push(line);
     const k = said[n] = (said[n] || 0) + 1;
     show(pool[(k - 1) % pool.length] || 'Bonjour !', [['Encore un mot ?', () => villager(n)], ['Au revoir', close]]);
@@ -686,6 +719,8 @@
     else if (c.npc === ROMANE) romane(c);
     else if (c.npc === LUCIEN) lucien();
     else if (c.npc === MATHURIN) mathurin();
+    else if (c.npc === SOLENE) solene();
+    else if (c.npc === GASTON) gaston();
     else if (c.wanderer) wanderer(c);
     else villager(c.npc);
     // Walking away ends the talk.

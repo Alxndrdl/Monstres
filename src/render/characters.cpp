@@ -228,6 +228,48 @@ constexpr RigPart kMoleRig[] = {
     {MeshId::MoleLeg, -1, {-0.1f, 0.1f, 0.12f}},
     {MeshId::MoleLeg, -1, {0.1f, 0.1f, 0.12f}},
 };
+// The north's monsters walk on four legs too. Caillou: a boulder on stubby
+// legs, its eyes glowing (tint 4); Cabri: a slender goat, its horns and beard
+// added by its look; Givri: a long, low ermine.
+constexpr RigPart kGolemRig[] = {
+    {MeshId::GolemBody, -1, {0, 0.3f, 0}, {1, 1, 1}, 1},
+    {MeshId::GolemHead, kCBody, {0, 0.06f, -0.27f}, {1, 1, 1}, 1},
+    {MeshId::EyeIris, kCHead, {-0.05f, 0.055f, -0.135f}, {0.026f, 0.02f, 0.02f}, 4},
+    {MeshId::EyeIris, kCHead, {0.05f, 0.055f, -0.135f}, {0.026f, 0.02f, 0.02f}, 4},
+    {MeshId::GolemEar, kCHead, {-0.12f, 0.08f, 0.0f}, {1, 1, 1}, 1},
+    {MeshId::GolemEar, kCHead, {0.12f, 0.08f, 0.0f}, {1, 1, 1}, 1},
+    {MeshId::GolemTail, kCBody, {0, 0.0f, 0.27f}, {1, 1, 1}, 1},
+    {MeshId::GolemLeg, -1, {-0.14f, 0.15f, -0.13f}, {1, 1, 1}, 1},
+    {MeshId::GolemLeg, -1, {0.14f, 0.15f, -0.13f}, {1, 1, 1}, 1},
+    {MeshId::GolemLeg, -1, {-0.14f, 0.15f, 0.13f}, {1, 1, 1}, 1},
+    {MeshId::GolemLeg, -1, {0.14f, 0.15f, 0.13f}, {1, 1, 1}, 1},
+};
+constexpr RigPart kGoatRig[] = {
+    {MeshId::GoatBody, -1, {0, 0.44f, 0}, {1, 1, 1}, 1},
+    {MeshId::GoatHead, kCBody, {0, 0.13f, -0.27f}, {1, 1, 1}, 1},
+    {MeshId::Eye, kCHead, {-0.052f, 0.08f, -0.07f}, {0.017f, 0.021f, 0.017f}},
+    {MeshId::Eye, kCHead, {0.052f, 0.08f, -0.07f}, {0.017f, 0.021f, 0.017f}},
+    {MeshId::GoatEar, kCHead, {-0.065f, 0.09f, 0.01f}, {1, 1, 1}, 1, Quat{0, 1, 0, 0}},  // the model sticks out along +X: turned
+    {MeshId::GoatEar, kCHead, {0.065f, 0.09f, 0.01f}, {1, 1, 1}, 1},
+    {MeshId::GoatTail, kCBody, {0, 0.07f, 0.26f}, {1, 1, 1}, 1},
+    {MeshId::GoatLeg, -1, {-0.085f, 0.27f, -0.16f}, {1, 1, 1}, 1},
+    {MeshId::GoatLeg, -1, {0.085f, 0.27f, -0.16f}, {1, 1, 1}, 1},
+    {MeshId::GoatLeg, -1, {-0.085f, 0.27f, 0.16f}, {1, 1, 1}, 1},
+    {MeshId::GoatLeg, -1, {0.085f, 0.27f, 0.16f}, {1, 1, 1}, 1},
+};
+constexpr RigPart kErmineRig[] = {
+    {MeshId::ErmineBody, -1, {0, 0.16f, 0}, {1, 1, 1}, 1},
+    {MeshId::ErmineHead, kCBody, {0, 0.06f, -0.24f}, {1, 1, 1}, 1},
+    {MeshId::Eye, kCHead, {-0.04f, 0.055f, -0.06f}, {0.014f, 0.017f, 0.014f}},
+    {MeshId::Eye, kCHead, {0.04f, 0.055f, -0.06f}, {0.014f, 0.017f, 0.014f}},
+    {MeshId::ErmineEar, kCHead, {-0.055f, 0.08f, 0.0f}, {1, 1, 1}, 1},
+    {MeshId::ErmineEar, kCHead, {0.055f, 0.08f, 0.0f}, {1, 1, 1}, 1},
+    {MeshId::ErmineTail, kCBody, {0, 0.02f, 0.2f}, {1, 1, 1}, 1},
+    {MeshId::ErmineLeg, -1, {-0.06f, 0.08f, -0.13f}, {1, 1, 1}, 1},
+    {MeshId::ErmineLeg, -1, {0.06f, 0.08f, -0.13f}, {1, 1, 1}, 1},
+    {MeshId::ErmineLeg, -1, {-0.06f, 0.08f, 0.13f}, {1, 1, 1}, 1},
+    {MeshId::ErmineLeg, -1, {0.06f, 0.08f, 0.13f}, {1, 1, 1}, 1},
+};
 // Hulou flies like Croa: the same parts, in the same order (CrowPart). Its
 // big eyes are colored (tint slot 3).
 constexpr RigPart kOwlRig[] = {
@@ -256,6 +298,9 @@ float rig_scale(Species species) {
     case Species::Owl: return 1.35f;
     case Species::Sheep: return 1.3f;
     case Species::Mole: return 1.3f;
+    case Species::Golem: return 1.3f;
+    case Species::Goat: return 1.3f;
+    case Species::Ermine: return 1.25f;
     default: return 1.0f;
   }
 }
@@ -448,6 +493,9 @@ std::span<const RigPart> creature_rig(Species species) {
     case Species::Owl: return kOwlRig;
     case Species::Sheep: return kSheepRig;
     case Species::Mole: return kMoleRig;
+    case Species::Golem: return kGolemRig;
+    case Species::Goat: return kGoatRig;
+    case Species::Ermine: return kErmineRig;
     case Species::Villager: return kVillagerRig;
     default: return {};
   }
@@ -656,6 +704,32 @@ CreatureLook creature_look(Species species, const Genes& g) {
       if (g.allele[3] == 1) look.add({MeshId::MoleStar, kCHead, {0, 0, 0}});  // a star nose
       break;
     }
+    case Species::Golem: {
+      // Granite, sandstone, slate; chromatic: white marble; elemental (fire): basalt, a heart of lava.
+      static constexpr Color kStone[] = {{1, 1, 1, 1}, {1.25f, 1.05f, 0.72f, 1}, {0.62f, 0.68f, 0.82f, 1}};
+      look.tints[0] = body_tint(g, kStone, {1.45f, 1.45f, 1.5f, 1}, {0.5f, 0.38f, 0.36f, 1});
+      look.tints[3] = g.elemental ? Color{2.4f, 0.9f, 0.25f, 1}
+                      : g.allele[3] == 1 ? Color{0.55f, 2.0f, 0.6f, 1} : Color{2.1f, 1.35f, 0.3f, 1};
+      if (g.allele[2] == 0) look.add({MeshId::GolemMoss, kCBody, {0, 0, 0}});  // mossy
+      break;
+    }
+    case Species::Goat: {
+      // White, grey, black; chromatic: golden; elemental (air): sky-pale.
+      static constexpr Color kCoats[] = {{1, 1, 1, 1}, {0.62f, 0.6f, 0.6f, 1}, {0.3f, 0.28f, 0.28f, 1}};
+      look.tints[0] = body_tint(g, kCoats, {1.0f, 0.82f, 0.5f, 1}, {0.82f, 0.95f, 1.3f, 1});
+      look.add({g.allele[2] == 1 ? MeshId::GoatHornsSpiral : MeshId::GoatHorns, kCHead, {0, 0, 0}});
+      look.add({MeshId::GoatBeard, kCHead, {0, 0, 0}, g.allele[3] == 1 ? Vec3f{1.2f, 1.9f, 1.2f} : Vec3f{1, 1, 1}, 1});
+      look.extra_height = 0.1f;
+      break;
+    }
+    case Species::Ermine: {
+      // Snow, cream, silver; chromatic: its summer brown; elemental (light): golden.
+      static constexpr Color kCoats[] = {{1, 1, 1, 1}, {1.05f, 0.95f, 0.8f, 1}, {0.8f, 0.84f, 0.92f, 1}};
+      look.tints[0] = body_tint(g, kCoats, {0.62f, 0.45f, 0.3f, 1}, {1.5f, 1.35f, 0.8f, 1});
+      if (g.allele[2] == 1) at(kTail).scale = {1.5f, 1.5f, 1.1f};  // fluffy
+      if (g.allele[3] == 1) look.add({MeshId::ErmineFrost, kCHead, {0, 0, 0}});  // frosted ears
+      break;
+    }
     default:
       break;
   }
@@ -743,7 +817,10 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
     case Species::Axolotl:
     case Species::Raccoon:
     case Species::Sheep:
-    case Species::Mole: {
+    case Species::Mole:
+    case Species::Golem:
+    case Species::Goat:
+    case Species::Ermine: {
       const bool axolotl = c.species == Species::Axolotl;
       const float phase = t * kTau * (axolotl ? 1.6f + 1.2f * walk : 2.0f + 1.5f * walk);
       const float swing = std::sin(phase) * 0.7f * clamp01(walk * 1.3f);
@@ -772,12 +849,14 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
       poses[kCHead].rotation = quat_z(std::sin(t * 0.8f) * 0.18f * (1 - walk)) * quat_x(0.08f * std::sin(phase) * walk);
       const float twitch = std::sin(t * 1.3f) > 0.97f ? 0.35f : 0.0f;
       // Pompon's floppy ears hang on the sides; Zapou's stand up.
-      if (c.species == Species::Sheep) {  // its ears hang on the sides, flicking now and then
+      if (c.species == Species::Sheep || c.species == Species::Goat) {  // its ears hang on the sides, flicking now and then
         poses[kEarL].rotation = quat_x(-twitch);
         poses[kEarR].rotation = quat_x(-twitch);
         break;
       }
-      const float spread = c.species == Species::Spark || c.species == Species::Raccoon || c.species == Species::Mole ? 0.25f
+      const float spread = c.species == Species::Spark || c.species == Species::Raccoon || c.species == Species::Mole ||
+                                   c.species == Species::Golem || c.species == Species::Ermine
+                               ? 0.25f
                            : c.genes.allele[2] == 2                                                                   ? 1.3f
                                                                                                                       : 0.35f;
       poses[kEarL].rotation = quat_z(spread) * quat_x(-twitch - (b.on_ground ? 0 : 0.5f));
@@ -1008,6 +1087,7 @@ float add_portrait_figure(DrawList& list, const PortraitSubject& subject, float 
   if (c.species == Species::Spark) height = 0.78f;    // with its big ears
   if (c.species == Species::Owl) height = 0.75f;
   if (c.species == Species::Mole) height = 0.6f;
+  if (c.species == Species::Ermine) height = 0.5f;
   height += look.extra_height * scale;
   if (look.aura) {
     const BodyShape& shape = species_info(c.species).shape;
@@ -1080,7 +1160,8 @@ void battle_pose(const World& w, size_t index, CreatureLook& look, Body& body, s
   const Fighter& f = index == 0 ? b.ally : b.foes[static_cast<size_t>(slot)].fighter;
   const Species species = w.creatures[index].species;
   const bool curls = species == Species::Spark || species == Species::Companion || species == Species::Raccoon ||
-                     species == Species::Sheep || species == Species::Mole;  // rigs with a head, ears, legs
+                     species == Species::Sheep || species == Species::Mole || species == Species::Golem ||
+                     species == Species::Goat || species == Species::Ermine;  // rigs with a head, ears, legs
   const uint64_t since_attack = w.tick - f.attack_tick;
 
   // The bite: it draws back a little, springs forward, comes back.

@@ -201,6 +201,8 @@ window.monstres = {
   // Debug (settings menu): time of day in hours; hold: it stands still.
   setHour: (hour) => _monstres_set_hour(hour),
   holdHour: (hold) => _monstres_hold_hour(hold ? 1 : 0),
+  // Debug: every teleporter known at once; returns how many there are.
+  unlockTeleporters: () => _monstres_debug_unlock_teleporters(),
   // Debug: the weather around the player: -1 the world's own, 0..6 clear,
   // fewClouds, overcast, rain, storm, fog, snow; 7 fine here and a storm
   // ahead. What it is now: state().weather.
@@ -260,7 +262,7 @@ window.monstres = {
   // Map data, plus the heights of the ground as a Float32Array (a copy).
   map: () => {
     const data = JSON.parse(UTF8ToString(_monstres_map_json()));
-    const n = data.points * data.points;
+    const n = data.pointsX * data.pointsZ;  // (further north than wide)
     const ptr = _monstres_heights() >> 2;
     data.heights = n ? HEAPF32.slice(ptr, ptr + n) : new Float32Array(0);
     return data;

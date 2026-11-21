@@ -149,7 +149,7 @@ TEST_CASE("crows start on roofs and fly to another perch when the player comes")
 
 TEST_CASE("villagers stay around the village and greet the player") {
   World w = cached_game(8);
-  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1 + 9);  // and Isidore, and the west's (the water miller too)
+  REQUIRE(count(w, Species::Villager) == rules::kVillagers + 1 + 9 + 2);  // and Isidore, the west's (the water miller too), the north's
   run(w, move(0, 0), 30 * rules::kTicksPerSecond);
   for (const Creature& c : w.creatures) {
     if (c.species != Species::Villager) continue;
@@ -195,6 +195,7 @@ TEST_CASE("the lake has water above a sunken bed, chimneys smoke") {
   DrawList list;
   build_dynamic(w, 3.0f, list);
   const size_t chimneys = count(w, ObjectKind::HouseChimney);
-  CHECK(list.batches[static_cast<size_t>(MeshId::Smoke)].size() == chimneys * 7);
+  // (And the north's refuge: its chimney, the steam over the hot springs.)
+  CHECK(list.batches[static_cast<size_t>(MeshId::Smoke)].size() == chimneys * 7 + (w.north.valid() ? 7 + 12 : 0));
   CHECK(list.batches[static_cast<size_t>(MeshId::Ripple)].size() == count(w, Species::Fish));
 }

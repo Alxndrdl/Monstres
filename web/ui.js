@@ -90,6 +90,15 @@
     if (game) game.setWeather(Number(weatherInput.value) - 1);
   });
 
+  // ---- Debug: every teleporter known (to visit the world quickly) ----
+  const unlockButton = document.getElementById('unlock-teleporters');
+  const unlockNote = document.getElementById('unlock-teleporters-note');
+  unlockButton.addEventListener('click', () => whenReady((g) => {
+    const n = g.unlockTeleporters();
+    unlockNote.textContent = `Les ${n} téléporteurs sont connus : approche-toi de l’un d’eux pour voyager.`;
+    unlockNote.hidden = false;
+  }));
+
   // ---- The season and the wind (kept between visits) ----
   const SEASONS = ['Printemps', 'Été', 'Automne', 'Hiver'];
   const WINDS = ['Naturel', 'Calme', 'Brise légère', 'Vent modéré', 'Vent fort', 'Tempête'];

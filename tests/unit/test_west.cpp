@@ -439,7 +439,7 @@ TEST_CASE("the bag, the farm and the west's quests are saved") {
   for (const Creature& c : loaded->creatures) CHECK(c.tag != Tag::Boarder);  // drawn again
   size_t west = 0;
   for (const Creature& c : loaded->creatures) west += c.species == Species::Villager && c.npc > npc::kMentor;
-  CHECK(west == 9);  // the water miller too
+  CHECK(west == 9 + 2);  // the water miller too, and the north's
   CHECK(bag_json(w).find("\"coins\":123") != std::string::npos);
   CHECK(farm_json(w).find("\"species\":\"mole\"") != std::string::npos);
 }

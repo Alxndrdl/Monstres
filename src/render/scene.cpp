@@ -4,6 +4,7 @@
 #include "monstres/core/interior.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/quests.hpp"
+#include "monstres/core/north.hpp"
 #include "monstres/core/west.hpp"
 
 #include "monstres/render/characters.hpp"
@@ -158,6 +159,14 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::Meteorite: return MeshId::Meteorite;
     case ObjectKind::WaterMill: return MeshId::WaterMill;  // its wheel: build_dynamic
     case ObjectKind::HiddenCave: return MeshId::CaveMouth;
+    case ObjectKind::Chalet: return MeshId::Chalet;
+    case ObjectKind::MineEntrance: return MeshId::MineEntrance;
+    case ObjectKind::Minecart: return o.variant & 1 ? MeshId::MinecartLoaded : MeshId::Minecart;
+    case ObjectKind::Larch: return MeshId::Larch;
+    case ObjectKind::StoneWall: return MeshId::StoneWall;
+    case ObjectKind::Cairn: return MeshId::Cairn;
+    case ObjectKind::HotSpring: return MeshId::HotSpring;
+    case ObjectKind::MineProp: return MeshId::MineProp;
     default:                return MeshId::Crate;
   }
 }
@@ -266,6 +275,42 @@ void add_village_effects(const World& w, float time, DrawList& list, float wind)
       const float alpha = std::min(1.0f, t * 6.0f) * (1.0f - t);
       const float grey = 0.95f - 0.15f * t;
       puff.tint = {grey, grey, grey, alpha};
+      add(list, MeshId::Smoke, puff);
+    }
+  }
+  // The north (north.hpp): the refuge's chimney, steam over the hot springs.
+  if (w.north.valid() && !w.ground.empty()) {
+    const NorthLayout& n = w.north;
+    const Vec2 right{-n.refuge_front.z, n.refuge_front.x};  // local +X of the chalet (its front at -Z looks along refuge_front)
+    const float cx = n.refuge.x - right.x * 2.3f - n.refuge_front.x * 1.0f;
+    const float cz = n.refuge.z - right.z * 2.3f - n.refuge_front.z * 1.0f;
+    const float base = w.ground.height(n.refuge.x, n.refuge.z);
+    for (int i = 0; i < kPuffs; ++i) {
+      const float t = std::fmod(time * 0.22f + 0.37f + static_cast<float>(i) / kPuffs, 1.0f);
+      Instance puff;
+      puff.x = cx + t * t * blow.x * lean + std::sin(time * 0.9f + static_cast<float>(i)) * 0.15f * t;
+      puff.y = base + 5.75f + t * (4.5f - 2.0f * wind);
+      puff.z = cz + t * t * blow.z * lean;
+      puff.sx = puff.sy = puff.sz = 0.25f + 0.85f * t;
+      puff.rotation = quat_yaw(static_cast<float>(i) * 1.7f + t);
+      const float grey = 0.95f - 0.15f * t;
+      puff.tint = {grey, grey, grey, std::min(1.0f, t * 6.0f) * (1.0f - t)};
+      add(list, MeshId::Smoke, puff);
+    }
+    const float water = w.ground.height(n.springs.x, n.springs.z + rules::kSpringsPool * 0.9f) - 0.15f;
+    constexpr int kSteam = 12;
+    for (int i = 0; i < kSteam; ++i) {
+      const auto u = static_cast<uint64_t>(i);
+      const float t = std::fmod(time * 0.16f + rand01(w.seed, 31500, u), 1.0f);
+      const float a = kTau * rand01(w.seed, 31600, u);
+      const float r = rules::kSpringsPool * 0.8f * std::sqrt(rand01(w.seed, 31700, u));
+      Instance puff;
+      puff.x = n.springs.x + std::cos(a) * r + t * blow.x * lean * 0.5f;
+      puff.y = water + 0.1f + t * 2.6f;
+      puff.z = n.springs.z + std::sin(a) * r + t * blow.z * lean * 0.5f;
+      puff.sx = puff.sy = puff.sz = 0.35f + 0.9f * t;
+      puff.rotation = quat_yaw(static_cast<float>(i) * 2.1f + t);
+      puff.tint = {1, 1, 1, 0.55f * std::min(1.0f, t * 4.0f) * (1.0f - t)};
       add(list, MeshId::Smoke, puff);
     }
   }
@@ -1878,6 +1923,16 @@ void interior_light(const World& w, float time, View& v) {
       v.fog_start = 7;
       v.fog_half = 16;
       v.fog_end = 70;
+      break;
+    case PlaceKind::Mine:  // dark galleries, warm under its lanterns
+      night = 1;
+      v.background = {0.025f, 0.02f, 0.018f, 1};
+      v.ambient_sky = {0.22f, 0.19f, 0.16f, 1};
+      v.ambient_ground = {0.12f, 0.10f, 0.08f, 1};
+      v.light_color = {0.06f, 0.05f, 0.045f, 1};
+      v.fog_start = 6;
+      v.fog_half = 15;
+      v.fog_end = 64;
       break;
     case PlaceKind::Burrow:  // dim earth, a little warmer than the cave
       night = 1;

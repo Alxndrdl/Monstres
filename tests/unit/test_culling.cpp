@@ -162,7 +162,7 @@ TEST_CASE("the landscape built from the cache is the one built from scratch, chu
 TEST_CASE("the detailed tiles around the player: 2 m cells on and around its tile, then 4 m; edges stitched to coarser ones") {
   const std::vector<TileKey> keys = detailed_tiles(10, 10);
   CHECK(keys.size() == 49);
-  const int pi = tile_of(10), pj = tile_of(10);
+  const int pi = tile_x(10), pj = tile_z(10);
   std::map<std::pair<int, int>, int> lod;
   for (const TileKey& k : keys) lod[{k.i, k.j}] = k.lod;
   const auto lod_at = [&](int i, int j) {
@@ -175,19 +175,24 @@ TEST_CASE("the detailed tiles around the player: 2 m cells on and around its til
     const int sides[4][2] = {{k.i - 1, k.j}, {k.i + 1, k.j}, {k.i, k.j - 1}, {k.i, k.j + 1}};
     for (int s = 0; s < 4; ++s) CHECK(((k.stitch >> s) & 1) == (lod_at(sides[s][0], sides[s][1]) > k.lod ? 1 : 0));
   }
-  // At the edge of the relief: fewer, none outside.
+  // At the edge of the relief: fewer, none outside (in the south-west, the north-east).
   for (const TileKey& k : detailed_tiles(-630, 630)) {
     CHECK(k.i >= 0);
-    CHECK(k.j < terrain::kTiles);
+    CHECK(k.j < terrain::kTilesZ);
   }
   CHECK(detailed_tiles(-630, 630).size() == 16);
+  for (const TileKey& k : detailed_tiles(630, -1270)) {
+    CHECK(k.i < terrain::kTilesX);
+    CHECK(k.j >= 0);
+  }
+  CHECK(detailed_tiles(630, -1270).size() == 16);
 }
 
 TEST_CASE("no gap between a detailed tile and a coarser neighbor") {
   const World& w = cached_game(7);
   GroundColors colors;
   const MeshData coarse = build_coarse_ground(w, colors);
-  REQUIRE(coarse.parts.size() == static_cast<size_t>(terrain::kTiles * terrain::kTiles));
+  REQUIRE(coarse.parts.size() == static_cast<size_t>(terrain::kTilesX * terrain::kTilesZ));
   // Height of a mesh's edge along x = const (or z = const) at t, from its vertices on that line.
   const auto edge_height = [](const MeshData& m, bool along_z, float at, float t, float& out) {
     float lo_t = -1e9f, hi_t = 1e9f, lo_y = 0, hi_y = 0;
@@ -213,8 +218,8 @@ TEST_CASE("no gap between a detailed tile and a coarser neighbor") {
       const TileKey n = coarser_side[s];
       const MeshData neighbor = n.lod >= terrain::kLods - 1 ? coarse : build_ground_tile(w, colors, n);
       const bool along_z = s < 2;  // the shared edge is x = const
-      const float at = along_z ? tile_start(s == 0 ? k.i : k.i + 1) : tile_start(s == 2 ? k.j : k.j + 1);
-      const float from = tile_start(along_z ? k.j : k.i);
+      const float at = along_z ? tile_start_x(s == 0 ? k.i : k.i + 1) : tile_start_z(s == 2 ? k.j : k.j + 1);
+      const float from = along_z ? tile_start_z(k.j) : tile_start_x(k.i);
       for (float t = from; t <= from + terrain::kTile; t += 0.5f) {
         float a = 0, b = 0;
         REQUIRE(edge_height(tile, along_z, at, t, a));

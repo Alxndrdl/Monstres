@@ -43,7 +43,7 @@ inline constexpr float kDetectRadius = 50.0f;       // the Detection spell finds
 inline constexpr size_t kMaxAlleles = 4;
 
 // Zones where an allele can appear, as bits (1 << Zone); 0 = everywhere.
-using ZoneMask = uint16_t;
+using ZoneMask = uint32_t;
 inline constexpr ZoneMask kEverywhere = 0;
 inline constexpr ZoneMask zone_bit(Zone zone) { return static_cast<ZoneMask>(1u << static_cast<unsigned>(zone)); }
 

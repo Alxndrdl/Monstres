@@ -1,5 +1,6 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/interior.hpp"
+#include "monstres/core/north.hpp"
 
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
@@ -48,6 +49,12 @@ constexpr Moves kMoves[] = {
       {"wool_wave", Burst, true, 19, kBig, 3.0f}}},  // Sheep
     {{{"scratch", Melee, false, 7, kQuick, 0.8f}, {"clod", Projectile, true, 13, kSpecial, 11.0f},
       {"tremor", Burst, true, 20, kBig, 3.2f}}},  // Mole
+    {{{"slam", Melee, false, 7, kQuick, 0.85f}, {"rock_throw", Projectile, true, 14, kSpecial, 11.0f},
+      {"landslide", Burst, true, 21, kBig, 3.2f}}},  // Golem
+    {{{"butt", Melee, false, 7, kQuick, 0.9f}, {"pebble_kick", Projectile, true, 13, kSpecial, 12.0f},
+      {"avalanche", Burst, true, 20, kBig, 3.2f}}},  // Goat
+    {{{"frost_bite", Melee, false, 7, kQuick, 0.85f}, {"icicle", Projectile, true, 13, kSpecial, 12.0f},
+      {"blizzard", Burst, true, 19, kBig, 3.2f}}},  // Ermine
 };
 static_assert(std::size(kMoves) == kSpeciesCount);
 
@@ -76,6 +83,9 @@ constexpr Temper kTempers[] = {
     {5.0f, 0.7f, 4.0f, 14, 1.0f, 3.4f},   // Owl: hovers high, swoops, throws gusts
     {2.5f, 0.7f, 2.5f, 36, 0.9f, 2.0f},   // Sheep: charges head first, rarely dodges
     {3.0f, 0.7f, 3.0f, 26, 0.95f, 2.0f},  // Mole: stubborn, throws clods
+    {2.5f, 0.7f, 2.5f, 40, 0.85f, 2.0f},  // Golem: slow and heavy, rarely dodges, hurls rocks
+    {3.0f, 0.7f, 3.5f, 20, 1.15f, 2.0f},  // Goat: charges horns first, leaps aside
+    {4.5f, 0.7f, 3.0f, 10, 1.25f, 2.0f},  // Ermine: quick, bites and darts away
 };
 static_assert(std::size(kTempers) == kSpeciesCount);
 constexpr float kLeapSpeed = 1.9f;  // a slime leaping at its foe: this much faster
@@ -346,6 +356,7 @@ void beat(World& w, size_t k) {
   } else {
     count_beaten(w, f);
     raider_down(w, c);
+    guardian_down(w, c);
     if (c.tag == Tag::Raider) c.tag = Tag::None;  // beaten: it gives up the raid
     c.beaten = true;  // after its reward: the next time, none
     uint16_t& n = w.beaten_count[static_cast<size_t>(c.species)];
@@ -654,8 +665,7 @@ void release(World& w, size_t slot) {
   const float len = std::sqrt(ax * ax + az * az);
   ax = len > 0.1f ? ax / len : -w.player.facing_x;
   az = len > 0.1f ? az / len : -w.player.facing_z;
-  const float limit = rules::kWorldHalfSize - 2.0f;
-  c.home = {std::clamp(c.body.pos.x + ax * 10, -limit, limit), std::clamp(c.body.pos.z + az * 10, -limit, limit)};
+  c.home = {rules::clamp_world_x(c.body.pos.x + ax * 10, 2.0f), rules::clamp_world_z(c.body.pos.z + az * 10, 2.0f)};
   c.target = c.home;
   c.mind = flies(c.species) ? Mind::Fly : Mind::Flee;
   c.target_y = w.ground.height(c.home.x, c.home.z);
@@ -923,10 +933,9 @@ bool rival_arena(const World& w, uint8_t trainer, Vec2& center, Vec2& axis) {
       for (int side = -2; side <= 2 && clear; ++side) {  // 3 m on each side: the magician and the trainer
         const float x = c.x + along.x * static_cast<float>(t) + radial.x * static_cast<float>(side) * 1.5f;
         const float z = c.z + along.z * static_cast<float>(t) + radial.z * static_cast<float>(side) * 1.5f;
-        const float limit = rules::kWorldHalfSize - 3.0f;
         const float h = w.ground.height(x, z);
         const Box probe{{x - 0.8f, h, z - 0.8f}, {x + 0.8f, h + 2.0f, z + 0.8f}};
-        clear = std::fabs(x) < limit && std::fabs(z) < limit && std::fabs(h - h0) < 1.2f &&
+        clear = rules::in_world(x, z, 3.0f) && std::fabs(h - h0) < 1.2f &&
                 !in_lake(w.village.lake, x, z, 2.0f) &&
                 std::none_of(near.begin(), near.end(), [&](const Box& b) { return overlaps(probe, b); });
       }
@@ -1083,7 +1092,7 @@ const char* cannot_cast(const World& w, size_t slot) {
 }
 
 bool can_heal_team(const World& w, uint8_t n) {
-  return (n == npc::kOdette || n == npc::kViolette) && w.battle.phase == BattlePhase::None && near_npc(w, n);
+  return (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene) && w.battle.phase == BattlePhase::None && near_npc(w, n);
 }
 
 namespace {
@@ -1226,6 +1235,7 @@ void capture_foe(World& w, size_t k) {
   n = static_cast<uint16_t>(std::min(n + 1, 65535));
   if (e.tag == Tag::Giant) w.quests[static_cast<size_t>(QuestId::GiantChampi)].progress |= kGiantCaught;
   raider_down(w, e);
+  guardian_down(w, e);
   if (m.tag == Tag::Raider) m.tag = Tag::None;
   capture(w, f.index);
   w.went_in = {w.tick, true, e.species, e.genes, e.body};  // runes, then into the crystal
@@ -1324,8 +1334,7 @@ void seal_escape(World& w, size_t k) {
   dz = l > 1e-3f ? dz / l : 1.0f;
   c.mind = Mind::Flee;
   c.timer = 5 * rules::kTicksPerSecond;
-  const float edge = rules::kWorldHalfSize - 1.0f;
-  c.target = {std::clamp(c.body.pos.x + dx * 18, -edge, edge), std::clamp(c.body.pos.z + dz * 18, -edge, edge)};
+  c.target = {rules::clamp_world_x(c.body.pos.x + dx * 18, 1.0f), rules::clamp_world_z(c.body.pos.z + dz * 18, 1.0f)};
   drop_foe(w, k);
   if (b.foes.empty()) end_battle(w, BattleOutcome::Escaped, b.won_xp);
 }

@@ -16,13 +16,9 @@ namespace {
 template <typename F>
 World world_on(F f) {
   World w;
-  w.ground.heights.resize(static_cast<size_t>(Heightmap::kPoints * Heightmap::kPoints));
-  for (int i = 0; i < Heightmap::kPoints; ++i) {
-    for (int j = 0; j < Heightmap::kPoints; ++j) {
-      w.ground.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] =
-          f(static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize,
-            static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize);
-    }
+  w.ground.heights.resize(static_cast<size_t>(Heightmap::kPointsX * Heightmap::kPointsZ));
+  for (int i = 0; i < Heightmap::kPointsX; ++i) {
+    for (int j = 0; j < Heightmap::kPointsZ; ++j) w.ground.heights[Heightmap::index(i, j)] = f(Heightmap::x_of(i), Heightmap::z_of(j));
   }
   w.player.pos.y = w.ground.height(0, 0);
   return w;
@@ -30,16 +26,16 @@ World world_on(F f) {
 
 // Steepest slope between neighboring grid points inside the playable area
 // (but the cliffs of the cave's hill, made to stop walkers).
-float steepest_slope(const World& w, float half_size, Vec2* where = nullptr) {
+// `north`: how much further north than half_size (the playable area: its own).
+float steepest_slope(const World& w, float half_size, Vec2* where = nullptr, float north = 0) {
   const Heightmap& m = w.ground;
   constexpr float cell = Heightmap::kCellSize;
   float steepest = 0;
-  const int lo = static_cast<int>((rules::kReliefHalfSize - half_size) / cell);
-  const int hi = static_cast<int>((rules::kReliefHalfSize + half_size) / cell);
+  const int lo = Heightmap::i_of(-half_size), hi = Heightmap::i_of(half_size);
+  const int lo_z = Heightmap::j_of(-half_size - north), hi_z = Heightmap::j_of(half_size);
   for (int i = lo; i < hi; ++i) {
-    for (int j = lo; j < hi; ++j) {
-      const float x = static_cast<float>(i) * cell - rules::kReliefHalfSize;
-      const float z = static_cast<float>(j) * cell - rules::kReliefHalfSize;
+    for (int j = lo_z; j < hi_z; ++j) {
+      const float x = Heightmap::x_of(i), z = Heightmap::z_of(j);
       if (in_cave_hill(w.cave, x, z, 3.0f)) continue;
       // The terrace's edge where it is a cliff (not where it is a slope, or the
       // ramp the path goes up), and the ravine cut through it to the cave's mouth.
@@ -156,8 +152,8 @@ TEST_CASE("the ground is drawn where bodies walk") {
     const float* c = &ground.vertices[t + 2 * MeshData::kFloatsPerVertex];
     // On the player's tile and the eight around it, the ground is drawn in
     // the relief's own 2 m cells (farther, coarser).
-    const Vec2 center{tile_start(tile_of(w.player.pos.x)) + terrain::kTile / 2,
-                      tile_start(tile_of(w.player.pos.z)) + terrain::kTile / 2};
+    const Vec2 center{tile_start_x(tile_x(w.player.pos.x)) + terrain::kTile / 2,
+                      tile_start_z(tile_z(w.player.pos.z)) + terrain::kTile / 2};
     const float half = terrain::kTile * (terrain::kLodReach[0] + 0.5f);
     bool inside = true;  // the whole triangle (the edge follows the coarser tiles)
     for (const float* v : {a, b, c}) {

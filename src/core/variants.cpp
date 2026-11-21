@@ -116,6 +116,27 @@ constexpr Genetics kGenetics[] = {
        {"claws", Shape, 2, {{{"small", Common}, {"big", Uncommon}}}},
        {"nose", Shape, 2, {{{"pink", Common}, {"star", Rare}}}}}},
      Element::Fire},
+    // Golem: Caillou, of the mountains' rocks (elemental: fire, a heart of lava).
+    {Family::Construct, 4,
+     {{kSex,
+       {"stone", Color, 3, {{{"granite", Common}, {"sandstone", Uncommon}, {"slate", Rare}}}},
+       {"moss", Shape, 2, {{{"mossy", Common}, {"bare", Uncommon}}}},
+       {"eyes", Color, 2, {{{"amber", Common}, {"green", Rare}}}}}},
+     Element::Fire},
+    // Goat: Cabri, of the pastures and the slopes (elemental: air).
+    {Family::Beast, 4,
+     {{kSex,
+       {"coat", Color, 3, {{{"white", Common}, {"grey", Uncommon}, {"black", Rare}}}},
+       {"horns", Shape, 2, {{{"curved", Common}, {"spiral", Uncommon}}}},
+       {"beard", Shape, 2, {{{"short", Common}, {"long", Rare}}}}}},
+     Element::Air},
+    // Ermine: Givri, of the snow (elemental: light).
+    {Family::Beast, 4,
+     {{kSex,
+       {"coat", Color, 3, {{{"snow", Common}, {"cream", Uncommon}, {"silver", Rare}}}},
+       {"tail", Shape, 2, {{{"tipped", Common}, {"fluffy", Uncommon}}}},
+       {"ears", Shape, 2, {{{"round", Common}, {"frosted", Rare}}}}}},
+     Element::Light},
 };
 static_assert(std::size(kGenetics) == kSpeciesCount);
 
@@ -477,6 +498,9 @@ constexpr Measures kMeasures[] = {
       {380, 900},   // Owl
       {700, 32000}, // Sheep
       {170, 110},   // Mole
+      {600, 52000}, // Golem
+      {820, 38000}, // Goat
+      {280, 300},   // Ermine
 };
 static_assert(std::size(kMeasures) == kSpeciesCount);
 }  // namespace

@@ -31,7 +31,7 @@ TEST_CASE("the time of day is saved") {
   // Past the end of the day: the clock's last byte, before the active member, the next id and the squares.
   // (then the teleporters and quests, Bastien's wins, the spells, the Detection and the counts, the victories,
   // where the player is, the last adventure spells and the capture spells)
-  bytes[bytes.size() - 1 - (1 + 4 + 1 + 3 * kPopulationCellCount) - (1 + 1 + 2 * kQuestCount) - (1 + 2 + 2) -
+  bytes[bytes.size() - 1 - (1 + 4 + 2 + 3 * kPopulationCellCount) - (2 + 1 + 2 * kQuestCount) - (1 + 2 + 2) -
         (2 + 1 + 6 * kSpeciesCount) - 4 - (1 + 1 + 4 * kItemCount + 2) - 1 - (kAdventureSlots - 2 + kCaptureSlots)] = 0xff;
   CHECK_FALSE(deserialize(bytes).has_value());
 }

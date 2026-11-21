@@ -1,6 +1,7 @@
 #include "monstres/core/quests.hpp"
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/north.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
 
@@ -223,6 +224,7 @@ uint8_t quest_giver(QuestId q) {
     case QuestId::Shepherd: return npc::kBasile;
     case QuestId::Mill: return npc::kLucien;
     case QuestId::WaterWheel: return npc::kMathurin;
+    case QuestId::MineGuardian: return npc::kGaston;
     default: return npc::kLison;
   }
 }
@@ -260,7 +262,7 @@ uint8_t npc_marks(const World& w, uint8_t n) {
     if (quest_giver(id) == n && stage == QuestStage::Unknown && quest_available(w, id)) marks |= kMarkNewQuest;
     if (quest_receiver(id) == n && stage == QuestStage::Active) marks |= kMarkQuest;
   }
-  if (n == npc::kOdette || n == npc::kViolette) marks |= kMarkHeal;
+  if (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene) marks |= kMarkHeal;
   if (n == npc::kBastien || n == npc::kRomane) marks |= kMarkFight;
   if (npc::wanderer(n)) {  // a trainer passing by: until beaten (an aggressive one: the bolt, not this)
     const int i = npc_index(w, n);
@@ -306,6 +308,7 @@ bool quest_ready(const World& w, QuestId q) {
     case QuestId::Shepherd: return (s.progress & kLambsHome) == kLambsHome;
     case QuestId::Mill: return (s.progress & kMillTurning) != 0;
     case QuestId::WaterWheel: return s.progress >= rules::kWheelRaiders;
+    case QuestId::MineGuardian: return (s.progress & kGuardianBeaten) != 0;
     default: return false;
   }
 }
@@ -408,6 +411,11 @@ void quest_command(World& w, const Input& in) {
           potions(rules::kWheelPotions);
           reward(w, rules::kWheelWizardXp, rules::kWheelMonsterXp);
           break;
+        case QuestId::MineGuardian:
+          coins(rules::kGuardianCoins);
+          potions(rules::kGuardianPotions);
+          reward(w, rules::kGuardianWizardXp, rules::kGuardianMonsterXp);
+          break;
         default: break;
       }
       break;
@@ -429,7 +437,7 @@ void quests_step(World& w) {
       continue;
     }
     if (flat_distance2(at, w.player.pos) < rules::kTeleporterDiscoverDistance * rules::kTeleporterDiscoverDistance) {
-      w.teleporters = static_cast<uint8_t>(w.teleporters | (1u << k));
+      w.teleporters = static_cast<uint16_t>(w.teleporters | (1u << k));
     }
   }
 }

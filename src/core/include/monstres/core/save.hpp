@@ -119,7 +119,7 @@ namespace monstres {
 //      (and its water drawn up to its banks): before, the valley's trees and
 //      rocks now in its water or on its cliffs go, the others settle again;
 //      the cave's teleporter is built again, down before its mouth.
-inline constexpr uint32_t kSaveVersion = 26;
+inline constexpr uint32_t kSaveVersion = 27;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

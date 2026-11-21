@@ -22,7 +22,29 @@ namespace monstres {
 namespace rules {
 inline constexpr int32_t kTicksPerSecond = 60;
 inline constexpr float kDt = 1.0f / kTicksPerSecond;
-inline constexpr float kWorldHalfSize = 580.0f; // the playable ground spans [-580, 580] on X and Z
+// The playable ground spans x in [-580, 580], z in [-1220, 580]: further
+// north, up to the foot of the Monts Givrés.
+inline constexpr float kWorldHalfSize = 580.0f; // west, east and south
+inline constexpr float kWorldNorth = 1220.0f;   // north (z down to -1220)
+// How far (x, z) is from the playable ground's edge, inside (negative outside).
+inline float world_inset(float x, float z) {
+  const float ax = x < 0 ? -x : x;
+  const float a = kWorldHalfSize - ax, b = kWorldHalfSize - z, c = z + kWorldNorth;
+  return a < b ? (a < c ? a : c) : (b < c ? b : c);
+}
+// kWorldHalfSize less that: what max(|x|, |z|) was when the world was a
+// square (compared with kWorldHalfSize - margin).
+inline float world_edge(float x, float z) { return kWorldHalfSize - world_inset(x, z); }
+inline bool in_world(float x, float z, float margin = 0) { return world_inset(x, z) >= margin; }
+// Kept `margin` inside the playable ground.
+inline float clamp_world_x(float x, float margin = 0) {
+  const float l = kWorldHalfSize - margin;
+  return x < -l ? -l : x > l ? l : x;
+}
+inline float clamp_world_z(float z, float margin = 0) {
+  const float lo = -kWorldNorth + margin, hi = kWorldHalfSize - margin;
+  return z < lo ? lo : z > hi ? hi : z;
+}
 // The starting valley: the whole world until it grew (its objects come
 // from the world's random stream and are saved; the rest of the world's
 // are drawn from the seed again at each load, see generate_wilds).
@@ -56,7 +78,8 @@ inline constexpr size_t kTeamSize = 6;
 // the wild monsters of a square appear when the player comes near it, and
 // disappear when it goes far away (others appear when it comes back).
 inline constexpr float kPopulationCell = 40.0f;          // side of a square
-inline constexpr int kPopulationCells = static_cast<int>(2 * kWorldHalfSize / kPopulationCell);  // per side
+inline constexpr int kPopulationCellsX = static_cast<int>(2 * kWorldHalfSize / kPopulationCell);  // west to east
+inline constexpr int kPopulationCellsZ = static_cast<int>((kWorldHalfSize + kWorldNorth) / kPopulationCell);  // north to south
 inline constexpr float kSpawnRadius = 50.0f;             // a square closer than this is lived in
 inline constexpr float kDespawnRadius = 80.0f;           // farther than this: emptied
 inline constexpr uint32_t kPopulationEveryTicks = 30;    // how often squares are checked
@@ -192,6 +215,15 @@ enum class ObjectKind : uint8_t {
   Meteorite,     // the black stone fallen in the crater, glowing veins. size.x = scale
   WaterMill,     // the water mill on the river's bank, its door at -Z, its wheel at +Z in the river (WaterWheel quest)
   HiddenCave,    // behind the waterfall, a cleft in the cliff: the hidden way into the crystal cave (interior.hpp)
+  // The north, towards the mountains (north.hpp; fixed sizes unless said otherwise, front at -Z):
+  Chalet,        // the refuge: a stone chalet, its door at -Z (a house inside)
+  MineEntrance,  // the old mine's timbered entrance in a rocky slope, its opening at -Z (interior.hpp)
+  Minecart,      // a mine cart on its bit of rails, along X
+  Larch,         // a larch: a conifer whose needles turn gold in autumn. size.x = scale
+  StoneWall,     // a 1.2 m stretch of a low dry-stone wall, along its yaw (any yaw: a square box)
+  Cairn,         // a pile of stones marking the way. size.x = scale
+  HotSpring,     // a steaming pool in a ring of stones (walked into: no collision)
+  MineProp,      // inside the mine: a timber frame holding up the gallery, across its yaw (its posts are solid)
   Count
 };
 
@@ -249,6 +281,10 @@ enum class Species : uint8_t {
   Owl,        // Hulou, an owl perched on the crown of the giant hollow tree, flies away when approached
   Sheep,      // Laini, a fluffy sheep: the shepherd's flock, rare in the hills
   Mole,       // Taupi, a mole: digs the burrow's tunnels
+  // The north (north.hpp):
+  Golem,      // Caillou, a little golem of stones: sleeps like a rock on the slopes, digs in the old mine
+  Goat,       // Cabri, a mountain goat leaping from rock to rock
+  Ermine,     // Givri, an ermine of frost: white on the snow, quick as the wind
   Count
 };
 
@@ -405,7 +441,12 @@ const MonsterStats& monster_stats(Species species);
 // Coast, Hills and Plains: the wilds around the valley (the west coast, the
 // north towards the mountains, the rest).
 // Farm, Woods, Crater: the west's (west.hpp).
-enum class Zone : uint8_t { Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Coast, Hills, Plains, Farm, Woods, Crater, River, Count };
+// Alpine, Larches, Frost, FrozenLake, Mine: the north's (north.hpp), up to the mountains.
+enum class Zone : uint8_t {
+  Meadow, Village, Lake, Ruins, Forest, Cave, Castle, Coast, Hills, Plains, Farm, Woods, Crater, River,
+  Alpine, Larches, Frost, FrozenLake, Mine,
+  Count
+};
 
 // What the player knows of each variant of each species (bestiary): every
 // variant listed by variants.hpp, in the same order.
@@ -613,7 +654,8 @@ struct CrystalTrace {
 
 // Which squares of the world are lived in (see rules::kPopulationCell), and
 // how many times each was: its monsters differ every time.
-inline constexpr size_t kPopulationCellCount = static_cast<size_t>(rules::kPopulationCells * rules::kPopulationCells);
+// Square (i, j) (x from the west, z from the north): index i * kPopulationCellsZ + j.
+inline constexpr size_t kPopulationCellCount = static_cast<size_t>(rules::kPopulationCellsX * rules::kPopulationCellsZ);
 struct Population {
   std::array<uint8_t, kPopulationCellCount> active{};
   std::array<uint16_t, kPopulationCellCount> visits{};
@@ -645,12 +687,15 @@ inline constexpr uint8_t kWandererCount = 4;
 inline constexpr bool wanderer(uint8_t n) { return n >= kWanderer && n < kWanderer + kWandererCount; }
 // The river (west.hpp), after the trainers passing by.
 inline constexpr uint8_t kMathurin = 22;  // the water miller: aquatic monsters jammed his wheel
+// The north (north.hpp).
+inline constexpr uint8_t kSolene = 23;    // the refuge's keeper: she heals the team, for free
+inline constexpr uint8_t kGaston = 24;    // the old miner, by the mine: a guardian took his mine
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
 // some places. Walking near one makes it known; from one, the player can go
 // to any other known one.
-enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Farm, Menhirs, Count };
+enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Farm, Menhirs, Refuge, Col, Count };
 inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Count);
 
 // Quests (see quests.hpp).
@@ -665,6 +710,7 @@ inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Cou
 enum class QuestId : uint8_t {
   LostPiou, Teleporters, GiantChampi, Combat, Healing, Main,
   Merchant, Delivery, Transfer, Orchard, Shepherd, Mill, WaterWheel,
+  MineGuardian,  // the north: the giant Caillou deep in the old mine (Gaston's)
   Count
 };
 inline constexpr size_t kQuestCount = static_cast<size_t>(QuestId::Count);
@@ -694,8 +740,10 @@ struct Box {
 // and rocks), nothing goes through every object any more.
 struct ObjectIndex {
   static constexpr float kCell = 8.0f;
-  static constexpr float kHalf = rules::kReliefHalfSize + 16.0f;
-  static constexpr int kCells = static_cast<int>(2 * kHalf / kCell);
+  static constexpr float kHalf = rules::kReliefHalfSize + 16.0f;  // x, and southwards
+  static constexpr float kNorth = rules::kReliefNorth + 16.0f;     // northwards
+  static constexpr int kCellsX = static_cast<int>(2 * kHalf / kCell);
+  static constexpr int kCellsZ = static_cast<int>((kHalf + kNorth) / kCell);
   std::vector<Box> boxes;          // boxes[i]: World::objects[i]'s
   std::vector<uint32_t> cell_start;  // objects of cell c: items[cell_start[c] .. cell_start[c + 1])
   std::vector<uint32_t> items;
@@ -703,7 +751,8 @@ struct ObjectIndex {
   size_t count = SIZE_MAX;
   const void* data = nullptr;
   Vec3 last;
-  static int cell_of(float v) { return std::clamp(static_cast<int>((v + kHalf) / kCell), 0, kCells - 1); }
+  static int cell_x(float x) { return std::clamp(static_cast<int>((x + kHalf) / kCell), 0, kCellsX - 1); }
+  static int cell_z(float z) { return std::clamp(static_cast<int>((z + kNorth) / kCell), 0, kCellsZ - 1); }
   bool operator==(const ObjectIndex&) const { return true; }  // derived data
 };
 
@@ -712,7 +761,8 @@ struct ObjectIndex {
 // is the interior's (its objects, a flat floor at y = 0, walls and a
 // ceiling), and what was outside waits in World::outdoors.
 // House: the village's houses, the farmhouse, the woodcutter's cabin.
-enum class PlaceKind : uint8_t { Outside, Cave, House, Tower, Burrow, HollowTree, Lighthouse, Count };
+// Mine: the north's old mine (galleries held up by timbers).
+enum class PlaceKind : uint8_t { Outside, Cave, House, Tower, Burrow, HollowTree, Lighthouse, Mine, Count };
 struct Place {
   PlaceKind kind = PlaceKind::Outside;
   uint32_t door = 0;  // inside: World::outdoors.objects[door] is the way in (cave mouth, house, tower)
@@ -782,6 +832,7 @@ struct World {
   CaveLayout cave;     // derived from the seed (not saved)
   CastleLayout castle; // derived from the seed (not saved)
   WestLayout west;     // the west, towards the sea (west.hpp): derived from the seed (not saved)
+  NorthLayout north;   // the north, up to the mountains (north.hpp): derived from the seed (not saved)
   Heightmap ground;    // derived from the seed (not saved)
   Body player;
   std::vector<Object> objects;
@@ -802,7 +853,7 @@ struct World {
   uint32_t clock = rules::kStartClock;  // time of day: ticks since midnight, < kTicksPerDay
   uint32_t next_id = 1;  // Creature::id of the next creature
   Population population;
-  uint8_t teleporters = 0;  // known teleporters, as bits (1 << TeleporterId)
+  uint16_t teleporters = 0;  // known teleporters, as bits (1 << TeleporterId)
   std::array<QuestState, kQuestCount> quests{};
   uint8_t rival_wins = 0;      // battles won against Bastien (only the first one gives experience)
   uint8_t romane_wins = 0;     // and against Romane, in the woods
@@ -859,7 +910,7 @@ World new_game(uint64_t seed, const NewGame& choices);
 void add_mentor(World& world);
 
 // Where a species lives in the wild (bits 1 << Zone; 0: nowhere, villagers).
-uint16_t species_habitat(Species species);
+uint32_t species_habitat(Species species);
 // Out of 100 wild monsters of a zone, how many of a species (100: crows and fish where they live).
 uint32_t species_chance(Species species, Zone zone);
 
@@ -972,9 +1023,9 @@ const ObjectIndex& objects_index(const World& world);
 template <typename F>
 void for_objects_near(const World& world, const Box& area, F f) {
   const ObjectIndex& ix = objects_index(world);
-  for (int cx = ObjectIndex::cell_of(area.min.x); cx <= ObjectIndex::cell_of(area.max.x); ++cx) {
-    for (int cz = ObjectIndex::cell_of(area.min.z); cz <= ObjectIndex::cell_of(area.max.z); ++cz) {
-      const auto c = static_cast<size_t>(cx * ObjectIndex::kCells + cz);
+  for (int cx = ObjectIndex::cell_x(area.min.x); cx <= ObjectIndex::cell_x(area.max.x); ++cx) {
+    for (int cz = ObjectIndex::cell_z(area.min.z); cz <= ObjectIndex::cell_z(area.max.z); ++cz) {
+      const auto c = static_cast<size_t>(cx * ObjectIndex::kCellsZ + cz);
       for (uint32_t k = ix.cell_start[c]; k < ix.cell_start[c + 1]; ++k) f(ix.items[k], ix.boxes[ix.items[k]]);
     }
   }

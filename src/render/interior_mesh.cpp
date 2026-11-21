@@ -119,7 +119,12 @@ MeshData cave_mesh(const Interior& in) {
     const float streak = value_noise(in.noise + 8, p.x * 0.3f, p.y * 2.5f + p.z * 0.3f, 1.0f);
     // The burrow: earth, not rock (roots in its ceiling).
     const bool earth = in.kind == PlaceKind::Burrow;
-    const Color rock = earth ? kEarth : kRock, floor = earth ? kEarthFloor : kRockFloor, dark = earth ? kEarthDark : kRockDark;
+    Color rock = earth ? kEarth : kRock, floor = earth ? kEarthFloor : kRockFloor, dark = earth ? kEarthDark : kRockDark;
+    if (in.kind == PlaceKind::Mine) {  // the mine: brownish rock, a dusty floor of earth
+      rock = mixc(kRock, kEarth, 0.35f);
+      floor = mixc(kEarthFloor, kRockFloor, 0.4f);
+      dark = mixc(kRockDark, kEarthDark, 0.5f);
+    }
     Color col = n.y > 0.6f ? mixc(rock, floor, std::min(1.0f, (n.y - 0.6f) * 4)) : n.y < -0.5f ? dark : rock;
     col = shade(col, 0.82f + 0.3f * grain + 0.12f * (streak - 0.5f));
     out.vertex(p, n, col);

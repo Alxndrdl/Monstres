@@ -2,6 +2,7 @@
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/heightmap.hpp"
+#include "monstres/core/north.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
 
@@ -63,7 +64,7 @@ uint64_t place_seed(uint64_t seed, PlaceKind kind, const Object& door) {
 
 bool is_house(ObjectKind k) {
   return k == ObjectKind::HouseCottage || k == ObjectKind::HouseChimney || k == ObjectKind::HouseHut ||
-         k == ObjectKind::Farmhouse || k == ObjectKind::Cabin;
+         k == ObjectKind::Farmhouse || k == ObjectKind::Cabin || k == ObjectKind::Chalet;
 }
 
 PlaceKind place_of(ObjectKind k) {
@@ -71,6 +72,7 @@ PlaceKind place_of(ObjectKind k) {
   if (is_house(k)) return PlaceKind::House;
   if (k == ObjectKind::Tower) return PlaceKind::Tower;
   if (k == ObjectKind::Burrow) return PlaceKind::Burrow;
+  if (k == ObjectKind::MineEntrance) return PlaceKind::Mine;
   if (k == ObjectKind::HollowTree) return PlaceKind::HollowTree;
   if (k == ObjectKind::Lighthouse) return PlaceKind::Lighthouse;
   return PlaceKind::Outside;
@@ -101,6 +103,7 @@ float house_front(ObjectKind k) {
     case ObjectKind::HouseChimney: return 2.25f;
     case ObjectKind::Farmhouse: return 3.0f;
     case ObjectKind::Cabin: return 2.5f;
+    case ObjectKind::Chalet: return 3.0f;
     default: return 2.1f;
   }
 }
@@ -124,6 +127,7 @@ DoorFrame frame_of(ObjectKind k) {
   if (k == ObjectKind::HollowTree) return {0, -4.9f, {0, 1.3f, -4.25f}, 1.4f, 2.6f, 0, -5.8f};
   if (k == ObjectKind::Lighthouse) return {0, -3.2f, {0, 1.2f, -2.66f}, 1.1f, 2.3f, 0, -4.0f};
   if (k == ObjectKind::Burrow) return {0, -2.7f, {0, 0.6f, -1.95f}, 1.3f, 1.2f, 0, -3.4f};
+  if (k == ObjectKind::MineEntrance) return {0, -2.2f, {0, 1.25f, -0.9f}, 2.0f, 2.4f, 0, -3.2f};
   const float f = house_front(k);
   return {0, -f - 0.7f, {0, 0.95f, -f - 0.05f}, 0.9f, 1.9f, 0, -f - 1.4f};
 }
@@ -221,6 +225,52 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
       in.pieces.push_back({at, at, r, {}, range(rng, 3.2f, 4.2f), 0.8f});
       dens.push_back({at, r});
     }
+  } else if (kind == PlaceKind::Mine) {
+    // Straight galleries dug at right angles, held up by timbers, a few wider
+    // halls where they meet; the deepest one the widest (the guardian's).
+    in.rounding = 0.35f;
+    in.entry = {0, 0, -0.5f};
+    in.exits[0] = {{0, 0, 1.3f}, {0, -1}, ExitKind::Out};
+    in.pieces.push_back({{0, 1.0f}, {0, -12.0f}, 2.1f, {}, 3.3f, 0.12f});
+    struct End {
+      Vec2 at;
+      Vec2 dir;
+    };
+    std::vector<End> ends{{{0, -12.0f}, {0, -1}}};
+    std::vector<std::pair<Vec2, Vec2>> runs{{{0, 1.0f}, {0, -12.0f}}};
+    Rng rng(s, 95);
+    // Too close to a gallery already dug (but the one it starts from).
+    const auto crosses = [&](Vec2 a, Vec2 b, size_t skip) {
+      for (size_t r = 0; r < runs.size(); ++r) {
+        if (r == skip) continue;
+        for (float t = 0.25f; t <= 1.0f; t += 0.25f) {
+          const Vec2 q{a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t};
+          RoomPiece probe{runs[r].first, runs[r].second, 2.1f, {}, 3.3f, 0};
+          if (piece_distance(probe, q.x, q.z, 0) > -4.5f) return true;
+        }
+      }
+      return false;
+    };
+    for (int attempt = 0; attempt < 80 && runs.size() < 8; ++attempt) {
+      const size_t from = rng.below(static_cast<uint32_t>(ends.size()));
+      const End e = ends[from];
+      const uint32_t turn = rng.below(3);  // ahead, left, right
+      const Vec2 d = turn == 0 ? e.dir : turn == 1 ? Vec2{-e.dir.z, e.dir.x} : Vec2{e.dir.z, -e.dir.x};
+      if (d.z > 0.5f) continue;  // not back towards the way in
+      const float len = range(rng, 9.0f, 16.0f);
+      const Vec2 to{e.at.x + d.x * len, e.at.z + d.z * len};
+      if (crosses(e.at, to, from < runs.size() ? from : runs.size())) continue;
+      in.pieces.push_back({e.at, to, 2.0f, {}, 3.2f, 0.12f});
+      runs.push_back({e.at, to});
+      if (rng.below(3) == 0) in.pieces.push_back({to, to, range(rng, 3.6f, 4.6f), {}, 4.2f, 0.35f});  // a hall
+      ends.push_back({to, d});
+    }
+    // The deepest end: a wide hall.
+    const End* deep = &ends[0];
+    for (const End& e : ends) {
+      if (e.at.z < deep->at.z) deep = &e;
+    }
+    in.pieces.push_back({deep->at, deep->at, 6.5f, {}, 5.5f, 0.45f});
   } else if (kind == PlaceKind::Cave) {
     // A corridor from the mouth, then chambers joined by tunnels, each away
     // from the others (deeper into the hill, towards -Z).
@@ -560,6 +610,61 @@ void furnish_burrow(const Interior& in, Rng& rng, std::vector<Object>& out) {
 
 }  // namespace
 
+void furnish_mine(const Interior& in, Rng& rng, std::vector<Object>& out) {
+  // Along each gallery, timber frames every few meters (their posts by the
+  // walls, their beams across); lanterns now and then; carts on bits of
+  // rails; rubble and glowing ore in the halls.
+  for (size_t k = 0; k < in.pieces.size(); ++k) {
+    const RoomPiece& p = in.pieces[k];
+    if (p.a == p.b) continue;
+    const float dx = p.b.x - p.a.x, dz = p.b.z - p.a.z;
+    const float len = std::sqrt(dx * dx + dz * dz);
+    if (len < 1e-3f) continue;
+    const Vec2 d{dx / len, dz / len}, across{-d.z, d.x};
+    // A post's beam runs along its local +X towards the middle: yaw turning +X onto `across` (and back).
+    const Angle16 yaw = angle16_from_radians(std::atan2(-across.z, across.x));
+    int frame = 0;
+    for (float t = 2.5f; t < len - 1.0f; t += 3.6f, ++frame) {
+      const Vec2 c{p.a.x + d.x * t, p.a.z + d.z * t};
+      if (distance2d(c.x, c.z) < 2.0f) continue;  // not right at the way in
+      for (const float side : {-1.0f, 1.0f}) {
+        const float reach = p.radius - 0.35f;
+        Object post = thing(ObjectKind::MineProp, c.x - across.x * side * reach, 0, c.z - across.z * side * reach,
+                            side < 0 ? static_cast<Angle16>(yaw + 32768) : yaw, static_cast<uint8_t>(rng.below(256)));
+        post.size = {reach, 2.7f, 1};
+        out.push_back(post);
+      }
+      if (frame % 3 == 1) {
+        Object lamp = thing(ObjectKind::Lamp, c.x + across.x * (p.radius - 0.75f), 0, c.z + across.z * (p.radius - 0.75f));
+        out.push_back(lamp);
+      }
+    }
+    if (rng.below(2) == 0 && len > 8.0f) {
+      const float t = range(rng, 3.0f, len - 3.0f);
+      const float side = rng.below(2) ? 1.0f : -1.0f;
+      const Vec2 c{p.a.x + d.x * t + across.x * side * 0.9f, p.a.z + d.z * t + across.z * side * 0.9f};
+      // Along X or Z (the galleries run so), its rails along it.
+      const Angle16 cart_yaw = std::fabs(d.x) > std::fabs(d.z) ? Angle16{0} : Angle16{16384};
+      out.push_back(thing(ObjectKind::Minecart, c.x, 0, c.z, cart_yaw, static_cast<uint8_t>(rng.below(256))));
+    }
+  }
+  for (const RoomPiece& p : in.pieces) {
+    if (!(p.a == p.b)) continue;
+    for (int n = 0; n < 5; ++n) {
+      const Vec2 a = dir16(any_angle(rng));
+      const float dd = p.radius * range(rng, 0.45f, 0.8f);
+      const float x = p.a.x + a.x * dd, z = p.a.z + a.z * dd;
+      const bool ore = rng.below(3) == 0;
+      const auto variant = static_cast<uint8_t>(rng.below(256));
+      const float sc = range(rng, 0.4f, 0.8f);
+      if (wall_distance(in, x, z) < 1.0f || distance2d(x, z) < 5.0f) continue;
+      Object o = thing(ore ? ObjectKind::Crystal : ObjectKind::Rock, x, -0.05f, z, ore ? any_angle(rng) : 0, variant);
+      o.size = ore ? Vec3{sc, sc, sc} : Vec3{sc, sc * 0.8f, sc};
+      out.push_back(o);
+    }
+  }
+}
+
 std::vector<Object> interior_objects(uint64_t seed, const Interior& in, const Object& door) {
   std::vector<Object> out;
   Rng rng(place_seed(seed, in.kind, door), 17);
@@ -570,6 +675,7 @@ std::vector<Object> interior_objects(uint64_t seed, const Interior& in, const Ob
     case PlaceKind::HollowTree:
     case PlaceKind::Lighthouse: furnish_tower(in, rng, out); break;
     case PlaceKind::Burrow: furnish_burrow(in, rng, out); break;
+    case PlaceKind::Mine: furnish_mine(in, rng, out); break;
     default: break;
   }
   return out;
@@ -610,6 +716,11 @@ DoorNear door_near(const World& w, float reach) {
         best.facing = {0, -1};
         best.width = 2.4f;
         best.height = 2.0f;
+      } else if (w.place.kind == PlaceKind::Mine) {
+        best.at = {0, 1.3f, 2.6f};
+        best.facing = {0, -1};
+        best.width = 2.8f;
+        best.height = 2.6f;
       } else {
         const bool big = tall(w.place.kind);
         best.at = {0, big ? 1.25f : 0.95f, -0.03f};
@@ -752,6 +863,7 @@ bool enter_place(World& w, Place place, bool from_roof) {
   map_way_out(w.interior, w.objects);
   if (place.kind == PlaceKind::Cave) spawn_cristis(w);
   if (place.kind == PlaceKind::Burrow) spawn_moles(w);
+  if (place.kind == PlaceKind::Mine) spawn_miners(w);
   return true;
 }
 
@@ -897,9 +1009,8 @@ void climb(const World& w, Body& b, Vec3 dir, float speed) {
     const float d = surface_distance(w, p);
     p = p - surface_normal(w, p) * d;
   }
-  const float limit = rules::kWorldHalfSize - 1.0f;
   const bool lost = !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
-                    std::fabs(surface_distance(w, p)) > 0.3f || std::fabs(p.x) > limit || std::fabs(p.z) > limit;
+                    std::fabs(surface_distance(w, p)) > 0.3f || !rules::in_world(p.x, p.z, 1.0f);
   // Outside: not into the lake, nor the sea.
   const bool wet = !inside(w) && (in_lake(w.village.lake, p.x, p.z, 0.2f) ||
                                   (w.ground.sea(p.x, p.z) && p.y < rules::kSeaLevel - 0.3f));

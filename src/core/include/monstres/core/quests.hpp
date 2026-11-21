@@ -57,6 +57,8 @@ inline constexpr uint32_t kShepherdWizardXp = 60, kShepherdMonsterXp = 40;
 inline constexpr uint8_t kShepherdGiftLevel = 5;
 inline constexpr uint32_t kMillWizardXp = 50, kMillMonsterXp = 30, kMillCoins = 50, kMillPotions = 1;
 inline constexpr uint32_t kWheelWizardXp = 80, kWheelMonsterXp = 50, kWheelCoins = 60, kWheelPotions = 2;
+// The mine's guardian (Gaston), in the north: stronger.
+inline constexpr uint32_t kGuardianWizardXp = 150, kGuardianMonsterXp = 90, kGuardianCoins = 120, kGuardianPotions = 3;
 }  // namespace rules
 
 // The quests of the main quest's first part.

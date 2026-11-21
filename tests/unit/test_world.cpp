@@ -25,7 +25,11 @@ TEST_CASE("new_game builds a valid world") {
       if (o.kind == ObjectKind::Collider) continue;  // raised: the roof of a gate or a cave
       // The west's bridge spans the stream; its fields are walked through, flat on the ground.
       // The water mill's stone base goes down the river's bank.
-      if (o.kind == ObjectKind::Bridge || o.kind == ObjectKind::Crops || o.kind == ObjectKind::WaterMill) continue;
+      // The hot springs' water: at the level of the ground around its pool (dug lower).
+      if (o.kind == ObjectKind::Bridge || o.kind == ObjectKind::Crops || o.kind == ObjectKind::WaterMill ||
+          o.kind == ObjectKind::HotSpring) {
+        continue;
+      }
       CAPTURE(std::string(object_kind_name(o.kind)));
       CAPTURE(o.pos.x);
       CAPTURE(o.pos.z);
@@ -59,6 +63,7 @@ TEST_CASE("the world has every kind of object") {
   }
   // Furniture, the tower's stair and trapdoor: only inside (test_interiors.cpp).
   for (int k = static_cast<int>(ObjectKind::Table); k <= static_cast<int>(ObjectKind::Hatch); ++k) counts[k] += 1;
+  counts[static_cast<int>(ObjectKind::MineProp)] += 1;  // the mine's timbers: inside (test_north.cpp)
   for (int count : counts) CHECK(count > 0);
   // Trees are the most common.
   CHECK(counts[static_cast<int>(ObjectKind::Tree)] > counts[static_cast<int>(ObjectKind::Crate)]);
@@ -174,8 +179,8 @@ TEST_CASE("the player slides along an object when walking diagonally into it") {
 
 TEST_CASE("the world has edges") {
   World w = empty_world();
-  run(w, forward(), static_cast<int>(rules::kWorldHalfSize / rules::kWalkSpeed + 2) * rules::kTicksPerSecond);
-  CHECK(w.player.pos.z == Approx(-(rules::kWorldHalfSize - rules::kPlayerHalfWidth)));
+  run(w, forward(), static_cast<int>(rules::kWorldNorth / rules::kWalkSpeed + 2) * rules::kTicksPerSecond);
+  CHECK(w.player.pos.z == Approx(-(rules::kWorldNorth - rules::kPlayerHalfWidth)));  // northwards: further
 }
 
 TEST_CASE("jumping goes up about 1.2 m and comes back down") {

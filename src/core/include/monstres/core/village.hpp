@@ -186,4 +186,23 @@ struct WestLayout {
   bool operator==(const WestLayout&) const = default;
 };
 
+// The north (north.hpp): between the terrace and the foot of the mountains.
+// Derived from the seed, the path and the west (not saved).
+struct NorthLayout {
+  Vec2 refuge, refuge_front;    // the refuge (a stone chalet) by the path; the way its door looks (an axis)
+  Vec2 refuge_teleporter;
+  Vec2 mine, mine_front;        // the old mine's entrance; the way it looks (an axis), out of its rocky rise
+  Vec2 springs;                 // the hot springs: a steaming pool
+  Vec2 lake;                    // the frozen lake, in the valley up to the col: its middle,
+  float lake_rx = 0, lake_rz = 0;  // its ellipse (its outline: outline_scale, kNorthLakeOutline)
+  float lake_level = 0;         // its ice (set with the relief)
+  Vec2 col, col_teleporter;     // the col, where the path leaves the world; its teleporter
+  float floor_start = 0;        // the valley's floor up to the col: its height where the mountains begin (set with the relief)
+  std::vector<std::vector<Vec2>> walls;  // the alpine pastures' dry-stone walls (a point every 1.1 m)
+  std::vector<Vec2> cairns;     // along the path, up to the col
+  bool valid() const { return refuge.x != 0 || refuge.z != 0; }
+  bool operator==(const NorthLayout&) const = default;
+};
+inline constexpr uint64_t kNorthLakeOutline = 4;
+
 }  // namespace monstres

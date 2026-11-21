@@ -126,13 +126,16 @@ Contrôles :
     contre, résiste et vulnérable à), et la table de toutes les rencontres
     (l'attaquant à gauche, le défenseur en haut : +, − ou ·). Les deux
     tableaux sont lus dans la table du jeu (`type_effect`, voir Combats), ils
-    concordent toujours. Terre et Glace n'ont encore aucun monstre ;
+    concordent toujours. Les monstres de Terre et de Glace vivent au nord
+    (Caillou, Cabri, Givri, voir Le Nord) ;
   Échap le ferme ;
 - engrenage en haut à droite : paramètres (gérer les sauvegardes, voir
   Sauvegardes ; afficher les FPS et le détail du temps de calcul, voir Performances ; ces
   choix sont retenus par le navigateur) et options de debug : un curseur pour
-  choisir l'heure de la journée, « Figer l'heure », un curseur de météo, et
-  un essai de rendu (voir Performances).
+  choisir l'heure de la journée, « Figer l'heure », un curseur de météo, le
+  bouton « Débloquer tous les téléporteurs » (tous connus d'un coup, pour
+  visiter le monde vite ; `monstres_debug_unlock_teleporters`), et un essai
+  de rendu (voir Performances).
 
 Sur ordinateur, les touches sont rappelées sous le joystick et le bouton ;
 elles s'adaptent à la disposition du clavier quand le navigateur le permet.
@@ -200,8 +203,13 @@ régression le vérifient.
 
 ## Le monde et le continent
 
-Le monde jouable fait 1 160 m de côté (±580 m, `rules::kWorldHalfSize`), soit
-environ 16 fois l'ancienne surface. Au milieu, le Val Verdoyant : l'ancien
+Le monde jouable fait 1 160 m d'ouest en est (±580 m, `rules::kWorldHalfSize`)
+et 1 800 m du nord au sud : au sud il s'arrête à 580 m du départ, au nord il
+va jusqu'à 1 220 m (`rules::kWorldNorth`), au pied des Monts Givrés (voir Le
+Nord). Les limites et les grilles (relief, cases des monstres, index des
+objets, tuiles du sol, morceaux du paysage, carte) sont des rectangles :
+`rules::in_world`, `world_inset`, `world_edge`, `clamp_world_x/z`, et de même
+pour le relief (`relief_inset`, `relief_edge`, `Heightmap::kPointsX/Z`). Au milieu, le Val Verdoyant : l'ancien
 monde de 280 m, inchangé (même chemin, mêmes lieux, mêmes objets ; seule la
 crête qui fermait ses bords a disparu). Autour, les terres sauvages, avec
 leurs zones : la Côte des Embruns à l'ouest (une plage, puis la mer, à
@@ -225,15 +233,18 @@ carte. Les noms (`regions` dans `web/lore.js`) sont provisoires.
 Le relief :
 - le continent vient de la graine (bruit déterministe) sur une grille de
   10 m. Il vaut 0 dans la vallée, qui garde son propre relief ;
-- le relief jouable (une grille de 2 m sur ±640 m, `Heightmap`) ajoute au
-  continent les petites collines et les lieux de la vallée. Les collines
-  s'effacent avant ±640 m, où le terrain lointain prend le relais avec
-  exactement les mêmes hauteurs ;
+- le relief jouable (une grille de 2 m, de −640 à 640 m d'ouest en est et de
+  −1 280 à 640 m du nord au sud, `Heightmap`) ajoute au continent les petites
+  collines et les lieux de la vallée. Les collines s'effacent avant ses bords,
+  où le terrain lointain prend le relais avec exactement les mêmes hauteurs
+  (son premier anneau, de 10 m, entoure tout le relief : ±1 300 m) ;
 - la mer est là où le continent lui-même passe sous son niveau (−2 m).
   Un creux des collines plus bas que la mer reste de la terre sèche (le
   départ de la graine 42 en est un).
 
-Les terres sauvages ont environ 12 000 à 17 000 objets (`generate_wilds`),
+Les terres sauvages ont environ 12 000 à 17 000 objets au sud du nord, et
+autant encore au nord (`generate_wilds` : la bande ajoutée au nord a son
+propre flux aléatoire, le reste ne change pas),
 selon la graine. Ils sont tirés de la graine, avec leur propre flux aléatoire,
 **et ne sont pas sauvegardés** : seuls ceux de la vallée le sont, et les
 autres sont tirés de nouveau à chaque chargement. La sauvegarde reste à
@@ -420,7 +431,8 @@ pays, et des quêtes en cours ou finies (« Mirabelle a perdu son Piou… »,
 « Gaspard ne quitte plus le cercle de pierres… », puis des remerciements).
 
 Téléporteurs : un cercle de pierres à runes au village, aux ruines, dans la
-forêt, devant la grotte et devant le château. S'en approcher (6 m) le fait
+forêt, devant la grotte et devant le château (et à l'exploitation, au cercle
+des menhirs, au refuge du Col et au col des Givres : neuf en tout). S'en approcher (6 m) le fait
 connaître pour toujours : ses runes s'allument et tournent, une note le
 signale. Debout au milieu d'un téléporteur connu, on peut aller vers
 n'importe quel autre déjà découvert, en le choisissant sur la carte
@@ -573,6 +585,72 @@ d'Anselme). Les pièces viennent des combats gagnés (environ le quart de
 l'expérience) et des quêtes. Tout ce qui n'est pas un objet de quête peut être
 jeté (un, ou tout).
 
+## Le Nord, jusqu'aux montagnes
+
+Règles dans `src/core/north.hpp` / `north.cpp`, tirées de la graine, du
+chemin et de l'Ouest (`make_north_layout`, non sauvegardé). Le monde a grandi
+vers le nord : de la terrasse jusqu'au pied des Monts Givrés, en trois bandes
+aux bords ondulés (bruit), de plus en plus fortes (un niveau tous les 110 m,
+jusqu'au niveau 12 environ près du col) :
+
+- **Les Alpages** (Zone::Alpine, à partir de z ≈ −560) : des prairies
+  ouvertes, quelques mélèzes et pins, des blocs de rocher, et des **murets de
+  pierre sèche** qui serpentent (`ObjectKind::StoneWall`, des tronçons de
+  1,2 m tournés le long de leur ligne, assez bas pour être enjambés, un trou
+  çà et là). Laini et Cabri y broutent.
+- **La vieille mine** de Gaston, en face du refuge de l'autre côté du
+  sentier : une entrée boisée (`ObjectKind::MineEntrance`) au pied d'une
+  butte rocheuse, des wagonnets sur leurs rails dans sa cour. Dedans
+  (`PlaceKind::Mine`, `interior.cpp`) : des galeries droites qui tournent à
+  angle droit, tenues par des étais (`ObjectKind::MineProp`), des lanternes,
+  des wagonnets, des éboulis et des filons qui brillent, quelques salles ; la
+  plus profonde, la plus grande. Caillou et Taupi y creusent (niveaux 7 à 10,
+  `spawn_miners`).
+- **Le refuge du Col**, au bord du sentier : un chalet de pierre et de bois
+  (`ObjectKind::Chalet`, une maison dedans), sa cheminée qui fume, un
+  téléporteur à côté. Solène, sa gardienne, soigne l'équipe et rend le mana,
+  comme Odette et Violette.
+- **Le Bois des Mélèzes** (Zone::Larches, à partir de z ≈ −830) : des
+  mélèzes (`ObjectKind::Larch`, leurs aiguilles dorées en automne comme des
+  feuilles) en bosquets, mêlés de pins. Les **sources chaudes** y fument :
+  un bassin turquoise dans un cercle de pierres et une croûte minérale
+  (`ObjectKind::HotSpring`) ; debout dans l'eau, chaque monstre de l'équipe
+  regagne 1 PV toutes les 2 secondes (`north_step`).
+- **Les pentes des Monts Givrés** (Zone::Frost, à partir de z ≈ −1030) : le
+  continent monte en crêtes raides, des éboulis, de la neige toute l'année
+  (`north_snow` : en plaques dans le fond de la vallée, partout plus haut ;
+  pas d'herbe dessus). Le sentier monte jusqu'au **col** (z = −1185) par une
+  vallée creusée dans les montagnes (`shape_north` : son fond plat monte
+  doucement, ses flancs restent praticables, la montagne est coupée autour ;
+  là où le sol est plus bas, il est comblé). Des **cairns** jalonnent le
+  sentier ; au col, un téléporteur.
+- **Le Lac des Givres** (Zone::FrozenLake), dans la vallée sous le col : un
+  lac gelé au contour irrégulier (`outline_scale`), sa glace plate au niveau
+  le plus bas de sa rive (on marche dessus), ses rives praticables. Les Givri
+  y vivent.
+
+Les reliefs des lieux (le replat du refuge, celui des sources et leur bassin,
+la cour de la mine et sa butte, la vallée, le lac) sont posés après le reste,
+à la hauteur du sol à cet endroit (`shape_north`, appelé par `build_layouts`).
+Au nord, le continent est bas, presque au niveau de la mer : c'est la
+terrasse qui relève le sol (à l'ouest de son bord, des lagunes) ; les lieux
+le savent (`natural_height` et le côté de la terrasse).
+
+**La quête de la mine** (`QuestId::MineGuardian`, Gaston) : un Caillou oméga
+(niveau 14) s'est installé dans la plus grande salle, tout au fond. Le battre
+ou le capturer (`guardian_down`), puis le dire à Gaston : 120 pièces, 3
+potions, 150 XP / 90. Tant que la quête n'est pas finie, il revient à chaque
+visite.
+
+Monstres du nord (types : voir Combats) :
+- **Caillou** (petit golem de pierre, Terre) : un tas de cailloux sur quatre
+  pattes trapues, aux yeux qui luisent ; lent, très résistant (pentes,
+  mélèzes, mine) ;
+- **Cabri** (chèvre des cimes, Terre et Glace) : saute haut, cornes
+  recourbées ou torsadées, barbiche (alpages, mélèzes, pentes) ;
+- **Givri** (hermine du givre, Glace) : longue, rapide, le bout de la queue
+  noir (pentes, lac gelé).
+
 ## Modèles 3D
 
 Les modèles sont des fichiers glTF binaires (`assets/models/*.glb`) : le jeu
@@ -671,6 +749,9 @@ laquelle il est entré (pas de carte de l'intérieur pour l'instant).
 - **Les sauvegardes** : une partie sauvegardée dedans enregistre le monde du
   dehors tel qu'il a été laissé, puis l'intérieur et la place du joueur
   (version 22) : au chargement, on se retrouve au même endroit.
+- **La vieille mine** (version 27, le Nord) : des galeries tenues par des
+  étais (voir Le Nord) ; le compagnon y montre aussi la sortie ; le refuge,
+  une pièce meublée.
 - **L'Ouest** (version 23) : le terrier (galeries de terre, comme la grotte),
   l'arbre creux et le phare (de hautes salles rondes avec un escalier jusqu'à
   une trappe, comme la tour : dehors sur la cime, ou sur la galerie), la
@@ -688,8 +769,9 @@ de l'Ouest), Chipou (raton masqué, ombre : l'exploitation, les terres sauvages,
 le bois de l'Ouest ; les pillards du verger), Hulou (chouette, air : perchée
 sur la cime de l'arbre creux et le toit de la cabane, elle s'envole quand on
 approche et vole en combat, comme Croa), Laini (mouton nuage, normal : le
-troupeau de Basile, et un peu dans les collines) et Taupi (taupe, nature : le
-terrier, les champs).
+troupeau de Basile, et un peu dans les collines), Taupi (taupe, nature : le
+terrier, les champs), et au nord Caillou (golem de pierre, terre), Cabri
+(chèvre des cimes, terre et glace) et Givri (hermine du givre, glace).
 Les Cristis attendent immobiles par terre, sur les parois ou au plafond, à
 peine distincts des cristaux ; ils détalent quand on s'approche (3 m) et se
 laissent tomber au sol pour combattre. Quand le joueur dirige un Cristi en
@@ -1308,6 +1390,11 @@ Version 23 : l'Ouest (14 espèces, 12 quêtes, 7 téléporteurs, trois intérieu
 de plus), le sac, les monstres laissés à l'exploitation et les victoires
 contre Romane. Les sauvegardes plus anciennes se chargent : les villageois de
 l'Ouest arrivent, le sac et l'exploitation sont vides.
+
+Version 27 : le monde agrandi au nord (les cases des monstres en rectangle :
+29 × 45 ; les anciennes sont décalées de 16 rangées), 9 téléporteurs (sur
+16 bits), 17 espèces, 14 quêtes (la mine). Les sauvegardes plus anciennes se
+chargent : Solène et Gaston arrivent.
 
 Version 24 : quatre sorts d'aventure et quatre sorts de capture. Les
 sauvegardes plus anciennes se chargent : les deux derniers emplacements

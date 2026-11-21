@@ -48,6 +48,10 @@ enum class MeshId : size_t {
   OwlBody, OwlWing, OwlLeg, OwlTufts,
   SheepBody, SheepHead, SheepEar, SheepTail, SheepLeg, SheepHorns,
   MoleBody, MoleHead, MoleEar, MoleTail, MoleLeg, MoleStar,
+  // The north's (north.hpp): Caillou, Cabri, Givri.
+  GolemBody, GolemHead, GolemEar, GolemTail, GolemLeg, GolemMoss,
+  GoatBody, GoatHead, GoatEar, GoatTail, GoatLeg, GoatHorns, GoatHornsSpiral, GoatBeard,
+  ErmineBody, ErmineHead, ErmineEar, ErmineTail, ErmineLeg, ErmineFrost,
   // Village.
   HouseCottage, HouseChimney, HouseHut, Fence, Sign, Well, Barrel, Lamp,
   VillagerTorso, VillagerLeg, VillagerArm, VillagerHand, VillagerHead,
@@ -65,8 +69,10 @@ enum class MeshId : size_t {
   Cart, CartUp, Goods, Bridge, Farmhouse, Barn, FruitTree, CropsWheat, CropsCabbage, Haystack, Windmill, WindmillSails,
   WaterMill, MillWheel,
   Cabin, Tent, Campfire, CampfireFire, Woodpile, HollowTree, Burrow, Lighthouse, LighthouseLamp, Menhir, Meteorite,
+  // The north (north.hpp).
+  Chalet, MineEntrance, Minecart, MinecartLoaded, Larch, StoneWall, Cairn, HotSpring, MineProp,
   // Seen from afar (simplified), and at a middle distance.
-  TreeFar, PineFar, TreeMid, BushFar,
+  TreeFar, PineFar, TreeMid, BushFar, LarchFar,
   GrassShortFar, GrassTallFar, FlowerFar,
   // The seasons: the tree in winter (near; at a middle distance and afar),
   // fallen leaves on the ground, leaves blown around the camera (weather_view.hpp).
@@ -117,7 +123,7 @@ inline MeshGroup mesh_group(MeshId id) {
     default: break;
   }
   const auto i = static_cast<size_t>(id);
-  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::MoleStar)) return MeshGroup::Characters;
+  if (i >= static_cast<size_t>(MeshId::Eye) && i <= static_cast<size_t>(MeshId::ErmineFrost)) return MeshGroup::Characters;
   if (i >= static_cast<size_t>(MeshId::VillagerTorso) && i <= static_cast<size_t>(MeshId::Bulb)) return MeshGroup::Characters;
   return MeshGroup::Scenery;
 }

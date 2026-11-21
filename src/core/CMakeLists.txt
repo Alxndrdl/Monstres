@@ -14,6 +14,7 @@ add_library(monstres_core STATIC
   weather.cpp
   interior.cpp
   west.cpp
+  north.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

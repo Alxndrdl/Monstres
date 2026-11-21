@@ -139,7 +139,8 @@ TEST_CASE("only the leaves of trees and bushes are marked for the seasons") {
     for (size_t i = 9; i < m.vertices.size(); i += MeshData::kFloatsPerVertex) n += std::fabs(m.vertices[i] - alpha) < 0.003f;
     return n;
   };
-  for (const MeshId id : {MeshId::Tree, MeshId::TreeMid, MeshId::TreeFar, MeshId::Bush, MeshId::BushFar, MeshId::HollowTree}) {
+  for (const MeshId id : {MeshId::Tree, MeshId::TreeMid, MeshId::TreeFar, MeshId::Bush, MeshId::BushFar, MeshId::HollowTree,
+                          MeshId::Larch, MeshId::LarchFar}) {
     CHECK(marks(id, kLeavesAlpha) > 0);
   }
   CHECK(marks(MeshId::FruitTree, kBlossomAlpha) > 0);
@@ -151,7 +152,8 @@ TEST_CASE("only the leaves of trees and bushes are marked for the seasons") {
     const MeshData& m = meshes[id];
     const auto mesh = static_cast<MeshId>(id);
     if (m.transparent || mesh == MeshId::Tree || mesh == MeshId::TreeMid || mesh == MeshId::TreeFar ||
-        mesh == MeshId::Bush || mesh == MeshId::BushFar || mesh == MeshId::HollowTree || mesh == MeshId::FruitTree) {
+        mesh == MeshId::Bush || mesh == MeshId::BushFar || mesh == MeshId::HollowTree || mesh == MeshId::FruitTree ||
+        mesh == MeshId::Larch || mesh == MeshId::LarchFar) {  // the larch's needles turn gold too
       continue;
     }
     CAPTURE(model_name(mesh));

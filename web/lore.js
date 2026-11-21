@@ -247,20 +247,75 @@ window.MonstresLore = {
         elemental: { name: 'Taupi de braise', description: 'Rouge comme une braise : elle a creusé trop près du feu de la terre.' },
       },
     },
+    golem: {
+      name: 'Caillou', kind: 'Petit golem de pierre',
+      description: 'Un tas de cailloux sur quatre pattes trapues, deux yeux qui luisent dans la roche. Le jour, il dort ' +
+        'sur les pentes et on le prend pour un rocher ; il se réveille quand on le dérange. Les Caillou creusent aussi ' +
+        'les galeries de la vieille mine, au nord.',
+      habitat: 'Bois des Mélèzes, pentes des Monts Givrés, vieille mine',
+      genes: { stone: 'Pierre', moss: 'Mousse', eyes: 'Yeux' },
+      variants: {
+        'stone.granite': { name: 'Granit', description: 'Un granit gris moucheté, dur comme… de la pierre.' },
+        'stone.sandstone': { name: 'Grès', description: 'Un grès doré qui s’effrite un peu quand il court.' },
+        'stone.slate': { name: 'Ardoise', description: 'Une ardoise bleutée, en feuillets bien serrés.' },
+        'moss.mossy': { name: 'Moussu', description: 'De la mousse et une touffe d’herbe sur le dos : il dort longtemps au même endroit.' },
+        'moss.bare': { name: 'Pierre nue', description: 'Pas un brin de mousse : un Caillou qui ne tient pas en place.' },
+        'eyes.amber': { name: 'Yeux d’ambre', description: 'Deux braises orangées au fond de la roche.' },
+        'eyes.green': { name: 'Yeux verts', description: 'Une lueur verte comme celle des vieux filons : très rare.' },
+        chromatic: { name: 'Caillou de marbre', description: 'Blanc et lisse comme une statue.' },
+        elemental: { name: 'Caillou de lave', description: 'Du basalte noir, et un cœur de lave qui rougeoie entre ses pierres.' },
+      },
+    },
+    goat: {
+      name: 'Cabri', kind: 'Chèvre des cimes',
+      description: 'Une chèvre blanche aux cornes recourbées, qui saute de rocher en rocher sans jamais glisser. ' +
+        'Les Cabri broutent dans les alpages et grimpent jusqu’aux neiges des Monts Givrés : ils sont de Terre et de Glace.',
+      habitat: 'Alpages, Bois des Mélèzes, pentes des Monts Givrés',
+      genes: { coat: 'Pelage', horns: 'Cornes', beard: 'Barbiche' },
+      variants: {
+        'coat.white': { name: 'Pelage blanc', description: 'Blanc comme la neige des sommets.' },
+        'coat.grey': { name: 'Pelage gris', description: 'Gris comme les éboulis où il se cache.' },
+        'coat.black': { name: 'Pelage noir', description: 'Un Cabri noir, qu’on voit de loin sur la neige.' },
+        'horns.curved': { name: 'Cornes recourbées', description: 'Deux cornes qui balaient l’arrière de sa tête.' },
+        'horns.spiral': { name: 'Cornes torsadées', description: 'Des cornes en spirale, plus longues : un fier Cabri.' },
+        'beard.short': { name: 'Petite barbiche', description: 'Une touffe de poils sous le menton.' },
+        'beard.long': { name: 'Longue barbe', description: 'Une barbe de vieux sage des montagnes : rare.' },
+        chromatic: { name: 'Cabri doré', description: 'Un pelage doré qui brille au soleil couchant.' },
+        elemental: { name: 'Cabri des vents', description: 'Bleuté et léger : il saute si haut que le vent le porte.' },
+      },
+    },
+    ermine: {
+      name: 'Givri', kind: 'Hermine du givre',
+      description: 'Une hermine blanche, longue et vive, au bout de la queue noir. Elle file sur la neige plus vite ' +
+        'qu’on ne la suit des yeux, et le givre se dépose là où elle passe.',
+      habitat: 'Pentes des Monts Givrés, Lac des Givres',
+      genes: { coat: 'Pelage', tail: 'Queue', ears: 'Oreilles' },
+      variants: {
+        'coat.snow': { name: 'Pelage de neige', description: 'Blanc pur : invisible sur la neige.' },
+        'coat.cream': { name: 'Pelage crème', description: 'Un blanc chaud, couleur de lait.' },
+        'coat.silver': { name: 'Pelage argenté', description: 'Gris argent, comme la glace au clair de lune.' },
+        'tail.tipped': { name: 'Bout noir', description: 'Le bout de la queue noir, comme trempé dans l’encre.' },
+        'tail.fluffy': { name: 'Queue touffue', description: 'Une queue épaisse et duveteuse.' },
+        'ears.round': { name: 'Oreilles rondes', description: 'Deux petites oreilles rondes.' },
+        'ears.frosted': { name: 'Oreilles givrées', description: 'Des cristaux de glace sur les oreilles : très rare.' },
+        chromatic: { name: 'Givri d’été', description: 'Brune, comme les hermines en été : on n’en voit presque jamais sur la neige.' },
+        elemental: { name: 'Givri d’aurore', description: 'Dorée et lumineuse, comme le soleil levant sur les glaciers.' },
+      },
+    },
   },
   // The three monsters to start a game with (kStarters), and their element.
   starterElements: { companion: 'fire', spark: 'electric', axolotl: 'water' },
   // Order of the species in the game (Species in src/core/world.hpp).
   speciesOrder: ['companion', 'slime', 'mushroom', 'bird', 'villager', 'crow', 'fish', 'spark', 'axolotl', 'cristi',
-    'raccoon', 'owl', 'sheep', 'mole'],
+    'raccoon', 'owl', 'sheep', 'mole', 'golem', 'goat', 'ermine'],
 
   elements: {
     fire: { name: 'Feu', color: '#ff9a5a' },
     water: { name: 'Eau', color: '#6cc4ff' },
     nature: { name: 'Nature', color: '#8fd16a' },
-    earth: { name: 'Terre', color: '#c9a06e' },  // only in the guide for now
+    earth: { name: 'Terre', color: '#c9a06e' },
     air: { name: 'Air', color: '#d6f0ff' },
-    ice: { name: 'Glace', color: '#a8e6f0' },    // only in the guide for now
+    ice: { name: 'Glace', color: '#a8e6f0' },
     shadow: { name: 'Ombre', color: '#b39ad9' },
     light: { name: 'Lumière', color: '#fff3c4' },
     electric: { name: 'Électrique', color: '#ffd23f' },
@@ -411,13 +466,42 @@ window.MonstresLore = {
       name: 'Secousse', byElement: { fire: 'Éruption' },
       description: 'Elle frappe le sol : la terre tremble tout autour d’elle.',
     },
+    slam: { name: 'Écrasement', description: 'Il se laisse tomber de tout son poids sur l’ennemi.' },
+    rock_throw: {
+      name: 'Jet de roc', byElement: { fire: 'Roc de lave' },
+      description: 'Il arrache une pierre de son dos et la lance de loin.',
+    },
+    landslide: {
+      name: 'Éboulement', byElement: { fire: 'Coulée de lave' },
+      description: 'Il frappe le sol : des pierres dégringolent tout autour de lui.',
+    },
+    butt: { name: 'Coup de cornes', description: 'Il baisse la tête et fonce, cornes en avant.' },
+    pebble_kick: {
+      name: 'Ruade', byElement: { air: 'Ruade du vent' },
+      description: 'Une ruade qui envoie des cailloux gelés vers l’ennemi.',
+    },
+    avalanche: {
+      name: 'Avalanche', byElement: { air: 'Tourbillon des cimes' },
+      description: 'Il frappe des sabots : neige et cailloux déferlent tout autour de lui.',
+    },
+    frost_bite: { name: 'Morsure de givre', description: 'Une morsure vive qui laisse une trace de givre.' },
+    icicle: {
+      name: 'Stalactite', byElement: { light: 'Éclat d’aurore' },
+      description: 'Une pointe de glace lancée de loin, fine et rapide.',
+    },
+    blizzard: {
+      name: 'Blizzard', byElement: { light: 'Aurore' },
+      description: 'Elle tourne sur elle-même : un tourbillon de neige glacée l’entoure.',
+    },
   },
   // Doors (interior.hpp): what the panel says near one. Houses by their kind.
   doors: {
     cave: 'Grotte aux Cristaux',
     tower: 'Tour des ruines',
     roof: 'Toit de la tour',
-    house: { cottage: 'Maison', chimney: 'Grande maison', hut: 'Hutte', farmhouse: 'Ferme de Capucine', cabin: 'Cabane du bûcheron' },
+    house: { cottage: 'Maison', chimney: 'Grande maison', hut: 'Hutte', farmhouse: 'Ferme de Capucine', cabin: 'Cabane du bûcheron',
+      chalet: 'Refuge du Col' },
+    mine: 'Vieille mine',
     burrow: 'Terrier',
     hollowTree: 'Arbre creux',
     lighthouse: 'Phare',
@@ -447,6 +531,11 @@ window.MonstresLore = {
     woods: 'Bois de l’Ouest',
     crater: 'Cratère de l’Étoile',
     river: 'Rivière',
+    alpine: 'Alpages',
+    larches: 'Bois des Mélèzes',
+    frost: 'Pentes des Monts Givrés',
+    frozenLake: 'Lac des Givres',
+    mine: 'Vieille mine',
   },
   // The regions of the continent (src/core/continent.hpp), for the map. Not
   // reachable yet: names to refine.
@@ -466,6 +555,11 @@ window.MonstresLore = {
   teleporters: {
     village: 'Village', ruins: 'Ruines de la Tour', forest: 'Forêt des Murmures', cave: 'Grotte aux Cristaux',
     castle: 'Château de Corbeval', farm: 'Exploitation de Capucine', menhirs: 'Cercle des Menhirs',
+    refuge: 'Refuge du Col', col: 'Col des Givres',
+  },
+  // The north's places (north.hpp), for the map.
+  northPlaces: {
+    refuge: 'Refuge du Col', mine: 'Vieille mine', springs: 'Sources chaudes', lake: 'Lac des Givres', col: 'Col des Givres',
   },
   // The west's places (west.hpp), for the map.
   westPlaces: {
@@ -527,6 +621,13 @@ window.MonstresLore = {
     22: { name: 'Mathurin', chatter: ['La rivière descend de la Forêt Profonde, à l’est. Son eau est fraîche même en plein été.',
       'Près de la grotte aux cristaux, la rivière passe au pied d’une cascade. On raconte qu’il y a quelque chose derrière…',
       'Les Ploufi adorent la rivière. D’habitude ils sont gentils, mais quand ils s’énervent, gare à toi !'] },
+    // The north (north.hpp).
+    23: { name: 'Solène', healer: true, chatter: ['Je garde ce refuge depuis vingt hivers. La soupe est toujours chaude pour qui monte au col.',
+      'Plus haut, les sources chaudes fument même sous la neige. Baigne tes monstres dedans : ça les requinque.',
+      'Les Givri sont si blancs qu’on ne les voit que lorsqu’ils bougent. Ouvre l’œil près du lac gelé.'] },
+    24: { name: 'Gaston', chatter: ['J’ai creusé cette mine pendant quarante ans. Des filons qui brillaient comme des étoiles…',
+      'Les Caillou dorment sur les pentes. Si un rocher a des yeux, passe ton chemin… ou prépare-toi !',
+      'Les Cabri grimpent partout. Une fois, j’en ai trouvé un sur le toit du refuge !'] },
   },
   // What the other villagers say about the quests (any of them, see web/dialogue.js).
   rumors: {
@@ -551,6 +652,9 @@ window.MonstresLore = {
     west: ['À l’ouest, la route mène à l’exploitation de Capucine, et plus loin jusqu’au phare.',
       'Un marchand a versé sa charrette sur la route de l’ouest. Le pauvre…',
       'On dit que des Chipou rôdent autour du verger de Capucine.'],
+    north: ['Au nord, le sentier monte vers les alpages, et jusqu’au col des Monts Givrés. Il y a un refuge en chemin.',
+      'Le vieux Gaston ne parle que de sa mine, là-haut au nord. Il paraît qu’un monstre énorme s’y est installé.',
+      'On dit qu’il y a des sources chaudes dans les montagnes, au milieu de la neige !'],
   },
   // The quests (src/core/quests.hpp): the journal, in the grimoire.
   quests: {
@@ -639,6 +743,13 @@ window.MonstresLore = {
         'jusqu’à la bergerie.',
       steps: { lambs: 'Ramener les agneaux dans l’enclos', tell: 'Le dire à Basile' },
       done: 'Le troupeau est au complet. Pour te remercier, Basile t’a confié un Laini.',
+    },
+    mineGuardian: {
+      title: 'Le gardien de la mine', giver: 24, xp: 150,
+      summary: 'Un Caillou gigantesque s’est installé au fond de la vieille mine de Gaston, dans la plus grande salle, et ' +
+        'plus personne n’ose y descendre. Bats-le (ou capture-le), puis reviens voir Gaston devant la mine.',
+      steps: { beaten: 'Battre le Caillou géant au fond de la mine', tell: 'Le dire à Gaston' },
+      done: 'Le gardien ne garde plus rien : Gaston a retrouvé sa mine, et t’a récompensé.',
     },
     waterWheel: {
       title: 'La roue bloquée', giver: 22, xp: 80,

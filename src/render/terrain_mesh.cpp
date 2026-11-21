@@ -1,5 +1,7 @@
 #include "monstres/render/terrain_mesh.hpp"
 
+#include "monstres/core/north.hpp"
+
 #include "monstres/core/west.hpp"
 
 #include "monstres/core/continent.hpp"
@@ -28,6 +30,12 @@ constexpr Color kPaving{0.60f, 0.58f, 0.54f, 1};  // old flagstones of the ruins
 constexpr Color kForestFloor{0.27f, 0.40f, 0.20f, 1};  // shaded grass and moss under the trees
 constexpr Color kCastlePaving{0.58f, 0.56f, 0.53f, 1};
 constexpr Color kCaveRock{0.46f, 0.44f, 0.43f, 1};
+// The north (north.hpp): its mountains' scree, snow, the frozen lake's ice, the springs' mineral crust.
+constexpr Color kScree{0.56f, 0.55f, 0.54f, 1};
+constexpr Color kSnowGround{0.92f, 0.94f, 0.99f, 1};
+constexpr Color kIce{0.66f, 0.83f, 0.92f, 1};
+constexpr Color kIceLight{0.84f, 0.93f, 0.98f, 1};
+constexpr Color kTravertine{0.86f, 0.80f, 0.66f, 1};
 
 Color lerp(Color a, Color b, float t) {
   t = std::clamp(t, 0.0f, 1.0f);
@@ -126,6 +134,32 @@ Color ground_color(const World& w, float x, float z) {
     const Color stone = lerp(kPaving, kEarth, 0.25f * value_noise(w.seed + 32, x, z, 1.0f));
     c = lerp(c, stone, inside * (0.35f + 0.6f * smooth(0.3f, 0.6f, worn)));
   }
+  if (w.north.valid() && z < rules::kNorthFrom + 30.0f) {
+    const NorthLayout& n = w.north;
+    // The trodden ground around the refuge and before the mine.
+    const auto trodden = [&](Vec2 at, float r) {
+      const float d = std::hypot(x - at.x, z - at.z) + 1.5f * value_noise(w.seed + 40, x, z, 2.0f);
+      return 1 - smooth(r * 0.6f, r, d);
+    };
+    c = lerp(c, kSquare, trodden({n.refuge.x + n.refuge_front.x * 5.0f, n.refuge.z + n.refuge_front.z * 5.0f}, 6.0f) * 0.7f);
+    c = lerp(c, kEarth, trodden({n.mine.x + n.mine_front.x * 4.0f, n.mine.z + n.mine_front.z * 4.0f}, 7.0f) * 0.8f);
+    // The springs' mineral crust around their pool.
+    c = lerp(c, kTravertine, trodden(n.springs, rules::kSpringsRadius) * 0.8f);
+    // The mountains: scree and bare rock between the tufts, higher up.
+    const float above = h - n.floor_start - rules::kValleyRise * std::max(0.0f, rules::kFrostFrom - z);
+    const float rocky = smooth(rules::kFrostFrom + 60.0f, rules::kFrostFrom - 40.0f, z) *
+                        (0.35f + 0.65f * smooth(2.0f, 14.0f, above)) * smooth(0.35f, 0.6f, value_noise(w.seed + 41, x, z, 9.0f) + 0.25f);
+    c = lerp(c, lerp(kScree, kCaveRock, value_noise(w.seed + 42, x, z, 2.5f)), rocky * 0.85f);
+    // Snow, all year long up there.
+    c = lerp(c, kSnowGround, north_snow(n, x, z, h));
+    // The frozen lake: ice, lighter streaks and cracks, snow drifted along its shore.
+    const float lake = frozen_lake_distance(n, x, z);
+    if (lake < 1.15f) {
+      const float streak = smooth(0.55f, 0.75f, value_noise(w.seed + 43, x * 0.5f, z * 2.0f, 6.0f));
+      const Color ice = lerp(kIce, kIceLight, 0.55f * streak + 0.25f * value_noise(w.seed + 44, x, z, 1.2f));
+      c = lerp(c, lerp(ice, kSnowGround, smooth(0.8f, 1.05f, lake) * 0.8f), 1 - smooth(1.0f, 1.15f, lake));
+    }
+  }
   // The wilds: the continent's forest floor, the beach and the sea floor.
   if (region_at(x, z) == Region::Forest) c = lerp(c, kForestFloor, 0.6f);
   // Near the shore only: the continent's ground there is close to the sea (around the valley it is 2 m above).
@@ -147,14 +181,18 @@ Color ground_color(const World& w, float x, float z) {
 
 float ground_height(const World& w, float x, float z) { return w.ground.height(x, z); }
 
-int tile_of(float v) {
-  return std::clamp(static_cast<int>(std::floor((v + terrain::kDetailHalfSize) / terrain::kTile)), 0, terrain::kTiles - 1);
+int tile_x(float x) {
+  return std::clamp(static_cast<int>(std::floor((x + terrain::kDetailHalfSize) / terrain::kTile)), 0, terrain::kTilesX - 1);
+}
+int tile_z(float z) {
+  return std::clamp(static_cast<int>(std::floor((z + terrain::kDetailNorth) / terrain::kTile)), 0, terrain::kTilesZ - 1);
 }
 
-float tile_start(int t) { return -terrain::kDetailHalfSize + terrain::kTile * static_cast<float>(t); }
+float tile_start_x(int i) { return -terrain::kDetailHalfSize + terrain::kTile * static_cast<float>(i); }
+float tile_start_z(int j) { return -terrain::kDetailNorth + terrain::kTile * static_cast<float>(j); }
 
 std::vector<TileKey> detailed_tiles(float x, float z) {
-  const int pi = tile_of(x), pj = tile_of(z);
+  const int pi = tile_x(x), pj = tile_z(z);
   const auto lod_at = [&](int i, int j) {
     const int d = std::max(std::abs(i - pi), std::abs(j - pj));
     for (int l = 0; l < terrain::kLods - 1; ++l) {
@@ -162,7 +200,7 @@ std::vector<TileKey> detailed_tiles(float x, float z) {
     }
     return terrain::kLods - 1;
   };
-  const auto inside = [](int i, int j) { return i >= 0 && j >= 0 && i < terrain::kTiles && j < terrain::kTiles; };
+  const auto inside = [](int i, int j) { return i >= 0 && j >= 0 && i < terrain::kTilesX && j < terrain::kTilesZ; };
   std::vector<TileKey> keys;
   const int r = terrain::kLodReach[terrain::kLods - 2];
   for (int i = pi - r; i <= pi + r; ++i) {
@@ -198,12 +236,12 @@ Color unpack(uint32_t p) {
 // edge (cells twice as big): its points in between are on the straight
 // line between theirs. Indexed: each point once. Returns where it is.
 Aabb add_cells(MeshData& m, const World& w, GroundColors& colors, float x0, float z0, float cell, int n, uint8_t stitch) {
-  constexpr float d = terrain::kDetailHalfSize;
   constexpr float kGrid = Heightmap::kCellSize;
-  constexpr int kPoints = Heightmap::kPoints;
-  if (colors.packed.size() != static_cast<size_t>(kPoints) * kPoints) colors.packed.assign(static_cast<size_t>(kPoints) * kPoints, 0);
-  const auto index = [&](float v) { return std::clamp(static_cast<int>(std::lround((v + d) / kGrid)), 0, kPoints - 1); };
-  const auto height = [&](float x, float z) { return w.ground.empty() ? 0.0f : w.ground.at(index(x), index(z)); };
+  constexpr int kPointsX = Heightmap::kPointsX, kPointsZ = Heightmap::kPointsZ;
+  if (colors.packed.size() != static_cast<size_t>(kPointsX) * kPointsZ) colors.packed.assign(static_cast<size_t>(kPointsX) * kPointsZ, 0);
+  const auto index_x = [&](float v) { return std::clamp(static_cast<int>(std::lround((v - Heightmap::kMinX) / kGrid)), 0, kPointsX - 1); };
+  const auto index_z = [&](float v) { return std::clamp(static_cast<int>(std::lround((v - Heightmap::kMinZ) / kGrid)), 0, kPointsZ - 1); };
+  const auto height = [&](float x, float z) { return w.ground.empty() ? 0.0f : w.ground.at(index_x(x), index_z(z)); };
   const int p = n + 1;
   const auto first = static_cast<uint32_t>(m.vertex_count());
   Aabb box = empty_aabb();
@@ -213,7 +251,7 @@ Aabb add_cells(MeshData& m, const World& w, GroundColors& colors, float x0, floa
       float y = height(x, z);
       if ((b & 1) && (((stitch & 1) && a == 0) || ((stitch & 2) && a == n))) y = 0.5f * (height(x, z - cell) + height(x, z + cell));
       if ((a & 1) && (((stitch & 4) && b == 0) || ((stitch & 8) && b == n))) y = 0.5f * (height(x - cell, z) + height(x + cell, z));
-      uint32_t& c = colors.packed[static_cast<size_t>(index(x) * kPoints + index(z))];
+      uint32_t& c = colors.packed[Heightmap::index(index_x(x), index_z(z))];
       if ((c >> 24) == 0) c = pack(ground_color(w, x, z));
       vertex(m, x, y, z, unpack(c), w.ground.normal(x, z));  // vertex first + a * p + b
       box.add(x, y, z);
@@ -243,12 +281,12 @@ MeshData build_coarse_ground(const World& world, GroundColors& colors) {
   MeshData m;
   constexpr int coarse = terrain::kLods - 1;
   const int n = cells_per_tile(coarse);
-  m.vertices.reserve(static_cast<size_t>(terrain::kTiles * terrain::kTiles * (n + 1) * (n + 1)) * MeshData::kFloatsPerVertex);
-  m.indices.reserve(static_cast<size_t>(terrain::kTiles * terrain::kTiles * n * n * 6));
-  for (int i = 0; i < terrain::kTiles; ++i) {
-    for (int j = 0; j < terrain::kTiles; ++j) {
+  m.vertices.reserve(static_cast<size_t>(terrain::kTilesX * terrain::kTilesZ * (n + 1) * (n + 1)) * MeshData::kFloatsPerVertex);
+  m.indices.reserve(static_cast<size_t>(terrain::kTilesX * terrain::kTilesZ * n * n * 6));
+  for (int i = 0; i < terrain::kTilesX; ++i) {
+    for (int j = 0; j < terrain::kTilesZ; ++j) {
       const auto first = static_cast<uint32_t>(m.indices.size());
-      const Aabb box = add_cells(m, world, colors, tile_start(i), tile_start(j), terrain::kLodCells[coarse], n, 0);
+      const Aabb box = add_cells(m, world, colors, tile_start_x(i), tile_start_z(j), terrain::kLodCells[coarse], n, 0);
       m.parts.push_back({{first, static_cast<uint32_t>(m.indices.size()) - first}, box});
     }
   }
@@ -260,7 +298,7 @@ MeshData build_ground_tile(const World& world, GroundColors& colors, TileKey key
   const int n = cells_per_tile(key.lod);
   m.vertices.reserve(static_cast<size_t>((n + 1) * (n + 1)) * MeshData::kFloatsPerVertex);
   m.indices.reserve(static_cast<size_t>(n * n * 6));
-  const Aabb box = add_cells(m, world, colors, tile_start(key.i), tile_start(key.j), terrain::kLodCells[key.lod], n, key.stitch);
+  const Aabb box = add_cells(m, world, colors, tile_start_x(key.i), tile_start_z(key.j), terrain::kLodCells[key.lod], n, key.stitch);
   m.parts.push_back({{0, static_cast<uint32_t>(m.indices.size())}, box});
   return m;
 }
@@ -270,8 +308,8 @@ MeshData build_ground_mesh(const World& world) {
   const MeshData coarse = expanded(build_coarse_ground(world, colors));
   const std::vector<TileKey> keys = detailed_tiles(world.player.pos.x, world.player.pos.z);
   MeshData m;
-  for (int i = 0; i < terrain::kTiles; ++i) {
-    for (int j = 0; j < terrain::kTiles; ++j) {
+  for (int i = 0; i < terrain::kTilesX; ++i) {
+    for (int j = 0; j < terrain::kTilesZ; ++j) {
       if (std::any_of(keys.begin(), keys.end(), [&](const TileKey& k) { return k.i == i && k.j == j; })) continue;
       const DrawRange r = coarse.parts[tile_part_index(i, j)].range;
       const auto from = coarse.vertices.begin() + static_cast<std::ptrdiff_t>(r.first * MeshData::kFloatsPerVertex);
@@ -303,8 +341,8 @@ struct TileOrder {
 };
 TileOrder tile_order(int i, int j, Vec2 player) {
   constexpr int kSectors = 16;
-  const int pi = tile_of(player.x), pj = tile_of(player.z);
-  const float cx = tile_start(i) + terrain::kTile / 2 - player.x, cz = tile_start(j) + terrain::kTile / 2 - player.z;
+  const int pi = tile_x(player.x), pj = tile_z(player.z);
+  const float cx = tile_start_x(i) + terrain::kTile / 2 - player.x, cz = tile_start_z(j) + terrain::kTile / 2 - player.z;
   int sector = static_cast<int>((std::atan2(cz, cx) + 3.14159265f) / 6.2831853f * kSectors);
   sector = std::clamp(sector, 0, kSectors - 1);
   return {std::max(std::abs(i - pi), std::abs(j - pj)) <= 1 ? 0 : 1, sector, cx * cx + cz * cz};
@@ -391,8 +429,8 @@ void GroundTiles::assemble(Vec2 player) {
   }
   // The coarse ground's other tiles, in the same order.
   std::vector<std::pair<TileOrder, size_t>> coarse;
-  for (int i = 0; i < terrain::kTiles; ++i) {
-    for (int j = 0; j < terrain::kTiles; ++j) {
+  for (int i = 0; i < terrain::kTilesX; ++i) {
+    for (int j = 0; j < terrain::kTilesZ; ++j) {
       const size_t part = tile_part_index(i, j);
       if (part >= coarse_tiles_.size()) continue;
       const bool detailed = std::any_of(drawn_keys_.begin(), drawn_keys_.end(), [&](const TileKey& k) { return k.i == i && k.j == j; });
@@ -467,14 +505,9 @@ void add_river_surface(MeshData& m, const World& world) {
   for (size_t i = n - 1; i-- > 0;) {
     left[i] = left[i + 1] + std::hypot(st.points[i + 1].x - st.points[i].x, st.points[i + 1].z - st.points[i].z);
   }
-  constexpr float kCell = Heightmap::kCellSize;
-  constexpr float R = rules::kReliefHalfSize;
   const float limit = widest + kPast;
-  const auto index = [&](float v) {
-    return std::clamp(static_cast<int>(std::floor((v + R) / kCell)), 0, Heightmap::kPoints - 1);
-  };
-  const int i0 = index(x0 - limit), i1 = std::min(index(x1 + limit) + 1, Heightmap::kPoints - 1);
-  const int j0 = index(z0 - limit), j1 = std::min(index(z1 + limit) + 1, Heightmap::kPoints - 1);
+  const int i0 = Heightmap::i_of(x0 - limit), i1 = std::min(Heightmap::i_of(x1 + limit) + 1, Heightmap::kPointsX - 1);
+  const int j0 = Heightmap::j_of(z0 - limit), j1 = std::min(Heightmap::j_of(z1 + limit) + 1, Heightmap::kPointsZ - 1);
   const int ni = i1 - i0 + 1, nj = j1 - j0 + 1;
   // At each grid point: its level for the river above the falls (or the
   // river anywhere, away from them) and for the pool below them.
@@ -493,8 +526,8 @@ void add_river_surface(MeshData& m, const World& world) {
   for (int i = 0; i < ni; ++i) {
     for (int j = 0; j < nj; ++j) {
       Point& p = pts[static_cast<size_t>(i) * nj + j];
-      p.x = static_cast<float>(i0 + i) * kCell - R;
-      p.z = static_cast<float>(j0 + j) * kCell - R;
+      p.x = Heightmap::x_of(i0 + i);
+      p.z = Heightmap::z_of(j0 + j);
       p.ground = world.ground.at(i0 + i, j0 + j);
       const auto take = [&](int k, RiverPart part) {
         float level = 0, width = 0;
@@ -601,8 +634,8 @@ MeshData build_water_mesh(const World& world) {
   // farther): squares of 8 m at its level, as the continent's water beyond.
   if (!world.ground.empty()) {
     constexpr float kCell = 16.0f;
-    const float d = terrain::kDetailHalfSize;
-    const int n = static_cast<int>(2 * d / kCell);
+    const float d = terrain::kDetailHalfSize, north = terrain::kDetailNorth;
+    const int n = static_cast<int>(2 * d / kCell), nz = static_cast<int>((d + north) / kCell);
     const auto water = [&](float x, float z) {
       const float depth = rules::kSeaLevel - world.ground.height(x, z);
       return Color{0.18f - 0.08f * smooth(0.0f, 20.0f, depth), 0.44f - 0.18f * smooth(0.0f, 20.0f, depth),
@@ -610,8 +643,8 @@ MeshData build_water_mesh(const World& world) {
     };
     const float y = rules::kSeaLevel;
     for (int i = 0; i < n; ++i) {
-      for (int j = 0; j < n; ++j) {
-        const float x0 = -d + kCell * static_cast<float>(i), z0 = -d + kCell * static_cast<float>(j);
+      for (int j = 0; j < nz; ++j) {
+        const float x0 = -d + kCell * static_cast<float>(i), z0 = -north + kCell * static_cast<float>(j);
         const float x1 = x0 + kCell, z1 = z0 + kCell;
         // Some ground under the sea's level in the square (every 2 m), where
         // the sea is (not a hollow of the hills): looked at all over it, not

@@ -3288,6 +3288,380 @@ def gust():
     return m
 
 
+# ---------------------------------------------------------------- the north (src/core/north.cpp)
+
+LARCH = (0.44, 0.64, 0.32, 0.97)      # its needles: seasonal (gold in autumn), as leaves
+CHALET_WOOD = (0.52, 0.34, 0.20, 1)
+CHALET_STONE = (0.60, 0.58, 0.55, 1)
+SHUTTER = (0.30, 0.46, 0.34, 1)
+RAIL = (0.30, 0.30, 0.33, 1)
+SLEEPER = (0.40, 0.28, 0.18, 1)
+ORE = (0.95, 0.72, 0.30, 1)
+SPRING_WATER = (0.42, 0.78, 0.80, 1)
+SPRING_DEEP = (0.24, 0.56, 0.62, 1)
+WALL_STONE = (0.64, 0.62, 0.58, 1)
+GOLEM_STONE = (0.66, 0.64, 0.61, 1)   # Caillou: grey stone, tinted by its kind of stone
+GOAT = (0.96, 0.95, 0.92, 1)          # Cabri: white, tinted by its coat
+GOAT_DARK = (0.24, 0.21, 0.20, 1)
+GOAT_HORN = (0.62, 0.56, 0.46, 1)
+ERMINE = (0.98, 0.98, 1.0, 1)         # Givri: snow-white, tinted by its coat
+ERMINE_TIP = (0.12, 0.11, 0.13, 1)
+FROST = (0.70, 0.92, 1.0, 1)
+
+
+def chalet():
+    """The refuge: a stone chalet, 7.2 x 6 m, stone walls up to 1.5 m, wood
+    above up to 2.9 m, a wide roof (ridge at 5.0 m along X), a chimney, its
+    door at -Z (collision: half 3.6 x 2.5 x 3.0)."""
+    m = Mesh()
+    hx, hz = 3.6, 3.0
+    for k in range(5):  # courses of stone, a little uneven
+        y = 0.15 + 0.3 * k
+        for i in range(8):
+            x = -hx + hx / 4 * (i + 0.5)
+            stone_box(m, (x, y, -hz + 0.2), (hx / 8 + 0.02, 0.15, 0.22), 7100 + k * 10 + i, CHALET_STONE)
+            stone_box(m, (x, y, hz - 0.2), (hx / 8 + 0.02, 0.15, 0.22), 7200 + k * 10 + i, CHALET_STONE)
+        for i in range(6):
+            z = -hz + hz / 3 * (i + 0.5)
+            stone_box(m, (-hx + 0.2, y, z), (0.22, 0.15, hz / 6 + 0.02), 7300 + k * 10 + i, CHALET_STONE)
+            stone_box(m, (hx - 0.2, y, z), (0.22, 0.15, hz / 6 + 0.02), 7400 + k * 10 + i, CHALET_STONE)
+    wall = 2.9
+    for k in range(5):  # planks above
+        y = 1.5 + 0.28 * k
+        c = shade(CHALET_WOOD, 0.9 + 0.12 * (k % 2))
+        box(m, (0, y + 0.14, -hz + 0.12), (hx - 0.05, 0.14, 0.1), c)
+        box(m, (0, y + 0.14, hz - 0.12), (hx - 0.05, 0.14, 0.1), c)
+        box(m, (-hx + 0.12, y + 0.14, 0), (0.1, 0.14, hz - 0.05), c)
+        box(m, (hx - 0.12, y + 0.14, 0), (0.1, 0.14, hz - 0.05), c)
+    box(m, (0, wall / 2, 0), (hx - 0.25, wall / 2, hz - 0.25), shade(CHALET_WOOD, 0.75))
+    gable_walls(m, hx, hz, wall, 5.0, CHALET_WOOD)
+    gable_roof(m, hx, hz, wall, 5.0, 0.8, (0.36, 0.30, 0.26, 1))
+    door(m, (0, 0.95, -hz - 0.05), 0.5, 0.95, (0, 0, -1))
+    for x in (-2.2, 2.2):
+        window(m, (x, 1.9, -hz - 0.05), 0.38, 0.34, (0, 0, -1))
+        for side in (-1, 1):  # shutters
+            box(m, (x + side * 0.6, 1.9, -hz - 0.1), (0.2, 0.4, 0.03), SHUTTER)
+    for z in (-1.2, 1.2):
+        window(m, (hx + 0.05, 1.9, z), 0.34, 0.3, (1, 0, 0))
+    box(m, (-2.3, 4.6, 1.0), (0.35, 1.1, 0.35), DARK_STONE)  # chimney
+    box(m, (0, 0.06, -hz - 0.7), (1.1, 0.06, 0.6), CHALET_STONE)  # a doorstep
+    return m
+
+
+def mine_entrance():
+    """The old mine's entrance: a timber frame (2.4 m wide, 2.5 m high) set in
+    rocks, dark inside, rails coming out of it; its opening at -Z, the rocks
+    going back into the slope (+Z). Walked into (its rocks: Colliders)."""
+    m = Mesh()
+    box(m, (0, 1.25, 0.2), (1.1, 1.25, 0.6), CAVE_DARK)
+    for x in (-1.25, 1.25):
+        box(m, (x, 1.3, -0.45), (0.16, 1.3, 0.16), TIMBER)
+        box(m, (x * 0.98, 0.9, -0.6), (0.06, 0.06, 0.3), shade(TIMBER, 0.8))  # a brace
+    box(m, (0, 2.62, -0.45), (1.5, 0.17, 0.2), TIMBER)
+    box(m, (0, 2.95, -0.2), (1.7, 0.15, 0.45), shade(TIMBER, 0.85))
+    box(m, (0, 2.62, -0.67), (0.55, 0.13, 0.02), PLANKS)  # a board over the way in
+    # The rocks around, the slope's face.
+    for k, (c, r) in enumerate([((-2.3, 1.0, 0.6), (1.1, 1.3, 1.2)), ((2.3, 1.1, 0.6), (1.1, 1.4, 1.2)),
+                                ((-1.4, 3.0, 0.9), (1.4, 0.9, 1.3)), ((1.3, 3.1, 0.9), (1.5, 0.9, 1.3)),
+                                ((0, 3.6, 1.6), (1.9, 1.0, 1.6)), ((-2.6, 2.6, 1.6), (0.9, 1.0, 1.3)),
+                                ((2.7, 2.7, 1.7), (1.0, 1.0, 1.3))]):
+        blob(m, c, r, 0.18, 7500 + k, jitter(CAVE_ROCK, 7500 + k, 0.1))
+    # The rails, out to the yard.
+    for x in (-0.45, 0.45):
+        box(m, (x, 0.08, -1.6), (0.035, 0.04, 2.4), RAIL)
+    for k in range(9):
+        box(m, (0, 0.03, -0.2 - 0.6 * k), (0.7, 0.03, 0.1), SLEEPER)
+    return m
+
+
+def minecart(loaded):
+    """A mine cart on a bit of rails along X: 1.4 x 0.9 x 0.9 m (collision:
+    half 0.75 x 0.5 x 0.5); loaded: full of stones and a glint of ore."""
+    m = Mesh()
+    for z in (-0.3, 0.3):
+        box(m, (0, 0.06, z), (1.2, 0.04, 0.035), RAIL)
+    for k in range(5):
+        box(m, (-1.0 + 0.5 * k, 0.025, 0), (0.08, 0.025, 0.45), SLEEPER)
+    for x in (-0.42, 0.42):
+        for z in (-0.3, 0.3):
+            frustum(m, lambda p, x=x, z=z: (x + p[0], 0.18 + p[2], z + p[1] * (1 if z > 0 else -1) - 0.04 * (1 if z > 0 else -1)),
+                    0.14, 0.14, 0.06, 10, METAL)
+    box(m, (0, 0.27, 0), (0.62, 0.05, 0.38), shade(PLANKS, 0.8))
+    for z in (-0.38, 0.38):
+        box(m, (0, 0.55, z), (0.66, 0.26, 0.035), PLANKS)
+    for x in (-0.64, 0.64):
+        box(m, (x, 0.55, 0), (0.035, 0.26, 0.4), PLANKS)
+    for x in (-0.5, 0.0, 0.5):
+        box(m, (x, 0.55, -0.42), (0.03, 0.27, 0.01), METAL)
+        box(m, (x, 0.55, 0.42), (0.03, 0.27, 0.01), METAL)
+    if loaded:
+        for k in range(7):
+            c = (-0.4 + 0.27 * (k % 4), 0.72 + 0.06 * (k % 2), -0.18 + 0.36 * (k // 4))
+            blob(m, c, (0.14, 0.1, 0.13), 0.25, 7600 + k, jitter(CAVE_ROCK, 7600 + k, 0.15), detail=0)
+        blob(m, (0.1, 0.8, 0.05), (0.08, 0.06, 0.07), 0.2, 7610, solid(ORE), detail=0)
+    return m
+
+
+def larch():
+    """A larch: a slender conifer, its needles light green, gold in autumn
+    (seasonal, as leaves), its tiers airy, a tall trunk showing between them."""
+    m = Mesh()
+    frustum(m, identity, 0.16, 0.06, 4.6, 6, BARK, open_ends=True)
+    tiers = [(0.9, 1.15, 1.4), (1.8, 0.95, 1.3), (2.65, 0.75, 1.2), (3.45, 0.55, 1.1), (4.15, 0.35, 0.9)]
+    for k, (y, radius, height) in enumerate(tiers):
+        c = shade(LARCH, 0.92 + 0.05 * k)
+        frustum(m, lambda p, y=y: (p[0], p[1] + y, p[2]), radius, 0, height, 7, c,
+                bottom_cap=shade(LARCH, 0.68), phase=0.5 * k, flat=True)
+    return m
+
+
+def larch_far():
+    m = Mesh()
+    frustum(m, identity, 0.16, 0.06, 1.0, 4, BARK, open_ends=True)
+    frustum(m, lambda p: (p[0], p[1] + 0.9, p[2]), 1.1, 0, 4.2, 5, LARCH, bottom_cap=shade(LARCH, 0.7), flat=True)
+    return m
+
+
+def stone_wall():
+    """A 1.2 m stretch of a low dry-stone wall along X, 0.62 m high, 0.5 m
+    thick: flat stones stacked, a little moss on top."""
+    m = Mesh()
+    rows = [(0.1, 4, 0.1), (0.27, 3, 0.09), (0.43, 4, 0.08), (0.56, 3, 0.06)]
+    for r, (y, n, hh) in enumerate(rows):
+        for k in range(n):
+            x = -0.62 + 1.24 * (k + 0.5) / n + 0.04 * (r % 2)
+            seed = 7700 + r * 10 + k
+            w = 0.62 / n + 0.03
+            c = shade(WALL_STONE, 0.85 + 0.25 * hash01(seed, 1))
+            box(m, (x, y, 0.02 * (hash01(seed, 2) - 0.5)), (w, hh, 0.24 - 0.025 * r), c)
+    blob(m, (0.2, 0.63, 0.0), (0.22, 0.04, 0.16), 0.2, 7750, jitter(MOSS, 7750, 0.1), detail=0)
+    return m
+
+
+def cairn():
+    """A pile of stones marking the way, about 1.3 m high (size: its scale)."""
+    m = Mesh()
+    stones = [((0, 0.16, 0), (0.42, 0.18, 0.38)), ((0.05, 0.45, -0.02), (0.33, 0.15, 0.3)),
+              ((-0.02, 0.7, 0.03), (0.26, 0.13, 0.24)), ((0.03, 0.92, 0), (0.19, 0.11, 0.18)),
+              ((0, 1.1, 0.01), (0.13, 0.09, 0.12)), ((0.01, 1.24, 0), (0.08, 0.07, 0.08))]
+    for k, (c, r) in enumerate(stones):
+        blob(m, c, r, 0.15, 7800 + k, jitter(WALL_STONE, 7800 + k, 0.12), detail=0)
+    return m
+
+
+def hot_spring():
+    """The hot springs' pool: milky turquoise water 3.6 m wide (radius), its
+    surface 0.15 m below the ground's, deeper in the middle; stones along its
+    edge. Walked into."""
+    m = Mesh()
+    segs = 28
+    r = 3.6
+    for i in range(segs):
+        a0, a1 = TAU * i / segs, TAU * (i + 1) / segs
+        wob0 = 1 + 0.06 * math.sin(3 * a0) + 0.04 * math.sin(5 * a0 + 1)
+        wob1 = 1 + 0.06 * math.sin(3 * a1) + 0.04 * math.sin(5 * a1 + 1)
+        p0 = (r * wob0 * math.cos(a0), -0.15, r * wob0 * math.sin(a0))
+        p1 = (r * wob1 * math.cos(a1), -0.15, r * wob1 * math.sin(a1))
+        q0 = mul(p0, 0.5)
+        q1 = mul(p1, 0.5)
+        q0 = (q0[0], -0.15, q0[2])
+        q1 = (q1[0], -0.15, q1[2])
+        m.tri((0, -0.15, 0), q1, q0, SPRING_DEEP)
+        m.quad_facing(q0, q1, p1, p0, SPRING_WATER, (0, 1, 0))
+    for k in range(18):
+        a = TAU * k / 18 + 0.1 * hash01(7900, k)
+        rr = r * (1 + 0.06 * math.sin(3 * a)) + 0.15
+        blob(m, (rr * math.cos(a), 0.02, rr * math.sin(a)), (0.32 + 0.12 * hash01(7901, k), 0.16, 0.28), 0.2, 7910 + k,
+             jitter(CAVE_ROCK, 7910 + k, 0.12), detail=0)
+    return m
+
+
+def mine_prop():
+    """Inside the mine: a timber post (2.7 m high) and half of a beam on top,
+    reaching 1.75 m along +X (two make a frame across a gallery)."""
+    m = Mesh()
+    box(m, (0, 1.35, 0), (0.12, 1.35, 0.12), TIMBER)
+    box(m, (0.85, 2.62, 0), (0.95, 0.12, 0.13), shade(TIMBER, 0.9))
+    box(m, (0.3, 2.3, 0), (0.05, 0.25, 0.05), shade(TIMBER, 0.75))  # a brace
+    return m
+
+
+# The north's monsters walk on four legs, as Pompon (their rigs: src/render/characters.cpp).
+
+def golem_body():
+    """Caillou: a boulder of a body, lumpy (tinted by its stone)."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (0.24, 0.18, 0.27), 0.12, 8000,
+         lambda n, face: shade(GOLEM_STONE, 0.85 + 0.25 * hash01(8000, face) + 0.08 * max(n[1], 0)), detail=1)
+    for k in range(4):  # smaller stones stuck to it
+        a = TAU * hash01(8001, k)
+        blob(m, (0.2 * math.cos(a), 0.06 + 0.06 * hash01(8002, k), 0.2 * math.sin(a)), (0.08, 0.07, 0.08), 0.2, 8010 + k,
+             lambda n, face, k=k: shade(GOLEM_STONE, 0.8 + 0.2 * hash01(8010 + k, face)), detail=0)
+    return m
+
+
+def golem_head():
+    m = Mesh()
+    blob(m, (0, 0.03, -0.02), (0.14, 0.12, 0.13), 0.12, 8020,
+         lambda n, face: shade(GOLEM_STONE, 0.85 + 0.25 * hash01(8020, face)), detail=1)
+    box(m, (0, 0.11, -0.12), (0.11, 0.025, 0.03), shade(GOLEM_STONE, 0.7))  # a brow
+    return m
+
+
+def golem_ear():
+    m = Mesh()
+    blob(m, (0, 0.02, 0), (0.035, 0.04, 0.03), 0.2, 8030, solid(shade(GOLEM_STONE, 0.9)), detail=0)
+    return m
+
+
+def golem_tail():
+    m = Mesh()
+    blob(m, (0, 0, 0.02), (0.05, 0.045, 0.06), 0.2, 8031, solid(shade(GOLEM_STONE, 0.85)), detail=0)
+    return m
+
+
+def golem_leg():
+    m = Mesh()
+    frustum(m, translate(0, -0.13, 0), 0.07, 0.06, 0.13, 6, shade(GOLEM_STONE, 0.85), flat=True)
+    blob(m, (0, -0.13, -0.01), (0.08, 0.035, 0.09), 0.15, 8032, solid(shade(GOLEM_STONE, 0.75)), detail=0)
+    return m
+
+
+def golem_moss():
+    """Moss and a tuft of grass on its back (its mossy kind)."""
+    m = Mesh()
+    blob(m, (0.02, 0.15, 0.02), (0.17, 0.05, 0.2), 0.2, 8040, jitter(MOSS, 8040, 0.12), detail=1)
+    for k in range(5):
+        a = TAU * k / 5
+        frustum(m, lambda p, a=a: (0.06 * math.cos(a) + p[0], 0.18 + p[1], 0.06 * math.sin(a) + p[2] - 0.03), 0.015, 0, 0.09,
+                4, GRASS_TIP)
+    return m
+
+
+def goat_body():
+    """Cabri: a slender white goat (tinted by its coat)."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (0.15, 0.16, 0.27), 0.03, 8100,
+         lambda n, face: shade(GOAT, 0.9 + 0.08 * hash01(8100, face) + 0.06 * max(n[1], 0)), detail=2)
+    return m
+
+
+def goat_head():
+    m = Mesh()
+    blob(m, (0, 0.05, -0.02), (0.075, 0.085, 0.1), 0.02, 8110, solid(GOAT), detail=2)
+    blob(m, (0, 0.0, -0.11), (0.05, 0.05, 0.07), 0.02, 8111, solid(GOAT), detail=1)  # the muzzle
+    blob(m, (0, 0.005, -0.175), (0.022, 0.016, 0.012), 0.0, 8112, solid(GOAT_DARK), detail=0)
+    return m
+
+
+def goat_ear():
+    """Along X (sticking out sideways)."""
+    m = Mesh()
+    blob(m, (0.04, 0, 0), (0.05, 0.015, 0.025), 0.0, 8120, solid(GOAT), detail=0)
+    return m
+
+
+def goat_tail():
+    m = Mesh()
+    frustum(m, lambda p: (p[0], 0.02 + p[1] * 0.7, 0.02 + p[1] * 0.6), 0.025, 0.01, 0.08, 6, GOAT)
+    return m
+
+
+def goat_leg():
+    m = Mesh()
+    frustum(m, translate(0, -0.24, 0), 0.022, 0.032, 0.24, 7, GOAT)
+    box(m, (0, -0.235, -0.005), (0.026, 0.012, 0.03), GOAT_DARK)
+    return m
+
+
+def goat_horns(spiral):
+    """Two horns sweeping back from the top of its head (origin at the head's
+    middle); spiral: twisted, longer."""
+    m = Mesh()
+    for side in (-1, 1):
+        pts = []
+        n = 10
+        for k in range(n + 1):
+            t = k / n
+            if spiral:
+                a = TAU * 1.2 * t
+                pts.append((side * (0.04 + 0.04 * t + 0.025 * math.cos(a) * t), 0.12 + 0.12 * t + 0.02 * math.sin(a), 0.02 + 0.14 * t))
+            else:
+                pts.append((side * (0.035 + 0.03 * t), 0.12 + 0.11 * t - 0.06 * t * t, 0.02 + 0.13 * t + 0.03 * t * t))
+        for k, (a, b) in enumerate(zip(pts, pts[1:])):
+            d = sub(b, a)
+            h = length(d)
+            u = normalize(d)
+            axis = normalize(cross((0.0, 1.0, 0.0), u)) if abs(u[1]) < 0.999 else (1.0, 0.0, 0.0)
+            angle = math.acos(max(-1.0, min(1.0, u[1])))
+            r0 = 0.02 * (1 - 0.8 * k / n)
+            r1 = 0.02 * (1 - 0.8 * (k + 1) / n)
+
+            def turn(p, axis=axis, angle=angle, a=a):
+                c, s_ = math.cos(angle), math.sin(angle)
+                q = add(add(mul(p, c), mul(cross(axis, p), s_)), mul(axis, dot(axis, p) * (1 - c)))
+                return add(a, q)
+            frustum(m, turn, r0, r1, h, 6, shade(GOAT_HORN, 0.9 + 0.1 * (k % 2)), open_ends=True)
+        blob(m, pts[0], (0.022, 0.02, 0.022), 0.0, 8130, solid(GOAT_HORN), detail=0)
+        blob(m, pts[-1], (0.006, 0.006, 0.006), 0.0, 8131, solid(GOAT_HORN), detail=0)
+    return m
+
+
+def goat_beard():
+    """A tuft of a beard under the chin (origin at the head's middle)."""
+    m = Mesh()
+    frustum(m, lambda p: (p[0], -0.03 - p[1], -0.12 + p[2] + 0.2 * p[1]), 0.022, 0.004, 0.08, 6, shade(GOAT, 0.9))
+    return m
+
+
+def ermine_body():
+    """Givri: a long, low, snow-white body (tinted by its coat)."""
+    m = Mesh()
+    blob(m, (0, 0, 0), (0.095, 0.085, 0.24), 0.02, 8200,
+         lambda n, face: shade(ERMINE, 0.92 + 0.06 * hash01(8200, face) + 0.04 * max(n[1], 0)), detail=2)
+    return m
+
+
+def ermine_head():
+    m = Mesh()
+    blob(m, (0, 0.03, -0.02), (0.075, 0.07, 0.085), 0.02, 8210, solid(ERMINE), detail=2)
+    blob(m, (0, 0.015, -0.085), (0.04, 0.035, 0.045), 0.02, 8211, solid(ERMINE), detail=1)
+    blob(m, (0, 0.025, -0.13), (0.014, 0.011, 0.01), 0.0, 8212, solid(ERMINE_TIP), detail=0)
+    return m
+
+
+def ermine_ear():
+    m = Mesh()
+    blob(m, (0, 0.02, 0), (0.026, 0.026, 0.01), 0.0, 8220, solid(ERMINE), detail=0)
+    return m
+
+
+def ermine_tail():
+    """Long, its tip black (its usual kind)."""
+    m = Mesh()
+    frustum(m, lambda p: (p[0], 0.02 + p[1] * 0.25, 0.02 + p[1]), 0.03, 0.026, 0.16, 7, ERMINE)
+    blob(m, (0, 0.06, 0.21), (0.03, 0.03, 0.055), 0.05, 8230, solid(ERMINE_TIP), detail=1)
+    return m
+
+
+def ermine_leg():
+    m = Mesh()
+    frustum(m, translate(0, -0.075, 0), 0.02, 0.026, 0.075, 7, ERMINE)
+    blob(m, (0, -0.075, -0.01), (0.026, 0.012, 0.03), 0.0, 8240, solid(ERMINE), detail=0)
+    return m
+
+
+def ermine_frost():
+    """Frost on its ears: little ice crystals (origin at the head's middle)."""
+    m = Mesh()
+    for side in (-1, 1):
+        for k in range(3):
+            a = 0.4 * (k - 1)
+            frustum(m, lambda p, side=side, a=a: (side * (0.06 + p[0] * 0.5) + side * math.sin(a) * p[1] * 0.4,
+                                                  0.09 + p[1], -0.01 + p[2] * 0.5), 0.008, 0.0, 0.05, 4, FROST, bottom_cap=FROST)
+    return m
+
+
 def all_models():
     models = {
         "cube": cube(),
@@ -3474,6 +3848,36 @@ def all_models():
         "icon_coin": icon_coin(),
         "icon_farm": icon_farm(),
         "gust": gust(),
+        "chalet": chalet(),
+        "mine_entrance": mine_entrance(),
+        "minecart": minecart(False),
+        "minecart_loaded": minecart(True),
+        "larch": larch(),
+        "larch_far": larch_far(),
+        "stone_wall": stone_wall(),
+        "cairn": cairn(),
+        "hot_spring": hot_spring(),
+        "mine_prop": mine_prop(),
+        "golem_body": golem_body(),
+        "golem_head": golem_head(),
+        "golem_ear": golem_ear(),
+        "golem_tail": golem_tail(),
+        "golem_leg": golem_leg(),
+        "golem_moss": golem_moss(),
+        "goat_body": goat_body(),
+        "goat_head": goat_head(),
+        "goat_ear": goat_ear(),
+        "goat_tail": goat_tail(),
+        "goat_leg": goat_leg(),
+        "goat_horns": goat_horns(False),
+        "goat_horns_spiral": goat_horns(True),
+        "goat_beard": goat_beard(),
+        "ermine_body": ermine_body(),
+        "ermine_head": ermine_head(),
+        "ermine_ear": ermine_ear(),
+        "ermine_tail": ermine_tail(),
+        "ermine_leg": ermine_leg(),
+        "ermine_frost": ermine_frost(),
     }
     for v in range(4):
         models[f"rock{v}"] = rock(v)
@@ -3492,7 +3896,8 @@ def all_models():
         models[f"mountain{v}"] = mountain(v)
     # The characters' parts are soft (their lumps are smooth); the rest keeps its facets.
     soft = ("player_", "companion_", "slime_", "mushroom_", "bird_", "villager_", "hair_", "hat_", "crow_", "fish_",
-            "eye", "horn", "bulb", "spark_", "axolotl_", "cristi_", "raccoon_", "owl_", "sheep_", "mole_")
+            "eye", "horn", "bulb", "spark_", "axolotl_", "cristi_", "raccoon_", "owl_", "sheep_", "mole_",
+            "golem_", "goat_", "ermine_")
     for name, mesh in models.items():
         mesh.finish(soft=name.startswith(soft))
     return models

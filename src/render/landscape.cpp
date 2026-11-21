@@ -1,5 +1,7 @@
 #include "monstres/render/landscape.hpp"
 
+#include "monstres/core/north.hpp"
+
 #include "monstres/core/interior.hpp"
 #include "monstres/core/west.hpp"
 
@@ -18,8 +20,11 @@ using scene_util::rand01;
 
 namespace {
 
-constexpr float kDecorationHalfSize = rules::kWorldHalfSize + 13;  // grass and flowers up to here
-constexpr int kGrassCells = static_cast<int>(2 * kDecorationHalfSize);  // 1 m cells
+constexpr float kDecorationHalfSize = rules::kWorldHalfSize + 13;  // grass and flowers up to here (x, south)
+constexpr float kDecorationNorth = rules::kWorldNorth + 13;         // and north
+constexpr int kGrassCells = static_cast<int>(2 * kDecorationHalfSize);  // 1 m cells, from -kDecorationHalfSize
+// (Northwards the cells' j go below 0: the same cells as before the world grew north.)
+constexpr int kGrassNorthCell = static_cast<int>(kDecorationHalfSize - kDecorationNorth);
 
 // Mesh scale, matching the sizes of tools/make_models.py and the collision
 // boxes of world.cpp.
@@ -27,7 +32,9 @@ void scale_for(const Object& o, Instance& in) {
   const Vec3 s = o.size;
   switch (o.kind) {
     case ObjectKind::Tree:
-    case ObjectKind::Pine:  in.sx = in.sy = in.sz = s.x; break;
+    case ObjectKind::Pine:
+    case ObjectKind::Larch:
+    case ObjectKind::Cairn: in.sx = in.sy = in.sz = s.x; break;
     case ObjectKind::Rock:  in.sx = s.x; in.sy = s.y; in.sz = s.z; break;
     case ObjectKind::Log:   in.sx = s.x; in.sy = s.y; in.sz = s.y; break;
     case ObjectKind::Stump:
@@ -57,14 +64,15 @@ float wind_for(ObjectKind kind) {
   switch (kind) {
     case ObjectKind::Tree:
     case ObjectKind::FruitTree: return 0.25f;
-    case ObjectKind::Pine: return 0.15f;
+    case ObjectKind::Pine:
+    case ObjectKind::Larch: return 0.15f;
     case ObjectKind::Bush: return 0.35f;
     default:               return 0;
   }
 }
 
 // Trees, rocks, logs, stumps, bushes: what the wilds are made of.
-bool nature(ObjectKind kind) { return kind <= ObjectKind::Bush; }
+bool nature(ObjectKind kind) { return kind <= ObjectKind::Bush || kind == ObjectKind::Larch; }
 
 // How far an object is drawn: landmarks always, trees simplified far away,
 // small things only near the player.
@@ -72,7 +80,8 @@ enum class Detail { Landmark, Tree, Small };
 Detail detail_of(const Object& o) {
   switch (o.kind) {
     case ObjectKind::Tree:
-    case ObjectKind::Pine: return Detail::Tree;
+    case ObjectKind::Pine:
+    case ObjectKind::Larch: return Detail::Tree;
     case ObjectKind::Rock: return o.size.x >= 1.0f || o.size.z >= 1.0f ? Detail::Landmark : Detail::Small;
     case ObjectKind::Log:
     case ObjectKind::Stump:
@@ -82,7 +91,9 @@ Detail detail_of(const Object& o) {
     case ObjectKind::Sign:
     case ObjectKind::Barrel:
     case ObjectKind::Lamp:
-    case ObjectKind::Rubble: return Detail::Small;
+    case ObjectKind::Rubble:
+    case ObjectKind::StoneWall:
+    case ObjectKind::Minecart: return Detail::Small;
     default: return Detail::Landmark;
   }
 }
@@ -115,6 +126,8 @@ LandscapeCache::Item make_item(const World& w, const Object& o) {
     item.far = MeshId::TreeFar;
   } else if (o.kind == ObjectKind::Pine) {
     item.far = MeshId::PineFar;
+  } else if (o.kind == ObjectKind::Larch) {
+    item.far = MeshId::LarchFar;
   } else if (o.kind == ObjectKind::Bush) {
     item.mid = MeshId::BushFar;
   }
@@ -179,6 +192,11 @@ LandscapeCache::Item make_item(const World& w, const Object& o) {
     case ObjectKind::Lighthouse: shadow(3.6f, 3.6f, 0, 0.75f); break;
     case ObjectKind::Menhir: shadow(0.7f, 0.7f, 0, 0.7f); break;
     case ObjectKind::Meteorite: shadow(1.3f * s.x, 1.3f * s.x, 0, 0.7f); break;
+    case ObjectKind::Larch: shadow(1.2f * s.x, 1.2f * s.x, 0); break;
+    case ObjectKind::Chalet: shadow(4.8f, 4.2f, yaw, 0.7f); break;
+    case ObjectKind::Minecart: shadow(1.0f, 0.65f, yaw, 0.6f); break;
+    case ObjectKind::StoneWall: shadow(0.8f, 0.45f, yaw, 0.5f); break;
+    case ObjectKind::Cairn: shadow(0.6f * s.x, 0.6f * s.x, 0, 0.6f); break;
     default: break;
   }
   return item;
@@ -224,6 +242,10 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
   const float z = -kDecorationHalfSize + (static_cast<float>(j) + rand01(w.seed, 2000 + ui, uj));
   const float on_path = distance_to_path(w.path, x, z, 2 * rules::kPathHalfWidth) / rules::kPathHalfWidth;
   if (on_path < 0.75f) return;
+  // The north's snow and ice: no grass (north.hpp).
+  if (w.north.valid() && z < rules::kFrostFrom + 120.0f) {
+    if (in_frozen_lake(w.north, x, z) || north_snow(w.north, x, z, w.ground.height(x, z)) > 0.45f) return;
+  }
   // The west's road, its stream's water and its fields.
   if (w.west.valid()) {
     if (distance_to_road(w.west.road, x, z, 2 * rules::kRoadHalfWidth) < 0.75f * rules::kRoadHalfWidth) return;
@@ -256,7 +278,7 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
   // Sparse along the path edges, and thinner outside the playable area
   // (seen from afar only: saves a lot of triangles on small devices).
   float edge_factor = on_path < 1.15f ? 0.35f : 1.0f;
-  if (std::max(std::fabs(x), std::fabs(z)) > rules::kWorldHalfSize) edge_factor *= 0.45f;
+  if (rules::world_edge(x, z) > rules::kWorldHalfSize) edge_factor *= 0.45f;
 
   Instance in;
   in.x = x;
@@ -305,14 +327,18 @@ MeshId simpler_grass(MeshId id) {
 
 // ---- Chunks ----------------------------------------------------------------------
 
-int chunk_of(float v) {
-  return std::clamp(static_cast<int>(std::floor((v - landscape::kChunkOrigin) / landscape::kChunk)), 0, landscape::kChunks - 1);
+int chunk_x(float x) {
+  return std::clamp(static_cast<int>(std::floor((x - landscape::kChunkOriginX) / landscape::kChunk)), 0, landscape::kChunksX - 1);
 }
-float chunk_start(int c) { return landscape::kChunkOrigin + landscape::kChunk * static_cast<float>(c); }
+int chunk_z(float z) {
+  return std::clamp(static_cast<int>(std::floor((z - landscape::kChunkOriginZ) / landscape::kChunk)), 0, landscape::kChunksZ - 1);
+}
+float chunk_start_x(int c) { return landscape::kChunkOriginX + landscape::kChunk * static_cast<float>(c); }
+float chunk_start_z(int c) { return landscape::kChunkOriginZ + landscape::kChunk * static_cast<float>(c); }
 
 // Squared distance from (x, z) to the nearest point of chunk (cx, cz).
 float chunk_distance2(int cx, int cz, float x, float z) {
-  const float x0 = chunk_start(cx), z0 = chunk_start(cz);
+  const float x0 = chunk_start_x(cx), z0 = chunk_start_z(cz);
   const float dx = std::max({x0 - x, 0.0f, x - (x0 + landscape::kChunk)});
   const float dz = std::max({z0 - z, 0.0f, z - (z0 + landscape::kChunk)});
   return dx * dx + dz * dz;
@@ -321,8 +347,8 @@ float chunk_distance2(int cx, int cz, float x, float z) {
 // The chunks with the valley's buildings, drawn from everywhere.
 bool valley_chunk(int cx, int cz) {
   const float lo = -rules::kValleyHalfSize, hi = rules::kValleyHalfSize;
-  return chunk_start(cx) + landscape::kChunk > lo && chunk_start(cx) < hi && chunk_start(cz) + landscape::kChunk > lo &&
-         chunk_start(cz) < hi;
+  return chunk_start_x(cx) + landscape::kChunk > lo && chunk_start_x(cx) < hi && chunk_start_z(cz) + landscape::kChunk > lo &&
+         chunk_start_z(cz) < hi;
 }
 
 std::array<Aabb, kMeshCount> g_mesh_bounds;
@@ -395,7 +421,7 @@ void LandscapeCache::check_world(const World& w) {
   seed_ = w.seed;
   object_count_ = w.objects.size();
   objects_ = w.objects.data();
-  chunks_.resize(static_cast<size_t>(landscape::kChunks) * landscape::kChunks);
+  chunks_.resize(static_cast<size_t>(landscape::kChunksX) * landscape::kChunksZ);
 }
 
 size_t LandscapeCache::chunks_with_grass() const {
@@ -404,16 +430,16 @@ size_t LandscapeCache::chunks_with_grass() const {
 
 const LandscapeCache::Chunk& LandscapeCache::chunk(const World& w, int cx, int cz, bool grass) {
   check_world(w);
-  Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunks + cz)];
+  Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunksZ + cz)];
   if (!c.objects_done) {
     // Its objects: those whose position is in it (through the index, each once).
     const ObjectIndex& ix = objects_index(w);
     for (int i = cx * 4; i < cx * 4 + 4; ++i) {
       for (int j = cz * 4; j < cz * 4 + 4; ++j) {
-        const auto cell = static_cast<size_t>(i * ObjectIndex::kCells + j);
+        const auto cell = static_cast<size_t>(i * ObjectIndex::kCellsZ + j);
         for (uint32_t k = ix.cell_start[cell]; k < ix.cell_start[cell + 1]; ++k) {
           const Object& o = w.objects[ix.items[k]];
-          if (ObjectIndex::cell_of(o.pos.x) != i || ObjectIndex::cell_of(o.pos.z) != j) continue;
+          if (ObjectIndex::cell_x(o.pos.x) != i || ObjectIndex::cell_z(o.pos.z) != j) continue;
           if (mesh_for(o) == MeshId::Count) continue;  // invisible
           c.items.push_back(make_item(w, o));
         }
@@ -423,7 +449,7 @@ const LandscapeCache::Chunk& LandscapeCache::chunk(const World& w, int cx, int c
   }
   if (grass && !c.grass_done) {
     // Grass cells whose corner is in the chunk, where no object stands.
-    const float x0 = chunk_start(cx), z0 = chunk_start(cz);
+    const float x0 = chunk_start_x(cx), z0 = chunk_start_z(cz);
     Obstacles obstacles({x0 + landscape::kChunk / 2, z0 + landscape::kChunk / 2}, landscape::kChunk / 2 + 2);
     const Box area{{x0 - 2, -1e9f, z0 - 2}, {x0 + landscape::kChunk + 2, 1e9f, z0 + landscape::kChunk + 2}};
     for_objects_near(w, area, [&](uint32_t k, const Box& b) {
@@ -431,10 +457,13 @@ const LandscapeCache::Chunk& LandscapeCache::chunk(const World& w, int cx, int c
       // The fields: no grass among the crops (walked through: no box of their own).
       obstacles.add(o.kind == ObjectKind::Crops ? Box{o.pos - o.size, o.pos + o.size} : b);
     });
-    const auto first = [](float start) {
+    const auto first_x = [](float start) {
       return std::clamp(static_cast<int>(std::ceil(start + kDecorationHalfSize)), 0, kGrassCells);
     };
-    const int i0 = first(x0), i1 = first(x0 + landscape::kChunk), j0 = first(z0), j1 = first(z0 + landscape::kChunk);
+    const auto first_z = [](float start) {
+      return std::clamp(static_cast<int>(std::ceil(start + kDecorationHalfSize)), kGrassNorthCell, kGrassCells);
+    };
+    const int i0 = first_x(x0), i1 = first_x(x0 + landscape::kChunk), j0 = first_z(z0), j1 = first_z(z0 + landscape::kChunk);
     for (int i = i0; i < i1; ++i) {
       for (int j = j0; j < j1; ++j) grass_cell(w, obstacles, i, j, c.grass);
     }
@@ -447,9 +476,9 @@ bool LandscapeCache::ready(const World& w, Vec2 center) {
   check_world(w);
   const float reach2 = landscape::kObjectsRadius * landscape::kObjectsRadius;
   const float grass2 = landscape::kGrassRadius * landscape::kGrassRadius;
-  for (int cx = 0; cx < landscape::kChunks; ++cx) {
-    for (int cz = 0; cz < landscape::kChunks; ++cz) {
-      const Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunks + cz)];
+  for (int cx = 0; cx < landscape::kChunksX; ++cx) {
+    for (int cz = 0; cz < landscape::kChunksZ; ++cz) {
+      const Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunksZ + cz)];
       const float d2 = chunk_distance2(cx, cz, center.x, center.z);
       if (!c.objects_done && (d2 <= reach2 || valley_chunk(cx, cz))) return false;
       if (!c.grass_done && d2 <= grass2) return false;
@@ -470,11 +499,11 @@ int LandscapeCache::prepare(const World& w, Vec2 at, double budget_ms) {
     bool grass;
   };
   std::vector<Missing> missing;
-  const int lo_x = chunk_of(at.x - reach), hi_x = chunk_of(at.x + reach);
-  const int lo_z = chunk_of(at.z - reach), hi_z = chunk_of(at.z + reach);
-  for (int cx = 0; cx < landscape::kChunks; ++cx) {
-    for (int cz = 0; cz < landscape::kChunks; ++cz) {
-      Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunks + cz)];
+  const int lo_x = chunk_x(at.x - reach), hi_x = chunk_x(at.x + reach);
+  const int lo_z = chunk_z(at.z - reach), hi_z = chunk_z(at.z + reach);
+  for (int cx = 0; cx < landscape::kChunksX; ++cx) {
+    for (int cz = 0; cz < landscape::kChunksZ; ++cz) {
+      Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunksZ + cz)];
       const float d2 = chunk_distance2(cx, cz, at.x, at.z);
       const bool near = cx >= lo_x && cx <= hi_x && cz >= lo_z && cz <= hi_z;
       const bool want_objects = (near && d2 <= reach * reach) || valley_chunk(cx, cz);
@@ -560,10 +589,10 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
   constexpr float reach2 = landscape::kObjectsRadius * landscape::kObjectsRadius;
   constexpr float grass2 = landscape::kGrassRadius * landscape::kGrassRadius;
   const float r = landscape::kObjectsRadius;
-  const int lo_x = chunk_of(center.x - r), hi_x = chunk_of(center.x + r);
-  const int lo_z = chunk_of(center.z - r), hi_z = chunk_of(center.z + r);
-  for (int cx = 0; cx < landscape::kChunks; ++cx) {
-    for (int cz = 0; cz < landscape::kChunks; ++cz) {
+  const int lo_x = chunk_x(center.x - r), hi_x = chunk_x(center.x + r);
+  const int lo_z = chunk_z(center.z - r), hi_z = chunk_z(center.z + r);
+  for (int cx = 0; cx < landscape::kChunksX; ++cx) {
+    for (int cz = 0; cz < landscape::kChunksZ; ++cz) {
       const bool around = cx >= lo_x && cx <= hi_x && cz >= lo_z && cz <= hi_z &&
                           chunk_distance2(cx, cz, center.x, center.z) <= reach2;
       if (!around && !valley_chunk(cx, cz)) continue;

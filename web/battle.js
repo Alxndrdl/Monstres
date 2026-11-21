@@ -138,6 +138,7 @@
       return d.action === 'climb' ? doors.roofs[d.place] : doors[d.place];
     }
     if (d.place === 'burrow') return doors.burrow;
+    if (d.place === 'mine') return doors.mine;
     return doors.house[d.building] || doors.house.cottage;
   }
 

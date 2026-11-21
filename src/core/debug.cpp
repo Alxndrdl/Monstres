@@ -1,5 +1,7 @@
 #include "monstres/core/debug.hpp"
 
+#include "monstres/core/north.hpp"
+
 #include "monstres/core/battle.hpp"
 #include "monstres/core/continent.hpp"
 #include "monstres/core/interior.hpp"
@@ -20,7 +22,7 @@ std::string carried_variants_json(Species species, const Genes& genes);
 
 const char* species_name(Species s) {
   static const char* kNames[] = {"companion", "slime", "mushroom", "bird", "villager", "crow", "fish", "spark", "axolotl", "cristi",
-                                 "raccoon", "owl", "sheep", "mole"};
+                                 "raccoon", "owl", "sheep", "mole", "golem", "goat", "ermine"};
   static_assert(std::size(kNames) == kSpeciesCount);
   const auto i = static_cast<size_t>(s);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -105,7 +107,7 @@ std::string to_json(const World& w) {
        ",\"onGround\":" + (p.on_ground ? "true" : "false") +
        ",\"facingX\":" + num(p.facing_x) + ",\"facingZ\":" + num(p.facing_z);
   // Inside (interior.hpp): where it is, and on the map where it went in.
-  static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse"};
+  static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse", "mine"};
   static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
   const Body& m = map_body(w);
   s += std::string(",\"place\":\"") + kPlaces[static_cast<size_t>(w.place.kind)] + "\"" +
@@ -181,7 +183,7 @@ std::string creature_json(const World& w, int index) {
     s += std::string(",\"talk\":") + (near_npc(w, c.npc) ? "true" : "false");
     uint8_t rivals = 0;
     rival_team(w, c.npc, rivals);
-    if (c.npc == npc::kOdette || c.npc == npc::kViolette) {
+    if (c.npc == npc::kOdette || c.npc == npc::kViolette || c.npc == npc::kSolene) {
       s += std::string(",\"healer\":true,\"heal\":") + (can_heal_team(w, c.npc) ? "true" : "false");
     }
     if (rivals) {
@@ -211,7 +213,7 @@ namespace monstres {
 
 const char* zone_name(Zone zone) {
   static const char* kNames[] = {"meadow", "village", "lake", "ruins", "forest", "cave", "castle", "coast", "hills", "plains",
-                                 "farm", "woods", "crater", "river"};
+                                 "farm", "woods", "crater", "river", "alpine", "larches", "frost", "frozenLake", "mine"};
   static_assert(std::size(kNames) == static_cast<size_t>(Zone::Count));
   const auto i = static_cast<size_t>(zone);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -280,7 +282,8 @@ const char* object_kind_name(ObjectKind kind) {
                                  "table", "chair", "bed", "shelf", "hearth", "rug", "step", "hatch",
                                  "cart", "bridge", "farmhouse", "barn", "fruitTree", "crops", "haystack", "windmill",
                                  "cabin", "tent", "campfire", "woodpile", "hollowTree", "burrow", "lighthouse",
-                                 "menhir", "meteorite", "waterMill", "hiddenCave"};
+                                 "menhir", "meteorite", "waterMill", "hiddenCave",
+                                 "chalet", "mineEntrance", "minecart", "larch", "stoneWall", "cairn", "hotSpring", "mineProp"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -431,7 +434,7 @@ std::string bestiary_json(const World& w) {
     }
     s += "]";
     s += ",\"habitat\":[";
-    const uint16_t habitat = species_habitat(species);
+    const uint32_t habitat = species_habitat(species);
     for (size_t z = 0, n = 0; z < static_cast<size_t>(Zone::Count); ++z) {
       if (!((habitat >> z) & 1u)) continue;
       s += std::string(n++ ? "," : "") + "\"" + zone_name(static_cast<Zone>(z)) + "\"";
@@ -460,7 +463,7 @@ std::string bestiary_json(const World& w) {
 namespace {
 
 const char* teleporter_name(TeleporterId id) {
-  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle", "farm", "menhirs"};
+  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle", "farm", "menhirs", "refuge", "col"};
   static_assert(std::size(kNames) == kTeleporterCount);
   return kNames[static_cast<size_t>(id)];
 }
@@ -468,7 +471,7 @@ const char* teleporter_name(TeleporterId id) {
 const char* quest_name(QuestId id) {
   static const char* kNames[] = {"lostPiou", "teleporters", "giantChampi", "combat", "healing", "main",
                                  "merchant",  "delivery",    "transfer",    "orchard", "shepherd", "mill",
-                                 "waterWheel"};
+                                 "waterWheel", "mineGuardian"};
   static_assert(std::size(kNames) == kQuestCount);
   return kNames[static_cast<size_t>(id)];
 }
@@ -583,6 +586,9 @@ std::string quests_json(const World& w) {
     } else if (id == QuestId::Mill) {
       s += std::string("\"turning\":") + ((q.progress & kMillTurning) ? "true" : "false");
       s += std::string(",\"tell\":") + (done ? "true" : "false");
+    } else if (id == QuestId::MineGuardian) {
+      s += std::string("\"beaten\":") + ((q.progress & kGuardianBeaten) || done ? "true" : "false");
+      s += std::string(",\"tell\":") + (done ? "true" : "false");
     } else if (id == QuestId::WaterWheel) {
       s += "\"beaten\":" + std::to_string(done ? rules::kWheelRaiders : std::min<uint32_t>(q.progress, rules::kWheelRaiders));
       s += ",\"of\":" + std::to_string(rules::kWheelRaiders);
@@ -629,6 +635,10 @@ std::string sign_json(const World& w, int index) {
   if (w.forest.radius_x > 0) places.push_back({Zone::Forest, w.forest.center});
   if (w.cave.radius > 0) places.push_back({Zone::Cave, w.cave.mouth});
   if (w.castle.radius > 0) places.push_back({Zone::Castle, w.castle.center});
+  if (w.north.valid()) {  // the refuge's signpost: the way up to the frozen lake and the mine
+    places.push_back({Zone::FrozenLake, w.north.lake});
+    places.push_back({Zone::Mine, w.north.mine});
+  }
   const auto distance = [&](const Sight& p) {
     const float dx = p.at.x - o.pos.x, dz = p.at.z - o.pos.z;
     return std::sqrt(dx * dx + dz * dz);
@@ -657,7 +667,8 @@ std::string continent_json(const Continent& c) {
   std::string s = "{\"minX\":" + num(Continent::kMinX) + ",\"minZ\":" + num(Continent::kMinZ);
   s += ",\"cell\":" + num(Continent::kCell) + ",\"pointsX\":" + std::to_string(Continent::kPointsX);
   s += ",\"pointsZ\":" + std::to_string(Continent::kPointsZ) + ",\"seaLevel\":" + num(rules::kSeaLevel);
-  s += ",\"snowLine\":" + num(rules::kSnowLine) + ",\"start\":" + num(rules::kReliefHalfSize);
+  s += ",\"snowLine\":" + num(rules::kSnowLine) + ",\"start\":" + num(rules::kReliefHalfSize) +
+       ",\"startNorth\":" + num(rules::kReliefNorth);
   s += ",\"ready\":" + std::string(c.empty() ? "false" : "true") + ",\"landmarks\":[";
   const auto& marks = continent_landmarks();
   for (size_t k = 0; k < marks.size(); ++k) {
@@ -678,8 +689,12 @@ std::string continent_json(const Continent& c) {
 }
 
 std::string map_json(const World& w) {
-  std::string s = "{\"relief\":" + num(rules::kReliefHalfSize) + ",\"world\":" + num(rules::kWorldHalfSize);
-  s += ",\"points\":" + std::to_string(w.ground.empty() ? 0 : Heightmap::kPoints);
+  // The relief: x from minX, z from minZ (the north), pointsX by pointsZ heights.
+  std::string s = "{\"relief\":" + num(rules::kReliefHalfSize) + ",\"reliefNorth\":" + num(rules::kReliefNorth) +
+                  ",\"world\":" + num(rules::kWorldHalfSize) + ",\"worldNorth\":" + num(rules::kWorldNorth);
+  s += ",\"minX\":" + num(Heightmap::kMinX) + ",\"minZ\":" + num(Heightmap::kMinZ);
+  s += ",\"pointsX\":" + std::to_string(w.ground.empty() ? 0 : Heightmap::kPointsX) +
+       ",\"pointsZ\":" + std::to_string(w.ground.empty() ? 0 : Heightmap::kPointsZ);
   s += ",\"cell\":" + num(Heightmap::kCellSize);
   s += ",\"waterLevel\":" + num(rules::kWaterLevel) + ",\"seaLevel\":" + num(rules::kSeaLevel);
   // The lake's, the forest's and its clearing's outlines (village.hpp, outline_scale).
@@ -716,15 +731,17 @@ std::string map_json(const World& w) {
                                           ",\"r\":" + num(rules::kCastleHalf) + "}"
                                     : std::string("null"));
   // The zones, every kZoneStep meters across the playable area (one letter
-  // each: 'a' + Zone), rows along +Z then columns along +X.
+  // each: 'a' + Zone), from (-world, -worldNorth): rows along +Z then columns along +X.
   constexpr float kZoneStep = 8.0f;
-  const int zones = static_cast<int>(2 * rules::kWorldHalfSize / kZoneStep) + 1;
-  s += ",\"zoneStep\":" + num(kZoneStep) + ",\"zoneCount\":" + std::to_string(zones) + ",\"zones\":\"";
+  const int zones_x = static_cast<int>(2 * rules::kWorldHalfSize / kZoneStep) + 1;
+  const int zones_z = static_cast<int>((rules::kWorldHalfSize + rules::kWorldNorth) / kZoneStep) + 1;
+  s += ",\"zoneStep\":" + num(kZoneStep) + ",\"zoneCountX\":" + std::to_string(zones_x) +
+       ",\"zoneCountZ\":" + std::to_string(zones_z) + ",\"zones\":\"";
   if (!w.ground.empty()) {
-    for (int i = 0; i < zones; ++i) {
-      for (int j = 0; j < zones; ++j) {
+    for (int i = 0; i < zones_x; ++i) {
+      for (int j = 0; j < zones_z; ++j) {
         const float x = -rules::kWorldHalfSize + kZoneStep * static_cast<float>(i);
-        const float z = -rules::kWorldHalfSize + kZoneStep * static_cast<float>(j);
+        const float z = -rules::kWorldNorth + kZoneStep * static_cast<float>(j);
         s += static_cast<char>('a' + static_cast<int>(zone_at(w, x, z)));
       }
     }
@@ -759,6 +776,19 @@ std::string map_json(const World& w) {
   } else {
     s += ",\"west\":null";
   }
+  // The north (north.hpp): its places, the frozen lake's outline, the valley's floor (for the snow).
+  const NorthLayout& north = w.north;
+  if (north.valid()) {
+    const auto at = [&](const char* name, Vec2 p) { return std::string(",\"") + name + "\":[" + num(p.x) + "," + num(p.z) + "]"; };
+    s += ",\"north\":{\"frost\":" + num(rules::kFrostFrom) + ",\"floor\":" + num(north.floor_start) +
+         ",\"rise\":" + num(rules::kValleyRise);
+    s += at("refuge", north.refuge) + at("mine", north.mine) + at("springs", north.springs) + at("col", north.col) +
+         at("lake", north.lake);
+    s += ",\"lakeRx\":" + num(north.lake_rx) + ",\"lakeRz\":" + num(north.lake_rz) +
+         ",\"lakeOutline\":" + numbers(outline_phases(north.lake, kNorthLakeOutline)) + "}";  // (numbers: as the lake's above)
+  } else {
+    s += ",\"north\":null";
+  }
   s += ",\"objects\":[";
   for (size_t i = 0; i < w.objects.size(); ++i) {
     const Object& o = w.objects[i];
@@ -768,7 +798,8 @@ std::string map_json(const World& w) {
     if (o.kind == ObjectKind::Crops) b = {o.pos - o.size, o.pos + o.size};  // walked through, but drawn
     if (s.back() != '[') s += ',';
     // Trees: the crown, not the trunk.
-    const float crown = o.kind == ObjectKind::Tree ? 1.2f * o.size.x : o.kind == ObjectKind::Pine ? 1.0f * o.size.x : 0;
+    const float crown = o.kind == ObjectKind::Tree ? 1.2f * o.size.x
+                        : o.kind == ObjectKind::Pine || o.kind == ObjectKind::Larch ? 1.0f * o.size.x : 0;
     s += std::string("[\"") + object_kind_name(o.kind) + "\"," + num(o.pos.x) + "," + num(o.pos.z) + ",";
     s += crown > 0 ? num(crown) + "," + num(crown)
                    : num(0.5f * (b.max.x - b.min.x)) + "," + num(0.5f * (b.max.z - b.min.z));
@@ -1027,7 +1058,7 @@ std::string battle_json(const World& w) {
     const DoorNear d = door_near(w);
     if (d.action != DoorAction::None) {
       static const char* kActions[] = {"none", "enter", "leave", "climb", "descend"};
-      static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse"};
+      static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse", "mine"};
       static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
       s += std::string(",\"door\":{\"action\":\"") + kActions[static_cast<size_t>(d.action)] + "\",\"place\":\"" +
            kPlaces[static_cast<size_t>(d.place)] + "\",\"building\":\"" + object_kind_name(d.building) + "\"}";

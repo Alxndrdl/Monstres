@@ -10,7 +10,8 @@
 namespace monstres {
 
 namespace terrain {
-inline constexpr float kDetailHalfSize = rules::kReliefHalfSize;  // ground grid: the relief's cells
+inline constexpr float kDetailHalfSize = rules::kReliefHalfSize;  // ground grid: the relief's cells (x, and south)
+inline constexpr float kDetailNorth = rules::kReliefNorth;        // and north
 inline constexpr float kPathHeight = 0.03f;       // just above the ground
 // The ground is drawn by square tiles of kTile meters, more or less
 // detailed: in the relief's own 2 m cells on the player's tile and the
@@ -19,7 +20,9 @@ inline constexpr float kPathHeight = 0.03f;       // just above the ground
 // The edges of a tile next to a coarser one follow the coarser one's (no
 // gap between them).
 inline constexpr float kTile = 64.0f;
-inline constexpr int kTiles = static_cast<int>(2 * kDetailHalfSize / kTile);
+inline constexpr int kTilesX = static_cast<int>(2 * kDetailHalfSize / kTile);
+inline constexpr int kTilesZ = static_cast<int>((kDetailHalfSize + kDetailNorth) / kTile);
+static_assert(kTilesX * kTile == 2 * kDetailHalfSize && kTilesZ * kTile == kDetailHalfSize + kDetailNorth);
 inline constexpr int kLods = 3;
 inline constexpr float kLodCells[kLods] = {2.0f, 4.0f, 8.0f};
 inline constexpr int kLodReach[kLods - 1] = {1, 3};  // tiles away from the player's (at most) for each detailed level
@@ -28,8 +31,10 @@ inline constexpr size_t kDetailMesh = kMeshCount;  // the drawn tiles: the rende
 }  // namespace terrain
 
 // Which tile a coordinate is on (clamped to the relief), and where it starts.
-int tile_of(float v);
-float tile_start(int t);
+int tile_x(float x);
+int tile_z(float z);
+float tile_start_x(int i);
+float tile_start_z(int j);
 
 // A detailed tile: where, how detailed (0: 2 m cells, 1: 4 m), and which of
 // its sides follow a coarser neighbor (bits: 1 -x, 2 +x, 4 -z, 8 +z).
@@ -55,7 +60,7 @@ struct GroundColors {
 // The coarse ground: the whole relief in 8 m cells, tile after tile (row by
 // row), each tile a part (MeshData::parts, by tile_part_index).
 MeshData build_coarse_ground(const World& world, GroundColors& colors);
-inline size_t tile_part_index(int i, int j) { return static_cast<size_t>(i * terrain::kTiles + j); }
+inline size_t tile_part_index(int i, int j) { return static_cast<size_t>(i * terrain::kTilesZ + j); }
 // A detailed tile.
 MeshData build_ground_tile(const World& world, GroundColors& colors, TileKey key);
 // All of it around the player in one mesh (the coarse ground but under the

@@ -146,7 +146,11 @@ MeshData build_far_ground_mesh(const Continent& k) {
   std::vector<int64_t> ids;  // vertex of each grid point, -1 until used (indexed: each point once)
   for (int level = 0; level < kLevels; ++level) {
     const float cell = kCells[level], outer = kOuter[level];
-    const float inner = level == 0 ? rules::kReliefHalfSize : kOuter[level - 1];
+    const float inner = level == 0 ? 0.0f : kOuter[level - 1];
+    // Inside the ring's inner square, or the relief (the World's ground): drawn otherwise.
+    const auto hole = [&](float x, float z, float slack) {
+      return std::max(std::fabs(x), std::fabs(z)) < inner - slack || rules::relief_inset(x, z) > slack;
+    };
     const int n = static_cast<int>(std::lround(2 * outer / cell));
     const int points = n + 1;
     grid.assign(static_cast<size_t>(points) * points, Point{});
@@ -155,7 +159,7 @@ MeshData build_far_ground_mesh(const Continent& k) {
     for (int i = 0; i < points; ++i) {
       for (int j = 0; j < points; ++j) {
         const float x = coord(i), z = coord(j);
-        if (std::max(std::fabs(x), std::fabs(z)) < inner - 1e-3f) continue;  // inside: not used
+        if (hole(x, z, 1e-3f)) continue;  // inside: not used
         const float y = far_vertex_height(k, level, x, z);
         const Vec3 nrm = far_normal(k, x, z, cell);
         grid[static_cast<size_t>(i * points + j)] = {y, far_color(k, x, z, y, nrm), nrm};
@@ -166,7 +170,7 @@ MeshData build_far_ground_mesh(const Continent& k) {
         const float x0 = coord(i), z0 = coord(j), x1 = x0 + cell, z1 = z0 + cell;
         // Inside the ring's inner square: drawn by a finer ring (or the World's ground).
         const float cx = 0.5f * (x0 + x1), cz = 0.5f * (z0 + z1);
-        if (std::max(std::fabs(cx), std::fabs(cz)) < inner) continue;
+        if (hole(cx, cz, 0.0f)) continue;
         const Point& p00 = grid[static_cast<size_t>(i * points + j)];
         const Point& p10 = grid[static_cast<size_t>((i + 1) * points + j)];
         const Point& p01 = grid[static_cast<size_t>(i * points + j + 1)];
@@ -189,13 +193,15 @@ MeshData build_far_ground_mesh(const Continent& k) {
   }
   // Along its inner edge (the relief's), a band going down, facing the
   // playable area: if the near ground there is a little lower, no gap opens.
-  const float e = rules::kReliefHalfSize, cell = kCells[0];
-  const int n = static_cast<int>(std::lround(2 * e / cell));
+  const float e = rules::kReliefHalfSize, north = rules::kReliefNorth, cell = kCells[0];
   for (int side = 0; side < 4; ++side) {
+    // Sides 0 and 1 (x = e, -e) go along z from the north; 2 and 3 (z = e, -north) along x.
+    const float from = side < 2 ? -north : -e;
+    const int n = static_cast<int>(std::lround((side < 2 ? e + north : 2 * e) / cell));
     for (int i = 0; i < n; ++i) {
-      const float t0 = -e + cell * static_cast<float>(i), t1 = t0 + cell;
-      const float ax = side == 0 ? e : side == 1 ? -e : t0, az = side == 0 || side == 1 ? t0 : side == 2 ? e : -e;
-      const float bx = side == 0 ? e : side == 1 ? -e : t1, bz = side == 0 || side == 1 ? t1 : side == 2 ? e : -e;
+      const float t0 = from + cell * static_cast<float>(i), t1 = t0 + cell;
+      const float ax = side == 0 ? e : side == 1 ? -e : t0, az = side == 0 || side == 1 ? t0 : side == 2 ? e : -north;
+      const float bx = side == 0 ? e : side == 1 ? -e : t1, bz = side == 0 || side == 1 ? t1 : side == 2 ? e : -north;
       const float ay = far_vertex_height(k, 0, ax, az), by = far_vertex_height(k, 0, bx, bz);
       const float drop = far_terrain::kSkirt;
       const Vec3 inward{side == 0 ? -1.0f : side == 1 ? 1.0f : 0.0f, 0, side == 2 ? -1.0f : side == 3 ? 1.0f : 0.0f};

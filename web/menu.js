@@ -639,7 +639,7 @@
 
   // Where a species lives: the playable area's map, its zones blinking, in place of its card.
   let habitatLoop = 0;
-  const habitatView = { cx: 0, cz: 0, scale: 0 };  // 0: the whole playable area
+  const habitatView = { cx: 0, cz: -320, scale: 0 };  // 0: the whole playable area (its middle: further north)
   function renderHabitat(e) {
     const info = LORE.species[e.species];
     const back = el('button', { type: 'button', className: 'dna-back', textContent: '← Fiche' });
@@ -663,13 +663,17 @@
     // The whole playable area at first (zoom and move it as the map); its
     // zones light up and fade, again and again. The view is kept from one
     // species to the next.
-    const fit = () => Math.min(view.clientWidth, view.clientHeight) / (2 * mapBase().world) * 1.02;
+    // (Further north than wide: x in [-world, world], z in [-worldNorth, world].)
+    const fit = () => {
+      const d = mapBase();
+      return Math.min(view.clientWidth / (2 * d.world), view.clientHeight / (d.world + d.worldNorth)) * 1.02;
+    };
     const look = () => {
-      const world = mapBase().world;
+      const d = mapBase();
       const min = fit();
       habitatView.scale = Math.min(MAX_SCALE, Math.max(min, habitatView.scale || min));
-      habitatView.cx = Math.min(world, Math.max(-world, habitatView.cx));
-      habitatView.cz = Math.min(world, Math.max(-world, habitatView.cz));
+      habitatView.cx = Math.min(d.world, Math.max(-d.world, habitatView.cx || 0));
+      habitatView.cz = Math.min(d.world, Math.max(-d.worldNorth, habitatView.cz));
       return habitatView;
     };
     panZoom(view, (factor, px, py) => {
@@ -946,6 +950,8 @@
     crops: 'rgba(214, 186, 96, 0.85)', haystack: '#d8b860', windmill: '#a8a298', cabin: '#7a5534', tent: '#d8cca8',
     campfire: '#e07a30', woodpile: '#7a5534', hollowTree: '#4e3a26', burrow: '#7a5a3a', lighthouse: '#e8e4dc',
     menhir: '#a8a39a', meteorite: '#3a2f46', waterMill: '#c9b89a', hiddenCave: '#2a2630',
+    chalet: '#8a6a50', mineEntrance: '#2a2630', minecart: '#7a5534', larch: 'rgba(92, 138, 62, 0.9)',
+    stoneWall: '#9a968e', cairn: '#a8a39a', hotSpring: '#7fd8d8', mineProp: '#7a5534',
   };
 
   // The season (settings menu, ui.js): the map's colors follow it, as the
@@ -969,7 +975,7 @@
     { tree: 'rgba(66, 132, 56, 0.85)', bush: 'rgba(84, 150, 66, 0.9)', fruitTree: 'rgba(238, 196, 212, 0.95)' },
     {},
     { tree: 'rgba(198, 112, 40, 0.88)', bush: 'rgba(180, 116, 52, 0.9)', fruitTree: 'rgba(196, 128, 44, 0.9)',
-      hollowTree: '#8a5a2a' },
+      hollowTree: '#8a5a2a', larch: 'rgba(222, 170, 50, 0.9)' },
     { tree: 'rgba(112, 92, 72, 0.8)', bush: 'rgba(150, 132, 104, 0.9)', fruitTree: 'rgba(112, 92, 72, 0.8)',
       pine: 'rgba(46, 84, 66, 0.92)', crops: 'rgba(236, 238, 244, 0.9)', haystack: '#e8e8ee' },
   ];
@@ -1000,13 +1006,13 @@
   }
 
   function heightAt(data, x, z) {
-    const n = data.points;
-    if (!n) return 0;
+    const nx = data.pointsX, nz = data.pointsZ;
+    if (!nx || !nz) return 0;
     const cell = data.cell || 1;
-    const fx = Math.min(Math.max((x + data.relief) / cell, 0), n - 1.001);
-    const fz = Math.min(Math.max((z + data.relief) / cell, 0), n - 1.001);
+    const fx = Math.min(Math.max((x - data.minX) / cell, 0), nx - 1.001);
+    const fz = Math.min(Math.max((z - data.minZ) / cell, 0), nz - 1.001);
     const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
-    const h = (a, b) => data.heights[a * n + b];
+    const h = (a, b) => data.heights[a * nz + b];
     const top = h(i, j) + (h(i + 1, j) - h(i, j)) * tx;
     const bottom = h(i, j + 1) + (h(i + 1, j + 1) - h(i, j + 1)) * tx;
     return top + (bottom - top) * tz;
@@ -1105,28 +1111,29 @@
   }
 
   // The playable area, drawn once per world: terrain, path and objects.
+  // (A rectangle: further north than wide.)
   function* buildBase(data, continent) {
-    const R = data.world + 7;
-    const size = Math.round(2 * R * PX_PER_M);
-    const image = el('canvas', { width: size, height: size });
+    const x0 = -(data.world + 7), z0 = -(data.worldNorth + 7);
+    const sizeX = Math.round(2 * (data.world + 7) * PX_PER_M), sizeZ = Math.round((data.world + data.worldNorth + 14) * PX_PER_M);
+    const image = el('canvas', { width: sizeX, height: sizeZ });
     const ctx = image.getContext('2d');
-    const pixels = ctx.createImageData(size, size);
+    const pixels = ctx.createImageData(sizeX, sizeZ);
     const lake = data.lake, village = data.village, ruins = data.ruins;
-    const forest = data.forest, cave = data.cave, castle = data.castle;
+    const forest = data.forest, cave = data.cave, castle = data.castle, north = data.north;
     // The ground's height at every pixel, looked up once (the slopes and the
     // shading below read their neighbors here: 1 px per meter).
-    const heights = new Float32Array(size * size);
-    for (let py = 0; py < size; ++py) {
-      for (let px = 0; px < size; ++px) heights[py * size + px] = heightAt(data, -R + (px + 0.5) / PX_PER_M, -R + (py + 0.5) / PX_PER_M);
+    const heights = new Float32Array(sizeX * sizeZ);
+    for (let py = 0; py < sizeZ; ++py) {
+      for (let px = 0; px < sizeX; ++px) heights[py * sizeX + px] = heightAt(data, x0 + (px + 0.5) / PX_PER_M, z0 + (py + 0.5) / PX_PER_M);
       if (py % 64 === 63) yield;
     }
-    const H = (px, py) => heights[Math.min(size - 1, Math.max(0, py)) * size + Math.min(size - 1, Math.max(0, px))];
+    const H = (px, py) => heights[Math.min(sizeZ - 1, Math.max(0, py)) * sizeX + Math.min(sizeX - 1, Math.max(0, px))];
     const near = (c, rx, rz, x, z) => c && Math.abs(x - c.x) < rx && Math.abs(z - c.z) < rz;  // its outline's box
     const step = Math.max(1, Math.round(PX_PER_M)), far = Math.max(1, Math.round(3 * PX_PER_M));
-    for (let py = 0; py < size; ++py) {
-      for (let px = 0; px < size; ++px) {
-        const x = -R + (px + 0.5) / PX_PER_M, z = -R + (py + 0.5) / PX_PER_M;
-        const h = heights[py * size + px];
+    for (let py = 0; py < sizeZ; ++py) {
+      for (let px = 0; px < sizeX; ++px) {
+        const x = x0 + (px + 0.5) / PX_PER_M, z = z0 + (py + 0.5) / PX_PER_M;
+        const h = heights[py * sizeX + px];
         const t = Math.min(Math.max((h + 4) / 12, 0), 1);
         let r = 78 + 70 * t, g = 128 + 46 * t, b = 62 + 30 * t;
         let water = 0;
@@ -1152,6 +1159,16 @@
           if (d < 1.04 && h > data.waterLevel - 0.05) { r = 214; g = 196; b = 140; }  // sandy shore
           if (d < 1 && h < data.waterLevel) { const k = Math.min(1, (data.waterLevel - h) / 1.2); r = 80 - 30 * k; g = 150 - 40 * k; b = 196 - 20 * k; water = 2; }
         }
+        // The north: snow on the mountains' slopes all year long, the frozen lake's ice.
+        if (north && z < north.frost + 120) {
+          const above = h - north.floor - north.rise * Math.max(0, north.frost - z);
+          const snow = smooth(north.frost + 120, north.frost - 120, z) * smooth(4, 30, above) * (1 - 0.6 * rock);
+          r += (236 - r) * snow; g += (240 - g) * snow; b += (248 - b) * snow;
+          if (near(north.lake ? { x: north.lake[0], z: north.lake[1] } : null, north.lakeRx * 1.05, north.lakeRz * 1.05, x, z) &&
+              outlineDistance(data, { x: north.lake[0], z: north.lake[1] }, north.lakeRx, north.lakeRz, north.lakeOutline, x, z) < 1) {
+            r = ICE[0]; g = ICE[1]; b = ICE[2];
+          }
+        }
         if (season !== 1) {
           const px = { r, g, b };
           inSeason(px, water, (1 - rock) * (shore ? 0.35 : 1));
@@ -1161,13 +1178,13 @@
         // little bumps smoothed away), the relief still readable.
         const shade = 1 + 0.07 * ((H(px - far, py) - H(px + far, py)) + (H(px, py - far) - H(px, py + far)));
         const k = Math.min(Math.max(shade, 0.78), 1.18);
-        const o = (py * size + px) * 4;
+        const o = (py * sizeX + px) * 4;
         pixels.data[o] = r * k; pixels.data[o + 1] = g * k; pixels.data[o + 2] = b * k; pixels.data[o + 3] = 255;
       }
       if (py % 16 === 15) yield;
     }
     ctx.putImageData(pixels, 0, 0);
-    const toPx = (v) => (v + R) * PX_PER_M;
+    const toX = (v) => (v - x0) * PX_PER_M, toZ = (v) => (v - z0) * PX_PER_M;
 
     // The west's stream, and its road (west.hpp).
     const line = (pts, color, width) => {
@@ -1176,7 +1193,7 @@
       ctx.lineCap = ctx.lineJoin = 'round';
       ctx.beginPath();
       for (let i = 0; i < pts.length; i += 2) {
-        if (i === 0) ctx.moveTo(toPx(pts[i]), toPx(pts[i + 1])); else ctx.lineTo(toPx(pts[i]), toPx(pts[i + 1]));
+        if (i === 0) ctx.moveTo(toX(pts[i]), toZ(pts[i + 1])); else ctx.lineTo(toX(pts[i]), toZ(pts[i + 1]));
       }
       ctx.stroke();
     };
@@ -1188,8 +1205,8 @@
       for (let i = 0; i + 3 < st.length; i += 2) {
         ctx.lineWidth = 2 * (sw[i / 2] || 2) * PX_PER_M;
         ctx.beginPath();
-        ctx.moveTo(toPx(st[i]), toPx(st[i + 1]));
-        ctx.lineTo(toPx(st[i + 2]), toPx(st[i + 3]));
+        ctx.moveTo(toX(st[i]), toZ(st[i + 1]));
+        ctx.lineTo(toX(st[i + 2]), toZ(st[i + 3]));
         ctx.stroke();
       }
       line(data.west.road, 'rgba(176, 140, 96, 0.95)', 2.6);
@@ -1200,22 +1217,23 @@
     ctx.lineCap = ctx.lineJoin = 'round';
     ctx.beginPath();
     for (let i = 0; i < data.path.length; i += 2) {
-      const X = toPx(data.path[i]), Y = toPx(data.path[i + 1]);
+      const X = toX(data.path[i]), Y = toZ(data.path[i + 1]);
       if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
     }
     ctx.stroke();
 
     // Objects: trees as round crowns, the rest as their outline.
-    const order = (kind) => (kind === 'tree' || kind === 'pine' ? 1 : 0);  // crowns over the rest
+    const order = (kind) => (kind === 'tree' || kind === 'pine' || kind === 'larch' ? 1 : 0);  // crowns over the rest
     const objects = [...data.objects].sort((a, b) => order(a[0]) - order(b[0]));
     for (const [kind, x, z, hx, hz] of objects) {
       ctx.fillStyle = objectColor(kind);
       if (kind === 'tree' || kind === 'pine' || kind === 'bush' || kind === 'tower' || kind === 'hut' ||
           kind === 'well' || kind === 'rubble' || kind === 'stump' || kind === 'castleTower' || kind === 'crystal' ||
           kind === 'fruitTree' || kind === 'haystack' || kind === 'windmill' || kind === 'hollowTree' ||
-          kind === 'lighthouse' || kind === 'menhir' || kind === 'meteorite' || kind === 'campfire') {
+          kind === 'lighthouse' || kind === 'menhir' || kind === 'meteorite' || kind === 'campfire' ||
+          kind === 'larch' || kind === 'cairn' || kind === 'hotSpring' || kind === 'stoneWall') {
         ctx.beginPath();
-        ctx.arc(toPx(x), toPx(z), Math.max(hx, 0.3) * PX_PER_M, 0, Math.PI * 2);
+        ctx.arc(toX(x), toZ(z), Math.max(kind === 'hotSpring' ? 3.6 : hx, 0.3) * PX_PER_M, 0, Math.PI * 2);
         ctx.fill();
         if (kind === 'tower') {
           ctx.lineWidth = 0.5 * PX_PER_M;
@@ -1224,10 +1242,10 @@
         }
       } else {
         const w = Math.max(hx, 0.25), d = Math.max(hz, 0.25);
-        ctx.fillRect(toPx(x - w), toPx(z - d), 2 * w * PX_PER_M, 2 * d * PX_PER_M);
+        ctx.fillRect(toX(x - w), toZ(z - d), 2 * w * PX_PER_M, 2 * d * PX_PER_M);
       }
     }
-    return { image, R };
+    return { image, x0, z0, w: sizeX / PX_PER_M, h: sizeZ / PX_PER_M };
   }
 
   let teleportTargets = [];  // where to click on the map, in teleport mode
@@ -1335,24 +1353,25 @@
       // Each pixel is centered on a grid point.
       ctx.drawImage(land.image, X(d.minX - d.cell / 2), Y(d.minZ - d.cell / 2), d.pointsX * d.cell * k, d.pointsZ * d.cell * k);
     }
-    ctx.drawImage(base.image, X(-base.R), Y(-base.R), 2 * base.R * k, 2 * base.R * k);
+    ctx.drawImage(base.image, X(base.x0), Y(base.z0), base.w * k, base.h * k);
 
     // Where a species lives: its zones, all alike (the opacity makes them blink).
     if (options.habitat && data.zones) {
-      const n = data.zoneCount;
+      const nx = data.zoneCountX, nz = data.zoneCountZ;
       const key = `${options.habitat.species}:${base.key}`;
       if (!habitatImage || habitatImage.key !== key) {
         const zoneIds = ['meadow', 'village', 'lake', 'ruins', 'forest', 'cave', 'castle', 'coast', 'hills', 'plains',
-          'farm', 'woods', 'crater'];  // Zone
+          'farm', 'woods', 'crater', 'river', 'alpine', 'larches', 'frost', 'frozenLake', 'mine'];  // Zone
         const wanted = new Set(options.habitat.habitat.map((z) => zoneIds.indexOf(z)));
         const image = document.createElement('canvas');
-        image.width = image.height = n;
+        image.width = nx;
+        image.height = nz;
         const g = image.getContext('2d');
-        const px = g.createImageData(n, n);
-        for (let i = 0; i < n; ++i) {
-          for (let j = 0; j < n; ++j) {
-            const zone = data.zones.charCodeAt(i * n + j) - 97;  // 'a' + Zone: column i (x), row j (z)
-            if (wanted.has(zone)) px.data.set([255, 214, 70, 255], (j * n + i) * 4);
+        const px = g.createImageData(nx, nz);
+        for (let i = 0; i < nx; ++i) {
+          for (let j = 0; j < nz; ++j) {
+            const zone = data.zones.charCodeAt(i * nz + j) - 97;  // 'a' + Zone: column i (x), row j (z, from the north)
+            if (wanted.has(zone)) px.data.set([255, 214, 70, 255], (j * nx + i) * 4);
           }
         }
         g.putImageData(px, 0, 0);
@@ -1360,7 +1379,7 @@
       }
       const step = data.zoneStep;
       ctx.globalAlpha = options.habitatAlpha ?? 0.6;
-      ctx.drawImage(habitatImage.image, X(-data.world - step / 2), Y(-data.world - step / 2), n * step * k, n * step * k);
+      ctx.drawImage(habitatImage.image, X(-data.world - step / 2), Y(-data.worldNorth - step / 2), nx * step * k, nz * step * k);
       ctx.globalAlpha = 1;
     }
 
@@ -1398,6 +1417,29 @@
           if (!w[id] || (k < 1.2 && !big.includes(id))) continue;
           const below = id === 'farm' ? -w.farmR - 4 : id === 'crater' ? -w.craterR - 6 : id === 'woods' ? 0 : -8;
           label(name, w[id][0], w[id][1] + below, big.includes(id) ? size : size - 1);
+        }
+      }
+      // The north's (north.hpp).
+      if (data.north) {
+        const n = data.north;
+        const big = ['refuge', 'lake', 'col', 'mine'];
+        for (const [id, name] of Object.entries(LORE.northPlaces)) {
+          if (!n[id] || (k < 1.2 && !big.includes(id))) continue;
+          const below = id === 'lake' ? 0 : id === 'mine' ? -12 : -9;
+          label(name, n[id][0], n[id][1] + below, big.includes(id) ? size : size - 1);
+        }
+        if (k < 1.2) {  // the belts' names, a little off the path
+          const pathX = (z) => {
+            let best = 0, gap = Infinity;
+            for (let i = 0; i < data.path.length; i += 2) {
+              const g = Math.abs(data.path[i + 1] - z);
+              if (g < gap) { gap = g; best = data.path[i]; }
+            }
+            return best;
+          };
+          label(LORE.zones.alpine, pathX(-700) - 60, -700, size, true);
+          label(LORE.zones.larches, pathX(-950) - 60, -950, size, true);
+          label(LORE.zones.frost, pathX(-1150) + 90, -1150, size, true);
         }
       }
     }

@@ -84,7 +84,8 @@ Ambience ambience_of(const World& w, Season season, const Weather& here, float w
   Ambience a;
   switch (w.place.kind) {
     case PlaceKind::Outside: a.place = SoundPlace::Outside; break;
-    case PlaceKind::Cave: a.place = SoundPlace::Cave; break;
+    case PlaceKind::Cave:
+    case PlaceKind::Mine: a.place = SoundPlace::Cave; break;
     case PlaceKind::Burrow: a.place = SoundPlace::Burrow; break;
     default: a.place = SoundPlace::Building; break;
   }

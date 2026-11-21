@@ -65,6 +65,8 @@ TEST_CASE("every wild species appears") {
   counts[static_cast<int>(Species::Cristi)] += 1;  // only inside the crystal cave (test_interiors.cpp)
   // The west's, far from the start (test_west.cpp).
   for (Species s : {Species::Owl, Species::Mole, Species::Sheep, Species::Raccoon}) counts[static_cast<int>(s)] += 1;
+  // The north's, far from the start (test_north.cpp).
+  for (Species s : {Species::Golem, Species::Goat, Species::Ermine}) counts[static_cast<int>(s)] += 1;
   for (int count : counts) CHECK(count > 0);
 }
 

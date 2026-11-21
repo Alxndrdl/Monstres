@@ -108,21 +108,21 @@ namespace {
 struct Coarse {
   static constexpr float kStep = 16.0f;
   static constexpr float kSlack = 11.4f;  // farthest from the nearest point (half a diagonal)
-  int n = 0;
+  int nx = 0, nz = 0;
   std::vector<float> path, road, stream, scarp;
   std::vector<float> lowest_land;  // the continent's lowest ground around (by the sea: below its level)
   float at(const std::vector<float>& v, float x, float z) const {
-    const int i = std::clamp(static_cast<int>(std::lround((x + rules::kReliefHalfSize) / kStep)), 0, n - 1);
-    const int j = std::clamp(static_cast<int>(std::lround((z + rules::kReliefHalfSize) / kStep)), 0, n - 1);
-    return v[static_cast<size_t>(i * n + j)];
+    const int i = std::clamp(static_cast<int>(std::lround((x - Heightmap::kMinX) / kStep)), 0, nx - 1);
+    const int j = std::clamp(static_cast<int>(std::lround((z - Heightmap::kMinZ) / kStep)), 0, nz - 1);
+    return v[static_cast<size_t>(i * nz + j)];
   }
   // Between its points (smooth, where the exact value is not needed).
   float between(const std::vector<float>& v, float x, float z) const {
-    const float fx = std::clamp((x + rules::kReliefHalfSize) / kStep, 0.0f, static_cast<float>(n - 1) - 0.001f);
-    const float fz = std::clamp((z + rules::kReliefHalfSize) / kStep, 0.0f, static_cast<float>(n - 1) - 0.001f);
+    const float fx = std::clamp((x - Heightmap::kMinX) / kStep, 0.0f, static_cast<float>(nx - 1) - 0.001f);
+    const float fz = std::clamp((z - Heightmap::kMinZ) / kStep, 0.0f, static_cast<float>(nz - 1) - 0.001f);
     const int i = static_cast<int>(fx), j = static_cast<int>(fz);
     const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
-    const auto a = [&](int p, int q) { return v[static_cast<size_t>(p * n + q)]; };
+    const auto a = [&](int p, int q) { return v[static_cast<size_t>(p * nz + q)]; };
     const float top = a(i, j) + (a(i + 1, j) - a(i, j)) * tx, bottom = a(i, j + 1) + (a(i + 1, j + 1) - a(i, j + 1)) * tx;
     return top + (bottom - top) * tz;
   }
@@ -162,7 +162,7 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
   const RuinsLayout& ruins = places.ruins;
   // A line's distance, measured only where it matters (closer than `limit`).
   const auto near = [&](const std::vector<float>& v, float limit, auto&& measure) {
-    return coarse.n == 0 || coarse.at(v, x, z) - Coarse::kSlack < limit ? measure() : limit;
+    return coarse.nx == 0 || coarse.at(v, x, z) - Coarse::kSlack < limit ? measure() : limit;
   };
   // Three octaves of hills; the smallest bumps fade out along the path.
   float near_path = 1 - smooth(1.5f, 7.0f, near(coarse.path, 7.0f, [&] { return distance_to_path(path, x, z, 7.0f); }));
@@ -206,8 +206,8 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
       const float across_cleft = std::fabs(-(x - e.x) * o.z + (z - e.z) * o.x);
       passage = std::max(passage, (1 - smooth(1.5f, 2.3f, across_cleft)) * (1 - smooth(1.1f, 1.5f, in)));
       // (Where the continent's own ground already rises as high, it is that.)
-      float sd = coarse.n ? coarse.at(coarse.scarp, x, z) : 0.0f;  // far from the edge: which side is enough
-      if (coarse.n == 0 || std::fabs(sd) - Coarse::kSlack < kTerraceReach) {
+      float sd = coarse.nx ? coarse.at(coarse.scarp, x, z) : 0.0f;  // far from the edge: which side is enough
+      if (coarse.nx == 0 || std::fabs(sd) - Coarse::kSlack < kTerraceReach) {
         sd = scarp_side(*west, x, z);
       } else {
         sd = sd > 0 ? 81.0f : -std::max(std::fabs(sd) - Coarse::kSlack, kTerraceReach);
@@ -228,7 +228,7 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
 
   // The hills fade out towards the edge of the relief, where the continent's
   // ground (drawn far away from its own grid) takes over: both then meet exactly.
-  const float edge = std::max(std::fabs(x), std::fabs(z));
+  const float edge = rules::relief_edge(x, z);
   h = h * (1 - smooth(rules::kReliefHalfSize - 80, rules::kReliefHalfSize - 8, edge)) + land;
   if (places.west && places.west->valid()) h = shape_west(*places.west, tops, x, z, h);
 
@@ -245,7 +245,7 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
   // The path and the road stay out of the sea: by the coast, where the
   // ground dips a little below it, they run on a strip of land just above it.
   // (Only by the coast, and not over the deeper sea: no causeway.)
-  const float lowest = coarse.n ? coarse.between(coarse.lowest_land, x, z) : land;
+  const float lowest = coarse.nx ? coarse.between(coarse.lowest_land, x, z) : land;
   const float coast = smooth(rules::kSeaLevel + 0.5f, rules::kSeaLevel - 0.5f, lowest) *
                       smooth(rules::kSeaLevel - 7.0f, rules::kSeaLevel - 1.0f, h);
   if (h < rules::kSeaLevel + 0.8f && coast > 0) {
@@ -267,10 +267,8 @@ namespace {
 // river's valley dug lower on one side), going down to the ground around
 // over a few meters: the way meets the deck at both ends.
 void embank_bridges(Heightmap& m, const WestLayout& west) {
-  const auto index = [](float v) {
-    return std::clamp(static_cast<int>(std::floor((v + rules::kReliefHalfSize) / Heightmap::kCellSize)), 0,
-                      Heightmap::kPoints - 1);
-  };
+  const auto index_x = [](float v) { return Heightmap::i_of(v); };
+  const auto index_z = [](float v) { return Heightmap::j_of(v); };
   const std::pair<Vec2, Vec2> bridges[] = {{west.bridge, west.bridge_along}, {west.path_bridge, west.path_bridge_along}};
   constexpr float L = rules::kBridgeHalf, kRamp = 12.0f;
   for (const auto& [c, a] : bridges) {
@@ -278,15 +276,15 @@ void embank_bridges(Heightmap& m, const WestLayout& west) {
     const float top = std::max(m.height(c.x + a.x * (L - 0.2f), c.z + a.z * (L - 0.2f)),
                                m.height(c.x - a.x * (L - 0.2f), c.z - a.z * (L - 0.2f)));
     const float r = L + kRamp + 6.0f;
-    for (int i = index(c.x - r); i <= std::min(index(c.x + r) + 1, Heightmap::kPoints - 1); ++i) {
-      for (int j = index(c.z - r); j <= std::min(index(c.z + r) + 1, Heightmap::kPoints - 1); ++j) {
-        const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
-        const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
+    for (int i = index_x(c.x - r); i <= std::min(index_x(c.x + r) + 1, Heightmap::kPointsX - 1); ++i) {
+      for (int j = index_z(c.z - r); j <= std::min(index_z(c.z + r) + 1, Heightmap::kPointsZ - 1); ++j) {
+        const float x = Heightmap::x_of(i);
+        const float z = Heightmap::z_of(j);
         const float u = std::fabs((x - c.x) * a.x + (z - c.z) * a.z);
         const float v = std::fabs(-(x - c.x) * a.z + (z - c.z) * a.x);
         if (u < L - 2.0f || u > L + kRamp || v > 6.0f) continue;
         const float k = (1 - smooth(L, L + kRamp, u)) * (1 - smooth(3.5f, 6.0f, v));
-        float& h = m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)];
+        float& h = m.heights[Heightmap::index(i, j)];
         if (h < top) h += (top - h) * k;
       }
     }
@@ -326,13 +324,13 @@ void carve_stream(Heightmap& m, WestLayout& west, uint64_t seed) {
   for (size_t i = 0; i < n; ++i) {
     if (i > up && i < foot) continue;
     const float here = m.height(s.points[i].x, s.points[i].z) - 0.7f;
-    const bool spring = i < n / 4 && std::max(std::fabs(s.points[i].x), std::fabs(s.points[i].z)) > kSpringEdge;
+    const bool spring = i < n / 4 && rules::world_edge(s.points[i].x, s.points[i].z) > kSpringEdge;
     if (spring) continue;
     level = std::min(level, here);
     s.level[i] = std::max(level, rules::kSeaLevel + 0.03f);  // flush with the sea at its mouth
   }
   size_t first = 0;  // there: as just after
-  while (first + 1 < n && std::max(std::fabs(s.points[first].x), std::fabs(s.points[first].z)) > kSpringEdge) ++first;
+  while (first + 1 < n && rules::world_edge(s.points[first].x, s.points[first].z) > kSpringEdge) ++first;
   for (size_t i = 0; i < first && first < n / 4; ++i) s.level[i] = s.level[first];
   // A high fall, whatever the valley's ground below: where it is high, the
   // pool and the river after it lower (a little gorge below the falls).
@@ -356,16 +354,14 @@ void carve_stream(Heightmap& m, WestLayout& west, uint64_t seed) {
     widest = std::max(widest, s.width[i]);
   }
   const float reach = widest + 60.0f;  // the banks rise back to the highest ground around
-  const auto index = [](float v) {
-    return std::clamp(static_cast<int>(std::floor((v + rules::kReliefHalfSize) / Heightmap::kCellSize)), 0,
-                      Heightmap::kPoints - 1);
-  };
+  const auto index_x = [](float v) { return Heightmap::i_of(v); };
+  const auto index_z = [](float v) { return Heightmap::j_of(v); };
   const auto lerp = [](const std::vector<float>& v, size_t i, float t) { return v[i] + (v[i + 1] - v[i]) * t; };
-  for (int i = index(x0 - reach); i <= std::min(index(x1 + reach) + 1, Heightmap::kPoints - 1); ++i) {
-    for (int j = index(z0 - reach); j <= std::min(index(z1 + reach) + 1, Heightmap::kPoints - 1); ++j) {
-      const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
-      const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
-      float& h = m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)];
+  for (int i = index_x(x0 - reach); i <= std::min(index_x(x1 + reach) + 1, Heightmap::kPointsX - 1); ++i) {
+    for (int j = index_z(z0 - reach); j <= std::min(index_z(z1 + reach) + 1, Heightmap::kPointsZ - 1); ++j) {
+      const float x = Heightmap::x_of(i);
+      const float z = Heightmap::z_of(j);
+      float& h = m.heights[Heightmap::index(i, j)];
       // Every stretch of it nearby digs (two arms of a bend at different levels: the lower one wins).
       float target = 1e9f;
       float side_of_scarp = 1e9f;  // looked up once, if needed
@@ -374,8 +370,8 @@ void carve_stream(Heightmap& m, WestLayout& west, uint64_t seed) {
       for (size_t c = 0; c < ch.size(); ++c) {
         const auto& box = ch[c];
         if (x < box[0] - reach || x > box[2] + reach || z < box[1] - reach || z > box[3] + reach) continue;
-        const size_t first = c * Chunks::kChunk, last = std::min(first + Chunks::kChunk, n - 1);
-        for (size_t seg = first; seg < last; ++seg) {
+        const size_t from = c * Chunks::kChunk, last = std::min(from + Chunks::kChunk, n - 1);
+        for (size_t seg = from; seg < last; ++seg) {
           const Vec2 a = s.points[seg], b = s.points[seg + 1];
           const float abx = b.x - a.x, abz = b.z - a.z;
           const float len2 = abx * abx + abz * abz;
@@ -408,7 +404,7 @@ void carve_stream(Heightmap& m, WestLayout& west, uint64_t seed) {
       if (target >= h) continue;
       // Not beyond the playable area (where the relief goes down to the
       // continent's ground): the river comes out of the ground there.
-      const float edge = std::max(std::fabs(x), std::fabs(z));
+      const float edge = rules::world_edge(x, z);
       const float k = 1 - smooth(kSpringEdge + 4.0f, kSpringEdge + 16.0f, edge);
       h += (std::min(h, target) - h) * k;
     }
@@ -423,14 +419,14 @@ void carve_stream(Heightmap& m, WestLayout& west, uint64_t seed) {
   }
   west.cove_level = s.level[pool];
   // The mill's race, and the cleft's floor with its ledge.
-  for (int i = index(west.water_wheel.x - 4); i <= index(west.water_wheel.x + 4); ++i) {
-    for (int j = index(west.water_wheel.z - 4); j <= index(west.water_wheel.z + 4); ++j) {
-      const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
-      const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
+  for (int i = index_x(west.water_wheel.x - 4); i <= index_x(west.water_wheel.x + 4); ++i) {
+    for (int j = index_z(west.water_wheel.z - 4); j <= index_z(west.water_wheel.z + 4); ++j) {
+      const float x = Heightmap::x_of(i);
+      const float z = Heightmap::z_of(j);
       float lvl = 0;
       distance_to_stream(s, x, z, 20.0f, &lvl);
       if (std::hypot(x - west.water_wheel.x, z - west.water_wheel.z) < 2.6f) {
-        float& h = m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)];
+        float& h = m.heights[Heightmap::index(i, j)];
         h = std::min(h, lvl - 1.1f);
       }
     }
@@ -452,14 +448,14 @@ void carve_stream(Heightmap& m, WestLayout& west, uint64_t seed) {
     }
   }
   const float sgn = banks[0] <= banks[1] ? 1.0f : -1.0f, walk = std::min(banks[0], banks[1]);
-  for (int i = index(F.x - 16); i <= index(F.x + 16); ++i) {
-    for (int j = index(F.z - 16); j <= index(F.z + 16); ++j) {
-      const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
-      const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
+  for (int i = index_x(F.x - 16); i <= index_x(F.x + 16); ++i) {
+    for (int j = index_z(F.z - 16); j <= index_z(F.z + 16); ++j) {
+      const float x = Heightmap::x_of(i);
+      const float z = Heightmap::z_of(j);
       const float out = (x - F.x) * o.x + (z - F.z) * o.z, l = (-(x - F.x) * o.z + (z - F.z) * o.x) * sgn;
       const bool cleft = std::fabs(l) < 2.6f && out > -0.3f && out < rules::kFallsLanding - 0.6f;
       const bool way = l > 0 && l < walk && out > -0.2f && out < 2.2f;
-      if (cleft || way) m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] = ledge;
+      if (cleft || way) m.heights[Heightmap::index(i, j)] = ledge;
     }
   }
 }
@@ -479,10 +475,10 @@ float value_noise(uint64_t seed, float x, float z, float cell) {
 
 float Heightmap::height(float x, float z) const {
   if (heights.empty()) return 0;
-  const float fx = std::clamp((x + rules::kReliefHalfSize) / kCellSize, 0.0f, static_cast<float>(kCells));
-  const float fz = std::clamp((z + rules::kReliefHalfSize) / kCellSize, 0.0f, static_cast<float>(kCells));
-  const int i = std::min(static_cast<int>(fx), kCells - 1);
-  const int j = std::min(static_cast<int>(fz), kCells - 1);
+  const float fx = std::clamp((x - kMinX) / kCellSize, 0.0f, static_cast<float>(kCellsX));
+  const float fz = std::clamp((z - kMinZ) / kCellSize, 0.0f, static_cast<float>(kCellsZ));
+  const int i = std::min(static_cast<int>(fx), kCellsX - 1);
+  const int j = std::min(static_cast<int>(fz), kCellsZ - 1);
   const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
   const float h00 = at(i, j), h10 = at(i + 1, j), h01 = at(i, j + 1), h11 = at(i + 1, j + 1);
   if (tz >= tx) return h00 + (h11 - h01) * tx + (h01 - h00) * tz;  // triangle (x0,z0) (x0,z1) (x1,z1)
@@ -499,11 +495,11 @@ Vec3 Heightmap::normal(float x, float z) const {
 
 float Heightmap::land_height(float x, float z) const {
   if (land.empty()) return 0;
-  const float fx = std::clamp((x + rules::kReliefHalfSize) / kLandCell, 0.0f, static_cast<float>(kLandPoints - 1));
-  const float fz = std::clamp((z + rules::kReliefHalfSize) / kLandCell, 0.0f, static_cast<float>(kLandPoints - 1));
-  const int i = std::min(static_cast<int>(fx), kLandPoints - 2), j = std::min(static_cast<int>(fz), kLandPoints - 2);
+  const float fx = std::clamp((x - kMinX) / kLandCell, 0.0f, static_cast<float>(kLandPointsX - 1));
+  const float fz = std::clamp((z - kMinZ) / kLandCell, 0.0f, static_cast<float>(kLandPointsZ - 1));
+  const int i = std::min(static_cast<int>(fx), kLandPointsX - 2), j = std::min(static_cast<int>(fz), kLandPointsZ - 2);
   const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
-  const auto at = [&](int a, int b) { return land[static_cast<size_t>(a * kLandPoints + b)]; };
+  const auto at = [&](int a, int b) { return land[static_cast<size_t>(a * kLandPointsZ + b)]; };
   const float top = at(i, j) + (at(i + 1, j) - at(i, j)) * tx;
   const float bottom = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * tx;
   return top + (bottom - top) * tz;
@@ -511,25 +507,25 @@ float Heightmap::land_height(float x, float z) const {
 
 Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) {
   Heightmap m;
-  m.heights.resize(static_cast<size_t>(Heightmap::kPoints * Heightmap::kPoints));
+  m.heights.resize(static_cast<size_t>(Heightmap::kPointsX * Heightmap::kPointsZ));
   const float knoll_top = hills(seed, places.ruins.center.x, places.ruins.center.z) + kKnollHeight;
   const float castle_top = hills(seed, places.castle.center.x, places.castle.center.z) + kCastleKnollHeight;
   // The continent's ground on its 10 m grid (the same points as Continent's),
   // between them in a straight line: as the far terrain draws it.
   constexpr float kLandCell = Heightmap::kLandCell;
-  constexpr int kLand = Heightmap::kLandPoints;
+  constexpr int kLandX = Heightmap::kLandPointsX, kLand = Heightmap::kLandPointsZ;
   std::vector<float>& land = m.land;
-  land.resize(static_cast<size_t>(kLand * kLand));
-  for (int i = 0; i < kLand; ++i) {
+  land.resize(static_cast<size_t>(kLandX * kLand));
+  for (int i = 0; i < kLandX; ++i) {
     for (int j = 0; j < kLand; ++j) {
       land[static_cast<size_t>(i * kLand + j)] =
-          continent_height(seed, -rules::kReliefHalfSize + kLandCell * static_cast<float>(i),
-                           -rules::kReliefHalfSize + kLandCell * static_cast<float>(j));
+          continent_height(seed, Heightmap::kMinX + kLandCell * static_cast<float>(i),
+                           Heightmap::kMinZ + kLandCell * static_cast<float>(j));
     }
   }
   const auto land_at = [&](float x, float z) {
-    const float fx = (x + rules::kReliefHalfSize) / kLandCell, fz = (z + rules::kReliefHalfSize) / kLandCell;
-    const int i = std::min(static_cast<int>(fx), kLand - 2), j = std::min(static_cast<int>(fz), kLand - 2);
+    const float fx = (x - Heightmap::kMinX) / kLandCell, fz = (z - Heightmap::kMinZ) / kLandCell;
+    const int i = std::clamp(static_cast<int>(fx), 0, kLandX - 2), j = std::clamp(static_cast<int>(fz), 0, kLand - 2);
     const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
     const float a = land[static_cast<size_t>(i * kLand + j)], b = land[static_cast<size_t>((i + 1) * kLand + j)];
     const float c = land[static_cast<size_t>(i * kLand + j + 1)], d = land[static_cast<size_t>((i + 1) * kLand + j + 1)];
@@ -542,7 +538,7 @@ Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) 
     // (Above the sea, by the coast too: a hollow of the hills there is no
     // place for a camp or a burrow.)
     const auto natural = [&](Vec2 p) {
-      const float edge = std::max(std::fabs(p.x), std::fabs(p.z));
+      const float edge = rules::relief_edge(p.x, p.z);
       return std::max(hills(seed, p.x, p.z) * (1 - smooth(rules::kReliefHalfSize - 80, rules::kReliefHalfSize - 8, edge)) +
                           land_at(p.x, p.z),
                       rules::kSeaLevel + 1.0f);
@@ -561,15 +557,16 @@ Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) 
   }
   const Places with_tops{places.village, places.ruins, places.cave, places.castle, west};
   Coarse coarse;
-  coarse.n = static_cast<int>(2 * rules::kReliefHalfSize / Coarse::kStep) + 1;
+  coarse.nx = static_cast<int>(2 * rules::kReliefHalfSize / Coarse::kStep) + 1;
+  coarse.nz = static_cast<int>((rules::kReliefHalfSize + rules::kReliefNorth) / Coarse::kStep) + 1;
   for (auto* v : {&coarse.path, &coarse.road, &coarse.stream, &coarse.scarp, &coarse.lowest_land}) {
-    v->assign(static_cast<size_t>(coarse.n * coarse.n), 1e9f);
+    v->assign(static_cast<size_t>(coarse.nx * coarse.nz), 1e9f);
   }
-  for (int i = 0; i < coarse.n; ++i) {
-    for (int j = 0; j < coarse.n; ++j) {
-      const float x = static_cast<float>(i) * Coarse::kStep - rules::kReliefHalfSize;
-      const float z = static_cast<float>(j) * Coarse::kStep - rules::kReliefHalfSize;
-      const auto k = static_cast<size_t>(i * coarse.n + j);
+  for (int i = 0; i < coarse.nx; ++i) {
+    for (int j = 0; j < coarse.nz; ++j) {
+      const float x = Heightmap::kMinX + static_cast<float>(i) * Coarse::kStep;
+      const float z = Heightmap::kMinZ + static_cast<float>(j) * Coarse::kStep;
+      const auto k = static_cast<size_t>(i * coarse.nz + j);
       coarse.path[k] = distance_to_path(path, x, z, 1e9f);
       for (float dx = -24; dx <= 24; dx += 12) {
         for (float dz = -24; dz <= 24; dz += 12) coarse.lowest_land[k] = std::min(coarse.lowest_land[k], land_at(x + dx, z + dz));
@@ -581,11 +578,11 @@ Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) 
       }
     }
   }
-  for (int i = 0; i < Heightmap::kPoints; ++i) {
-    for (int j = 0; j < Heightmap::kPoints; ++j) {
-      const float x = static_cast<float>(i) * Heightmap::kCellSize - rules::kReliefHalfSize;
-      const float z = static_cast<float>(j) * Heightmap::kCellSize - rules::kReliefHalfSize;
-      m.heights[static_cast<size_t>(i * Heightmap::kPoints + j)] =
+  for (int i = 0; i < Heightmap::kPointsX; ++i) {
+    for (int j = 0; j < Heightmap::kPointsZ; ++j) {
+      const float x = Heightmap::x_of(i);
+      const float z = Heightmap::z_of(j);
+      m.heights[Heightmap::index(i, j)] =
           relief(seed, path, with_tops, knoll_top, castle_top, tops, x, z, land_at(x, z), coarse);
     }
   }
@@ -597,7 +594,7 @@ Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) 
 }
 
 float natural_height(uint64_t seed, float x, float z) {
-  const float edge = std::max(std::fabs(x), std::fabs(z));
+  const float edge = rules::relief_edge(x, z);
   return hills(seed, x, z) * (1 - smooth(rules::kReliefHalfSize - 80, rules::kReliefHalfSize - 8, edge)) +
          continent_height(seed, x, z);
 }

@@ -272,7 +272,10 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
   {
     const Vec2 C = cave_at;
     const auto j = [&](uint64_t k, float a) { return (hash01(seed, 900 + k) - 0.5f) * 2 * a; };
-    std::vector<Vec2> c{{C.x - 175 + j(1, 20), -rules::kReliefHalfSize - 90.0f},
+    // (Its first point beyond the relief's north, which goes further north
+    // than it did: the edge goes on up there as it went.)
+    std::vector<Vec2> c{{C.x - 182 + j(1, 20), -rules::kReliefNorth - 90.0f},
+                        {C.x - 175 + j(1, 20), -rules::kReliefHalfSize - 90.0f},
                         {C.x - 150 + j(8, 20), std::max(C.z - 430.0f, -rules::kReliefHalfSize + 20.0f)},
                         {C.x - 118 + j(2, 15), C.z - 230 + j(3, 20)},
                         {C.x - 95 + j(4, 8), C.z - 115 + j(5, 10)},
@@ -1176,7 +1179,7 @@ float river_surface(const WestLayout& west, float x, float z, float ground, floa
   const size_t n = s.points.size();
   if (n < 2 || s.level.size() != n || s.width.size() != n) return limit;
   // Beyond the playable area it runs under the ground (it springs there).
-  if (std::max(std::fabs(x), std::fabs(z)) > rules::kWorldHalfSize + 12.0f) return limit;
+  if (rules::world_edge(x, z) > rules::kWorldHalfSize + 12.0f) return limit;
   size_t seg = 0;
   float t = 0;
   float d = polyline_distance(s.points, s.chunks, x, z, limit, &seg, &t);
@@ -1270,10 +1273,10 @@ std::vector<Vec3> owl_perches(const World& w) {
 namespace {
 
 int cell_of(Vec2 p) {
-  const int n = rules::kPopulationCells;
-  const int i = std::clamp(static_cast<int>((p.x + rules::kWorldHalfSize) / rules::kPopulationCell), 0, n - 1);
-  const int j = std::clamp(static_cast<int>((p.z + rules::kWorldHalfSize) / rules::kPopulationCell), 0, n - 1);
-  return i * n + j;
+  const int nx = rules::kPopulationCellsX, nz = rules::kPopulationCellsZ;
+  const int i = std::clamp(static_cast<int>((p.x + rules::kWorldHalfSize) / rules::kPopulationCell), 0, nx - 1);
+  const int j = std::clamp(static_cast<int>((p.z + rules::kWorldNorth) / rules::kPopulationCell), 0, nz - 1);
+  return i * nz + j;
 }
 bool lived_in(const World& w, Vec2 p) { return w.population.active[static_cast<size_t>(cell_of(p))] != 0; }
 uint16_t visits(const World& w, Vec2 p) { return w.population.visits[static_cast<size_t>(cell_of(p))]; }
@@ -1535,7 +1538,7 @@ void go_home(World& w) {
 
 bool companion_guide(const World& w, Vec2& at) {
   if (inside(w)) {
-    if (w.place.kind != PlaceKind::Cave && w.place.kind != PlaceKind::Burrow) return false;
+    if (w.place.kind != PlaceKind::Cave && w.place.kind != PlaceKind::Burrow && w.place.kind != PlaceKind::Mine) return false;
     return way_out_ahead(w, rules::kCompanionGuideDistance, at);
   }
   if (!w.west.valid() || w.ground.empty()) return false;

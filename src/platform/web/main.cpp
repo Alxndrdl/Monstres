@@ -840,6 +840,13 @@ EMSCRIPTEN_KEEPALIVE void monstres_set_wind(float wind) {
   g_app->redraw = true;
 }
 
+// Debug option (settings menu): every teleporter known at once (to visit the
+// world quickly). Returns how many there are.
+EMSCRIPTEN_KEEPALIVE int monstres_debug_unlock_teleporters() {
+  g_app->world.teleporters = static_cast<decltype(g_app->world.teleporters)>((1u << kTeleporterCount) - 1);
+  return static_cast<int>(kTeleporterCount);
+}
+
 EMSCRIPTEN_KEEPALIVE void monstres_hold_hour(int hold) {
   g_app->hold_clock = hold != 0;
   g_app->held_clock = g_app->world.clock;
@@ -891,9 +898,8 @@ EMSCRIPTEN_KEEPALIVE void monstres_save_now() { write_save(*g_app); }
 EMSCRIPTEN_KEEPALIVE void monstres_debug_teleport(float x, float z) {
   if (!std::isfinite(x) || !std::isfinite(z)) return;
   World& w = g_app->world;
-  const float limit = rules::kWorldHalfSize - 1;
-  x = std::clamp(x, -limit, limit);
-  z = std::clamp(z, -limit, limit);
+  x = rules::clamp_world_x(x, 1);
+  z = rules::clamp_world_z(z, 1);
   w.player.pos = {x, w.ground.height(x, z), z};
   if (inside(w)) {  // on top of what stands there (the tower's stair, its landing)
     for_objects_near(w, {{x - 0.1f, -1, z - 0.1f}, {x + 0.1f, 50, z + 0.1f}}, [&](uint32_t, const Box& b) {
@@ -1123,7 +1129,7 @@ JSON_EXPORT(monstres_continent_json, continent_json(g_app->continent))
 // Heights of the continent, Continent::kPointsX * kPointsZ floats (see continent_json).
 EMSCRIPTEN_KEEPALIVE const float* monstres_continent_heights() { return g_app->continent.heights.data(); }
 
-// Heights of the ground, Heightmap::kPoints squared floats (see map_json).
+// Heights of the ground, Heightmap::kPointsX * kPointsZ floats (see map_json).
 EMSCRIPTEN_KEEPALIVE const float* monstres_heights() {
   const World& w = *&g_app->world;
   return (inside(w) ? w.outdoors.ground : w.ground).heights.data();

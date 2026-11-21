@@ -54,7 +54,7 @@ TEST_CASE("wild monsters live only around the player, and others come back") {
   // Villagers never leave.
   size_t villagers = 0;
   for (const Creature& c : w.creatures) villagers += c.species == Species::Villager;
-  CHECK(villagers == rules::kVillagers + 1 + 9);  // and Isidore, and the west's (the water miller too)
+  CHECK(villagers == rules::kVillagers + 1 + 9 + 2);  // and Isidore, the west's (the water miller too), the north's
   check_invariants(w);
 }
 
