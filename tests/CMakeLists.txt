@@ -74,6 +74,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_north.cpp
   unit/test_roads.cpp
   unit/test_sites.cpp
+  unit/test_routines.cpp
   unit/test_coherence.cpp
   unit/test_seasons.cpp
   unit/test_sounds.cpp

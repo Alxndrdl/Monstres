@@ -43,6 +43,11 @@ inline constexpr uint8_t kLandingVariant = 200;
 
 inline bool inside(const World& w) { return w.place.kind != PlaceKind::Outside; }
 
+// The interior an object's door leads into (Outside: none), and where one
+// stands to use it (outside, before it).
+PlaceKind place_behind(ObjectKind kind);
+Vec2 door_use_spot(const Object& door);
+
 // What a door does.
 enum class DoorAction : uint8_t { None, Enter, Leave, Climb, Descend };
 

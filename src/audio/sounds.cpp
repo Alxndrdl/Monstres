@@ -3,6 +3,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/debug.hpp"
 #include "monstres/core/interior.hpp"
+#include "monstres/core/routines.hpp"
 #include "monstres/core/west.hpp"
 
 #include <algorithm>
@@ -310,7 +311,7 @@ void SoundWatch::watch(const World& w, const WeatherField* field, double seconds
       int seen = 0;
       for (size_t i = 1; i < w.creatures.size(); ++i) {
         const Creature& c = w.creatures[i];
-        if (!monster_stats(c.species).is_monster || c.mind == Mind::KnockedOut) continue;
+        if (!monster_stats(c.species).is_monster || c.mind == Mind::KnockedOut || asleep(c) || !about(c)) continue;
         if (flat_distance2(c.body.pos, player) > 40.0f * 40.0f) continue;
         if (next_random(rng_) % static_cast<uint64_t>(++seen) == 0) caller = &c;  // one of them, at random
       }

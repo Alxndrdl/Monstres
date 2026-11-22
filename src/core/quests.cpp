@@ -90,7 +90,8 @@ int npc_index(const World& w, uint8_t n) {
 
 bool near_npc(const World& w, uint8_t n) {
   const int i = npc_index(w, n);
-  return i > 0 && flat_distance2(w.creatures[static_cast<size_t>(i)].body.pos, w.player.pos) <
+  return i > 0 && w.creatures[static_cast<size_t>(i)].act != Activity::Home &&  // not in its house
+         flat_distance2(w.creatures[static_cast<size_t>(i)].body.pos, w.player.pos) <
                       rules::kTalkDistance * rules::kTalkDistance;
 }
 
@@ -262,10 +263,7 @@ uint8_t npc_marks(const World& w, uint8_t n) {
     if (quest_giver(id) == n && stage == QuestStage::Unknown && quest_available(w, id)) marks |= kMarkNewQuest;
     if (quest_receiver(id) == n && stage == QuestStage::Active) marks |= kMarkQuest;
   }
-  if (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene || n == npc::kAgathe || n == npc::kAubin ||
-      n == npc::kGauthier || n == npc::kYsolde) {
-    marks |= kMarkHeal;
-  }
+  if (npc::healer(n)) marks |= kMarkHeal;
   if (n == npc::kBastien || n == npc::kRomane || n == npc::kTristan) marks |= kMarkFight;
   // The abbey's monks: until beaten; the abbot once they are.
   if (npc::monk(n) && !((w.trials >> (n - npc::kHugues)) & 1u) && (n != npc::kAmbroise || (w.trials & 0x07) == 0x07)) marks |= kMarkFight;

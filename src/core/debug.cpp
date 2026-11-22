@@ -7,6 +7,7 @@
 #include "monstres/core/interior.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/roads.hpp"
+#include "monstres/core/routines.hpp"
 #include "monstres/core/sites.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
@@ -123,7 +124,8 @@ std::string to_json(const World& w) {
     if (i) s += ',';
     s += std::string("{\"species\":\"") + species_name(c.species) + "\"" + ",\"mind\":\"" + mind_name(c.mind) +
          "\"" + ",\"x\":" + num(c.body.pos.x) + ",\"y\":" + num(c.body.pos.y) + ",\"z\":" + num(c.body.pos.z) +
-         (c.tag == Tag::Raider ? ",\"aggressive\":true" : "") + (c.npc ? ",\"npc\":" + std::to_string(c.npc) : "") + "}";
+         (c.tag == Tag::Raider ? ",\"aggressive\":true" : "") + (c.npc ? ",\"npc\":" + std::to_string(c.npc) : "") +
+         (c.act != Activity::None ? std::string(",\"act\":\"") + activity_name(c.act) + "\"" : std::string()) + "}";
   }
   s += "]";
   s += ",\"bag\":" + bag_json(w);
@@ -145,6 +147,7 @@ std::string creature_json(const World& w, int index) {
   std::string s = "{\"index\":" + std::to_string(index);
   s += std::string(",\"species\":\"") + species_name(c.species) + "\"";
   s += std::string(",\"mind\":\"") + mind_name(c.mind) + "\"";
+  s += std::string(",\"act\":\"") + activity_name(c.act) + "\"";
   s += ",\"variant\":" + std::to_string(c.variant);
   if (monster_stats(c.species).is_monster) {
     s += std::string(",\"family\":\"") + family_name(genetics(c.species).family) + "\"";
@@ -186,7 +189,7 @@ std::string creature_json(const World& w, int index) {
     s += std::string(",\"talk\":") + (near_npc(w, c.npc) ? "true" : "false");
     uint8_t rivals = 0;
     rival_team(w, c.npc, rivals);
-    if (c.npc == npc::kOdette || c.npc == npc::kViolette || c.npc == npc::kSolene) {
+    if (npc::healer(c.npc)) {
       s += std::string(",\"healer\":true,\"heal\":") + (can_heal_team(w, c.npc) ? "true" : "false");
     }
     if (rivals) {
@@ -497,7 +500,7 @@ std::string marks_json(const World& w) {
     const uint8_t m = npc_marks(w, c.npc);
     if (!m) continue;
     s += std::string(first ? "" : ",") + "{\"npc\":" + std::to_string(c.npc) + ",\"x\":" + num(c.body.pos.x) +
-         ",\"z\":" + num(c.body.pos.z) + ",\"marks\":[";
+         ",\"z\":" + num(c.body.pos.z) + (about(c) ? "" : ",\"home\":true") + ",\"marks\":[";
     first = false;
     for (int k = 0, n = 0; k < 6; ++k) {
       if (m & (1 << k)) s += std::string(n++ ? "," : "") + "\"" + kMarkNames[k] + "\"";
@@ -1128,6 +1131,16 @@ std::string battle_json(const World& w) {
                            : w.sites.valid() && by(w.sites.apiary) ? "apiary"
                            : w.sites.valid() && by(w.sites.chapel) ? "chapel" : nullptr;
         if (spot) s += std::string(",\"spot\":\"") + spot + "\"";
+        // Who is in (routines.hpp): the villagers gone home by this door.
+        if (d.action == DoorAction::Enter && place_behind(outside[d.object].kind) != PlaceKind::Outside) {
+          const Vec2 use = door_use_spot(outside[d.object]);
+          std::string in;
+          for (const Creature& c : w.creatures) {
+            if (c.species != Species::Villager || about(c) || std::hypot(c.body.pos.x - use.x, c.body.pos.z - use.z) > 0.6f) continue;
+            in += (in.empty() ? "" : ",") + std::to_string(c.npc);
+          }
+          if (!in.empty()) s += ",\"residents\":[" + in + "]";
+        }
       }
       s += "}";
     }

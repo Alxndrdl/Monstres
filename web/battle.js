@@ -222,11 +222,15 @@
       const t = !c && object >= 0 ? game.object(object) : null;
       if (b.door && !c) {
         const d = b.door;
-        key = `door/${d.action}/${d.place}/${d.building}`;
+        const residents = (d.residents || []).map(npcName);
+        key = `door/${d.action}/${d.place}/${d.building}/${residents.join()}`;
         build = () => {
           contextTitle.replaceChildren(doorTitle(d));
           contextActions.replaceChildren(action('door', LORE.doors.actions[d.action] || 'Entrer', true, goThrough));
-          contextNote.textContent = '';
+          // Who went home by this door (the night, the rain, the winter).
+          contextNote.textContent = !residents.length ? ''
+            : residents.length === 1 ? `${residents[0]} est là, à l’intérieur.`
+              : `${residents.slice(0, -1).join(', ')} et ${residents[residents.length - 1]} sont là, à l’intérieur.`;
         };
       } else if (t && t.kind === 'teleporter') {
         const reachable = game.teleporters().list.filter((x) => x.reachable).length;

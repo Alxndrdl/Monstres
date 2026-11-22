@@ -1776,3 +1776,57 @@ test.describe('the sound', () => {
     await expect(page.locator('#volume-ambience-value')).toHaveText('0 %');
   });
 });
+
+test('the villagers\' routines: at night Odette is home, the door says so, inside she heals', async ({ page }) => {
+  await openGame(page, '?seed=42&new&frozen');
+  const map = await page.evaluate(() => window.monstres.map());
+  // Far from the village (she goes in at once), at night, fine weather.
+  await page.evaluate(([x, z]) => {
+    const m = window.monstres;
+    m.setWeather(0);
+    m.setHour(23);
+    m.holdHour(true);
+    m.teleport(x, z + 60);
+    m.step(40);
+  }, map.sites.abbey);
+  const odette = await page.evaluate(() => window.monstres.state().creatures.find((c) => c.npc === 5));
+  expect(odette.act).toBe('home');
+  // At her door: the panel says she is in.
+  await page.evaluate(([x, z]) => { window.monstres.teleport(x, z); window.monstres.step(2); }, [odette.x, odette.z]);
+  expect((await page.evaluate(() => window.monstres.battle())).door.residents).toContain(5);
+  await expect(page.locator('#context .context-note')).toContainText('Odette');
+  await expect(page.locator('#context .context-note')).toContainText('à l’intérieur');
+  await page.evaluate(() => { window.monstres.door(); window.monstres.step(5); });
+  await expect.poll(async () => (await state(page)).player.place).toBe('house');
+  // Inside, she talks and heals.
+  const i = await page.evaluate(() => {
+    const m = window.monstres;
+    const k = m.state().creatures.findIndex((c) => c.npc === 5);
+    const c = m.state().creatures[k];
+    m.teleport(c.x + 1.0, c.z);
+    m.step(1);
+    m.select(k);
+    return k;
+  });
+  expect(i).toBeGreaterThan(0);
+  expect((await page.evaluate(() => window.monstres.selected())).heal).toBe(true);
+  await page.evaluate(() => window.monstresDialogue.open(window.monstres.selected()));
+  await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Odette');
+});
+
+test('every healer\'s button heals (Aubin by the road)', async ({ page }) => {
+  await openGame(page, '?seed=42&new&frozen');
+  const k = await page.evaluate(() => {
+    const m = window.monstres;
+    const k = m.state().creatures.findIndex((c) => c.npc === 28);
+    const c = m.state().creatures[k];
+    m.teleport(c.x + 1.2, c.z);
+    m.step(1);
+    m.select(k);
+    return k;
+  });
+  expect(k).toBeGreaterThan(0);
+  const aubin = await page.evaluate(() => window.monstres.selected());
+  expect(aubin.healer).toBe(true);
+  expect(aubin.heal).toBe(true);
+});

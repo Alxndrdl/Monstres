@@ -128,7 +128,10 @@ namespace monstres {
 //      teleporters; at the very end, the abbey's trials won (u8, a bit per
 //      monk, the abbot's last) and the battles won against Tristan (u8).
 //      Before: none.
-inline constexpr uint32_t kSaveVersion = 29;
+//  30  the routines (routines.hpp): each creature's activity (u8 Activity)
+//      and the one it plays with or chases (u32 id), after its tag. Before:
+//      none (the villagers out, the monsters awake).
+inline constexpr uint32_t kSaveVersion = 30;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

@@ -5,6 +5,7 @@
 #include "monstres/core/rng.hpp"
 #include "monstres/core/terrain.hpp"
 #include "monstres/core/village.hpp"
+#include "monstres/core/weather.hpp"
 
 #include <algorithm>
 #include <array>
@@ -358,6 +359,15 @@ enum class Tag : uint8_t { None, LostPiou, Rival, Giant, Raider, Flock, Lamb, Bo
 // KnockedOut: beaten in a battle, it lies on the ground for a while.
 enum class Mind : uint8_t { Idle, Wander, Flee, Follow, Greet, Fly, Battle, KnockedOut };
 
+// What a creature is busy with, beyond its Mind (routines.hpp; saved).
+// Villagers: GoHome, walking to their door; Home, in their house (unseen,
+// not met outside). Wild monsters: Sleep (still, eyes closed), Shelter
+// (gone under a tree out of the rain), Drink (at the water's edge), Graze
+// (nibbling, pecking), Play (running after one of its kind, or away from
+// it), Chase (after its prey), Sniff (nose to nose with the companion, or
+// one of its kind), Warm (curled up by a fire).
+enum class Activity : uint8_t { None, GoHome, Home, Sleep, Shelter, Drink, Graze, Play, Chase, Sniff, Warm, Count };
+
 struct Creature {
   Species species = Species::Slime;
   Body body;
@@ -374,6 +384,8 @@ struct Creature {
   bool beaten = false;    // already beaten once: no more experience from it either
   uint8_t npc = 0;        // villagers: who it is (Npc), 0: anyone
   Tag tag = Tag::None;
+  Activity act = Activity::None;  // what it is busy with (routines.hpp)
+  uint32_t other = 0;     // Play, Chase, Sniff: the creature it goes after, or away from (Creature::id)
   bool operator==(const Creature&) const = default;
 };
 
@@ -749,6 +761,10 @@ inline constexpr uint8_t kSylvain = 41;   // the hermit of the chapel
 inline constexpr uint8_t kHeloise = 42;   // the beekeeper of the apiary
 inline constexpr uint8_t kArmand = 43;    // the old watchman of the lookout
 inline constexpr bool monk(uint8_t n) { return n >= kHugues && n <= kAmbroise; }
+// The healers: they heal the team, and fill the magician's mana, for free.
+inline constexpr bool healer(uint8_t n) {
+  return n == kOdette || n == kViolette || n == kSolene || n == kAgathe || n == kAubin || n == kGauthier || n == kYsolde;
+}
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
@@ -959,8 +975,15 @@ struct World {
   uint16_t way_out_ticks = 0;  // not saved: the WayOut spell, ticks left
   Vec3 climb_forward{0, 0, -1};
   Angle16 climb_yaw = 0;
+  // Not saved: the season and the weather the debug menu chose, given by
+  // the page each frame (the weather itself is drawn from the seed and the
+  // tick: weather_field). The villagers and the monsters live by them.
+  Sky sky;
   bool operator==(const World&) const = default;
 };
+
+// The weather as it is now (with the debug menu's choices).
+WeatherField weather_field(const World& world);
 
 // A trainer's monster stands beside it (the first of its team), brought if missing.
 void keep_trainer_monster(World& world, uint8_t trainer);

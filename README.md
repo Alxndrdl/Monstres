@@ -1027,8 +1027,8 @@ personnages gardent leur éclat la nuit (`kGlowing`).
 Sept temps : ensoleillé, quelques nuages, couvert (on ne voit plus le ciel),
 pluie, tempête avec orage, brouillard, neige (en hiver seulement : la pluie
 y devient de la neige, et la neige de la pluie le reste de l'année ; voir
-« Saisons et vent »). Ils ne changent rien au jeu pour l'instant, ni aux
-combats ni aux monstres.
+« Saisons et vent »). Ils ne changent rien aux combats, mais les villageois
+et les monstres vivent avec (voir « La vie du monde »).
 
 **Le temps qu'il fait** (`src/core/weather.cpp`) est un champ sur tout le
 pays et le continent : des cellules de 800 m, chacune avec son temps pendant
@@ -1066,13 +1066,66 @@ met le beau temps ici et un orage à 1,1 km devant la caméra. Dans la console :
 30 000 triangles de plus quand le ciel est couvert, 40 000 sous la pluie,
 moins d'un demi-milliseconde de calcul par image.
 
+## La vie du monde
+
+Les villageois et les monstres sauvages vivent d'heure en heure, selon le
+temps, la saison et leurs voisins (`src/core/routines.cpp`). Ce que chacun
+fait est son activité (`Creature::act`, sauvegardée).
+
+**Les villageois rentrent chez eux.** Chaque villageois qui a une maison à
+moins de 45 m de sa place (chaumière, hutte, ferme, cabane, chalet, le phare
+pour Yvon) y rentre :
+
+- la nuit, chacun à ses heures (couché entre 20 h 30 et 22 h 30, levé entre
+  5 h 30 et 7 h 30) ;
+- quand il pleut fort, qu'il neige fort ou qu'il y a de l'orage là où il vit
+  (il ressort quand la pluie a bien diminué) ;
+- en hiver : les jours sont courts (dedans tôt le soir, sorti tard le
+  matin) et il reste au coin du feu bien des moments de la journée (environ
+  quatre fois sur dix, par tranches de deux heures).
+
+Vu par le joueur (à moins de 45 m), il marche jusqu'à sa porte, en
+contournant ce qui le gêne, et y entre ; plus loin, il entre ou sort d'un
+coup. Rentré, on ne le voit plus dehors et on ne peut plus lui parler à sa
+porte. Mais en entrant dans sa maison, on l'y trouve : il parle, soigne,
+vend comme dehors. Devant la porte, le panneau dit qui est à l'intérieur ;
+sur la carte, ses icônes sont plus pâles, à sa porte. Le Piou de Mirabelle
+rentre avec elle. Restent dehors par tous les temps : les dresseurs qui
+attendent un combat (Bastien, Romane, Tristan), Barnabé à son arène, frère
+Gauthier à la porte de l'abbaye, les moines dans l'église et ceux qui n'ont
+pas de maison près d'eux.
+
+**Les monstres sauvages** (ceux qui n'ont pas de rôle : pas le troupeau du
+berger, ni les monstres des dresseurs, ni les agressifs) :
+
+- **l'heure** : la plupart dorment la nuit (Chipou dort le jour) ;
+  immobiles, yeux fermés, ils respirent lentement. Les frileux (Piou, Zapou,
+  Chipou, Givri) vont se blottir près d'un feu de camp s'il y en a un près
+  d'eux. Ils se réveillent quand le joueur arrive à 4 m et ne crient pas en
+  dormant ;
+- **le temps** : ceux qui n'aiment pas la pluie (Piou, Zapou, Chipou, Laini,
+  Taupi, Cabri, Givri) vont sous l'arbre le plus proche ; sans arbre, ils
+  attendent, blottis. Champi se met à l'ombre d'un arbre à midi en été.
+  Gloubi, Champi et Ploufi aiment la pluie et vont plus loin ; Zapou file
+  dans tous les sens pendant l'orage, Givri dans la neige ;
+- **les lieux** : ils vont boire au bord de l'eau (lac, rivière, mer ; plus
+  souvent par les chaudes après-midi d'été), le nez vers l'eau. Laini, Cabri
+  et Piou broutent ou picorent ;
+- **les autres** : Laini et Cabri restent en troupeau ; les joueurs de leur
+  espèce se courent après ; Chipou chasse les Piou, Givri les Piou, Taupi et
+  Zapou (la proie s'enfuit et s'en sort toujours) ; un monstre de l'espèce du
+  compagnon vient le renifler, et deux de la même espèce se reniflent.
+
+Un combat les réveille et les rend à la bataille.
+
 ## Saisons et vent
 
 Quatre saisons et la force du vent, choisies dans le menu des paramètres
 (sous la météo) et gardées d'une visite à l'autre par la page. Elles ne
-changent rien au jeu pour l'instant (ni monstres, ni combats, ni
-déplacements) : seulement ce qu'on voit. La saison n'est pas dans la
-sauvegarde.
+changent rien aux combats ni aux déplacements ; l'hiver garde les
+villageois chez eux une bonne partie du jour (« La vie du monde »). La page
+donne la saison au monde à chaque image (`World::sky`, avec le temps choisi
+dans le menu de débogage) ; elle n'est pas dans la sauvegarde.
 
 - **Couleurs** (dans le shader des maillages, `seasonal()` de
   `src/render/gles3/gles3_renderer.cpp`, d'après `View::season`) : seulement
@@ -1544,6 +1597,11 @@ téléporteurs), les épreuves de l'abbaye gagnées et les victoires contre
 Tristan. Les sauvegardes plus anciennes se chargent : aucune épreuve, les
 habitants des sites arrivent ; les arbres et rochers de la vallée sur un
 chemin disparaissent comme avant.
+
+Version 30 : l'activité de chaque créature (`Creature::act` : chez lui,
+endormi, à l'abri…) et celle avec qui elle joue ou qu'elle chasse. Les
+sauvegardes plus anciennes se chargent : les villageois dehors, les
+monstres éveillés.
 
 Version 24 : quatre sorts d'aventure et quatre sorts de capture. Les
 sauvegardes plus anciennes se chargent : les deux derniers emplacements

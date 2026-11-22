@@ -6,6 +6,7 @@
 #include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/roads.hpp"
+#include "monstres/core/routines.hpp"
 #include "monstres/core/sites.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
@@ -841,10 +842,13 @@ void step_wild(World& w, const Surroundings& boxes, Creature& c) {
   Body& b = c.body;
   const Body& p = w.player;
 
+  // Its life (routines.hpp): asleep, after its prey, playing, away from a hunter...
+  wild_watch(w, c);
   float away_x, away_z;
   const float player_distance = direction_to(p.pos.x, p.pos.z, {b.pos.x, b.pos.z}, away_x, away_z);
-  if (c.species == Species::Bird && player_distance < rules::kBirdFleeDistance && c.mind != Mind::Flee) {
+  if (c.species == Species::Bird && !asleep(c) && player_distance < rules::kBirdFleeDistance && c.mind != Mind::Flee) {
     c.mind = Mind::Flee;
+    c.act = Activity::None;
     c.timer = 2 * rules::kTicksPerSecond;
     c.target = clamp_to_world({b.pos.x + away_x * 6, b.pos.z + away_z * 6}, 1.0f);
   }
@@ -855,23 +859,43 @@ void step_wild(World& w, const Surroundings& boxes, Creature& c) {
     if (c.timer > 0) {
       --c.timer;
       // Birds hop on the spot from time to time.
-      if (c.species == Species::Bird && b.on_ground && w.rng.below(200) == 0) jump = true;
-    } else {
+      if (c.species == Species::Bird && c.act == Activity::None && b.on_ground && w.rng.below(200) == 0) jump = true;
+    } else if (!wild_decide(w, c)) {
       c.mind = Mind::Wander;
       c.timer = 8 * rules::kTicksPerSecond;  // give up after 8 s
       // The shepherd's flock stays in its pen, the farm's boarders in their paddock.
-      const float r = c.tag == Tag::Flock ? rules::kPenHalf - 1.2f : c.tag == Tag::Boarder ? 6.0f : rules::kWanderRadius;
+      const float r = wander_reach(w, c);
       c.target = clamp_to_world({c.home.x + random_range(w.rng, -r, r), c.home.z + random_range(w.rng, -r, r)}, 1.0f);
     }
   } else {
     const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
     if (d < 0.4f || c.timer == 0) {
+      // There (or it gave up): what it came for, a while; else a rest.
       c.mind = Mind::Idle;
-      c.timer = static_cast<uint16_t>(rules::kTicksPerSecond + w.rng.below(3 * rules::kTicksPerSecond));
       dir_x = dir_z = 0;
+      const auto secs = [](float s) { return static_cast<uint16_t>(s * rules::kTicksPerSecond); };
+      switch (c.act) {
+        case Activity::Shelter: c.timer = secs(12) + static_cast<uint16_t>(w.rng.below(8 * rules::kTicksPerSecond)); break;
+        case Activity::Warm: c.timer = secs(20); break;
+        case Activity::Sniff: c.timer = secs(3); break;
+        case Activity::Drink: {
+          Vec2 edge, facing;
+          if (water_edge(w, {b.pos.x, b.pos.z}, 3.0f, edge, facing)) {
+            b.facing_x = facing.x;
+            b.facing_z = facing.z;
+          }
+          c.timer = secs(4) + static_cast<uint16_t>(w.rng.below(3 * rules::kTicksPerSecond));
+          break;
+        }
+        default:
+          c.act = Activity::None;
+          c.other = 0;
+          c.timer = static_cast<uint16_t>(rules::kTicksPerSecond + w.rng.below(3 * rules::kTicksPerSecond));
+          break;
+      }
     } else {
       --c.timer;
-      speed = c.mind == Mind::Flee ? info.run_speed : info.walk_speed;
+      speed = wild_runs(c) ? info.run_speed : info.walk_speed;
     }
   }
 
@@ -901,6 +925,36 @@ void step_villager(World& w, const Surroundings& s, Creature& c) {
     b.facing_x = to_x;
     b.facing_z = to_z;
     c.timer = static_cast<uint16_t>(rules::kTicksPerSecond / 2);
+  } else if (c.act == Activity::GoHome) {
+    // Home (routines.hpp): to its door, round what stands in the way.
+    const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
+    if (d < 0.5f || c.timer == 0) {
+      c.act = Activity::Home;
+      c.mind = Mind::Idle;
+      c.other = 0;
+      b.pos = {c.target.x, w.ground.empty() ? b.pos.y : w.ground.height(c.target.x, c.target.z), c.target.z};
+      return;
+    }
+    --c.timer;
+    c.mind = Mind::Wander;
+    uint32_t stuck = c.other & 0xFFu, aside = (c.other >> 8) & 0xFFu, left = (c.other >> 16) & 1u;
+    if (aside > 0) {  // a moment along the obstacle
+      const float sx = left ? -dir_z : dir_z, sz = left ? dir_x : -dir_x;
+      dir_x = sx;
+      dir_z = sz;
+      --aside;
+    }
+    move_body(s, b, info.shape, dir_x, dir_z, info.walk_speed, false, info.jump_speed);
+    b.facing_x = dir_x;
+    b.facing_z = dir_z;
+    stuck = b.speed < 0.25f * info.walk_speed ? stuck + 1 : 0;
+    if (stuck > 30) {
+      stuck = 0;
+      aside = 50;
+      left ^= 1u;
+    }
+    c.other = std::min(stuck, 255u) | (aside << 8) | (left << 16);
+    return;
   } else if (c.mind == Mind::Greet || c.mind == Mind::Idle) {
     if (c.timer > 0) {
       --c.timer;
@@ -908,7 +962,8 @@ void step_villager(World& w, const Surroundings& s, Creature& c) {
       c.mind = Mind::Wander;
       c.timer = 10 * rules::kTicksPerSecond;
       // Gaspard stays by the teleporter, Bastien at the edge of the village, Isidore on the square.
-      const float r = c.npc == npc::kGaspard || c.npc == npc::kBastien ? 2.5f
+      const float r = inside(w)                                        ? 1.0f  // in its house
+                      : c.npc == npc::kGaspard || c.npc == npc::kBastien ? 2.5f
                       : c.npc == npc::kMentor || c.npc > npc::kMentor ? 1.5f  // the west's stay at their place
                                                                       : rules::kVillageRadius - 4.0f;
       c.target = {c.home.x + random_range(w.rng, -r, r), c.home.z + random_range(w.rng, -r, r)};
@@ -1606,6 +1661,19 @@ bool place_trainer(const World& w, Creature& c) {
     }
   }
   return false;  // nowhere free: anywhere in the village
+}
+
+WeatherField weather_field(const World& w) {
+  WeatherField f;
+  f.seed = w.seed;
+  f.tick = w.tick;
+  f.season = w.sky.season;
+  f.center = {w.player.pos.x, w.player.pos.z};
+  f.forced = w.sky.forced;
+  f.forced_amount = w.sky.forced_amount;
+  f.afar = w.sky.afar;
+  f.afar_at = w.sky.afar_at;
+  return f;
 }
 
 void spawn_creatures(World& w) {
@@ -2707,6 +2775,7 @@ void step(World& w, const Input& in) {
       continue;
     }
     if ((steered && i == 0) || foe >= 0 || preparing) {
+      if (i > 0) c.act = Activity::None;  // awake, fighting
       const Steer st = preparing ? battle_prepare(w, i == 0 ? Stand::Ally : Stand::Foe)
                        : i == 0  ? battle_ally(w, in, dir_x, dir_z)
                                  : battle_foe(w, static_cast<size_t>(foe));
@@ -2746,7 +2815,12 @@ void step(World& w, const Input& in) {
       continue;
     }
     if (c.tag == Tag::LostPiou && w.quests[static_cast<size_t>(QuestId::LostPiou)].stage == QuestStage::Done) {
-      step_pet(w, s, c, npc::kMirabelle);
+      // Mirabelle's Piou goes home with her.
+      const int owner = npc_index(w, npc::kMirabelle);
+      const bool home = owner > 0 && !about(w.creatures[static_cast<size_t>(owner)]);
+      if (home) c.body.pos = w.creatures[static_cast<size_t>(owner)].body.pos;
+      c.act = home ? Activity::Home : Activity::None;
+      if (!home) step_pet(w, s, c, npc::kMirabelle);
       continue;
     }
     if (c.tag == Tag::Rival) {
@@ -2765,6 +2839,8 @@ void step(World& w, const Input& in) {
     }
     switch (c.species) {
       case Species::Villager:
+        villager_routine(w, c);  // home at night, in the rain... (routines.hpp)
+        if (!about(c)) break;
         // Far from the player, the village stands still.
         if (near_player(w, c.body.pos.x, c.body.pos.z, rules::kSimulationRadius)) {
           step_villager(w, s, c);

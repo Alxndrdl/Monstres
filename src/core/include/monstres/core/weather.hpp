@@ -62,6 +62,18 @@ inline constexpr float kAfarRadius = 380.0f;
 // Where the wind blows (m/s, the same everywhere): the weather drifts with it.
 Vec2 wind_velocity(uint64_t seed);
 
+// What the page chooses (World::sky, not saved): the season, and the
+// debug menu's weather: `forced` (strength forced_amount, 0: none) around
+// the player; with `afar`, the sun here and a storm at `afar_at`.
+struct Sky {
+  Season season = Season::Summer;
+  Weather forced;
+  float forced_amount = 0;
+  bool afar = false;
+  Vec2 afar_at;
+  bool operator==(const Sky&) const = default;
+};
+
 // The weather at (x, z): drawn from the seed and the tick, possibly with a
 // kind chosen in the debug menu around a point (forced), and a storm
 // placed ahead for testing (afar).

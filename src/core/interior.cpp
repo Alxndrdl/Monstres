@@ -3,6 +3,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/heightmap.hpp"
 #include "monstres/core/north.hpp"
+#include "monstres/core/routines.hpp"
 #include "monstres/core/sites.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
@@ -159,6 +160,13 @@ float piece_distance(const RoomPiece& p, float x, float z, uint64_t noise) {
 }
 
 }  // namespace
+
+PlaceKind place_behind(ObjectKind k) { return place_of(k); }
+
+Vec2 door_use_spot(const Object& o) {
+  const DoorFrame f = frame_of(o.kind);
+  return local_to_world(o, f.use_x, f.use_z);
+}
 
 // ---- Shape -------------------------------------------------------------------
 
@@ -1068,6 +1076,7 @@ bool enter_place(World& w, Place place, bool from_roof) {
   if (place.kind == PlaceKind::Burrow) spawn_moles(w);
   if (place.kind == PlaceKind::Mine) spawn_miners(w);
   if (place.kind == PlaceKind::Temple) spawn_monks(w);
+  if (place.kind == PlaceKind::House || place.kind == PlaceKind::Lighthouse) spawn_residents(w);  // who lives there
   return true;
 }
 

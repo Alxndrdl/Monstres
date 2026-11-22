@@ -193,11 +193,14 @@ Input current_input(App& app) {
   return in;
 }
 
+void sync_sky(App& app);
+
 void tick(App& app, const Input& in) {
   World& w = app.world;
   const bool was_on_ground = w.player.on_ground;
   const bool fighting = w.battle.phase == BattlePhase::Fight;
   const size_t creatures = w.creatures.size();
+  sync_sky(app);
   step(w, in);
   if (app.hold_clock) w.clock = app.held_clock;
   // A press is kept a few ticks, until it happens (landing, end of a cooldown).
@@ -246,18 +249,20 @@ void follow_battle(App& app, double dt_ms) {
 
 constexpr int kWeatherAfar = kWeatherKinds;  // debug: the sun here, a storm ahead
 
+// What the page chose (the season, the debug menu's weather), for the world: its villagers and monsters live by it.
+void sync_sky(App& app) {
+  Sky& sky = app.world.sky;
+  sky.season = app.season;
+  sky.forced = app.forced_now;
+  sky.forced_amount = app.forced_amount;
+  sky.afar = app.weather_choice == kWeatherAfar;
+  sky.afar_at = app.afar_at;
+}
+
 // The weather now: the world's, with what the debug menu chose.
-WeatherField weather_field(const App& app) {
-  WeatherField f;
-  f.seed = app.world.seed;
-  f.tick = app.world.tick;
-  f.season = app.season;
-  f.center = {app.world.player.pos.x, app.world.player.pos.z};
-  f.forced = app.forced_now;
-  f.forced_amount = app.forced_amount;
-  f.afar = app.weather_choice == kWeatherAfar;
-  f.afar_at = app.afar_at;
-  return f;
+WeatherField weather_field(App& app) {
+  sync_sky(app);
+  return weather_field(app.world);
 }
 
 // The weather chosen in the debug menu comes in a second and a half (at once when frozen).

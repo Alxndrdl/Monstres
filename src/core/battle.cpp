@@ -1151,9 +1151,7 @@ const char* cannot_cast(const World& w, size_t slot) {
 }
 
 bool can_heal_team(const World& w, uint8_t n) {
-  return (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene || n == npc::kAgathe || n == npc::kAubin ||
-          n == npc::kGauthier || n == npc::kYsolde) &&
-         w.battle.phase == BattlePhase::None && near_npc(w, n);
+  return npc::healer(n) && w.battle.phase == BattlePhase::None && near_npc(w, n);
 }
 
 namespace {

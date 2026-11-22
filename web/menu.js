@@ -1500,6 +1500,7 @@
       ctx.textBaseline = 'middle';
       for (const m of game.marks()) {
         if (Math.hypot(m.x - p.x, m.z - p.z) > 200 && !m.marks.includes('farm')) continue;  // the farm: from afar too
+        ctx.globalAlpha = m.home ? 0.55 : 1;  // gone home: at its door, paler
         m.marks.forEach((id, i) => {
           const [glyph, color] = ICONS[id] || ['·', '#fff'];
           const cx = X(m.x) + (i - (m.marks.length - 1) / 2) * 15, cy = Y(m.z) - 12;
@@ -1513,6 +1514,7 @@
           ctx.fillStyle = color;
           ctx.fillText(glyph, cx, cy + 0.5);
         });
+        ctx.globalAlpha = 1;
       }
     }
 

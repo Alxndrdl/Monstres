@@ -2,6 +2,7 @@
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/interior.hpp"
+#include "monstres/core/routines.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/north.hpp"
@@ -1617,6 +1618,7 @@ int pick_creature(const World& w, const View& view, float ndc_x, float ndc_y) {
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     if (i == 0 && w.active < 0) continue;  // in the crystal
     const Creature& c = w.creatures[i];
+    if (!about(c)) continue;  // in its house
     Box b = body_box(c.body, species_info(c.species).shape);
     b.min = b.min - Vec3{kMargin, kMargin * 0.5f, kMargin};
     b.max = b.max + Vec3{kMargin, kMargin, kMargin};

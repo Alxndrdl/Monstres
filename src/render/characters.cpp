@@ -6,6 +6,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/interior.hpp"
 #include "monstres/core/quests.hpp"
+#include "monstres/core/routines.hpp"
 #include "monstres/core/variants.hpp"
 
 #include <algorithm>
@@ -969,6 +970,23 @@ void pose_creature(const Creature& c, float time, float seed, std::vector<PartPo
       break;
   }
   blink(poses, rig, time, seed);
+  // What it is busy with (routines.hpp): asleep, eyes shut, breathing slowly,
+  // low on its legs; drinking or nibbling, its nose to the ground.
+  if (asleep(c)) {
+    const float breath = 1.0f + 0.035f * std::sin(t * 1.3f);
+    for (size_t i = 0; i < rig.size(); ++i) {
+      if (is_eye(rig[i].mesh)) poses[i].scale.y = 0.12f;
+      if (rig[i].parent < 0) {
+        poses[i].scale = {poses[i].scale.x * 1.04f, poses[i].scale.y * 0.86f * breath, poses[i].scale.z * 1.04f};
+        poses[i].rotation = Quat{};
+      }
+    }
+  } else if ((c.act == Activity::Drink || c.act == Activity::Graze) && c.mind == Mind::Idle) {
+    const float nod = 0.28f + 0.09f * std::sin(t * (c.act == Activity::Drink ? 5.0f : 2.4f));
+    for (size_t i = 0; i < rig.size(); ++i) {
+      if (rig[i].parent < 0) poses[i].rotation = poses[i].rotation * quat_x(nod);
+    }
+  }
 }
 
 // ---- Assembly -------------------------------------------------------------------------
@@ -1338,6 +1356,7 @@ void add_characters(const World& w, float time, DrawList& list, const Frustum* v
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     if (i == 0 && w.active < 0) continue;  // in the crystal
     const Creature& c = w.creatures[i];
+    if (!about(c)) continue;  // in its house
     if (view) {  // out of view: not drawn (room for the biggest ones, their shadows, what they hold)
       const Vec3 p = c.body.pos;
       if (!in_view(*view, Aabb{p.x - 3, p.y - 1.5f, p.z - 3, p.x + 3, p.y + 5, p.z + 3})) continue;
@@ -1696,7 +1715,7 @@ size_t world_lights(const World& w, float x, float z, float night, float time, P
   }
   for (size_t i = 0; i < w.creatures.size(); ++i) {
     const Creature& c = w.creatures[i];
-    if (!monster_stats(c.species).is_monster || (i == 0 && w.active < 0)) continue;
+    if (!monster_stats(c.species).is_monster || (i == 0 && w.active < 0) || !about(c)) continue;
     const CreatureLook look = creature_look(c.species, c.genes);
     const BodyShape& shape = species_info(c.species).shape;
     bool bulbs = false;

@@ -234,6 +234,8 @@ void write_world(Writer& out, const World& w) {
     out.u8(static_cast<uint8_t>((c.released ? 1 : 0) | (c.beaten ? 2 : 0)));
     out.u8(c.npc);
     out.u8(static_cast<uint8_t>(c.tag));
+    out.u8(static_cast<uint8_t>(c.act));
+    out.u32(c.other);
   }
   const size_t name_bytes = std::min(w.wizard.name.size(), kMaxNameBytes);
   out.u8(static_cast<uint8_t>(name_bytes));
@@ -352,6 +354,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_north = version >= 27;        // the world grown north: its squares, its places, teleporters, species
   const bool with_arena = version >= 28;        // Rochebrune: its teleporter, the arena's cups
   const bool with_sites = version >= 29;        // the sites: their teleporters, the abbey's trials, Tristan
+  const bool with_routines = version >= 30;     // the creatures' activities (routines.hpp)
   // Species in the bestiary and the counts: two more from version 19.
   const size_t species_saved = with_north    ? kSpeciesCount
                                : with_west   ? kSpeciesCountV26
@@ -427,6 +430,13 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
           return fail(error, LoadError::Corrupt);
         }
         c.tag = static_cast<Tag>(tag);
+      }
+      if (with_routines) {
+        uint8_t act = 0;
+        if (!in.u8(act) || act >= static_cast<uint8_t>(Activity::Count) || !in.u32(c.other)) {
+          return fail(error, LoadError::Corrupt);
+        }
+        c.act = static_cast<Activity>(act);
       }
     }
   }
