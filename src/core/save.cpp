@@ -3,6 +3,7 @@
 #include "monstres/core/interior.hpp"
 #include "monstres/core/north.hpp"
 #include "monstres/core/roads.hpp"
+#include "monstres/core/sites.hpp"
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/quests.hpp"
@@ -132,6 +133,7 @@ constexpr size_t kQuestCountV26 = 13;    // before the mine's
 constexpr uint8_t kTeleportersV22 = 5;
 constexpr uint8_t kTeleportersV26 = 7;  // before the north's
 constexpr uint8_t kTeleportersV27 = 9;  // before Rochebrune's
+constexpr uint8_t kTeleportersV28 = 10;  // before the sites'
 constexpr uint8_t kPlacesV22 = 4;        // outside, cave, house, tower
 
 // Chromatic (1), elemental (2), the build (bits 2-3).
@@ -283,6 +285,8 @@ void write_world(Writer& out, const World& w) {
   out.u16(static_cast<uint16_t>(w.farm.size()));
   for (const Monster& m : w.farm) write_monster(out, m);
   out.u8(w.cups);  // version 28
+  out.u8(w.trials);  // version 29
+  out.u8(w.tristan_wins);
 }
 
 }  // namespace
@@ -347,6 +351,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   const bool with_falls_moved = version >= 26;  // the waterfall away from the cave (the river elsewhere there)
   const bool with_north = version >= 27;        // the world grown north: its squares, its places, teleporters, species
   const bool with_arena = version >= 28;        // Rochebrune: its teleporter, the arena's cups
+  const bool with_sites = version >= 29;        // the sites: their teleporters, the abbey's trials, Tristan
   // Species in the bestiary and the counts: two more from version 19.
   const size_t species_saved = with_north    ? kSpeciesCount
                                : with_west   ? kSpeciesCountV26
@@ -543,7 +548,8 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     uint8_t quests = 0;
     // Before version 18 there were two quests (the giant Champi's came then),
     // before 19 three (fighting, healing and the main quest came then).
-    const uint8_t teleporters = with_arena   ? static_cast<uint8_t>(kTeleporterCount)
+    const uint8_t teleporters = with_sites   ? static_cast<uint8_t>(kTeleporterCount)
+                                : with_arena ? kTeleportersV28
                                 : with_north ? kTeleportersV27
                                 : with_west  ? kTeleportersV26
                                              : kTeleportersV22;
@@ -607,6 +613,9 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
     heal_farm(w);  // cared for there
   }
   if (with_arena && (!in.u8(w.cups) || w.cups >= (1u << rules::kCups))) return fail(error, LoadError::Corrupt);
+  if (with_sites && (!in.u8(w.trials) || w.trials > rules::kTrialsAll || !in.u8(w.tristan_wins))) {
+    return fail(error, LoadError::Corrupt);
+  }
   // Where the player is: inside a cave, a house, the tower (version 22).
   uint8_t place = 0;
   Body inner;
@@ -738,6 +747,7 @@ std::optional<World> read_world(std::span<const uint8_t> bytes, LoadError* error
   add_west_npcs(w);
   add_north_npcs(w);
   add_road_npcs(w);
+  add_site_npcs(w);
   // Before version 19: Isidore comes to the village (and Bastien's lesson is
   // learned if he was beaten already: told to him, it is done).
   if (!with_looks) add_mentor(w);

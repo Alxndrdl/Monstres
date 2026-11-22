@@ -4,6 +4,7 @@
 #include "monstres/core/heightmap.hpp"
 #include "monstres/core/north.hpp"
 #include "monstres/core/quests.hpp"
+#include "monstres/core/sites.hpp"
 #include "monstres/core/west.hpp"
 
 #include <algorithm>
@@ -204,8 +205,9 @@ std::vector<Vec2> cheapest_way(const Land& land, Vec2 from) {
 
 RoadsLayout make_roads(uint64_t seed, const Path& path, const VillageLayout& village, const RuinsLayout& ruins,
                        const ForestLayout& forest, const CaveLayout& cave, const CastleLayout& castle, const WestLayout& west,
-                       const NorthLayout& north) {
+                       const NorthLayout& north, SitesLayout& sites) {
   RoadsLayout r;
+  sites = {};
   if (path.points.size() < 2 || !west.valid() || !north.valid()) return r;
   const auto ground = [&](float x, float z) {
     return natural_height(seed, x, z) + terrace_rise(seed, path, west, cave, x, z);
@@ -268,11 +270,14 @@ RoadsLayout make_roads(uint64_t seed, const Path& path, const VillageLayout& vil
   land.target.assign(cells, 0);
   land.wander.resize(cells);
   land.wet.assign(cells, 0);
+  std::vector<uint8_t> low(cells, 0);  // low ground by the sea: avoided (below)
+  std::vector<float> edges(cells);       // the side of the terrace's edge (for the sites)
   for (int i = 0; i < Land::kNx; ++i) {
     for (int j = 0; j < Land::kNz; ++j) {
       const float x = Land::x_of(i), z = Land::z_of(j);
       const size_t k = Land::at(i, j);
       const float edge_side = scarp_side(west, x, z);
+      edges[k] = edge_side;
       float h = quick_ground(x, z, edge_side);
       float extra = 0;
       // The north's valley up to the col: its floor (the relief cuts the mountains back).
@@ -286,7 +291,9 @@ RoadsLayout make_roads(uint64_t seed, const Path& path, const VillageLayout& vil
       if ((on_path || on_road) && !in_village(village, x, z, 6.0f) && distance_to_stream(west.stream, x, z, 14.0f) >= 13.0f) {
         land.target[k] = 1;
       }
-      if (h < rules::kSeaLevel + 1.2f) extra = kClosed;  // (the terrace lifts the continent's low ground up north)
+      // (The terrace lifts the continent's low ground up north.)
+      if (h < rules::kSeaLevel + 0.25f) extra = kClosed;
+      else if (h < rules::kSeaLevel + 1.2f) low[k] = 1;
       if (distance_to_stream(west.stream, x, z, 10.0f) < 9.0f || in_lake(village.lake, x, z, 4.0f)) {
         extra = kClosed;
         land.wet[k] = 1;
@@ -321,6 +328,70 @@ RoadsLayout make_roads(uint64_t seed, const Path& path, const VillageLayout& vil
     }
   }
 
+  // Where the lanes can go from the path and the road (the low ground by the
+  // sea too): the sites are placed there (make_sites), then closed.
+  {
+    std::vector<uint8_t> reached(cells, 0);
+    std::vector<int32_t> todo;
+    for (size_t k = 0; k < cells; ++k) {
+      if (land.target[k]) {
+        reached[k] = 1;
+        todo.push_back(static_cast<int32_t>(k));
+      }
+    }
+    while (!todo.empty()) {
+      const int32_t k = todo.back();
+      todo.pop_back();
+      const int i = k / Land::kNz, j = k % Land::kNz;
+      static constexpr int kDi[4] = {1, -1, 0, 0}, kDj[4] = {0, 0, 1, -1};
+      for (int d = 0; d < 4; ++d) {
+        const int a = i + kDi[d], b = j + kDj[d];
+        if (a < 0 || b < 0 || a >= Land::kNx || b >= Land::kNz) continue;
+        const size_t n = Land::at(a, b);
+        if (reached[n] || land.extra[n] >= kClosed) continue;
+        reached[n] = 1;
+        todo.push_back(static_cast<int32_t>(n));
+      }
+    }
+    const auto reachable = [&](float x, float z) {
+      return rules::in_world(x, z, 0.0f) && reached[Land::at(Land::i_of(x), Land::j_of(z))] != 0;
+    };
+    // Between the grid's middles.
+    const auto between = [&](const std::vector<float>& v, float x, float z) {
+      const float fx = std::clamp((x - Land::kMinX) / Land::kCell - 0.5f, 0.0f, static_cast<float>(Land::kNx - 1) - 0.001f);
+      const float fz = std::clamp((z - Land::kMinZ) / Land::kCell - 0.5f, 0.0f, static_cast<float>(Land::kNz - 1) - 0.001f);
+      const int i = static_cast<int>(fx), j = static_cast<int>(fz);
+      const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
+      const auto a = [&](int p, int q) { return v[Land::at(p, q)]; };
+      const float top = a(i, j) + (a(i + 1, j) - a(i, j)) * tx, bottom = a(i, j + 1) + (a(i + 1, j + 1) - a(i, j + 1)) * tx;
+      return top + (bottom - top) * tz;
+    };
+    SiteHints hints;
+    hints.reachable = reachable;
+    hints.ground = [&](float x, float z) { return between(land.height, x, z); };
+    hints.edge = [&](float x, float z) { return between(edges, x, z); };
+    hints.keep_off = {{r.inn, rules::kInnRadius}, {r.farmstead, rules::kFarmsteadRadius}, {r.sawmill, rules::kSawmillRadius}};
+    sites = make_sites(seed, path, village, ruins, forest, cave, castle, west, north, hints);
+    for (int i = 0; i < Land::kNx; ++i) {
+      for (int j = 0; j < Land::kNz; ++j) {
+        const float x = Land::x_of(i), z = Land::z_of(j);
+        const size_t k = Land::at(i, j);
+        const Vec2 p{x, z};
+        // The low ground by the sea: avoided if there is another way.
+        if (low[k] && land.extra[k] < kClosed) land.extra[k] += 2.0f;
+        if (in_site(sites, x, z, 2.0f)) {
+          // (The port's quay is open, not its houses; the camp's ground too.)
+          const bool open = (in_port(sites, x, z) || distance(p, sites.camp) < rules::kSeaCampRadius - 3.0f) &&
+                            land.height[k] > rules::kSeaLevel + 0.5f;
+          if (!open) land.extra[k] = kClosed;
+        }
+        for (const Vec2 h : sites.port_houses) {
+          if (distance(p, h) < 5.0f) land.extra[k] = kClosed;
+        }
+      }
+    }
+  }
+
   // The lanes, each from its place to the nearest of the path, the road or
   // a lane already made (it joins it there).
   const auto toward_ways = [&](Vec2 c) {
@@ -348,8 +419,36 @@ RoadsLayout make_roads(uint64_t seed, const Path& path, const VillageLayout& vil
   goals.push_back({north.arena + north.arena_front * (rules::kArenaRadius + 2.0f), LaneTo::Arena});
   goals.push_back({north.ranch + north.ranch_front * 5.5f, LaneTo::Ranch});
   goals.push_back({north.grotto + north.grotto_front * 5.0f, LaneTo::Grotto});
+  if (sites.valid()) {
+    if (sites.port.x != 0 || sites.port.z != 0) {
+      goals.push_back({sites.port - sites.port_sea * (rules::kPortDepth + 3.0f), LaneTo::Port});
+    }
+    if (!sites.abbey_way.empty()) goals.push_back({sites.abbey_way.front(), LaneTo::Abbey});
+    const auto placed = [](Vec2 p) { return p.x != 0 || p.z != 0; };
+    if (placed(sites.camp)) goals.push_back({sites.camp + sites.camp_front * (rules::kSeaCampRadius + 2.0f), LaneTo::Camp});
+    if (placed(sites.lookout)) goals.push_back({sites.lookout + sites.lookout_front * (rules::kLookoutRadius + 1.0f), LaneTo::Lookout});
+    if (placed(sites.quarry)) {
+      goals.push_back({sites.quarry + sites.quarry_front * (rules::kQuarryRadius + rules::kQuarryRim + 3.0f), LaneTo::Quarry});
+    }
+    if (placed(sites.chapel)) goals.push_back({sites.chapel + sites.chapel_front * (rules::kChapelRadius - 4.0f), LaneTo::Chapel});
+    if (placed(sites.apiary)) goals.push_back({sites.apiary + sites.apiary_front * (rules::kApiaryRadius - 3.0f), LaneTo::Apiary});
+  }
   for (const Goal& g : goals) {
     std::vector<Vec2> way = cheapest_way(land, g.at);
+    // (A site shut in where it starts: from a little further out, towards the
+    // nearest way, never over the water.)
+    const Vec2 out = toward_ways(g.at);
+    for (int k = 1; k <= 5 && way.size() < 2 && g.to >= LaneTo::Port; ++k) {
+      const Vec2 from = g.at + out * (7.0f * static_cast<float>(k));
+      bool dry = true;
+      for (float t = 0; t <= 1.0f && dry; t += 0.1f) {
+        const Vec2 q = g.at + (from - g.at) * t;
+        dry = distance_to_stream(west.stream, q.x, q.z, 10.0f) >= 9.0f && !in_lake(village.lake, q.x, q.z, 4.0f);
+      }
+      if (!dry) break;
+      way = cheapest_way(land, from);
+      if (way.size() >= 2) way.insert(way.begin(), g.at);
+    }
     if (way.size() < 2) continue;
     // Its ends exactly: at the place, and on the line it joins.
     way.front() = g.at;
@@ -397,6 +496,14 @@ RoadsLayout make_roads(uint64_t seed, const Path& path, const VillageLayout& vil
     }
     r.lanes.push_back(std::move(lane));
     r.lane_to.push_back(g.to);
+  }
+  // The abbey's own way up its slope, from the foot its lane leads to.
+  if (sites.abbey_way.size() >= 6) {
+    Road way;
+    way.points = sites.abbey_way;
+    make_lane_chunks(way);
+    r.lanes.push_back(std::move(way));
+    r.lane_to.push_back(LaneTo::AbbeyWay);
   }
   // Shrines at some forks (where a lane leaves the path or the road).
   for (size_t k = 0; k < r.lanes.size(); ++k) {

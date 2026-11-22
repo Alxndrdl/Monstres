@@ -66,7 +66,7 @@ TEST_CASE("no tree, rock or building in the water or on a cliff") {
       CAPTURE(o.pos);
       const bool in_water_by_design = o.kind == ObjectKind::Bridge || o.kind == ObjectKind::WaterMill ||
                                       o.kind == ObjectKind::HiddenCave || o.kind == ObjectKind::Collider ||
-                                      o.kind == ObjectKind::Log;
+                                      o.kind == ObjectKind::Log || o.kind == ObjectKind::Pier || o.kind == ObjectKind::Boat;
       if (!in_water_by_design) CHECK_FALSE(wet(w, at.x, at.z));
       if (nature(o.kind)) CHECK_FALSE(steep_ground(w, at.x, at.z));
     }

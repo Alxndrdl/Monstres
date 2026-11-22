@@ -501,13 +501,15 @@ window.MonstresLore = {
     roof: 'Toit de la tour',
     house: { cottage: 'Maison', chimney: 'Grande maison', hut: 'Hutte', farmhouse: 'Ferme de Capucine', cabin: 'Cabane du bûcheron',
       chalet: 'Chalet' },
-    spots: { refuge: 'Refuge du Col', inn: 'Auberge du Chemin', farmstead: 'Ferme des Genêts', sawmill: 'Scierie' },
+    spots: { refuge: 'Refuge du Col', inn: 'Auberge du Chemin', farmstead: 'Ferme des Genêts', sawmill: 'Scierie',
+      lookout: 'Tour de guet des Falaises', apiary: 'Hutte d’Héloïse', chapel: 'Chapelle Saint-Roch' },
+    temple: 'Église de l’abbaye',
     mine: 'Vieille mine',
     grotto: 'Grotte des Givres',
     burrow: 'Terrier',
     hollowTree: 'Arbre creux',
     lighthouse: 'Phare',
-    roofs: { tower: 'Toit de la tour', hollowTree: 'Cime de l’arbre creux', lighthouse: 'Galerie du phare' },
+    roofs: { tower: 'Toit de la tour', hollowTree: 'Cime de l’arbre creux', lighthouse: 'Galerie du phare', lookout: 'Sommet de la tour de guet' },
     actions: { enter: 'Entrer', leave: 'Sortir', climb: 'Monter', descend: 'Descendre' },
   },
   // Every monster's fourth move.
@@ -558,6 +560,7 @@ window.MonstresLore = {
     village: 'Village', ruins: 'Ruines de la Tour', forest: 'Forêt des Murmures', cave: 'Grotte aux Cristaux',
     castle: 'Château de Corbeval', farm: 'Exploitation de Capucine', menhirs: 'Cercle des Menhirs',
     refuge: 'Refuge du Col', col: 'Col des Givres', hamlet: 'Rochebrune',
+    port: 'Port-Goéland', abbey: 'Abbaye de Hautepierre', camp: 'Camp des Embruns',
   },
   // The north's places (north.hpp), for the map.
   northPlaces: {
@@ -566,6 +569,12 @@ window.MonstresLore = {
   },
   // Along the roads (roads.hpp), for the map.
   roadPlaces: { inn: 'Auberge du Chemin', farmstead: 'Ferme des Genêts', sawmill: 'Scierie' },
+  // The sites (sites.hpp), for the map.
+  sitePlaces: {
+    port: 'Port-Goéland', abbey: 'Abbaye de Hautepierre', camp: 'Camp des Embruns', lookout: 'Tour de guet des Falaises',
+    quarry: 'Carrière', chapel: 'Chapelle Saint-Roch', apiary: 'Rucher', dolmen: 'Dolmen', wreck: 'Épave',
+    aqueduct: 'Vieil aqueduc',
+  },
   // The west's places (west.hpp), for the map.
   westPlaces: {
     cart: 'Charrette d’Anselme', bridge: 'Pont de la Route', pathBridge: 'Pont du Sentier', cove: 'Crique de la Cascade',
@@ -650,6 +659,37 @@ window.MonstresLore = {
     30: { name: 'Agathe', healer: true, chatter: ['Je soigne les monstres des concurrents de l’arène. Il y a du travail, crois-moi !',
       'L’air des montagnes fait du bien aux monstres. Et aux guérisseuses aussi.',
       'De l’autre côté de la vallée, il y a une grotte dans la montagne. Elle est glaciale.'] },
+    // The sites (sites.hpp).
+    31: { name: 'Loïc', chatter: ['Cinquante ans que je pêche ici. La mer donne, la mer reprend.',
+      'Les Gloubi viennent sauter sur les pontons quand il pleut. Mes bateaux n’en ont jamais vu autant !',
+      'Une vieille coque s’est échouée plus au sud, sur la plage. Personne ne sait d’où elle vient.'] },
+    32: { name: 'Nolwenn', chatter: ['Poisson frais, poisson séché ! Les Bloup du lac, je n’y touche pas, promis.',
+      'Les filets sèchent au soleil, les poissons au vent. Rien ne se perd au port.',
+      'Le campement des Embruns est juste à côté, dans la plaine. Ysolde y soigne les voyageurs.'] },
+    33: { name: 'Frère Gauthier', healer: true, chatter: ['Bienvenue à l’abbaye de Hautepierre. Nos portes sont ouvertes à qui monte jusqu’ici.',
+      'Dans l’église, nos frères et sœurs s’exercent au combat. Ils acceptent tous les défis.',
+      'Le père abbé n’affronte que ceux qui ont vaincu les trois moines. Il ne perd presque jamais.'] },
+    34: { name: 'Frère Hugues', trainer: true, monk: true, chatter: ['La patience est la première des forces. Mes monstres le savent.'] },
+    35: { name: 'Sœur Odile', trainer: true, monk: true, chatter: ['Le froid des cimes forge des monstres solides. Prêt à le vérifier ?'] },
+    36: { name: 'Frère Benoît', trainer: true, monk: true, chatter: ['J’étais pêcheur avant d’être moine. Mon Ploufi s’en souvient.'] },
+    37: { name: 'Père Ambroise', trainer: true, monk: true, abbot: true, chatter: ['Le combat n’est qu’une prière qui bouge.'] },
+    38: { name: 'Ysolde', healer: true, chatter: ['Le camp est ouvert à tous les voyageurs. Un feu, une tente, et le bruit de la mer.',
+      'Nous surveillons la côte. Les tempêtes arrivent vite par ici.',
+      'Au port, Loïc raconte des histoires de monstres marins. Je ne sais pas s’il faut le croire.'] },
+    39: { name: 'Tristan', trainer: true, chatter: ['Je m’entraîne sur la plage, contre le vent. Rien de mieux pour les jambes !',
+      'Mes monstres viennent de la côte et de la plaine. Ils n’ont peur de rien.'] },
+    40: { name: 'Raoul', chatter: ['Cette pierre-là a bâti l’abbaye, là-haut dans la montagne. Il a fallu des années pour la monter.',
+      'Attention aux gradins, ça glisse. La rampe est faite pour ça !',
+      'Les Caillou adorent la carrière. On en trouve parfois endormis entre deux blocs.'] },
+    41: { name: 'Sylvain', chatter: ['Je veille sur la chapelle et sur ceux qui reposent ici. C’est un endroit calme.',
+      'La nuit, les lanternes du cimetière éclairent jusqu’au chemin.',
+      'Les vieilles arches de l’aqueduc, au sud-est… Elles portaient l’eau jusqu’à une ville disparue.'] },
+    42: { name: 'Héloïse', chatter: ['Mes abeilles butinent les fleurs de toute la plaine. Le miel a le goût de l’été.',
+      'Les Piou n’osent pas approcher des ruches. Ils ont appris à leurs dépens !',
+      'Plus loin, dans la plaine de l’est, il y a un dolmen. Les anciens y faisaient des offrandes.'] },
+    43: { name: 'Armand', chatter: ['J’ai guetté la mer depuis cette tour pendant trente ans. Monte au sommet : on voit toutes les îles.',
+      'Par temps clair, on aperçoit le phare d’Yvon, tout au sud.',
+      'Autrefois, des feux s’allumaient ici quand un navire était en danger.'] },
   },
   // What the other villagers say about the quests (any of them, see web/dialogue.js).
   rumors: {
@@ -681,6 +721,12 @@ window.MonstresLore = {
       'À Rochebrune, Margaux élève les monstres des magiciens, comme Capucine à l’exploitation.',
       'L’arène de Rochebrune décerne trois coupes : bronze, argent et or. Il faut gagner trois combats d’affilée.',
       'Aubin tient une auberge sur le chemin du nord. Sa soupe ferait revenir un Caillou à la vie !'],
+    sites: ['Au sud du phare, il y a Port-Goéland, un petit port de pêche. Les bateaux rentrent au coucher du soleil.',
+      'Tout là-haut dans les montagnes de l’est, il y a une abbaye. Ses moines combattent comme personne.',
+      'Le père abbé de Hautepierre récompense ceux qui le battent. Mais il faut d’abord vaincre ses trois moines.',
+      'Dans la plaine près de la mer, il y a le camp des Embruns. Un dresseur s’y entraîne tous les jours.',
+      'La vieille tour de guet, sur les falaises du nord-ouest, offre la plus belle vue du pays.',
+      'Raoul extrait la pierre de la carrière, à l’est. C’est avec elle qu’on a bâti l’abbaye.'],
   },
   // The quests (src/core/quests.hpp): the journal, in the grimoire.
   quests: {

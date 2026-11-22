@@ -6,6 +6,7 @@
 #include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/roads.hpp"
+#include "monstres/core/sites.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
 
@@ -198,7 +199,7 @@ bool wet_here(const World& w, float x, float z) { return under_water(w, x, z, 0.
 bool in_a_place(const World& w, float x, float z) {
   return in_village(w.village, x, z, 2.0f) || in_lake(w.village.lake, x, z, 2.5f) || in_ruins(w.ruins, x, z, 2.0f) ||
          in_castle(w.castle, x, z, 2.0f) || in_cave_hill(w.cave, x, z, 3.0f) || in_west_place(w.west, x, z, 1.0f) ||
-         in_north_place(w.north, x, z, 1.0f) ||
+         in_north_place(w.north, x, z, 1.0f) || in_site(w.sites, x, z, 1.0f) ||
          steep_here(w, x, z) || wet_here(w, x, z);
 }
 
@@ -363,6 +364,7 @@ void generate_wilds(World& w) {
   const size_t first = build_west(w);
   build_north(w);
   build_roads(w);
+  build_sites(w);
   Rng rng(w.seed ^ 0x57494C44535F3031ULL, 3);  // "WILDS_01": its own stream
   PlacementGrid grid(w.objects);
   const float gap = rules::kObjectGap;
@@ -373,7 +375,8 @@ void generate_wilds(World& w) {
   const auto grow = [&](float x, float z, uint32_t roll, Object o) {
     if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize - 2.0f) return;  // the valley's own
     // The west's places stay clear; its woods have their own trees (below).
-    if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z) || in_roadside_place(w.roads, x, z, 1.5f)) return;
+    if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z) || in_roadside_place(w.roads, x, z, 1.5f) ||
+        in_site(w.sites, x, z, 1.5f)) return;
     if (steep_here(w, x, z) || wet_here(w, x, z)) return;  // not on the cliffs, not in the water
     const float h = w.ground.height(x, z);
     // How likely an object is here: woods in patches, the continent's forest
@@ -544,8 +547,15 @@ bool wrong_medium(const Surroundings& s, const Body& b, const BodyShape& shape, 
   if (medium == Medium::Air) return false;
   if (medium == Medium::Water) return !in_lake(s.lake, b.pos.x, b.pos.z, -(shape.half_width + 0.6f));
   // The lake, and the sea (the ground below its level: a few steps into the waves, no more).
-  return in_lake(s.lake, b.pos.x, b.pos.z, shape.half_width * 0.5f) ||
-         (s.ground.height(b.pos.x, b.pos.z) < rules::kSeaLevel - 0.3f && s.ground.sea(b.pos.x, b.pos.z));
+  if (in_lake(s.lake, b.pos.x, b.pos.z, shape.half_width * 0.5f)) return true;
+  if (!(s.ground.height(b.pos.x, b.pos.z) < rules::kSeaLevel - 0.3f && s.ground.sea(b.pos.x, b.pos.z))) return false;
+  // Over the sea: only on a deck (a pier's), standing on it.
+  if (b.pos.y < rules::kSeaLevel + 0.2f) return true;
+  const float hw = shape.half_width;
+  const Box feet{{b.pos.x - hw, b.pos.y - 0.4f, b.pos.z - hw}, {b.pos.x + hw, b.pos.y + 0.05f, b.pos.z + hw}};
+  bool deck = false;
+  s.near(feet, [&](const Box& o) { deck = deck || (overlaps(feet, o) && o.max.y <= b.pos.y + 0.05f && o.max.y > rules::kSeaLevel); });
+  return !deck;
 }
 
 constexpr float kStepUp = 0.01f;     // rise always allowed in one step (rounding)
@@ -1568,6 +1578,7 @@ void update_population(World& w) {
   keep_rival(w, npc::kBastien);
   keep_rival(w, npc::kRomane);
   if (w.tournament.on) keep_rival(w, npc::kContender);
+  keep_rival(w, npc::kTristan);
   keep_west(w);
 }
 
@@ -1645,6 +1656,7 @@ void spawn_creatures(World& w) {
   add_west_npcs(w);
   add_north_npcs(w);
   add_road_npcs(w);
+  add_site_npcs(w);
   // The wild monsters around the player.
   update_population(w);
 }
@@ -1820,7 +1832,11 @@ void settle_objects(World& w, size_t first) {
     for (float x : {b.min.x, b.max.x}) {
       for (float z : {b.min.z, b.max.z}) lowest = std::min(lowest, w.ground.height(x, z));
     }
-    if (o.kind == ObjectKind::Bridge) continue;  // its deck spans the stream (build_west)
+    if (o.kind == ObjectKind::Bridge || o.kind == ObjectKind::Pier) continue;  // its deck spans the stream, the sea (build_west, build_sites)
+    if (o.kind == ObjectKind::Boat) {  // afloat
+      o.pos.y = rules::kSeaLevel - 0.3f;
+      continue;
+    }
     if (o.kind == ObjectKind::HotSpring) {  // its water at the level of the ground around its pool
       o.pos.y = w.ground.height(o.pos.x + o.size.x * 1.25f, o.pos.z);
       continue;
@@ -2169,6 +2185,7 @@ Zone zone_at(const World& w, float x, float z) {
     case PlaceKind::HollowTree: return Zone::Woods;
     case PlaceKind::Lighthouse: return Zone::Coast;
     case PlaceKind::Mine: return Zone::Mine;
+    case PlaceKind::Temple: return Zone::Frost;
     default: break;
   }
   if (in_lake(w.village.lake, x, z, 1.5f)) return Zone::Lake;
@@ -2268,7 +2285,8 @@ bool is_round(ObjectKind kind) {
          kind == ObjectKind::Haystack || kind == ObjectKind::Windmill || kind == ObjectKind::Campfire ||
          kind == ObjectKind::HollowTree || kind == ObjectKind::Lighthouse || kind == ObjectKind::Menhir ||
          kind == ObjectKind::Meteorite || kind == ObjectKind::Larch || kind == ObjectKind::StoneWall ||
-         kind == ObjectKind::Cairn || kind == ObjectKind::HotSpring || kind == ObjectKind::MineProp;
+         kind == ObjectKind::Cairn || kind == ObjectKind::HotSpring || kind == ObjectKind::MineProp ||
+         kind == ObjectKind::Beehive;
 }
 
 Box object_box(const Object& o) {
@@ -2350,6 +2368,23 @@ Box object_box(const Object& o) {
     case ObjectKind::Shrine:       half = {0.4f, 0.95f, 0.4f}; break;
     case ObjectKind::Bench:        half = {0.8f, 0.25f, 0.25f}; break;
     case ObjectKind::Stall:        half = {1.3f, 1.2f, 0.8f}; break;
+    // The sites (sites.hpp): matching the models of tools/make_models.py.
+    case ObjectKind::Pier:         half = s; break;  // its deck (build_sites sets it at the quay's level)
+    case ObjectKind::Boat:         half = {2.4f, 0.55f, 0.95f}; break;
+    case ObjectKind::FishRack:     half = {1.3f, 0.8f, 0.3f}; break;
+    case ObjectKind::AbbeyWall:    half = {1.99f, 2.1f, 0.5f}; break;  // stretches side by side do not overlap
+    case ObjectKind::AbbeyGate:    half = {0, 0, 0}; break;  // walked through (its sides: Colliders)
+    case ObjectKind::Temple:       half = {12.0f, 6.5f, 9.5f}; break;
+    case ObjectKind::Belfry:       half = {2.5f, 8.0f, 2.5f}; break;
+    case ObjectKind::Dorter:       half = {11.0f, 3.2f, 3.6f}; break;
+    case ObjectKind::Gravestone:   half = {0.3f, 0.45f, 0.12f}; break;
+    case ObjectKind::Chapel:       half = {3.2f, 3.0f, 4.6f}; break;
+    case ObjectKind::Crane:        half = {0.9f, 3.0f, 0.9f}; break;  // its mast
+    case ObjectKind::Block:        half = s; break;
+    case ObjectKind::Beehive:      half = {0.35f, 0.55f, 0.35f}; break;
+    case ObjectKind::Dolmen:       half = {2.0f, 1.0f, 1.2f}; break;
+    case ObjectKind::Wreck:        half = {6.0f, 1.6f, 2.0f}; break;
+    case ObjectKind::Aqueduct:     half = {0, 0, 0}; break;  // walked under (its piers: Colliders)
     default:                half = s; break;  // Crate, Collider, Step
   }
   if (o.mount != 0) half = {0, 0, 0};  // on a wall or the ceiling: out of the way
@@ -2408,9 +2443,10 @@ void build_layouts(World& w) {
   w.castle = make_castle_layout(w.seed, w.path);
   w.west = make_west_layout(w.seed, w.path, w.village, w.ruins, w.forest, w.cave, w.castle);
   w.north = make_north_layout(w.seed, w.path, w.west);
-  w.roads = make_roads(w.seed, w.path, w.village, w.ruins, w.forest, w.cave, w.castle, w.west, w.north);
+  w.roads = make_roads(w.seed, w.path, w.village, w.ruins, w.forest, w.cave, w.castle, w.west, w.north, w.sites);  // (and the sites)
   w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle, &w.west, &w.roads});
   shape_north(w.ground, w.north, w.path, w.seed);
+  shape_sites(w.ground, w.sites, w.seed);
 }
 
 void regrow_forest(World& w) {

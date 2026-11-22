@@ -26,8 +26,9 @@ TEST_CASE("new_game builds a valid world") {
       // The west's bridge spans the stream; its fields are walked through, flat on the ground.
       // The water mill's stone base goes down the river's bank.
       // The hot springs' water: at the level of the ground around its pool (dug lower).
+      // The port's piers and boats: over the sea.
       if (o.kind == ObjectKind::Bridge || o.kind == ObjectKind::Crops || o.kind == ObjectKind::WaterMill ||
-          o.kind == ObjectKind::HotSpring) {
+          o.kind == ObjectKind::HotSpring || o.kind == ObjectKind::Pier || o.kind == ObjectKind::Boat) {
         continue;
       }
       CAPTURE(std::string(object_kind_name(o.kind)));

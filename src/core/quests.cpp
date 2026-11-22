@@ -262,8 +262,13 @@ uint8_t npc_marks(const World& w, uint8_t n) {
     if (quest_giver(id) == n && stage == QuestStage::Unknown && quest_available(w, id)) marks |= kMarkNewQuest;
     if (quest_receiver(id) == n && stage == QuestStage::Active) marks |= kMarkQuest;
   }
-  if (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene || n == npc::kAgathe || n == npc::kAubin) marks |= kMarkHeal;
-  if (n == npc::kBastien || n == npc::kRomane) marks |= kMarkFight;
+  if (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene || n == npc::kAgathe || n == npc::kAubin ||
+      n == npc::kGauthier || n == npc::kYsolde) {
+    marks |= kMarkHeal;
+  }
+  if (n == npc::kBastien || n == npc::kRomane || n == npc::kTristan) marks |= kMarkFight;
+  // The abbey's monks: until beaten; the abbot once they are.
+  if (npc::monk(n) && !((w.trials >> (n - npc::kHugues)) & 1u) && (n != npc::kAmbroise || (w.trials & 0x07) == 0x07)) marks |= kMarkFight;
   if (n == npc::kBarnabe && !w.tournament.on && w.cups != (1u << rules::kCups) - 1) marks |= kMarkFight;  // a cup to win
   if (npc::wanderer(n)) {  // a trainer passing by: until beaten (an aggressive one: the bolt, not this)
     const int i = npc_index(w, n);

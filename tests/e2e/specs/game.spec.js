@@ -36,7 +36,7 @@ test('the game starts in a 3D world', async ({ page }) => {
   expect(s.creatures[0].species).toBe('companion');
   const bySpecies = {};
   for (const c of s.creatures) bySpecies[c.species] = (bySpecies[c.species] || 0) + 1;
-  expect(bySpecies.villager).toBe(25);  // with Isidore, the old magician, the west's nine, the north's two, Rochebrune's three, the roads' two
+  expect(bySpecies.villager).toBe(34);  // with Isidore, the old magician, the west's nine, the north's two, Rochebrune's three, the roads' two, the sites' nine
   expect(bySpecies.companion).toBeGreaterThanOrEqual(1);  // the companion (and now and then a wild Pompon)
   expect(bySpecies.crow).toBeGreaterThan(0);
   expect(bySpecies.fish).toBeGreaterThan(0);
@@ -1379,12 +1379,42 @@ test.describe('the bigger world', () => {
     expect((await page.evaluate(() => window.monstres.teleporters().list)).filter((t) => t.known)).toHaveLength(0);
     await page.locator('#settings-button').click();
     await page.locator('#unlock-teleporters').click();
-    await expect(page.locator('#unlock-teleporters-note')).toContainText('Les 10 téléporteurs sont connus');
+    await expect(page.locator('#unlock-teleporters-note')).toContainText('Les 13 téléporteurs sont connus');
     const list = await page.evaluate(() => window.monstres.teleporters().list);
-    expect(list).toHaveLength(10);
+    expect(list).toHaveLength(13);
     expect(list.every((t) => t.known)).toBe(true);
-    // The north's: the refuge's, Rochebrune's and the col's, up there.
-    expect(list.filter((t) => t.z < -700)).toHaveLength(3);
+    // The north's: the refuge's, Rochebrune's, the col's and the abbey's, up there.
+    expect(list.filter((t) => t.z < -700)).toHaveLength(4);
+  });
+
+  test('the sites: the abbey\'s temple, its monks fight; the port and the camp on the map', async ({ page }) => {
+    await openGame(page, '?seed=42&new&frozen');
+    const map = await page.evaluate(() => window.monstres.map());
+    expect(map.sites.port).toHaveLength(2);
+    expect(map.sites.camp).toHaveLength(2);
+    expect(map.sites.abbey[1]).toBeLessThan(-1050);
+    // In through the temple's great door.
+    await page.evaluate(([x, z]) => {
+      window.monstres.teleport(x, z + 10.3);
+      window.monstres.step(2);
+      window.monstres.door();
+      window.monstres.step(5);
+    }, map.sites.temple);
+    await expect.poll(async () => (await state(page)).player.place).toBe('temple');
+    // Frère Hugues waits along the nave: a battle.
+    const at = await page.evaluate(() => window.monstres.state().creatures.find((c) => c.npc === 34));
+    expect(at).toBeTruthy();
+    await page.evaluate(([x, z]) => {
+      window.monstres.teleport(x + 1.2, z);
+      window.monstres.step(5);
+    }, [at.x, at.z]);
+    const index = await page.evaluate(() => window.monstres.state().creatures.findIndex((c) => c.npc === 34));
+    await page.evaluate((i) => window.monstres.select(i), index);
+    await page.evaluate(() => window.monstresDialogue.open(window.monstres.selected()));
+    await expect(page.locator('#dialogue .dialogue-name')).toHaveText('Frère Hugues');
+    await page.locator('#challenge').click();
+    await page.evaluate(() => window.monstres.step(10));
+    expect((await page.evaluate(() => window.monstres.battle())).phase).toBe('prepare');
   });
 
   test('Rochebrune: Barnabé offers the arena\'s cups, the first contender comes; lanes on the map', async ({ page }) => {

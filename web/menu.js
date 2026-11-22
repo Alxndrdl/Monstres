@@ -953,6 +953,9 @@
     arena: '#b4ab9c', grotto: '#2a2630', shrine: '#a8a39a', bench: '#8a6a44', stall: '#c0473a',
     chalet: '#8a6a50', mineEntrance: '#2a2630', minecart: '#7a5534', larch: 'rgba(92, 138, 62, 0.9)',
     stoneWall: '#9a968e', cairn: '#a8a39a', hotSpring: '#7fd8d8', mineProp: '#7a5534',
+    pier: '#9a7a50', boat: '#3a6a9a', fishRack: '#8a6a44', abbeyWall: '#c8bfa8', abbeyGate: '#b8af98',
+    temple: '#a8563c', belfry: '#7a8296', dorter: '#b0563e', gravestone: '#9a968e', chapel: '#6a7288',
+    crane: '#7a5534', block: '#cfc6b0', beehive: '#d8b060', dolmen: '#8a8a90', wreck: '#6a5038', aqueduct: '#b4ab9c',
   };
 
   // The season (settings menu, ui.js): the map's colors follow it, as the
@@ -1433,6 +1436,18 @@
       if (data.roads && k >= 1.2) {
         for (const [id, name] of Object.entries(LORE.roadPlaces)) {
           if (data.roads[id]) label(name, data.roads[id][0], data.roads[id][1] - 9, size - 1);
+        }
+      }
+      // The sites (sites.hpp): the big ones zoomed out, all of them up close.
+      if (data.sites) {
+        const st = data.sites;
+        const big = ['port', 'abbey', 'camp'];
+        const at = { ...st };
+        if (st.aqueductA && st.aqueductB) at.aqueduct = [(st.aqueductA[0] + st.aqueductB[0]) / 2, (st.aqueductA[1] + st.aqueductB[1]) / 2];
+        for (const [id, name] of Object.entries(LORE.sitePlaces)) {
+          if (!at[id] || (k < 1.2 && !big.includes(id))) continue;
+          const below = id === 'abbey' ? -st.abbeyHz - 8 : id === 'quarry' ? -st.quarryR - 4 : -10;
+          label(name, at[id][0], at[id][1] + below, big.includes(id) ? size : size - 1);
         }
       }
       // The north's (north.hpp).

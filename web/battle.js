@@ -133,7 +133,11 @@
   function doorTitle(d) {
     const doors = LORE.doors;
     if (d.place === 'cave') return doors.cave;
-    if (d.place === 'tower') return d.action === 'climb' ? doors.roof : doors.tower;
+    if (d.place === 'tower') {
+      if (d.spot === 'lookout') return d.action === 'climb' ? doors.roofs.lookout : doors.spots.lookout;
+      return d.action === 'climb' ? doors.roof : doors.tower;
+    }
+    if (d.place === 'temple') return doors.temple;
     if (d.place === 'hollowTree' || d.place === 'lighthouse') {
       return d.action === 'climb' ? doors.roofs[d.place] : doors[d.place];
     }

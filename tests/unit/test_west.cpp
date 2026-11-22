@@ -111,7 +111,8 @@ TEST_CASE("the west: its places on solid ground, apart, beyond the valley; the r
 
 TEST_CASE("the west's buildings and villagers") {
   const World& w = cached_game(4);
-  for (ObjectKind k : {ObjectKind::Farmhouse, ObjectKind::Windmill, ObjectKind::Tent, ObjectKind::Campfire,
+  // (The camp by the sea has its own tents and fire: sites.hpp.)
+  for (ObjectKind k : {ObjectKind::Farmhouse, ObjectKind::Windmill,
                        ObjectKind::HollowTree, ObjectKind::Burrow, ObjectKind::Lighthouse, ObjectKind::Meteorite,
                        ObjectKind::Cart, ObjectKind::WaterMill, ObjectKind::HiddenCave}) {
     CAPTURE(object_kind_name(k));
@@ -119,7 +120,7 @@ TEST_CASE("the west's buildings and villagers") {
   }
   // (Rochebrune's breeding farm, the farmstead and the sawmill have their own: north.hpp, roads.hpp.)
   CHECK(count_kind(w, ObjectKind::Barn) == 3);
-  CHECK(count_kind(w, ObjectKind::Cabin) == 2);
+  CHECK(count_kind(w, ObjectKind::Cabin) >= 2);  // (and the sites': the camp's hut, the quarry's)
   CHECK(count_kind(w, ObjectKind::Bridge) == 2);  // the road's and the path's, over the river
   size_t orchard = 0;
   for (const Object& o : w.objects) orchard += o.kind == ObjectKind::FruitTree && in_farm(w.west, o.pos.x, o.pos.z);
@@ -444,7 +445,8 @@ TEST_CASE("the bag, the farm and the west's quests are saved") {
   for (const Creature& c : loaded->creatures) CHECK(c.tag != Tag::Boarder);  // drawn again
   size_t west = 0;
   for (const Creature& c : loaded->creatures) west += c.species == Species::Villager && c.npc > npc::kMentor;
-  CHECK(west == 9 + 2 + 3 + 2);  // the water miller too, the north's, Rochebrune's, those along the roads
+  CHECK(west == 9 + 2 + 3 + 2 + 9);  // the water miller too, the north's, Rochebrune's, those along the roads, the sites'
+  CHECK(loaded->trials == w.trials);
   CHECK(bag_json(w).find("\"coins\":123") != std::string::npos);
   CHECK(farm_json(w).find("\"species\":\"mole\"") != std::string::npos);
 }

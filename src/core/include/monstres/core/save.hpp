@@ -124,7 +124,11 @@ namespace monstres {
 //      wind more (the path, the road, the terrace's edge, the river), lanes
 //      lead to the places: the valley's trees and rocks on one go. Before: no
 //      cups won.
-inline constexpr uint32_t kSaveVersion = 28;
+//  29  the sites (sites.hpp: the port, the abbey, the camp...): thirteen
+//      teleporters; at the very end, the abbey's trials won (u8, a bit per
+//      monk, the abbot's last) and the battles won against Tristan (u8).
+//      Before: none.
+inline constexpr uint32_t kSaveVersion = 29;
 inline constexpr uint32_t kOldestReadableSaveVersion = 4;
 
 enum class LoadError { None, TooShort, BadMagic, UnsupportedVersion, Corrupt };

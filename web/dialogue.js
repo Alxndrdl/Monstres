@@ -32,6 +32,11 @@
   const CONTENDER = 27;
   const AUBIN = 28;
   const AGATHE = 30;
+  const GAUTHIER = 33;
+  const YSOLDE = 38;
+  const TRISTAN = 39;
+  const MONKS = [34, 35, 36];
+  const AMBROISE = 37;
   const CUPS = ['de Bronze', 'd’Argent', 'd’Or'];
 
   let game = null;
@@ -584,6 +589,38 @@
         `Trois contre toi : tu oses ?${why}`, [...offer, ['Une autre fois', close]]);
   }
 
+  // ---- Tristan: a trainer in the camp by the sea ----
+  function tristan(c) {
+    const wins = c.wins || 0;
+    const offer = c.challenge ? [['Combattre !', () => { game.challenge(TRISTAN); close(); }, 'challenge']] : [];
+    const why = !c.challenge ? ' Mais d’abord, fais sortir un monstre en forme.' : '';
+    show(wins ? `Te revoilà ! Tu m’as battu ${wins === 1 ? 'une fois' : `${wins} fois`}. Cette fois, le vent est pour moi !${why}`
+      : 'Un magicien, au camp ? Mon Gloubi, mon Piou et mon Ploufi s’entraînent face à la mer. Un combat ?' + why,
+      [...offer, ['Une autre fois', close]]);
+  }
+
+  // ---- The abbey's monks, in the temple, and the abbot (sites.hpp) ----
+  function monk(c) {
+    const trials = c.trials || 0;
+    const offer = c.challenge ? [['Combattre !', () => { game.challenge(c.npc); close(); }, 'challenge']] : [];
+    const why = !c.challenge ? ' Mais fais d’abord sortir un monstre en forme.' : '';
+    if (c.npc === AMBROISE) {
+      const monks = MONKS.filter((n, k) => (trials >> k) & 1).length;
+      if (monks < 3) {
+        show(`Tu as vaincu ${monks} de mes trois moines. Reviens quand tu les auras tous battus : alors seulement, je t’affronterai.`);
+        return;
+      }
+      show((trials >> 3) & 1 ? `Te revoilà, toi qui m’as vaincu. Un nouveau combat, pour l’exercice de l’âme ?${why}`
+        : `Frère Hugues, sœur Odile, frère Benoît… Tous trois t’ont reconnu. À mon tour. Mes monstres sont les plus forts de l’abbaye.${why}`,
+      [...offer, ['Pas encore', close]]);
+      return;
+    }
+    const beaten = (trials >> (c.npc - MONKS[0])) & 1;
+    show(beaten ? `Tu m’as déjà vaincu. On peut s’exercer encore, si tu veux.${why}`
+      : `${(LORE.npcs[c.npc] || {}).chatter?.[0] || ''} Affronte-moi, et le père abbé t’en saura gré.${why}`,
+    [...offer, ['Une autre fois', close]]);
+  }
+
   // ---- A trainer passing by: a battle, once ----
   function wanderer(c) {
     const challenge = () => {
@@ -751,6 +788,7 @@
     if (n <= ISIDORE && n % 2 === 1) add(LORE.rumors.west, 0);
     if ((n <= ISIDORE && n % 2 === 0) || n === 23) add(LORE.rumors.north, 0);
     if (n % 2 === 0 || n === 28 || n === 29) add(LORE.rumors.rochebrune, 0);  // Rochebrune, its arena, its breeder
+    if (n % 2 === 1 || n >= 31) add(LORE.rumors.sites, 0);  // the port, the abbey, the camp...
     for (const line of (LORE.npcs[n] || {}).chatter || []) pool.push(line);
     const k = said[n] = (said[n] || 0) + 1;
     show(pool[(k - 1) % pool.length] || 'Bonjour !', [['Encore un mot ?', () => villager(n)], ['Au revoir', close]]);
@@ -780,7 +818,9 @@
     else if (c.npc === BARNABE) barnabe();
     else if (c.npc === MARGAUX) margaux();
     else if (c.npc === CONTENDER) contender();
-    else if (c.npc === AUBIN || c.npc === AGATHE) healer(c.npc);
+    else if (c.npc === AUBIN || c.npc === AGATHE || c.npc === GAUTHIER || c.npc === YSOLDE) healer(c.npc);
+    else if (c.npc === TRISTAN) tristan(c);
+    else if (MONKS.includes(c.npc) || c.npc === AMBROISE) monk(c);
     else if (c.wanderer) wanderer(c);
     else villager(c.npc);
     // Walking away ends the talk.
@@ -814,6 +854,7 @@
   let known = null;
   let lastRescue = null;
   let lastTournament = null;
+  let lastTrials = null;
   let before = null;  // the quests as they were
   // Another world is played (saves.js): its teleporters and quests are not news.
   // After the arrival of a new game: Isidore waits (said once, when the flight is over).
@@ -824,6 +865,7 @@
     before = null;
     lastRescue = null;
     lastTournament = null;
+    lastTrials = null;
     close();
     if (!farmPanel.hidden) closeFarm();
   });
@@ -866,6 +908,12 @@
       }
       lastTournament = t;
     }
+    // The abbey's trials: the abbot beaten, the first time (his gifts).
+    const trials = ((game.wizard() || {}).record || {}).trials || 0;
+    if (lastTrials !== null && (trials >> 3) & 1 && !((lastTrials >> 3) & 1)) {
+      note('Le père abbé est vaincu !', '+250 pièces, 3 potions de mana');
+    }
+    lastTrials = trials;
     // After the arrival: Isidore waits.
     const main = quests.find((q) => q.id === 'main');
     if (!welcomed && main && main.stage === 'unknown' && !game.introOn() && !game.needsCreation()) {

@@ -73,6 +73,9 @@ enum class MeshId : size_t {
   Chalet, MineEntrance, Minecart, MinecartLoaded, Larch, StoneWall, Cairn, HotSpring, MineProp,
   // Rochebrune and along the roads (north.hpp, roads.hpp).
   Arena, Grotto, Shrine, Bench, Stall,
+  // The sites (sites.hpp).
+  Pier, Boat0, Boat1, Boat2, Boat3, FishRack, NetRack, AbbeyWall, AbbeyGate, Temple, Belfry, Dorter, Refectory,
+  Gravestone0, Gravestone1, Cross, Chapel, Crane, Block, Beehive, Dolmen, Wreck, Aqueduct,
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar, LarchFar,
   GrassShortFar, GrassTallFar, FlowerFar,

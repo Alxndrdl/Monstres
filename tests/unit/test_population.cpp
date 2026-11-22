@@ -55,7 +55,7 @@ TEST_CASE("wild monsters live only around the player, and others come back") {
   size_t villagers = 0;
   for (const Creature& c : w.creatures) villagers += c.species == Species::Villager;
   // and Isidore, the west's (the water miller too), the north's (Rochebrune's too), those along the roads
-  CHECK(villagers == rules::kVillagers + 1 + 9 + 2 + 3 + 2);
+  CHECK(villagers == rules::kVillagers + 1 + 9 + 2 + 3 + 2 + 9);  // and the sites'
   check_invariants(w);
 }
 

@@ -1,3 +1,4 @@
+#include "monstres/core/sites.hpp"
 #include "monstres/core/heightmap.hpp"
 #include "monstres/core/west.hpp"
 #include "monstres/core/world.hpp"
@@ -37,6 +38,8 @@ float steepest_slope(const World& w, float half_size, Vec2* where = nullptr, flo
     for (int j = lo_z; j < hi_z; ++j) {
       const float x = Heightmap::x_of(i), z = Heightmap::z_of(j);
       if (in_cave_hill(w.cave, x, z, 3.0f)) continue;
+      // The quarry's pit: its benches' faces are steep (its ramp goes down).
+      if (w.sites.valid() && std::hypot(x - w.sites.quarry.x, z - w.sites.quarry.z) < rules::kQuarryRadius + rules::kQuarryRim + 8.0f) continue;
       // The terrace's edge where it is a cliff (not where it is a slope, or the
       // ramp the path goes up), and the ravine cut through it to the cave's mouth.
       if (w.west.valid() && std::fabs(scarp_side(w.west, x, z)) < 25.0f) continue;  // (the path's way up: below)

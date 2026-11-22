@@ -29,7 +29,8 @@ inline constexpr float kSawmillRadius = 14.0f;
 
 RoadsLayout make_roads(uint64_t seed, const Path& path, const VillageLayout& village, const RuinsLayout& ruins,
                        const ForestLayout& forest, const CaveLayout& cave, const CastleLayout& castle, const WestLayout& west,
-                       const NorthLayout& north);
+                       const NorthLayout& north, SitesLayout& sites);
+// (The sites are placed there too, where the lanes can reach: make_sites.)
 
 // Distance to the nearest lane's middle (`limit` if farther).
 float distance_to_lanes(const RoadsLayout& roads, float x, float z, float limit = 1e9f);

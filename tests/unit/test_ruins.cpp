@@ -27,7 +27,7 @@ TEST_CASE("the ruins stand beside the path, south of the start, with their tower
     CHECK(r.center.z == Approx(rules::kRuinsZ));
     CHECK(std::fabs(r.center.x) + r.radius < rules::kWorldHalfSize);
     CHECK(distance_to_path(w.path, r.center.x, r.center.z) > 10.0f);
-    REQUIRE(count(w, ObjectKind::Tower) == 1);
+    REQUIRE(count(w, ObjectKind::Tower) == 2);  // (and the old watchtower on the cliffs: sites.hpp)
     CHECK(count(w, ObjectKind::RuinWall) >= 8);
     CHECK(count(w, ObjectKind::Pillar) + count(w, ObjectKind::FallenPillar) >= 4);
     CHECK(count(w, ObjectKind::RuneStone) == 4);

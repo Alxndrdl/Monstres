@@ -219,7 +219,11 @@ inline constexpr uint64_t kNorthLakeOutline = 4;
 // and the west's road to the places people go to, and the places along them.
 // Derived from the seed and the other layouts (not saved).
 enum class LaneTo : uint8_t {
-  Castle, Windmill, Pen, WaterMill, Menhirs, Cabin, Inn, Farmstead, Mine, Refuge, Springs, Sawmill, Arena, Ranch, Grotto, Count
+  Castle, Windmill, Pen, WaterMill, Menhirs, Cabin, Inn, Farmstead, Mine, Refuge, Springs, Sawmill, Arena, Ranch, Grotto,
+  // The sites (sites.hpp): the port, the abbey (its foot; then its own way up), the camp, the lookout, the quarry,
+  // the chapel, the apiary.
+  Port, Abbey, Camp, Lookout, Quarry, Chapel, Apiary, AbbeyWay,
+  Count
 };
 struct RoadsLayout {
   std::vector<Road> lanes;      // from where each leaves the path, the road or another lane, to its place
@@ -230,6 +234,47 @@ struct RoadsLayout {
   std::vector<Vec2> shrines;    // wayside shrines (at some forks)
   bool valid() const { return inn.x != 0 || inn.z != 0; }
   bool operator==(const RoadsLayout&) const = default;
+};
+
+// The sites of the wilds (sites.hpp): the fishing port on the coast, the
+// abbey up in the mountains, the camp in the plains by the sea, and smaller
+// places here and there. Derived from the seed and the other layouts (not saved).
+struct SitesLayout {
+  // The fishing port: the middle of its shore, the way out to sea (an axis),
+  // its quay's level (set with the relief); its piers (where each leaves the
+  // shore, how far out it goes), houses, market, teleporter.
+  Vec2 port, port_sea;
+  float port_level = 0;
+  std::vector<Vec2> piers;
+  std::vector<float> pier_lengths;
+  std::vector<Vec2> port_houses, port_house_fronts;
+  Vec2 port_market, port_teleporter;
+  // The abbey: its walls' middle, their half sizes (along X and Z), the way
+  // its gate looks (an axis), its ground's level (set with the relief); its
+  // church (the temple: battles inside), its other buildings, its teleporter
+  // outside the gate; the way up to the gate from the foot of its slope.
+  Vec2 abbey, abbey_front;
+  float abbey_hx = 0, abbey_hz = 0, abbey_level = 0;
+  Vec2 temple, belfry, dorter, refectory, cloister, abbey_teleporter;
+  std::vector<Vec2> abbey_way;  // from its foot up to the gate (a point every meter or so)
+  // The camp in the plains by the sea, the way its palisade opens (an axis, towards the ways); its teleporter.
+  Vec2 camp, camp_front, camp_teleporter;
+  // Smaller places: the old watchtower on the cliffs (its door looks
+  // inland), the quarry (its pit's floor, its ramp's way out), the chapel
+  // and its graves, the apiary, the dolmen and its mound, the wreck on the
+  // beach (lying along an axis), the old aqueduct's arches (from a to b,
+  // along an axis, their top's level).
+  Vec2 lookout, lookout_front;
+  Vec2 quarry, quarry_front;
+  float quarry_level = 0;
+  Vec2 chapel, chapel_front;
+  Vec2 apiary, apiary_front;
+  Vec2 dolmen;
+  Vec2 wreck, wreck_along;
+  Vec2 aqueduct_a, aqueduct_b;
+  float aqueduct_level = 0;
+  bool valid() const { return abbey.x != 0 || abbey.z != 0; }
+  bool operator==(const SitesLayout&) const = default;
 };
 
 }  // namespace monstres

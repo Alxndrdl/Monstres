@@ -378,6 +378,10 @@ MeshData room_mesh(const World& w) {
     look = {shade(kStone, 0.9f), kWhitewash, shade(kStone, 0.85f), shade(kStone, 0.6f), shade(kWhitewash, 0.7f), true, true};
     door_width = 1.24f;
     door_height = 2.5f;
+  } else if (in.kind == PlaceKind::Temple) {  // pale stone, a dark wooden ceiling
+    look = {shade(kStone, 0.8f), shade(kWhitewash, 0.92f), shade(kStone, 0.9f), shade(kTimber, 0.9f), shade(kStone, 0.6f), false, true};
+    door_width = 2.0f;
+    door_height = 3.2f;
   } else if (building == ObjectKind::Cabin) {
     look = {shade(kPlanks, 0.9f), shade(kBark, 1.3f), kBark, kTimber, shade(kPlanks, 0.75f), false, false};
   } else if (building == ObjectKind::Farmhouse) {

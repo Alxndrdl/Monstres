@@ -3,6 +3,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/heightmap.hpp"
 #include "monstres/core/north.hpp"
+#include "monstres/core/sites.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
 
@@ -75,6 +76,7 @@ PlaceKind place_of(ObjectKind k) {
   if (k == ObjectKind::MineEntrance || k == ObjectKind::Grotto) return PlaceKind::Mine;
   if (k == ObjectKind::HollowTree) return PlaceKind::HollowTree;
   if (k == ObjectKind::Lighthouse) return PlaceKind::Lighthouse;
+  if (k == ObjectKind::Temple) return PlaceKind::Temple;
   return PlaceKind::Outside;
 }
 
@@ -129,6 +131,10 @@ DoorFrame frame_of(ObjectKind k) {
   if (k == ObjectKind::Burrow) return {0, -2.7f, {0, 0.6f, -1.95f}, 1.3f, 1.2f, 0, -3.4f};
   if (k == ObjectKind::MineEntrance) return {0, -2.2f, {0, 1.25f, -0.9f}, 2.0f, 2.4f, 0, -3.2f};
   if (k == ObjectKind::Grotto) return {0, -2.4f, {0, 1.4f, -1.2f}, 2.6f, 2.8f, 0, -3.8f};
+  if (k == ObjectKind::Temple) {  // its great door in the middle of its front
+    const float f = rules::kTempleHalfZ;
+    return {0, -f - 0.8f, {0, 1.6f, -f - 0.05f}, 2.0f, 3.2f, 0, -f - 1.6f};
+  }
   const float f = house_front(k);
   return {0, -f - 0.7f, {0, 0.95f, -f - 0.05f}, 0.9f, 1.9f, 0, -f - 1.4f};
 }
@@ -446,6 +452,10 @@ Interior make_interior(uint64_t seed, PlaceKind kind, const Object& door) {
     const Vec2 end{deep->at.x + way.x * (deep->r + 8.0f), deep->at.z + way.z * (deep->r + 8.0f)};
     in.pieces.push_back({deep->at, end, 1.8f, {}, 3.2f, 0.3f});
     in.exits.push_back({{end.x - way.x * 0.6f, 0, end.z - way.z * 0.6f}, {-way.x, -way.z}, ExitKind::Hidden});
+  } else if (kind == PlaceKind::Temple) {
+    // The abbey's church: a long nave between two rows of pillars, the
+    // altar at its end; the monks wait along it.
+    in.pieces.push_back({{0, -15.0f}, {}, 0, {9.0f, 15.0f}, 11.0f, 0});
   } else if (tall(kind)) {
     // One tall round hall; a stair along its wall up to a landing under the trapdoor.
     const Hall h = hall_of(kind);
@@ -652,6 +662,40 @@ void furnish_house(const Interior& in, const Object& door, Rng& rng, std::vector
   }
 }
 
+// The temple: pillars along the nave, a rug down its middle (where the
+// battles are fought), the altar in the apse, candlesticks, shelves of books.
+void furnish_temple(Rng& rng, std::vector<Object>& out) {
+  const auto v = [&]() { return static_cast<uint8_t>(rng.below(256)); };
+  for (const float x : {-7.2f, 7.2f}) {
+    for (const float z : {-4.0f, -9.0f, -14.0f, -19.0f}) {
+      Object p = thing(ObjectKind::Step, x, 0, z, 0, kLandingVariant);  // (drawn as they are, not as a stair)
+      p.size = {0.5f, 5.5f, 0.5f};
+      out.push_back(p);
+    }
+  }
+  Object rug = thing(ObjectKind::Rug, 0, 0.01f, -12.0f, 0, v());
+  rug.size = {1.3f, 0.02f, 9.5f};
+  out.push_back(rug);
+  Object step = thing(ObjectKind::Step, 0, 0, -27.6f, 0, kLandingVariant);
+  step.size = {3.2f, 0.12f, 2.2f};
+  out.push_back(step);
+  Object altar = thing(ObjectKind::Step, 0, 0.24f, -28.4f, 0, kLandingVariant);
+  altar.size = {1.5f, 0.5f, 0.7f};
+  out.push_back(altar);
+  for (const float x : {-3.0f, 3.0f}) out.push_back(thing(ObjectKind::Lamp, x, 0, -25.0f, 0, v()));
+  for (const float z : {-6.5f, -11.5f, -16.5f}) {
+    for (const float side : {-1.0f, 1.0f}) {
+      out.push_back(thing(ObjectKind::Shelf, side * 8.65f, 0, z, side > 0 ? kQuarter : 3 * kQuarter, v()));
+    }
+  }
+  for (const float x : {-7.5f, 7.5f}) out.push_back(thing(ObjectKind::Lamp, x, 0, -1.5f, 0, v()));
+  for (const float side : {-1.0f, 1.0f}) {
+    Object c = thing(ObjectKind::Crystal, side * 6.5f, 0, -28.5f, 0, v());
+    c.size = {0.7f, 0.7f, 0.7f};
+    out.push_back(c);
+  }
+}
+
 void furnish_tower(const Interior& in, Rng& rng, std::vector<Object>& out) {
   const Hall h = hall_of(in.kind);
   const float R = h.radius, ring = h.ring;
@@ -824,6 +868,7 @@ std::vector<Object> interior_objects(uint64_t seed, const Interior& in, const Ob
     case PlaceKind::Lighthouse: furnish_tower(in, rng, out); break;
     case PlaceKind::Burrow: furnish_burrow(in, rng, out); break;
     case PlaceKind::Mine: furnish_mine(in, rng, out); break;
+    case PlaceKind::Temple: furnish_temple(rng, out); break;
     default: break;
   }
   return out;
@@ -1022,6 +1067,7 @@ bool enter_place(World& w, Place place, bool from_roof) {
   if (place.kind == PlaceKind::Cave) spawn_cristis(w);
   if (place.kind == PlaceKind::Burrow) spawn_moles(w);
   if (place.kind == PlaceKind::Mine) spawn_miners(w);
+  if (place.kind == PlaceKind::Temple) spawn_monks(w);
   return true;
 }
 

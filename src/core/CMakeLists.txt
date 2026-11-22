@@ -16,6 +16,7 @@ add_library(monstres_core STATIC
   west.cpp
   north.cpp
   roads.cpp
+  sites.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

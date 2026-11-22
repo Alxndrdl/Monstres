@@ -172,6 +172,22 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::Shrine: return MeshId::Shrine;
     case ObjectKind::Bench: return MeshId::Bench;
     case ObjectKind::Stall: return MeshId::Stall;
+    case ObjectKind::Pier: return MeshId::Pier;
+    case ObjectKind::Boat: return mesh_offset(MeshId::Boat0, o.variant % 4);
+    case ObjectKind::FishRack: return o.variant & 1 ? MeshId::NetRack : MeshId::FishRack;
+    case ObjectKind::AbbeyWall: return MeshId::AbbeyWall;
+    case ObjectKind::AbbeyGate: return MeshId::AbbeyGate;
+    case ObjectKind::Temple: return MeshId::Temple;
+    case ObjectKind::Belfry: return MeshId::Belfry;
+    case ObjectKind::Dorter: return o.variant & 1 ? MeshId::Refectory : MeshId::Dorter;
+    case ObjectKind::Gravestone: return mesh_offset(MeshId::Gravestone0, o.variant % 3);
+    case ObjectKind::Chapel: return MeshId::Chapel;
+    case ObjectKind::Crane: return MeshId::Crane;
+    case ObjectKind::Block: return MeshId::Block;
+    case ObjectKind::Beehive: return MeshId::Beehive;
+    case ObjectKind::Dolmen: return MeshId::Dolmen;
+    case ObjectKind::Wreck: return MeshId::Wreck;
+    case ObjectKind::Aqueduct: return MeshId::Aqueduct;
     default:                return MeshId::Crate;
   }
 }
@@ -1960,6 +1976,7 @@ void interior_light(const World& w, float time, View& v) {
       v.fog_end = 2000;
       break;
     case PlaceKind::Lighthouse:
+    case PlaceKind::Temple:
     case PlaceKind::Tower:
       night = std::max(night, 0.6f);
       v.background = {0.04f, 0.04f, 0.05f, 1};

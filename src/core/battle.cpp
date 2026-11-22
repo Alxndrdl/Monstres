@@ -1,6 +1,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/interior.hpp"
 #include "monstres/core/north.hpp"
+#include "monstres/core/sites.hpp"
 
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
@@ -889,6 +890,37 @@ const std::array<RivalMonster, kRivalTeamSize>& rival_team(const World& w, uint8
     count = w.tournament.count;
     return w.tournament.team;
   }
+  // The abbey's monks, one stronger than the other; the abbot (sites.hpp).
+  static const std::array<RivalMonster, kRivalTeamSize> kHugues = {{
+      {Species::Golem, Genes{}, rules::kMonkLevels[0], 0, false},
+      {Species::Owl, Genes{}, rules::kMonkLevels[0], 0, false},
+      {},
+  }};
+  static const std::array<RivalMonster, kRivalTeamSize> kOdile = {{
+      {Species::Ermine, Genes{}, rules::kMonkLevels[1], 0, false},
+      {Species::Spark, Genes{}, rules::kMonkLevels[1], 0, false},
+      {Species::Goat, Genes{}, rules::kMonkLevels[1], 0, false},
+  }};
+  static const std::array<RivalMonster, kRivalTeamSize> kBenoit = {{
+      {Species::Axolotl, Genes{}, rules::kMonkLevels[2], 0, false},
+      {Species::Mole, Genes{}, rules::kMonkLevels[2], 0, false},
+      {Species::Golem, Genes{}, rules::kMonkLevels[2], 0, false},
+  }};
+  static const std::array<RivalMonster, kRivalTeamSize> kAmbroise = {{
+      {Species::Goat, Genes{}, rules::kAbbotLevel, 0, false},
+      {Species::Cristi, Genes{}, rules::kAbbotLevel, 0, false},
+      {Species::Golem, Genes{.form = Form::Alpha}, static_cast<uint8_t>(rules::kAbbotLevel + 1), 0, false},
+  }};
+  // Tristan, in the camp by the sea.
+  static const std::array<RivalMonster, kRivalTeamSize> kTristan = {{
+      {Species::Slime, Genes{}, 12, 0, false},
+      {Species::Bird, Genes{}, 12, 0, false},
+      {Species::Axolotl, Genes{}, 13, 0, false},
+  }};
+  if (npc::monk(n) || n == npc::kTristan) {
+    count = n == npc::kHugues ? 2 : 3;
+    return n == npc::kHugues ? kHugues : n == npc::kOdile ? kOdile : n == npc::kBenoit ? kBenoit : n == npc::kAmbroise ? kAmbroise : kTristan;
+  }
   count = n == npc::kBastien ? 2 : 0;
   return kBastien;
 }
@@ -912,6 +944,19 @@ bool rival_arena(const World& w, uint8_t trainer, Vec2& center, Vec2& axis) {
     const Vec2 g = std::fabs(f.x) >= std::fabs(f.z) ? Vec2{f.x > 0 ? 1.0f : -1.0f, 0} : Vec2{0, f.z > 0 ? 1.0f : -1.0f};
     center = w.north.arena;
     axis = {-g.z, g.x};
+    return true;
+  }
+  if (npc::monk(trainer)) {  // down the temple's nave, along its rug
+    if (w.place.kind != PlaceKind::Temple) return false;
+    center = {0, -13.0f};
+    axis = {0, -1};
+    return true;
+  }
+  if (trainer == npc::kTristan) {  // in the camp, on the side away from the tents
+    if (!w.sites.valid()) return false;
+    const Vec2 f = w.sites.camp_front;
+    center = {w.sites.camp.x + f.x * 7.0f, w.sites.camp.z + f.z * 7.0f};
+    axis = {-f.z, f.x};
     return true;
   }
   if (trainer == npc::kRomane) {  // in her camp's clearing, south of the fire
@@ -973,6 +1018,8 @@ bool can_challenge(const World& w, uint8_t n) {
       return false;
     }
   }
+  // The abbot fights only once his three monks are beaten.
+  if (n == npc::kAmbroise && (w.trials & 0x07) != 0x07) return false;
   return count > 0 && w.battle.phase == BattlePhase::None && a && a->hp > 0 && near_npc(w, n) && rival_index(w, n) > 0;
 }
 
@@ -1104,7 +1151,8 @@ const char* cannot_cast(const World& w, size_t slot) {
 }
 
 bool can_heal_team(const World& w, uint8_t n) {
-  return (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene || n == npc::kAgathe || n == npc::kAubin) &&
+  return (n == npc::kOdette || n == npc::kViolette || n == npc::kSolene || n == npc::kAgathe || n == npc::kAubin ||
+          n == npc::kGauthier || n == npc::kYsolde) &&
          w.battle.phase == BattlePhase::None && near_npc(w, n);
 }
 
@@ -2053,10 +2101,13 @@ void battle_resolve(World& w) {
       uint32_t levels = 0;
       for (uint8_t k = 0; k < r.count; ++k) levels += r.team[k].level;
       uint8_t passing = 0;  // a trainer passing by: met once
+      uint8_t monk = npc::monk(r.npc) ? static_cast<uint8_t>((w.trials >> (r.npc - npc::kHugues)) & 1u) : 0;
       uint8_t contender = static_cast<uint8_t>((w.cups >> w.tournament.cup) & 1u);  // the cup won once: no more
       uint8_t& wins = npc::wanderer(r.npc)            ? passing
                       : r.npc == npc::kContender ? contender
                       : r.npc == npc::kRomane    ? w.romane_wins
+                      : r.npc == npc::kTristan   ? w.tristan_wins
+                      : npc::monk(r.npc)         ? monk
                                                  : w.rival_wins;
       xp = wins == 0 ? rules::kRivalXpPerLevel * levels : 0;
       if (xp == 0) b.no_xp = NoXp::Trainer;
@@ -2067,6 +2118,13 @@ void battle_resolve(World& w) {
         w.creatures[static_cast<size_t>(t)].tag = Tag::None;
       }
       if (r.npc == npc::kContender) round_won(w);
+      if (npc::monk(r.npc)) {  // a trial won (the abbot's, the first time: his gifts)
+        if (r.npc == npc::kAmbroise && !(w.trials & (1u << 3))) {
+          w.bag[static_cast<size_t>(Item::Coin)] += rules::kAbbotCoins;
+          w.bag[static_cast<size_t>(Item::ManaPotion)] += rules::kAbbotPotions;
+        }
+        w.trials = static_cast<uint8_t>(w.trials | (1u << (r.npc - npc::kHugues)));
+      }
     } else {
       w.bag[static_cast<size_t>(Item::Coin)] += (b.won_xp + 3) / 4;  // what the beaten ones dropped
     }

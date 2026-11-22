@@ -282,7 +282,8 @@ TEST_CASE("the mine: galleries every which way, going down; the guardian's hall 
       if (e.kind == ExitKind::Far) far = &e;
     }
     REQUIRE(far != nullptr);
-    w.player.pos = far->at;
+    const Exit out = *far;  // (the interior is built again when coming back in)
+    w.player.pos = out.at;
     const DoorNear d = door_near(w);
     CHECK(d.action == DoorAction::Leave);
     CHECK(d.far);
@@ -295,7 +296,7 @@ TEST_CASE("the mine: galleries every which way, going down; the guardian's hall 
     CHECK(back.building == ObjectKind::Grotto);
     REQUIRE(use_door(w));
     CHECK(inside(w));
-    CHECK(flat({w.player.pos.x, w.player.pos.z}, {far->at.x, far->at.z}) < 3.0f);
+    CHECK(flat({w.player.pos.x, w.player.pos.z}, {out.at.x, out.at.z}) < 3.0f);
     CHECK(w.player.pos.y == doctest::Approx(w.ground.height(w.player.pos.x, w.player.pos.z)).epsilon(0.05));
   }
 }

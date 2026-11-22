@@ -720,6 +720,69 @@ Le long du sentier :
 - çà et là au bord du sentier : des bancs, des tas de bois, des meules, des
   tonneaux, des oratoires.
 
+## Les sites
+
+Règles dans `src/core/sites.hpp` / `sites.cpp` (`make_sites`, tiré de la
+graine et des autres plans, non sauvegardé). Les sites sont placés par
+`make_roads`, une fois connue la grille des chemins : seulement là où un
+chemin peut arriver depuis le sentier ou la route (la grille est inondée
+depuis eux), loin des autres lieux. Un chemin mène à chacun (sauf le dolmen,
+l'épave et l'aqueduc) ; le bas pays au bord de la mer est désormais évité
+plutôt que fermé. Leurs reliefs (`shape_sites`) sont posés après ceux du Nord.
+
+- **Port-Goéland**, le port de pêche, sur la côte au sud du phare (ou, si la
+  côte ne s'y prête pas, ailleurs sur la côte ouest) : un quai plat au ras de
+  l'eau (`kPortLevel`), ses bords en pente douce vers la mer, des **pontons**
+  de bois au-dessus de l'eau (`ObjectKind::Pier`, des tronçons de 4 m : on
+  marche dessus, leurs garde-corps sont des Colliders qui montent du fond),
+  des **barques** amarrées (`Boat`, à flot), des maisons de pêcheurs, des
+  séchoirs à poissons et à filets (`FishRack`), un marché, un téléporteur.
+  Loïc, le vieux pêcheur ; Nolwenn, la poissonnière. Au-dessus de la mer, on
+  ne marche que sur un pont (`wrong_medium` : debout sur un objet).
+- **L'abbaye de Hautepierre**, dans les montagnes à l'est du col : une
+  terrasse taillée dans la montagne (remblayée devant, entaillée derrière),
+  des murs (`AbbeyWall`) et une porte fortifiée (`AbbeyGate`), l'**église**
+  (`Temple`, 24 × 19 m), le clocher (`Belfry`), le dortoir et le réfectoire
+  (`Dorter`), un cloître (puits, arbres fruitiers, bancs), des potagers, des
+  ruches, des tombes, des lanternes le long de l'allée, un téléporteur près
+  de la porte. On y monte par un **chemin en lacets** creusé dans la pente
+  (`SitesLayout::abbey_way`, son relief taillé à pente régulière : un chemin
+  comme les autres pour la carte et le rendu). Frère Gauthier, le portier,
+  soigne l'équipe.
+  - **Dans l'église** (`PlaceKind::Temple`) : une nef de 18 × 30 m, 11 m de
+    haut, deux rangées de piliers, un tapis jusqu'à l'autel. Trois moines
+    (frère Hugues, sœur Odile, frère Benoît, niveaux 15, 17, 19) combattent
+    le magicien le long de la nef ; une fois les trois battus, le **père
+    Ambroise**, l'abbé (niveau 23, son dernier monstre alpha), accepte le
+    combat : la première victoire contre lui rapporte 250 pièces et 3 potions
+    de mana. Les victoires sont sauvegardées (`World::trials`, un bit par
+    moine). Les moines ne sont pas sauvegardés : ils reviennent à chaque
+    visite (`spawn_monks`).
+- **Le camp des Embruns**, dans la plaine près de la mer : des tentes autour
+  d'un feu, une cabane, une palissade ouverte vers son chemin, un séchoir, un
+  téléporteur. Ysolde, la garde, soigne l'équipe ; **Tristan**, un dresseur
+  (Gloubi, Piou, Ploufi, niveaux 12 à 13), combat à côté du feu
+  (`World::tristan_wins`).
+- **La tour de guet des Falaises**, sur la terrasse au bord de la falaise,
+  au-dessus de la mer du nord-ouest : la tour des ruines (on y monte jusqu'au
+  sommet), des murs écroulés, un banc face à la mer ; Armand, le vieux guetteur.
+- **La carrière**, dans les collines de l'est : une fosse creusée en trois
+  gradins, une rampe qui en sort vers son chemin, des blocs taillés
+  (`Block`), des wagonnets, une grue (`Crane`), une cabane ; Raoul, le
+  carrier. Pas d'herbe dans la fosse (`bare_site`).
+- **La chapelle Saint-Roch** (`Chapel`) et ses tombes (`Gravestone`) dans un
+  muret ; Sylvain, l'ermite.
+- **Le rucher**, près du sentier au sud : la hutte d'Héloïse (on y entre),
+  des ruches en rangées (`Beehive`), des pommiers.
+- **Le dolmen** (`Dolmen`) et son tumulus, entouré de pierres levées ;
+  **l'épave** d'un navire sur une plage (`Wreck`), des caisses rejetées ;
+  **le vieil aqueduc**, une file de 13 arches (`Aqueduct`, mises à la
+  hauteur du sol, quelques-unes écroulées) dans la plaine du sud-est.
+
+Trois téléporteurs de plus (le port, l'abbaye, le camp : 13 en tout). Le
+monde se construit environ 10 % plus lentement (la recherche des sites, les
+chemins de plus).
+
 ## Modèles 3D
 
 Les modèles sont des fichiers glTF binaires (`assets/models/*.glb`) : le jeu
@@ -823,6 +886,8 @@ laquelle il est entré (pas de carte de l'intérieur pour l'instant).
   (voir Le Nord) ; le compagnon y montre aussi la sortie ; le refuge, une
   pièce meublée. Sauvegardée au fond de la mine, la partie s'y recharge, sur
   son sol.
+- **L'église de l'abbaye** (version 29) : une grande nef de pierre, ses
+  piliers et son autel ; les moines y combattent (voir Les sites).
 - **L'Ouest** (version 23) : le terrier (galeries de terre, comme la grotte),
   l'arbre creux et le phare (de hautes salles rondes avec un escalier jusqu'à
   une trappe, comme la tour : dehors sur la cime, ou sur la galerie), la
@@ -1473,6 +1538,12 @@ bord de la terrasse, la rivière) et des chemins mènent aux lieux : les arbres
 et rochers sauvegardés de la vallée qui se trouvent sur un chemin
 disparaissent. Les sauvegardes plus anciennes se chargent : aucune coupe,
 Barnabé, Margaux, Agathe, Aubin et Bertille arrivent.
+
+Version 29 : les sites (le port, l'abbaye, le camp et les autres : 13
+téléporteurs), les épreuves de l'abbaye gagnées et les victoires contre
+Tristan. Les sauvegardes plus anciennes se chargent : aucune épreuve, les
+habitants des sites arrivent ; les arbres et rochers de la vallée sur un
+chemin disparaissent comme avant.
 
 Version 24 : quatre sorts d'aventure et quatre sorts de capture. Les
 sauvegardes plus anciennes se chargent : les deux derniers emplacements

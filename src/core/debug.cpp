@@ -7,6 +7,7 @@
 #include "monstres/core/interior.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/roads.hpp"
+#include "monstres/core/sites.hpp"
 #include "monstres/core/variants.hpp"
 #include "monstres/core/west.hpp"
 
@@ -109,7 +110,7 @@ std::string to_json(const World& w) {
        ",\"onGround\":" + (p.on_ground ? "true" : "false") +
        ",\"facingX\":" + num(p.facing_x) + ",\"facingZ\":" + num(p.facing_z);
   // Inside (interior.hpp): where it is, and on the map where it went in.
-  static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse", "mine"};
+  static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse", "mine", "temple"};
   static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
   const Body& m = map_body(w);
   s += std::string(",\"place\":\"") + kPlaces[static_cast<size_t>(w.place.kind)] + "\"" +
@@ -190,7 +191,11 @@ std::string creature_json(const World& w, int index) {
     }
     if (rivals) {
       s += std::string(",\"trainer\":true,\"challenge\":") + (can_challenge(w, c.npc) ? "true" : "false");
-      s += ",\"wins\":" + std::to_string(c.npc == npc::kRomane ? w.romane_wins : w.rival_wins);
+      const uint32_t wins = c.npc == npc::kRomane    ? w.romane_wins
+                            : c.npc == npc::kTristan ? w.tristan_wins
+                            : npc::monk(c.npc)       ? (w.trials >> (c.npc - npc::kHugues)) & 1u
+                                                     : w.rival_wins;
+      s += ",\"wins\":" + std::to_string(wins) + ",\"trials\":" + std::to_string(w.trials);
     }
     if (c.species == Species::Villager) {  // the icons over its head
       const uint8_t m = npc_marks(w, c.npc);
@@ -287,7 +292,9 @@ const char* object_kind_name(ObjectKind kind) {
                                  "cabin", "tent", "campfire", "woodpile", "hollowTree", "burrow", "lighthouse",
                                  "menhir", "meteorite", "waterMill", "hiddenCave",
                                  "chalet", "mineEntrance", "minecart", "larch", "stoneWall", "cairn", "hotSpring", "mineProp",
-                                 "arena", "grotto", "shrine", "bench", "stall"};
+                                 "arena", "grotto", "shrine", "bench", "stall",
+                                 "pier", "boat", "fishRack", "abbeyWall", "abbeyGate", "temple", "belfry", "dorter",
+                                 "gravestone", "chapel", "crane", "block", "beehive", "dolmen", "wreck", "aqueduct"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -330,7 +337,7 @@ std::string wizard_json(const World& w) {
   for (const uint16_t n : w.captured_count) captured += n;
   for (const uint16_t n : w.beaten_count) beaten += n;
   s += ",\"record\":{\"captured\":" + std::to_string(captured) + ",\"beaten\":" + std::to_string(beaten) +
-       ",\"battlesWon\":" + std::to_string(w.battles_won) + "}}";
+       ",\"battlesWon\":" + std::to_string(w.battles_won) + ",\"trials\":" + std::to_string(w.trials) + "}}";
   return s;
 }
 
@@ -467,7 +474,7 @@ std::string bestiary_json(const World& w) {
 namespace {
 
 const char* teleporter_name(TeleporterId id) {
-  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle", "farm", "menhirs", "refuge", "col", "hamlet"};
+  static const char* kNames[] = {"village", "ruins", "forest", "cave", "castle", "farm", "menhirs", "refuge", "col", "hamlet", "port", "abbey", "camp"};
   static_assert(std::size(kNames) == kTeleporterCount);
   return kNames[static_cast<size_t>(id)];
 }
@@ -810,6 +817,20 @@ std::string map_json(const World& w) {
   } else {
     s += ",\"roads\":null";
   }
+  // The sites (sites.hpp).
+  if (w.sites.valid()) {
+    const SitesLayout& st = w.sites;
+    const auto at = [&](const char* name, Vec2 p) { return std::string(",\"") + name + "\":[" + num(p.x) + "," + num(p.z) + "]"; };
+    s += ",\"sites\":{\"abbeyHx\":" + num(st.abbey_hx) + ",\"abbeyHz\":" + num(st.abbey_hz);
+    if (st.port.x != 0 || st.port.z != 0) s += at("port", st.port) + at("portSea", st.port_sea);
+    s += at("abbey", st.abbey) + at("temple", st.temple) + at("camp", st.camp) + at("lookout", st.lookout) +
+         at("quarry", st.quarry) + at("quarryFront", st.quarry_front) + at("chapel", st.chapel) + at("apiary", st.apiary) + at("dolmen", st.dolmen);
+    if (st.wreck.x != 0 || st.wreck.z != 0) s += at("wreck", st.wreck);
+    if (st.aqueduct_a.x != 0 || st.aqueduct_a.z != 0) s += at("aqueductA", st.aqueduct_a) + at("aqueductB", st.aqueduct_b);
+    s += ",\"quarryR\":" + num(rules::kQuarryRadius + rules::kQuarryRim) + "}";
+  } else {
+    s += ",\"sites\":null";
+  }
   s += ",\"objects\":[";
   for (size_t i = 0; i < w.objects.size(); ++i) {
     const Object& o = w.objects[i];
@@ -818,6 +839,12 @@ std::string map_json(const World& w) {
     if (o.kind == ObjectKind::Arena) {
       const float ar = rules::kArenaRadius;
       b = {o.pos - Vec3{ar, 0, ar}, o.pos + Vec3{ar, 0, ar}};
+    }
+    if (o.kind == ObjectKind::AbbeyGate) b = {o.pos - Vec3{4, 0, 4}, o.pos + Vec3{4, 0, 4}};
+    if (o.kind == ObjectKind::Aqueduct) {
+      const bool along_x = ((o.yaw >> 14) & 1) == 0;
+      const Vec3 h{along_x ? 4.0f : 1.0f, 0, along_x ? 1.0f : 4.0f};
+      b = {o.pos - h, o.pos + h};
     }
     if (o.kind == ObjectKind::Collider) continue;
     if (o.kind == ObjectKind::Crops) b = {o.pos - o.size, o.pos + o.size};  // walked through, but drawn
@@ -1083,7 +1110,7 @@ std::string battle_json(const World& w) {
     const DoorNear d = door_near(w);
     if (d.action != DoorAction::None) {
       static const char* kActions[] = {"none", "enter", "leave", "climb", "descend"};
-      static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse", "mine"};
+      static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse", "mine", "temple"};
       static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
       s += std::string(",\"door\":{\"action\":\"") + kActions[static_cast<size_t>(d.action)] + "\",\"place\":\"" +
            kPlaces[static_cast<size_t>(d.place)] + "\",\"building\":\"" + object_kind_name(d.building) + "\"";
@@ -1096,7 +1123,10 @@ std::string battle_json(const World& w) {
         const char* spot = w.north.valid() && by(w.north.refuge) ? "refuge"
                            : w.roads.valid() && by(w.roads.inn) ? "inn"
                            : w.roads.valid() && by(w.roads.farmstead) ? "farmstead"
-                           : w.roads.valid() && by(w.roads.sawmill) ? "sawmill" : nullptr;
+                           : w.roads.valid() && by(w.roads.sawmill) ? "sawmill"
+                           : w.sites.valid() && by(w.sites.lookout) ? "lookout"
+                           : w.sites.valid() && by(w.sites.apiary) ? "apiary"
+                           : w.sites.valid() && by(w.sites.chapel) ? "chapel" : nullptr;
         if (spot) s += std::string(",\"spot\":\"") + spot + "\"";
       }
       s += "}";

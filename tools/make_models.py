@@ -3653,6 +3653,388 @@ def stall():
     return m
 
 
+
+# ---------------------------------------------------------------- the sites (src/core/sites.cpp)
+
+SAIL = (0.93, 0.89, 0.80, 1)
+HULL_PAINTS = [(0.20, 0.42, 0.62, 1), (0.70, 0.22, 0.18, 1), (0.24, 0.52, 0.36, 1), (0.85, 0.70, 0.30, 1)]
+FISH_SILVER = (0.72, 0.76, 0.80, 1)
+NET = (0.42, 0.36, 0.26, 1)
+TILE = (0.66, 0.34, 0.24, 1)
+ABBEY_STONE = (0.80, 0.76, 0.66, 1)
+ABBEY_DARK = (0.48, 0.44, 0.40, 1)
+HIVE_STRAW = (0.84, 0.68, 0.36, 1)
+
+
+def pier():
+    """4 m of a wooden pier along X, 2.4 m wide: its deck from y = 0 to 0.3
+    (collision: half 2 x 0.15 x 1.2), posts going down 4 m into the sea,
+    a rail on each side (their Colliders up to 0.95 m above the deck)."""
+    m = Mesh()
+    for k in range(10):
+        x = -2.0 + 0.2 + 0.4 * k
+        box(m, (x, 0.24, 0), (0.19, 0.06, 1.2), shade(PLANKS, 0.85 + 0.2 * hash01(9500, k)))
+    for z in (-1.0, 1.0):
+        box(m, (0, 0.1, z), (2.0, 0.09, 0.1), TIMBER)
+    for z in (-1.18, 1.18):
+        for x in (-1.9, 0.0):
+            box(m, (x, -1.7, z), (0.12, 2.0, 0.12), shade(TIMBER, 0.85))
+            box(m, (x, 0.75, z), (0.06, 0.45, 0.06), TIMBER)
+        box(m, (0, 1.2, z), (2.0, 0.04, 0.04), PLANKS)
+        # A rope sagging between the posts.
+        for k in range(6):
+            x0, x1 = -1.9 + 1.9 * k / 6 * 2, -1.9 + 1.9 * (k + 1) / 6 * 2
+            y0 = 0.85 - 0.12 * math.sin(math.pi * k / 6)
+            y1 = 0.85 - 0.12 * math.sin(math.pi * (k + 1) / 6)
+            tube(m, [(x0, y0, z), (x1, y1, z)], 0.02, NET, segments=4)
+    return m
+
+
+def boat(variant=0):
+    """A fishing boat along X, 4.8 m long, 1.9 wide, afloat (the water at
+    y = 0.3): its hull painted, a mast and a furled sail, oars, a net."""
+    m = Mesh()
+    paint = HULL_PAINTS[variant % len(HULL_PAINTS)]
+    n = 8
+    def section(t):
+        x = -2.4 + 4.8 * t
+        w = 0.95 * math.sin(math.pi * min(1.0, max(0.0, t * 0.95 + 0.03))) ** 0.6
+        return x, w
+    for i in range(n):
+        xa, wa = section(i / n)
+        xb, wb = section((i + 1) / n)
+        for side in (-1, 1):
+            m.quad_facing((xa, 0.0, side * wa * 0.55), (xb, 0.0, side * wb * 0.55), (xb, 0.9, side * wb), (xa, 0.9, side * wa), paint, (0, -0.3, side))
+            m.quad_facing((xa, 0.9, side * wa), (xb, 0.9, side * wb), (xb, 1.0, side * wb * 1.02), (xa, 1.0, side * wa * 1.02), shade(PLANKS, 1.05), (0, 0.2, side))
+            m.quad_facing((xa, 0.0, side * wa * 0.55), (xb, 0.0, side * wb * 0.55), (xb, 0.88, side * wb * 0.95), (xa, 0.88, side * wa * 0.95), shade(PLANKS, 0.7), (0, 0.3, -side))
+        m.quad_facing((xa, 0.0, -wa * 0.55), (xb, 0.0, -wb * 0.55), (xb, 0.0, wb * 0.55), (xa, 0.0, wa * 0.55), shade(paint, 0.5), (0, -1, 0))
+    box(m, (0, 0.35, 0), (2.0, 0.03, 0.5), shade(PLANKS, 0.8))  # the floor inside
+    for x in (-0.9, 0.7):
+        box(m, (x, 0.62, 0), (0.18, 0.04, 0.82), PLANKS)  # thwarts
+    box(m, (0.2, 2.0, 0), (0.06, 1.6, 0.06), TIMBER)  # the mast
+    box(m, (0.2, 1.3, 0), (0.9, 0.04, 0.04), TIMBER)  # the boom
+    blob(m, (0.2, 1.42, 0), (0.85, 0.14, 0.13), 0.15, 9520 + variant, solid(SAIL), detail=0)
+    for side in (-1, 1):
+        tube(m, [(-1.2, 0.95, side * 0.75), (0.6, 0.7, side * 0.55)], 0.03, WOOD, segments=4)
+    blob(m, (-1.6, 0.5, 0), (0.4, 0.15, 0.3), 0.3, 9530 + variant, solid(NET), detail=0)
+    return m
+
+
+def fish_rack(nets):
+    """A rack along X, 2.6 m long, 1.6 high: fish hanging to dry, or nets."""
+    m = Mesh()
+    for x in (-1.25, 1.25):
+        box(m, (x, 0.8, 0), (0.06, 0.8, 0.06), TIMBER)
+        tube(m, [(x, 0.0, -0.4), (x, 1.2, 0.0)], 0.04, TIMBER, segments=4)
+    box(m, (0, 1.55, 0), (1.3, 0.04, 0.04), PLANKS)
+    box(m, (0, 1.05, 0), (1.3, 0.03, 0.03), PLANKS)
+    if nets:
+        for k in range(5):
+            x = -1.0 + 0.5 * k
+            m.quad_facing((x - 0.27, 1.55, 0.02), (x + 0.27, 1.55, 0.02), (x + 0.22, 0.5 + 0.2 * hash01(9540, k), 0.06), (x - 0.22, 0.45, 0.06), shade(NET, 0.9 + 0.2 * hash01(9541, k)), (0, 0, 1))
+            m.quad_facing((x - 0.27, 1.55, 0.02), (x + 0.27, 1.55, 0.02), (x + 0.22, 0.5 + 0.2 * hash01(9540, k), 0.06), (x - 0.22, 0.45, 0.06), shade(NET, 0.8), (0, 0, -1))
+    else:
+        for row, y in enumerate((1.5, 1.0)):
+            for k in range(7):
+                x = -1.05 + 0.35 * k
+                blob(m, (x, y - 0.22, 0), (0.06, 0.2, 0.025), 0.15, 9550 + row * 10 + k, solid(shade(FISH_SILVER, 0.85 + 0.25 * hash01(9551, k + row))), detail=0)
+    return m
+
+
+def abbey_wall():
+    """4 m of the abbey's wall along X, 1 m thick, 3.9 m high, a coping of
+    tiles on top up to 4.2 m (collision: half 2 x 2.1 x 0.5)."""
+    m = Mesh()
+    stone_box(m, (0, 0.2, 0), (2.0, 0.2, 0.52), 9600, ABBEY_DARK)
+    for row in range(5):
+        y = 0.4 + row * 0.7
+        for k in range(3):
+            off = 0.65 if row % 2 else 0.0
+            x0 = max(-2.0, -2.0 + k * 1.33 + off - (0.65 if row % 2 and k == 0 else 0))
+            x1 = min(2.0, x0 + 1.33 if not (row % 2 and k == 2) else 2.0)
+            if row % 2 and k == 0:
+                x0, x1 = -2.0, -2.0 + 0.65 + 1.33
+            stone_box(m, ((x0 + x1) / 2, y + 0.35, 0), ((x1 - x0) / 2 - 0.01, 0.34, 0.5), 9601 + row * 5 + k, ABBEY_STONE)
+    for side in (-1, 1):
+        m.quad_facing((-2.0, 3.9, side * 0.62), (2.0, 3.9, side * 0.62), (2.0, 4.2, 0), (-2.0, 4.2, 0), TILE, (0, 0.6, side))
+    box(m, (0, 4.18, 0), (2.0, 0.05, 0.08), shade(TILE, 0.75))
+    return m
+
+
+def abbey_gate():
+    """The abbey's gatehouse: 8 m along X, 2.2 m deep, front (outside) at -Z;
+    a passage 3.2 m wide under a round arch, a tiled roof up to 7.6 m, a
+    bell-cote. Solid parts (Colliders): x in [-4, -1.7] and [1.7, 4]."""
+    m = Mesh()
+    for side in (-1, 1):
+        for row in range(8):
+            stone_box(m, (side * 2.85, row * 0.7 + 0.35, 0), (1.15, 0.34, 1.1), 9620 + row * 2 + (side > 0), ABBEY_STONE)
+    stone_box(m, (0, 5.2, 0), (1.7, 0.85, 1.1), 9640, ABBEY_STONE)
+    for k in range(10):
+        x = -1.6 + (k + 0.5) * 3.2 / 10
+        y = 3.3 + 1.0 * math.sqrt(max(0.0, 1 - (x / 1.6) ** 2))
+        h = 4.35 - y
+        if h > 0.02:
+            for z in (-0.9, 0.9):
+                box(m, (x, y + h / 2, z), (1.6 / 10, h / 2, 0.2), shade(ABBEY_STONE, 0.95 + 0.1 * hash01(9645, k)))
+    gable_walls(m, 4.0, 1.1, 6.05, 7.6, ABBEY_STONE)
+    gable_roof(m, 4.0, 1.1, 6.05, 7.6, 0.35, TILE)
+    box(m, (0, 8.1, 0), (0.45, 0.6, 0.3), ABBEY_STONE)  # the bell-cote
+    box(m, (0, 8.0, -0.31), (0.22, 0.3, 0.02), CAVE_DARK)
+    frustum(m, translate(0, 7.85, -0.2), 0.13, 0.07, 0.25, 8, GOLD)
+    for side in (-1, 1):
+        box(m, (side * 2.3, 3.0, -1.15), (0.06, 0.18, 0.06), TIMBER)
+        box(m, (side * 2.3, 3.25, -1.2), (0.1, 0.1, 0.1), LIT_LANTERN)
+    return m
+
+
+def temple():
+    """The abbey's church: 24 x 19 m, walls 8 m, a steep tiled roof up to
+    13 m (ridge along Z), a rose window and a great door at -Z, buttresses,
+    tall lit windows (collision: half 12 x 6.5 x 9.5)."""
+    m = Mesh()
+    hx, hz, wall = 12.0, 9.5, 8.0
+    stone_box(m, (0, 0.3, 0), (hx + 0.2, 0.3, hz + 0.2), 9700, ABBEY_DARK)
+    rows = 8
+    for row in range(rows):
+        y = 0.6 + row * (wall - 0.6) / rows
+        stone_box(m, (0, y + (wall - 0.6) / rows / 2, 0), (hx, (wall - 0.6) / rows / 2 - 0.005, hz), 9701 + row, ABBEY_STONE)
+    # The roof: ridge along Z (the nave runs from the door inwards), gables front and back.
+    for side in (-1, 1):
+        rows_ = 6
+        for r in range(rows_):
+            t0, t1 = r / rows_, (r + 1) / rows_
+            xa, xb = side * (hx + 0.5) * (1 - t0), side * (hx + 0.5) * (1 - t1)
+            ya, yb = wall + 5.0 * t0, wall + 5.0 * t1
+            m.quad_facing((xa, ya, -hz - 0.5), (xa, ya, hz + 0.5), (xb, yb, hz + 0.5), (xb, yb, -hz - 0.5), shade(TILE, 1.0 if r % 2 == 0 else 0.9), (side, 1, 0))
+        m.quad_facing((side * (hx + 0.5), wall, -hz - 0.5), (side * (hx + 0.5), wall, hz + 0.5), (0, wall + 5.0, hz + 0.5), (0, wall + 5.0, -hz - 0.5), shade(TILE, 0.5), (-side, -1, 0))
+    for zf in (-1, 1):
+        a, b, c = (-hx, wall, zf * hz), (hx, wall, zf * hz), (0, wall + 4.9, zf * hz)
+        if dot(cross(sub(b, a), sub(c, a)), (0, 0, zf)) < 0:
+            b, c = c, b
+        m.tri(a, b, c, ABBEY_STONE)
+    # The front: a great door under an arch, a rose window above it.
+    box(m, (0, 1.6, -hz - 0.05), (1.0, 1.6, 0.06), DOOR)
+    box(m, (0, 3.35, -hz - 0.08), (1.25, 0.18, 0.08), ABBEY_DARK)
+    for k in range(9):
+        x = -1.2 + (k + 0.5) * 2.4 / 9
+        y = 3.2 + 0.7 * math.sqrt(max(0.0, 1 - (x / 1.2) ** 2))
+        box(m, (x, y + 0.1, -hz - 0.08), (2.4 / 18, 0.12, 0.08), shade(ABBEY_DARK, 1.1))
+    frustum(m, lambda q: (q[0], 6.6 + q[2], -hz - 0.04 - q[1]), 1.3, 1.3, 0.1, 16, LIT_GLASS, top_cap=LIT_GLASS)
+    frustum(m, lambda q: (q[0], 6.6 + q[2], -hz - 0.06 - q[1]), 1.45, 1.45, 0.05, 16, ABBEY_DARK)
+    # Buttresses and tall windows along the sides.
+    for z in (-6.0, -2.0, 2.0, 6.0):
+        for side in (-1, 1):
+            stone_box(m, (side * (hx + 0.35), 3.0, z), (0.35, 3.0, 0.45), 9720 + int(z), ABBEY_DARK)
+    for z in (-4.0, 0.0, 4.0):
+        for side in (-1, 1):
+            window(m, (side * hx, 4.6, z), 0.55, 1.4, (side, 0, 0))
+    # A small spire over the front.
+    frustum(m, translate(0, wall + 4.6, -hz + 1.2), 0.9, 0.9, 1.6, 8, ABBEY_STONE)
+    frustum(m, translate(0, wall + 6.2, -hz + 1.2), 1.05, 0.0, 3.2, 8, ROOF_SLATE)
+    frustum(m, translate(0, wall + 9.4, -hz + 1.2), 0.05, 0.05, 0.6, 6, GOLD)
+    return m
+
+
+def belfry():
+    """The bell tower: 5 x 5 m, 15 m high, open arches at the top showing its
+    bell, a pointed roof up to 19 m (collision: half 2.5 x 8 x 2.5)."""
+    m = Mesh()
+    for row in range(14):
+        stone_box(m, (0, row * 0.9 + 0.45, 0), (2.5, 0.445, 2.5), 9800 + row, ABBEY_STONE if row % 3 else shade(ABBEY_STONE, 0.94))
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            stone_box(m, (sx * 2.2, 13.95, sz * 2.2), (0.3, 1.35, 0.3), 9820 + sx + 2 * sz, ABBEY_STONE)
+    stone_box(m, (0, 15.45, 0), (2.6, 0.15, 2.6), 9830, ABBEY_DARK)
+    frustum(m, translate(0, 13.6, 0), 0.6, 0.3, 1.1, 10, GOLD)  # the bell
+    box(m, (0, 14.75, 0), (1.9, 0.06, 0.06), TIMBER)
+    frustum(m, translate(0, 15.6, 0), 3.0, 0.0, 3.6, 4, ROOF_SLATE, phase=math.pi / 4)
+    frustum(m, translate(0, 19.2, 0), 0.04, 0.04, 0.7, 6, GOLD)
+    for side in (-1, 1):
+        window(m, (side * 2.5, 6.0, 0), 0.25, 0.6, (side, 0, 0))
+        window(m, (0, 9.0, side * 2.5), 0.25, 0.6, (0, 0, side))
+    return m
+
+
+def dorter(variant):
+    """A long stone building along X: 22 x 7.2 m, two floors (6.4 m), an
+    arcade along its front (-Z), a tiled roof; the refectory (variant 1) has
+    a chimney (collision: half 11 x 3.2 x 3.6)."""
+    m = Mesh()
+    hx, hz, wall = 11.0, 3.0, 6.4
+    stone_box(m, (0, 3.2, 0.4), (hx, 3.2, hz), 9900 + variant, ABBEY_STONE)
+    box(m, (0, 3.25, 0.4), (hx + 0.05, 0.08, hz + 0.05), ABBEY_DARK)
+    gable_walls(m, hx, hz + 0.6, wall, 9.0, ABBEY_STONE)
+    gable_roof(m, hx, hz + 0.6, wall, 9.0, 0.4, TILE)
+    # The arcade: columns and arches along the front, a lean-to roof.
+    for k in range(9):
+        x = -hx + 1.2 + k * (2 * hx - 2.4) / 8
+        frustum(m, translate(x, 0, -hz - 0.25), 0.18, 0.16, 2.6, 8, ABBEY_STONE)
+        box(m, (x, 2.75, -hz - 0.25), (0.25, 0.12, 0.25), ABBEY_DARK)
+    box(m, (0, 3.0, -hz - 0.25), (hx, 0.15, 0.25), ABBEY_STONE)
+    m.quad_facing((-hx, 3.15, -hz - 0.6), (hx, 3.15, -hz - 0.6), (hx, 3.9, -hz + 0.4), (-hx, 3.9, -hz + 0.4), TILE, (0, 1, -0.6))
+    m.quad_facing((-hx, 3.15, -hz - 0.6), (hx, 3.15, -hz - 0.6), (hx, 3.9, -hz + 0.4), (-hx, 3.9, -hz + 0.4), shade(TILE, 0.5), (0, -1, 0.6))
+    for x in (-6.0, 0.0, 6.0):
+        door(m, (x, 0.95, -hz + 0.4), 0.45, 0.95, (0, 0, -1))
+    for k in range(8):
+        x = -hx + 1.4 + k * (2 * hx - 2.8) / 7
+        window(m, (x, 4.9, -hz + 0.4), 0.3, 0.45, (0, 0, -1))
+        window(m, (x, 4.9, hz + 0.4), 0.3, 0.45, (0, 0, 1))
+        window(m, (x, 1.6, hz + 0.4), 0.3, 0.45, (0, 0, 1))
+    if variant % 2:
+        box(m, (6.5, 8.6, 1.5), (0.4, 1.6, 0.4), DARK_STONE)
+        box(m, (6.5, 10.2, 1.5), (0.48, 0.07, 0.48), shade(DARK_STONE, 0.8))
+    return m
+
+
+def gravestone(variant):
+    """A gravestone (rounded top) or a stone cross, facing -Z, about 0.9 m high."""
+    m = Mesh()
+    c = shade(ABBEY_STONE, 0.75 + 0.2 * hash01(9950, variant))
+    if variant % 3 == 2:  # a cross
+        box(m, (0, 0.45, 0), (0.07, 0.45, 0.07), c)
+        box(m, (0, 0.65, 0), (0.25, 0.06, 0.07), c)
+    else:
+        box(m, (0, 0.33, 0), (0.28, 0.33, 0.09), c)
+        frustum(m, lambda q: (q[0], 0.66 + q[2] * (1 if q[2] > 0 else 0), q[1] - 0.09), 0.28, 0.28, 0.18, 10, c)
+        box(m, (0, 0.45, -0.1), (0.15, 0.02, 0.005), shade(c, 0.6))
+    box(m, (0, 0.03, -0.2), (0.3, 0.03, 0.12), shade(c, 0.9))
+    if variant % 2:
+        blob(m, (0.2, 0.08, -0.25), (0.08, 0.06, 0.08), 0.2, 9951 + variant, solid((0.9, 0.3, 0.35, 1)), detail=0)
+    return m
+
+
+def chapel():
+    """A small stone chapel: 6.4 x 9.2 m, walls 4.4 m, a steep slate roof
+    (ridge along Z, up to 7.6 m), its door at -Z, a bell over the front gable
+    (collision: half 3.2 x 3 x 4.6)."""
+    m = Mesh()
+    hx, hz, wall = 3.2, 4.6, 4.4
+    for row in range(6):
+        stone_box(m, (0, row * wall / 6 + wall / 12, 0), (hx, wall / 12 - 0.004, hz), 9960 + row, shade(ABBEY_STONE, 0.95))
+    for side in (-1, 1):
+        m.quad_facing((side * (hx + 0.3), wall, -hz - 0.3), (side * (hx + 0.3), wall, hz + 0.3), (0, 7.6, hz + 0.3), (0, 7.6, -hz - 0.3), ROOF_SLATE, (side, 1, 0))
+        m.quad_facing((side * (hx + 0.3), wall, -hz - 0.3), (side * (hx + 0.3), wall, hz + 0.3), (0, 7.6, hz + 0.3), (0, 7.6, -hz - 0.3), shade(ROOF_SLATE, 0.5), (-side, -1, 0))
+        window(m, (side * hx, 2.6, -1.5), 0.25, 0.7, (side, 0, 0))
+        window(m, (side * hx, 2.6, 1.8), 0.25, 0.7, (side, 0, 0))
+    for zf in (-1, 1):
+        a, b, c = (-hx, wall, zf * hz), (hx, wall, zf * hz), (0, 7.5, zf * hz)
+        if dot(cross(sub(b, a), sub(c, a)), (0, 0, zf)) < 0:
+            b, c = c, b
+        m.tri(a, b, c, shade(ABBEY_STONE, 0.95))
+    door(m, (0, 1.1, -hz), 0.6, 1.1, (0, 0, -1))
+    frustum(m, lambda q: (q[0], 5.3 + q[2], -hz - 0.03 - q[1]), 0.45, 0.45, 0.05, 12, LIT_GLASS, top_cap=LIT_GLASS)
+    box(m, (0, 8.1, -hz + 0.2), (0.4, 0.6, 0.2), shade(ABBEY_STONE, 0.95))
+    box(m, (0, 8.05, -hz - 0.01), (0.2, 0.3, 0.02), CAVE_DARK)
+    frustum(m, translate(0, 7.9, -hz + 0.05), 0.12, 0.06, 0.22, 8, GOLD)
+    box(m, (0, 9.0, -hz + 0.2), (0.04, 0.3, 0.04), METAL)
+    box(m, (0, 9.1, -hz + 0.2), (0.15, 0.03, 0.03), METAL)
+    return m
+
+
+def crane():
+    """The quarry's crane: a mast of timber 6 m high on a cross of beams, its
+    jib reaching 5 m out towards -Z, a rope and a hook, a winch."""
+    m = Mesh()
+    for a in (0, math.pi / 2):
+        box(m, (0, 0.15, 0), (1.0 * abs(math.cos(a)) + 0.12, 0.15, 1.0 * abs(math.sin(a)) + 0.12), TIMBER)
+    box(m, (0, 3.0, 0), (0.15, 3.0, 0.15), shade(TIMBER, 1.1))
+    for sx, sz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        tube(m, [(sx * 0.95, 0.3, sz * 0.95), (0, 2.6, 0)], 0.06, TIMBER, segments=4)
+    tube(m, [(0, 5.4, 0.4), (0, 4.4, -5.0)], 0.1, shade(TIMBER, 1.1), segments=5)
+    tube(m, [(0, 6.0, 0), (0, 4.5, -4.9)], 0.02, NET, segments=4)
+    tube(m, [(0, 4.4, -4.9), (0, 2.0, -4.9)], 0.02, NET, segments=4)
+    box(m, (0, 1.9, -4.9), (0.08, 0.12, 0.04), METAL)
+    box(m, (0.0, 1.0, 0.55), (0.35, 0.25, 0.25), PLANKS)  # the winch
+    frustum(m, lambda q: (q[1] - 0.4, 1.25 + q[0], 0.55 + q[2]), 0.18, 0.18, 0.8, 8, shade(PLANKS, 0.8))
+    return m
+
+
+def block():
+    """A cut block of stone, fitting [-1, 1] x [0, 2] x [-1, 1] (scaled by its half extents)."""
+    m = Mesh()
+    box(m, (0, 1, 0), (1, 1, 1), shade(ABBEY_STONE, 0.95))
+    box(m, (0, 2.0, 0), (0.96, 0.02, 0.96), shade(ABBEY_STONE, 1.05))
+    for k in range(3):
+        box(m, (-0.6 + 0.6 * k, 1.0, -1.005), (0.02, 0.9, 0.005), shade(ABBEY_STONE, 0.8))
+    return m
+
+
+def beehive():
+    """A straw hive on its wooden stand, 1.1 m high, round."""
+    m = Mesh()
+    for x in (-0.25, 0.25):
+        box(m, (x, 0.2, 0), (0.05, 0.2, 0.05), TIMBER)
+    box(m, (0, 0.42, 0), (0.38, 0.03, 0.38), PLANKS)
+    profile = [(0.0, 0.45, HIVE_STRAW)]
+    for k in range(7):
+        t = k / 6
+        r = 0.32 * math.cos(t * math.pi / 2 * 0.95) + 0.02
+        profile.append((r, 0.45 + 0.62 * math.sin(t * math.pi / 2), shade(HIVE_STRAW, 1.0 if k % 2 else 0.86)))
+    profile.append((0.0, 1.08, HIVE_STRAW))
+    lathe(m, profile, 12)
+    box(m, (0, 0.5, -0.3), (0.06, 0.04, 0.03), CAVE_DARK)
+    return m
+
+
+def dolmen():
+    """A stone table along X: a great flat stone on three standing ones,
+    2 m high, 4 m long (collision: half 2 x 1 x 1.2)."""
+    m = Mesh()
+    for k, (x, z) in enumerate(((-1.4, -0.7), (-1.3, 0.75), (1.35, 0.0))):
+        blob(m, (x, 0.75, z), (0.32, 0.8, 0.42), 0.12, 9980 + k, jitter(ROCK, 9981 + k, 0.1), detail=1)
+    blob(m, (0, 1.75, 0), (2.2, 0.32, 1.35), 0.1, 9990, jitter(shade(ROCK, 0.95), 9991, 0.1), detail=1)
+    blob(m, (0.6, 2.02, 0.4), (0.7, 0.07, 0.5), 0.3, 9992, jitter(MOSS, 9993, 0.15), detail=0)
+    return m
+
+
+def wreck():
+    """An old ship's hull lying on the beach along X, 12 m long, keeled
+    over, ribs showing where its planks fell (collision: half 6 x 1.6 x 2)."""
+    m = Mesh()
+    n = 12
+    old = shade(PLANKS, 0.7)
+    for i in range(n):
+        t0, t1 = i / n, (i + 1) / n
+        xa, xb = -6 + 12 * t0, -6 + 12 * t1
+        wa = 2.0 * math.sin(math.pi * (0.06 + 0.88 * t0)) ** 0.7
+        wb = 2.0 * math.sin(math.pi * (0.06 + 0.88 * t1)) ** 0.7
+        broken = hash01(9995, i) < 0.3
+        # Lying on its side: one side down in the sand, the other up.
+        for side in (-1, 1):
+            if side > 0 and broken:
+                continue
+            ya, yb = (0.2, 0.2) if side < 0 else (2.4 * wa / 2.0, 2.4 * wb / 2.0)
+            m.quad_facing((xa, 0.0, 0), (xb, 0.0, 0), (xb, yb + 0.2, side * wb), (xa, ya + 0.2, side * wa), shade(old, 0.85 + 0.25 * hash01(9996, i * 2 + (side > 0))), (0, 0.3, side))
+            m.quad_facing((xa, 0.0, 0), (xb, 0.0, 0), (xb, yb + 0.2, side * wb), (xa, ya + 0.2, side * wa), shade(old, 0.5), (0, 0.3, -side))
+        tube(m, [(xa, 0.0, 0), (xa, 0.2 + 2.4 * wa / 2.0, wa)], 0.08, shade(TIMBER, 0.8), segments=4)
+    tube(m, [(1.0, 0.5, 0.2), (2.5, 3.8, 3.2)], 0.15, shade(TIMBER, 0.75), segments=6)  # the broken mast
+    tube(m, [(-6.2, 0.1, 0), (6.4, 0.3, 0)], 0.16, shade(TIMBER, 0.8), segments=6)  # the keel
+    for k in range(4):
+        blob(m, (-4 + 2.6 * k, 0.05, -1.4 + 0.5 * hash01(9997, k)), (0.6, 0.15, 0.4), 0.3, 9998 + k, jitter((0.86, 0.80, 0.62, 1), 9999, 0.1), detail=0)
+    return m
+
+
+def aqueduct():
+    """One arch of the old aqueduct, 8 m along X, 7 m high (scaled to its
+    height): piers at each end, a round arch, the channel on top. Walked
+    under (its piers: Colliders, half 0.75 x 1.05 across)."""
+    m = Mesh()
+    for side in (-1, 1):
+        for row in range(7):
+            stone_box(m, (side * 3.25, row * 0.7 + 0.35, 0), (0.75, 0.345, 1.05), 10000 + row * 2 + (side > 0), RUIN_STONE)
+    for k in range(14):
+        x = -2.5 + (k + 0.5) * 5.0 / 14
+        y = 4.9 + 1.1 * math.sqrt(max(0.0, 1 - (x / 2.5) ** 2))
+        h = 6.2 - y
+        box(m, (x, y + h / 2, 0), (5.0 / 28, max(h, 0.05) / 2, 1.0), shade(RUIN_STONE, 0.92 + 0.1 * hash01(10020, k)))
+    stone_box(m, (0, 6.45, 0), (4.0, 0.25, 1.1), 10030, shade(RUIN_STONE, 0.95))
+    for z in (-0.9, 0.9):
+        stone_box(m, (0, 6.85, z), (4.0, 0.15, 0.18), 10031 + int(z * 10), RUIN_DARK)
+    blob(m, (2.8, 6.8, 0.6), (0.9, 0.35, 0.5), 0.3, 10040, jitter(IVY, 10041, 0.12), detail=0)
+    blob(m, (-3.3, 1.2, -1.05), (0.5, 0.9, 0.2), 0.25, 10042, jitter(IVY, 10043, 0.12), detail=0)
+    return m
+
 # The north's monsters walk on four legs, as Pompon (their rigs: src/render/characters.cpp).
 
 def golem_body():
@@ -4030,6 +4412,29 @@ def all_models():
         "shrine": shrine(),
         "bench": bench(),
         "stall": stall(),
+        "pier": pier(),
+        "boat0": boat(0),
+        "boat1": boat(1),
+        "boat2": boat(2),
+        "boat3": boat(3),
+        "fish_rack": fish_rack(False),
+        "net_rack": fish_rack(True),
+        "abbey_wall": abbey_wall(),
+        "abbey_gate": abbey_gate(),
+        "temple": temple(),
+        "belfry": belfry(),
+        "dorter": dorter(0),
+        "refectory": dorter(1),
+        "gravestone0": gravestone(0),
+        "gravestone1": gravestone(1),
+        "cross": gravestone(2),
+        "chapel": chapel(),
+        "crane": crane(),
+        "block": block(),
+        "beehive": beehive(),
+        "dolmen": dolmen(),
+        "wreck": wreck(),
+        "aqueduct": aqueduct(),
         "golem_body": golem_body(),
         "golem_head": golem_head(),
         "golem_ear": golem_ear(),

@@ -2,6 +2,7 @@
 
 #include "monstres/core/north.hpp"
 #include "monstres/core/roads.hpp"
+#include "monstres/core/sites.hpp"
 
 #include "monstres/core/interior.hpp"
 #include "monstres/core/west.hpp"
@@ -57,6 +58,8 @@ void scale_for(const Object& o, Instance& in) {
     }
     case ObjectKind::Bridge: in.sx = s.x / 5.4f; in.sy = in.sz = 1; in.y += 2 * s.y; break;  // its deck on top of its box, as long
     case ObjectKind::HiddenCave: in.sx = in.sy = in.sz = rules::kHiddenCaveScale; break;           // the cave's mouth, smaller
+    case ObjectKind::Block: in.sx = s.x; in.sy = s.y; in.sz = s.z; break;  // its base on the ground
+    case ObjectKind::Aqueduct: in.sx = in.sz = 1; in.sy = s.y / 7.0f; break;  // 7 m high: to its height
     default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
   }
 }
@@ -94,7 +97,11 @@ Detail detail_of(const Object& o) {
     case ObjectKind::Lamp:
     case ObjectKind::Rubble:
     case ObjectKind::StoneWall:
+    case ObjectKind::Gravestone:
+    case ObjectKind::Beehive:
+    case ObjectKind::FishRack:
     case ObjectKind::Minecart: return Detail::Small;
+    case ObjectKind::Block: return o.size.x >= 1.0f ? Detail::Landmark : Detail::Small;
     default: return Detail::Landmark;
   }
 }
@@ -201,6 +208,20 @@ LandscapeCache::Item make_item(const World& w, const Object& o) {
     case ObjectKind::Shrine: shadow(0.6f, 0.6f, 0, 0.6f); break;
     case ObjectKind::Bench: shadow(1.0f, 0.4f, yaw, 0.5f); break;
     case ObjectKind::Stall: shadow(1.6f, 1.0f, yaw, 0.6f); break;
+    case ObjectKind::FishRack: shadow(1.5f, 0.5f, yaw, 0.5f); break;
+    case ObjectKind::AbbeyWall: shadow(2.4f, 1.0f, yaw, 0.7f); break;
+    case ObjectKind::AbbeyGate: shadow(4.8f, 1.8f, yaw, 0.7f); break;
+    case ObjectKind::Temple: shadow(14.0f, 11.5f, yaw, 0.75f); break;
+    case ObjectKind::Belfry: shadow(3.4f, 3.4f, yaw, 0.75f); break;
+    case ObjectKind::Dorter: shadow(12.5f, 4.8f, yaw, 0.7f); break;
+    case ObjectKind::Gravestone: shadow(0.45f, 0.3f, yaw, 0.5f); break;
+    case ObjectKind::Chapel: shadow(4.2f, 5.6f, yaw, 0.7f); break;
+    case ObjectKind::Crane: shadow(1.3f, 1.3f, yaw, 0.6f); break;
+    case ObjectKind::Block: shadow(1.4f * s.x, 1.4f * s.z, yaw, 0.6f); break;
+    case ObjectKind::Beehive: shadow(0.5f, 0.5f, 0, 0.5f); break;
+    case ObjectKind::Dolmen: shadow(2.8f, 1.8f, yaw, 0.7f); break;
+    case ObjectKind::Wreck: shadow(6.8f, 2.8f, yaw, 0.6f); break;
+    case ObjectKind::Aqueduct: shadow(4.6f, 1.5f, yaw, 0.6f); break;
     default: break;
   }
   return item;
@@ -247,6 +268,7 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
   const float on_path = distance_to_path(w.path, x, z, 2 * rules::kPathHalfWidth) / rules::kPathHalfWidth;
   if (on_path < 0.75f) return;
   if (distance_to_lanes(w.roads, x, z, 2 * rules::kLaneHalfWidth) < 0.8f * rules::kLaneHalfWidth) return;
+  if (bare_site(w.sites, x, z)) return;  // the quarry's pit, round the camp's fire
   // The north's snow and ice: no grass (north.hpp).
   if (w.north.valid() && z < rules::kFrostFrom + 120.0f) {
     if (in_frozen_lake(w.north, x, z) || north_snow(w.north, x, z, w.ground.height(x, z)) > 0.45f) return;

@@ -231,6 +231,23 @@ enum class ObjectKind : uint8_t {
   Shrine,        // a wayside shrine: a little stone niche on a pillar
   Bench,         // a wooden bench, along X
   Stall,         // a market stall under its awning, its front at -Z
+  // The sites (sites.hpp; fixed sizes unless said otherwise, front at -Z):
+  Pier,          // 4 m of a wooden pier along X, its deck on top (walked onto; set at the quay's level, not on the ground)
+  Boat,          // a fishing boat moored, afloat (on the sea), along X
+  FishRack,      // a rack of fish drying (variant odd: nets hung to dry), along X
+  AbbeyWall,     // 4 m of the abbey's wall along X, a tiled coping on top (not jumped)
+  AbbeyGate,     // the abbey's gatehouse: walk through its arch (its sides are Colliders), front (outside) at -Z
+  Temple,        // the abbey's church: a big hall, its door at -Z (interior.hpp: battles inside)
+  Belfry,        // the abbey's bell tower, square
+  Dorter,        // a long two-floored stone building with an arcade, along X, its doors at -Z
+  Gravestone,    // a gravestone or a cross (variant), facing -Z
+  Chapel,        // a small stone chapel, its door at -Z, a bell over its gable
+  Crane,         // the quarry's wooden crane (a derrick and its jib)
+  Block,         // a cut block of stone. size = half extents
+  Beehive,       // a straw hive on its stand
+  Dolmen,        // a stone table on standing stones, along X
+  Wreck,         // an old ship's hull on the beach, along X (walked around)
+  Aqueduct,      // one arch of the old aqueduct, 8 m along X: size.y = its height (its piers: Colliders; walked under)
   Count
 };
 
@@ -717,12 +734,27 @@ inline constexpr uint8_t kContender = 27; // a tournament's contender, in the ar
 inline constexpr uint8_t kAubin = 28;     // the innkeeper by the road: a good meal heals the team
 inline constexpr uint8_t kBertille = 29;   // the farmer of the farmstead by the path (Bertille)
 inline constexpr uint8_t kAgathe = 30;    // the healer of Rochebrune
+// The sites (sites.hpp).
+inline constexpr uint8_t kLoic = 31;      // the port's old fisherman, by the piers
+inline constexpr uint8_t kNolwenn = 32;    // the fishmonger of the port's market
+inline constexpr uint8_t kGauthier = 33;  // the abbey's gatekeeper: he heals the team
+inline constexpr uint8_t kHugues = 34;    // the abbey's monks, in the temple: trainers (World::trials)
+inline constexpr uint8_t kOdile = 35;
+inline constexpr uint8_t kBenoit = 36;
+inline constexpr uint8_t kAmbroise = 37;  // the abbot: fights once the three monks are beaten
+inline constexpr uint8_t kYsolde = 38;    // the camp's ranger: she heals the team
+inline constexpr uint8_t kTristan = 39;   // a trainer in the camp
+inline constexpr uint8_t kRaoul = 40;     // the quarryman
+inline constexpr uint8_t kSylvain = 41;   // the hermit of the chapel
+inline constexpr uint8_t kHeloise = 42;   // the beekeeper of the apiary
+inline constexpr uint8_t kArmand = 43;    // the old watchman of the lookout
+inline constexpr bool monk(uint8_t n) { return n >= kHugues && n <= kAmbroise; }
 }  // namespace npc
 
 // Teleporters (ObjectKind::Teleporter, variant = id): a circle of stones in
 // some places. Walking near one makes it known; from one, the player can go
 // to any other known one.
-enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Farm, Menhirs, Refuge, Col, Hamlet, Count };
+enum class TeleporterId : uint8_t { Village, Ruins, Forest, Cave, Castle, Farm, Menhirs, Refuge, Col, Hamlet, Port, Abbey, Camp, Count };
 inline constexpr size_t kTeleporterCount = static_cast<size_t>(TeleporterId::Count);
 
 // Quests (see quests.hpp).
@@ -789,7 +821,7 @@ struct ObjectIndex {
 // ceiling), and what was outside waits in World::outdoors.
 // House: the village's houses, the farmhouse, the woodcutter's cabin.
 // Mine: the north's old mine (galleries held up by timbers).
-enum class PlaceKind : uint8_t { Outside, Cave, House, Tower, Burrow, HollowTree, Lighthouse, Mine, Count };
+enum class PlaceKind : uint8_t { Outside, Cave, House, Tower, Burrow, HollowTree, Lighthouse, Mine, Temple, Count };
 struct Place {
   PlaceKind kind = PlaceKind::Outside;
   uint32_t door = 0;  // inside: World::outdoors.objects[door] is the way in (cave mouth, house, tower)
@@ -866,6 +898,7 @@ struct World {
   WestLayout west;     // the west, towards the sea (west.hpp): derived from the seed (not saved)
   NorthLayout north;   // the north, up to the mountains (north.hpp): derived from the seed (not saved)
   RoadsLayout roads;   // the side roads and the places along them (roads.hpp): derived from the seed (not saved)
+  SitesLayout sites;   // the port, the abbey, the camp and the other sites (sites.hpp): derived from the seed (not saved)
   Heightmap ground;    // derived from the seed (not saved)
   Body player;
   std::vector<Object> objects;
@@ -902,6 +935,8 @@ struct World {
   std::array<uint16_t, kSpeciesCount> captured_count{}, beaten_count{}, released_count{};
   uint32_t battles_won = 0;    // victories, wild monsters' and trainers'
   uint8_t cups = 0;            // the arena's cups won (a bit each, battle.hpp)
+  uint8_t trials = 0;          // the abbey's monks beaten (a bit each, from npc::kHugues; the abbot's last)
+  uint8_t tristan_wins = 0;    // battles won against Tristan, in the camp
   Tournament tournament;       // not saved: the one going on
   uint16_t detect_ticks = 0;   // the Detection spell: ticks left
   std::array<SpellId, kCombatSlots> combat_spells{SpellId::Heal, SpellId::Shield};  // chosen out of battles
