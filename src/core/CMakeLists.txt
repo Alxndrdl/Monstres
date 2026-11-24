@@ -16,6 +16,7 @@ add_library(monstres_core STATIC
   west.cpp
   north.cpp
   roads.cpp
+  landfix.cpp
   routines.cpp
   sites.cpp
 )

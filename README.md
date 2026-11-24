@@ -195,6 +195,29 @@ sauter. Les objets sont posés sur le sol (légèrement enfoncés), l'herbe, les
 ombres et le sentier suivent la pente, et la caméra ne passe jamais sous une
 colline.
 
+Les dernières retouches (`src/core/landfix.cpp`) gardent le pays cohérent :
+
+- **Pas d'eau enfermée dans les terres.** Là où le continent descend sous le
+  niveau de la mer à l'intérieur des terres, la mer dessinée (par carrés de
+  16 m) formait des lagunes sans issue. `join_waters` (à la fin de
+  `build_layouts`) les cherche et les relie à la mer ouverte par un chenal
+  sinueux, creusé au plus bas. Le chenal fait au plus 320 m, ne traverse pas
+  de terrain à plus de 6 m au-dessus de la mer, et passe loin des chemins,
+  de la rivière, des lieux et de la vallée. Ses rives sont plus raides là où
+  il entaille une butte, et le continent y passe sous la mer pour que l'eau
+  y soit dessinée. Une lagune qu'aucun chenal ne peut rejoindre est comblée
+  en prairie basse, légèrement ondulée, jusqu'à la courbe de niveau qui
+  l'entoure (sans bord droit).
+- **Les bâtiments des terres sauvages sur un sol plat.** `seat_buildings`
+  (dans `generate_wilds`, avant que poussent les arbres) aplanit le sol sous
+  chaque maison, chalet, cabane, ferme et grange, et devant sa porte, au
+  niveau moyen du terrain qu'il occupe. Il fait de même devant l'entrée de
+  la mine et la grotte, au niveau de leur seuil, sans toucher la roche
+  derrière. Le bord se fond dans la pente avec un contour irrégulier ; deux
+  terre-pleins voisins se raccordent. Ces bâtiments sont ensuite posés au
+  niveau du sol en leur milieu : plus de porte enterrée ni de marche à
+  l'entrée. Ceux de la vallée (sauvegardés) ne sont pas touchés.
+
 La simulation (60 pas par seconde) est déterministe : entrées en entiers,
 générateur aléatoire PCG32 à graine, sinus/cosinus maison
 (`src/core/include/monstres/core/math.hpp`) et `-ffp-contract=off`. Une même
@@ -745,10 +768,18 @@ plutôt que fermé. Leurs reliefs (`shape_sites`) sont posés après ceux du Nor
   (`Temple`, 24 × 19 m), le clocher (`Belfry`), le dortoir et le réfectoire
   (`Dorter`), un cloître (puits, arbres fruitiers, bancs), des potagers, des
   ruches, des tombes, des lanternes le long de l'allée, un téléporteur près
-  de la porte. On y monte par un **chemin en lacets** creusé dans la pente
-  (`SitesLayout::abbey_way`, son relief taillé à pente régulière : un chemin
-  comme les autres pour la carte et le rendu). Frère Gauthier, le portier,
-  soigne l'équipe.
+  de la porte. On y monte par un **chemin muletier** tracé sur la montagne
+  (`SitesLayout::abbey_way`, `route_way` : une recherche A* sur une grille de
+  4,5 m, qui évite les pentes de plus de 11 % et interdit celles de plus de
+  30 %, coûte à chaque virage, fait ses épingles en deux virages au moins, et
+  contourne le sentier et les lieux du Nord). Il est tracé une première fois
+  sur le relief estimé par `make_roads`, puis à nouveau dans `shape_sites`
+  sur le relief réel, terrasse de l'abbaye comprise (`set_lane` met à jour
+  son chemin). Son profil suit le sol lissé sur une dizaine de mètres, jamais
+  plus de 15 % de pente ; ses talus sont courts et irréguliers, et entre deux
+  branches d'un lacet, le sol passe de l'une à l'autre (`carve_profile`).
+  C'est un chemin comme les autres pour la carte et le rendu. Frère Gauthier,
+  le portier, soigne l'équipe.
   - **Dans l'église** (`PlaceKind::Temple`) : une nef de 18 × 30 m, 11 m de
     haut, deux rangées de piliers, un tapis jusqu'à l'autel. Trois moines
     (frère Hugues, sœur Odile, frère Benoît, niveaux 15, 17, 19) combattent
@@ -853,6 +884,10 @@ laquelle il est entré (pas de carte de l'intérieur pour l'instant).
 - **Les maisons** : une pièce par maison (rectangulaire, carrée ou ronde pour
   la hutte), meublée différemment dans chacune : table et chaises, lit(s),
   cheminée au feu qui éclaire, étagères de livres, tapis, tonneaux, caisses.
+  Dans une hutte ronde, la table reste près du milieu, dans l'axe de la
+  porte, avec deux chaises. Si le mobilier coupe une partie du sol de la
+  porte (`keep_way_through`), les meubles secondaires s'en vont un à un :
+  étagère, tonneaux, caisse, chaises en trop.
 - **La tour des ruines** : une grande salle ronde ; un escalier tourne le long
   du mur jusqu'à un palier sous une trappe, qui mène au sommet de la tour (son
   sol en ruine, entre les créneaux) ; la trappe, là-haut, ramène au palier.

@@ -2,6 +2,7 @@
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/interior.hpp"
+#include "monstres/core/landfix.hpp"
 #include "monstres/core/north.hpp"
 #include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
@@ -362,10 +363,20 @@ void generate_wilds(World& w) {
   if (w.ground.empty() || w.wild_objects > 0) return;  // hand-made worlds; already there
   // The west's buildings first (the valley's trees and rocks in their way go), then the north's.
   clear_lanes(w);
-  const size_t first = build_west(w);
+  size_t first = build_west(w);
   build_north(w);
   build_roads(w);
   build_sites(w);
+  if (!w.ground.seated) {
+    // Their buildings' ground made flat (landfix.hpp), then all built again
+    // over it: the same as when the wilds are drawn again over a ground already seated.
+    seat_buildings(w, first);
+    w.objects.resize(first);
+    first = build_west(w);
+    build_north(w);
+    build_roads(w);
+    build_sites(w);
+  }
   Rng rng(w.seed ^ 0x57494C44535F3031ULL, 3);  // "WILDS_01": its own stream
   PlacementGrid grid(w.objects);
   const float gap = rules::kObjectGap;
@@ -1909,6 +1920,10 @@ void settle_objects(World& w, size_t first) {
       o.pos.y = w.ground.height(o.pos.x + o.size.x * 1.25f, o.pos.z);
       continue;
     }
+    if (seated_kind(o.kind) && std::max(std::fabs(o.pos.x), std::fabs(o.pos.z)) >= rules::kValleyHalfSize + 12.0f) {
+      o.pos.y = center - kSink;  // on its flat ground (seat_buildings), its sill at the ground's level
+      continue;
+    }
     if (o.kind == ObjectKind::Collider) {  // from its lowest point, raised by its variant (decimeters)
       o.pos.y = lowest + static_cast<float>(o.variant) / 10.0f;
       continue;
@@ -2514,7 +2529,9 @@ void build_layouts(World& w) {
   w.roads = make_roads(w.seed, w.path, w.village, w.ruins, w.forest, w.cave, w.castle, w.west, w.north, w.sites);  // (and the sites)
   w.ground = make_heightmap(w.seed, w.path, {w.village, w.ruins, w.cave, w.castle, &w.west, &w.roads});
   shape_north(w.ground, w.north, w.path, w.seed);
-  shape_sites(w.ground, w.sites, w.seed);
+  shape_sites(w.ground, w.sites, w.seed, w.path, w.north);
+  if (w.sites.abbey_way.size() >= 6) set_lane(w.roads, LaneTo::AbbeyWay, w.sites.abbey_way);  // (found again over the shaped ground)
+  join_waters(w);  // no water shut in inland (landfix.hpp)
 }
 
 void regrow_forest(World& w) {

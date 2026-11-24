@@ -70,6 +70,8 @@ struct Heightmap {
   std::vector<float> land;  // index i * kLandPointsZ + j
   // Inside (no heights): the floor's slopes, if any (empty: flat at y = 0).
   std::vector<FloorPiece> floor;
+  // The buildings of the wilds seated on it (landfix.hpp: seat_buildings, once).
+  bool seated = false;
 
   bool empty() const { return heights.empty(); }
   float at(int i, int j) const { return heights[index(i, j)]; }

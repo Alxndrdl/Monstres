@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <queue>
 
 namespace monstres {
 
@@ -133,6 +135,113 @@ std::vector<Vec2> abbey_way_points(Vec2 c, float hz, float s) {
   return every_meter(spline(ctl, 0.5f));
 }
 
+// The ground the abbey's platform leaves at (x, z), from the ground `h` there:
+// flat at L within its walls (and a little more), cut into the mountain
+// behind, built up before it, blending back with an uneven edge.
+float abbey_platform(float h, float x, float z, Vec2 c, float hx, float hz, float L, uint64_t seed) {
+  const float wobble = 5.0f * (value_noise(seed + 1230, x, z, 15.0f) - 0.5f) + 1.5f * (value_noise(seed + 1231, x, z, 5.0f) - 0.5f);
+  const float out = std::max({std::fabs(x - c.x) - (hx + 5.0f), std::fabs(z - c.z) - (hz + 5.0f), 0.0f});
+  const float blend = z > c.z ? 30.0f : (h > L ? 14.0f : 24.0f);
+  const float k = out > 0 ? 1 - smooth(0.0f, blend, out + std::max(0.0f, wobble)) : 1.0f;  // (flat all inside)
+  return h + (L - h) * k;
+}
+
+// Where the abbey's way does not go: on the path (or close), in the north's places.
+bool away_from_way(const Path& path, const NorthLayout& north, float x, float z) {
+  return distance_to_path(path, x, z, 12.0f) < 10.0f || in_north_place(north, x, z, 6.0f);
+}
+
+// The abbey's way up from `foot` to `gate`, found over the slope as a mule
+// track goes: hardly ever steeper than 1 in 9, turning seldom (in
+// switchbacks where the slope is steep), round the abbey's walls. A* on a
+// grid of 4.5 m, the state its cell and the way it goes (16 ways: knight's
+// moves too, for gentle bends); then its corners cut, a point every meter.
+std::vector<Vec2> route_way(Vec2 foot, Vec2 gate, Vec2 abbey, float hx, float hz, const std::function<float(float, float)>& ground,
+                            const std::function<bool(float, float)>& avoid, float steepest = 0.3f) {
+  constexpr float kCell = 4.5f;  // (wide: the legs of its switchbacks well apart)
+  const float x0 = std::max(std::min(foot.x, gate.x) - 170.0f, -rules::kWorldHalfSize + 6.0f);
+  const float x1 = std::min(std::max(foot.x, gate.x) + 170.0f, rules::kWorldHalfSize - 6.0f);
+  const float z0 = std::max(std::min(foot.z, gate.z) - 30.0f, -rules::kWorldNorth + 6.0f), z1 = std::max(foot.z, gate.z) + 90.0f;
+  const int nx = static_cast<int>((x1 - x0) / kCell) + 1, nz = static_cast<int>((z1 - z0) / kCell) + 1;
+  const auto cell_of = [&](Vec2 p) {
+    return std::clamp(static_cast<int>(std::lround((p.x - x0) / kCell)), 0, nx - 1) * nz +
+           std::clamp(static_cast<int>(std::lround((p.z - z0) / kCell)), 0, nz - 1);
+  };
+  const auto at = [&](int n) { return Vec2{x0 + kCell * static_cast<float>(n / nz), z0 + kCell * static_cast<float>(n % nz)}; };
+  std::vector<float> height(static_cast<size_t>(nx * nz));
+  std::vector<uint8_t> blocked(static_cast<size_t>(nx * nz));
+  for (int n = 0; n < nx * nz; ++n) {
+    const Vec2 p = at(n);
+    height[static_cast<size_t>(n)] = ground(p.x, p.z);
+    blocked[static_cast<size_t>(n)] = (std::fabs(p.x - abbey.x) < hx + 4.0f && std::fabs(p.z - abbey.z) < hz + 4.0f) ||
+                                      (distance(p, foot) > 12.0f && avoid(p.x, p.z));
+  }
+  static constexpr int kDx[16] = {1, 2, 1, 1, 0, -1, -1, -2, -1, -2, -1, -1, 0, 1, 1, 2};
+  static constexpr int kDz[16] = {0, 1, 1, 2, 1, 2, 1, 1, 0, -1, -1, -2, -1, -2, -1, -1};
+  const int start = cell_of(foot), goal = cell_of(gate);
+  const size_t states = static_cast<size_t>(nx * nz) * 16;
+  std::vector<float> cost(states, 1e30f);
+  std::vector<int> from(states, -1);
+  using Node = std::pair<float, int>;
+  std::priority_queue<Node, std::vector<Node>, std::greater<>> open;
+  const Vec2 g = at(goal);
+  const auto guess = [&](int n) { const Vec2 p = at(n); return std::hypot(p.x - g.x, p.z - g.z); };
+  for (int d = 0; d < 16; ++d) {
+    cost[static_cast<size_t>(start * 16 + d)] = 0;
+    open.push({guess(start), start * 16 + d});
+  }
+  int end = -1;
+  while (!open.empty()) {
+    const auto [f, s0] = open.top();
+    open.pop();
+    const int n = s0 / 16, d0 = s0 % 16;
+    const float c0 = cost[static_cast<size_t>(s0)];
+    if (f > c0 + guess(n) + 1e-3f) continue;
+    if (n == goal) {
+      end = s0;
+      break;
+    }
+    const int i = n / nz, j = n % nz;
+    for (int d = 0; d < 16; ++d) {
+      const int u = i + kDx[d], v = j + kDz[d];
+      if (u < 0 || v < 0 || u >= nx || v >= nz) continue;
+      const int m = u * nz + v;
+      const int mid = ((i + u) / 2) * nz + (j + v) / 2;
+      if (blocked[static_cast<size_t>(m)] || blocked[static_cast<size_t>(mid)]) continue;
+      const float len = kCell * std::hypot(static_cast<float>(kDx[d]), static_cast<float>(kDz[d]));
+      const float grade = std::fabs(height[static_cast<size_t>(m)] - height[static_cast<size_t>(n)]) / len;
+      if (grade > steepest) continue;  // (a scramble, not a way)
+      const float steep = std::max(0.0f, grade - 0.11f);
+      const int turn = std::min(std::abs(d - d0), 16 - std::abs(d - d0));
+      if (turn >= 6) continue;  // a hairpin in two bends at least: its legs apart
+      float c = len * (1.0f + 4.0f * grade + 3000.0f * steep * steep) + 1.1f * static_cast<float>(turn * turn);
+      if (m == goal && kDz[d] >= 0) c += 60.0f;  // up to the gate from before it
+      const size_t s1 = static_cast<size_t>(m * 16 + d);
+      if (c0 + c < cost[s1]) {
+        cost[s1] = c0 + c;
+        from[s1] = s0;
+        open.push({c0 + c + guess(m), static_cast<int>(s1)});
+      }
+    }
+  }
+  if (end < 0) return {};
+  std::vector<Vec2> pts;
+  for (int s1 = end; s1 >= 0; s1 = from[static_cast<size_t>(s1)]) pts.push_back(at(s1 / 16));
+  std::reverse(pts.begin(), pts.end());
+  pts.front() = foot;
+  pts.push_back(gate);
+  for (int pass = 0; pass < 3 && pts.size() > 2; ++pass) {  // its corners cut
+    std::vector<Vec2> out{pts.front()};
+    for (size_t k = 0; k + 1 < pts.size(); ++k) {
+      out.push_back(pts[k] * 0.75f + pts[k + 1] * 0.25f);
+      out.push_back(pts[k] * 0.25f + pts[k + 1] * 0.75f);
+    }
+    out.push_back(pts.back());
+    pts = std::move(out);
+  }
+  return every_meter(pts);
+}
+
 }  // namespace
 
 // ---- Layout ----------------------------------------------------------------------------
@@ -211,8 +320,39 @@ SitesLayout make_sites(uint64_t seed, const Path& path, const VillageLayout& vil
   // The fishing port, on the coast south of the lighthouse: a shore with the
   // sea out along an axis (deep enough for piers), low land behind it.
   {
+    // The open sea (squares of 16 m reached from past the world's edge): not a lagoon shut in by the land.
+    constexpr float kSq = 16.0f;
+    const int sqx = static_cast<int>(2 * rules::kReliefHalfSize / kSq), sqz = static_cast<int>((rules::kReliefHalfSize + rules::kReliefNorth) / kSq);
+    std::vector<uint8_t> open_sea(static_cast<size_t>(sqx * sqz), 0);  // 0 land, 1 sea, 2 open sea
+    {
+      std::vector<std::pair<int, int>> stack;
+      for (int i = 0; i < sqx; ++i) {
+        for (int j = 0; j < sqz; ++j) {
+          const float x = -rules::kReliefHalfSize + kSq * (static_cast<float>(i) + 0.5f), z = -rules::kReliefNorth + kSq * (static_cast<float>(j) + 0.5f);
+          if (!sea_at(seed, x, z, 0.0f)) continue;
+          const bool edge = i == 0 || j == 0 || i == sqx - 1 || j == sqz - 1 || !rules::in_world(x, z, -8.0f);
+          open_sea[static_cast<size_t>(i * sqz + j)] = edge ? 2 : 1;
+          if (edge) stack.push_back({i, j});
+        }
+      }
+      while (!stack.empty()) {
+        const auto [i, j] = stack.back();
+        stack.pop_back();
+        for (const auto& [u, v] : {std::pair{i + 1, j}, std::pair{i - 1, j}, std::pair{i, j + 1}, std::pair{i, j - 1}}) {
+          if (u < 0 || v < 0 || u >= sqx || v >= sqz || open_sea[static_cast<size_t>(u * sqz + v)] != 1) continue;
+          open_sea[static_cast<size_t>(u * sqz + v)] = 2;
+          stack.push_back({u, v});
+        }
+      }
+    }
+    const auto open_at = [&](Vec2 q) {
+      const int i = std::clamp(static_cast<int>((q.x + rules::kReliefHalfSize) / kSq), 0, sqx - 1);
+      const int j = std::clamp(static_cast<int>((q.z + rules::kReliefNorth) / kSq), 0, sqz - 1);
+      return open_sea[static_cast<size_t>(i * sqz + j)] == 2;
+    };
     float best = 1e30f;
     const Vec2 axes[4] = {{-1, 0}, {0, 1}, {0, -1}, {1, 0}};
+    for (int round = 0; round < 3 && best > 1e29f; ++round)  // (the open sea, its lane near or not; at worst, any sea)
     for (int pass = 0; pass < 6 && best > 1e29f; ++pass) {
       const bool any_land = pass == 5;  // (at last: any shore within reach, its quay will be made)
       const bool loose = pass >= 2;  // (none found: a rougher coast will do)
@@ -232,6 +372,7 @@ SitesLayout make_sites(uint64_t seed, const Path& path, const VillageLayout& vil
             bool ok = true;
             const float shore = pass >= 3 ? 14.0f : 8.0f;  // (the water right there)
             ok = ok && sea_at(seed, p.x + d.x * shore, p.z + d.z * shore, 0.2f);
+            ok = ok && (round == 2 || open_at(p + d * (shore + 12.0f)));  // (on the open sea)
             for (float t = shore + 4.0f; t <= shore + 18.0f && ok; t += 4.0f) {
               for (const float o : {-8.0f, 0.0f, 8.0f}) ok = ok && sea_at(seed, p.x + d.x * t + u.x * o * (loose ? 0.6f : 1.0f), p.z + d.z * t + u.z * o * (loose ? 0.6f : 1.0f));
             }
@@ -247,6 +388,10 @@ SitesLayout make_sites(uint64_t seed, const Path& path, const VillageLayout& vil
               bool near = reachable(g.x, g.z);
               for (int k = 0; k < 8 && !near && pass >= 3; ++k) {
                 const Vec2 q = g + dir16(static_cast<Angle16>(k * 8192)) * 14.0f;
+                near = reachable(q.x, q.z);
+              }
+              for (int k = 0; k < 48 && !near && round == 1; ++k) {  // (farther: its lane will find its way)
+                const Vec2 q = g + dir16(static_cast<Angle16>((k % 16) * 4096)) * (14.0f * static_cast<float>(1 + k / 16));
                 near = reachable(q.x, q.z);
               }
               ok = ok && near;
@@ -348,7 +493,19 @@ SitesLayout make_sites(uint64_t seed, const Path& path, const VillageLayout& vil
     s.abbey_front = {0, 1};
     // Its way up winds towards Rochebrune.
     const float side = north.hamlet.x < c.x ? 1.0f : -1.0f;
-    s.abbey_way = abbey_way_points(c, hz, side);
+    // (Over the ground as the abbey's platform will leave it: its level as shape_sites finds it.)
+    float level = 0;
+    for (int a = -2; a <= 2; ++a) {
+      for (int b = -2; b <= 2; ++b) level += ground(c.x + a * hx * 0.5f, c.z + b * hz * 0.5f) / 25.0f;
+    }
+    const auto shaped = [&](float x, float z) { return abbey_platform(ground(x, z), x, z, c, hx, hz, level, seed); };
+    const auto avoid = [&](float x, float z) { return away_from_way(path, north, x, z); };
+    s.abbey_way = route_way(c + Vec2{-side * 58.0f, hz + 84.0f}, c + Vec2{0, hz + 7.0f}, c, hx, hz, shaped, avoid);
+    if (s.abbey_way.empty()) s.abbey_way = route_way(c + Vec2{-side * 58.0f, hz + 84.0f}, c + Vec2{0, hz + 7.0f}, c, hx, hz, shaped, avoid, 10.0f);
+    if (!s.abbey_way.empty()) {  // on to the gate
+      for (float t = 6.0f; t >= 1.0f; t -= 1.0f) s.abbey_way.push_back(c + Vec2{0, hz + t});
+    }
+    if (s.abbey_way.size() < 20) s.abbey_way = abbey_way_points(c, hz, side);  // (none found: the old bends)
     s.temple = c + Vec2{0, -hz + 2.5f + rules::kTempleHalfZ};
     s.belfry = s.temple + Vec2{rules::kTempleHalfX + 6.0f, -2.0f};
     s.dorter = c + Vec2{-hx + 6.5f, 3.0f};
@@ -558,13 +715,11 @@ SitesLayout make_sites(uint64_t seed, const Path& path, const VillageLayout& vil
 
 namespace {
 
-// Brings the ground along a way to a line going from y0 at its first point
-// to y1 at its last (by its length), flat over `half` on each side, blending
-// back into the ground beyond, over `blend`.
-void carve_way(Heightmap& m, const std::vector<Vec2>& pts, float y0, float y1, float half, float blend, uint64_t seed) {
-  if (pts.size() < 2) return;
-  float total = 0;
-  for (size_t i = 0; i + 1 < pts.size(); ++i) total += distance(pts[i], pts[i + 1]);
+// Brings the ground along a way to its levels (one a meter, along it), flat
+// over `half` on each side; its banks short and uneven, wider where it cut
+// deep or built up much.
+void carve_profile(Heightmap& m, const std::vector<Vec2>& pts, const std::vector<float>& levels, float half, uint64_t seed) {
+  if (pts.size() < 2 || levels.size() != pts.size()) return;
   float x0 = 1e30f, z0 = 1e30f, x1 = -1e30f, z1 = -1e30f;
   for (const Vec2& p : pts) {
     x0 = std::min(x0, p.x);
@@ -572,7 +727,7 @@ void carve_way(Heightmap& m, const std::vector<Vec2>& pts, float y0, float y1, f
     x1 = std::max(x1, p.x);
     z1 = std::max(z1, p.z);
   }
-  const float reach = half + blend + 2.0f;
+  const float reach = half + 12.0f;
   const int i0 = Heightmap::i_of(x0 - reach), i1 = std::min(Heightmap::i_of(x1 + reach) + 1, Heightmap::kPointsX - 1);
   const int j0 = Heightmap::j_of(z0 - reach), j1 = std::min(Heightmap::j_of(z1 + reach) + 1, Heightmap::kPointsZ - 1);
   for (int i = i0; i <= i1; ++i) {
@@ -581,18 +736,44 @@ void carve_way(Heightmap& m, const std::vector<Vec2>& pts, float y0, float y1, f
       float along = 0;
       const float d = polyline_distance(pts, p, &along);
       if (d > reach) continue;
-      const float wobble = 1.5f * (value_noise(seed + 1210, p.x, p.z, 7.0f) - 0.5f);
-      const float k = 1 - smooth(half, half + blend, d + std::max(0.0f, wobble));
-      const float target = y0 + (y1 - y0) * (total > 0 ? along / total : 0.0f);
+      const auto level_at = [&](float a) {
+        const size_t k = std::min(levels.size() - 1, static_cast<size_t>(std::max(0.0f, a)));
+        const float u = std::clamp(a - static_cast<float>(k), 0.0f, 1.0f);
+        return levels[k] + (levels[std::min(levels.size() - 1, k + 1)] - levels[k]) * u;
+      };
+      // Another leg of the way near too (a switchback): the ground between
+      // them goes from one's level to the other's.
+      float other = 1e30f, other_along = 0, gone = 0;
+      for (size_t q = 0; q + 1 < pts.size(); ++q) {
+        const Vec2 a = pts[q], ab = pts[q + 1] - a;
+        const float len2 = dot(ab, ab), len = std::sqrt(len2);
+        const float t = len2 > 0 ? std::clamp(dot(p - a, ab) / len2, 0.0f, 1.0f) : 0.0f;
+        const float at = gone + t * len;
+        gone += len;
+        if (std::fabs(at - along) < 18.0f) continue;
+        const float e = distance(p, a + ab * t);
+        if (e < other) {
+          other = e;
+          other_along = at;
+        }
+      }
+      float target = level_at(along);
+      if (other < reach) {
+        const float wa = 1.0f / std::pow(d + 0.5f, 4.0f), wb = 1.0f / std::pow(other + 0.5f, 4.0f);
+        target = (target * wa + level_at(other_along) * wb) / (wa + wb);
+      }
       float& h = m.heights[Heightmap::index(i, j)];
-      h += (target - h) * k;
+      const float wobble = 1.6f * (value_noise(seed + 1212, p.x, p.z, 5.0f) - 0.5f) + 0.8f * (value_noise(seed + 1213, p.x, p.z, 2.0f) - 0.5f);
+      const float blend = std::min(10.0f, 2.5f + 0.6f * std::fabs(target - h));
+      const float k01 = 1 - smooth(half, half + blend, d + std::max(0.0f, wobble));
+      h += (target - h) * k01;
     }
   }
 }
 
 }  // namespace
 
-void shape_sites(Heightmap& m, SitesLayout& s, uint64_t seed) {
+void shape_sites(Heightmap& m, SitesLayout& s, uint64_t seed, const Path& path, const NorthLayout& north) {
   if (!s.valid() || m.empty()) return;
   const auto each_point = [&](Vec2 c, float reach, auto&& f) {
     const int i0 = Heightmap::i_of(c.x - reach), i1 = std::min(Heightmap::i_of(c.x + reach) + 1, Heightmap::kPointsX - 1);
@@ -659,15 +840,41 @@ void shape_sites(Heightmap& m, SitesLayout& s, uint64_t seed) {
     s.abbey_level = sum / n;
     const float L = s.abbey_level;
     each_point(c, std::max(s.abbey_hx, s.abbey_hz) + 50.0f, [&](float x, float z, float& h) {
-      const float wobble = 5.0f * (value_noise(seed + 1230, x, z, 15.0f) - 0.5f) + 1.5f * (value_noise(seed + 1231, x, z, 5.0f) - 0.5f);
-      const float out = std::max({std::fabs(x - c.x) - (s.abbey_hx + 5.0f), std::fabs(z - c.z) - (s.abbey_hz + 5.0f), 0.0f});
-      const float blend = z > c.z ? 30.0f : (h > L ? 14.0f : 24.0f);
-      const float k = out > 0 ? 1 - smooth(0.0f, blend, out + std::max(0.0f, wobble)) : 1.0f;  // (flat all inside)
-      h += (L - h) * k;
+      h = abbey_platform(h, x, z, c, s.abbey_hx, s.abbey_hz, L, seed);
     });
     if (s.abbey_way.size() >= 2) {
-      const Vec2 foot = s.abbey_way.front();
-      carve_way(m, s.abbey_way, m.height(foot.x, foot.z), L, rules::kAbbeyWayHalf, 9.0f, seed);
+      // Found again over the ground as it is now (the platform built): the
+      // first one went by the ground as make_roads guessed it.
+      const auto here = [&](float x, float z) { return m.height(x, z); };
+      const auto avoid = [&](float x, float z) { return away_from_way(path, north, x, z); };
+      std::vector<Vec2> again = route_way(s.abbey_way.front(), c + Vec2{0, s.abbey_hz + 7.0f}, c, s.abbey_hx, s.abbey_hz, here, avoid);
+      if (again.empty()) again = route_way(s.abbey_way.front(), c + Vec2{0, s.abbey_hz + 7.0f}, c, s.abbey_hx, s.abbey_hz, here, avoid, 10.0f);
+      if (again.size() >= 20) {
+        for (float t = 6.0f; t >= 1.0f; t -= 1.0f) again.push_back(c + Vec2{0, s.abbey_hz + t});
+        s.abbey_way = std::move(again);
+      }
+      // Along the ground as it is (smoothed over some ten meters), up to the gate's level at its end.
+      const auto& way = s.abbey_way;
+      const size_t count = way.size();
+      std::vector<float> natural(count), levels(count);
+      for (size_t k = 0; k < count; ++k) natural[k] = m.height(way[k].x, way[k].z);
+      constexpr int kSpan = 5;
+      for (size_t k = 0; k < count; ++k) {
+        const size_t a = k > kSpan ? k - kSpan : 0, b = std::min(count - 1, k + kSpan);
+        float acc = 0;
+        for (size_t q = a; q <= b; ++q) acc += natural[q];
+        levels[k] = acc / static_cast<float>(b - a + 1);
+      }
+      levels.front() = natural.front();
+      for (size_t k = 0; k < count; ++k) {
+        const float t = smooth(static_cast<float>(count) - 16.0f, static_cast<float>(count) - 2.0f, static_cast<float>(k));
+        levels[k] += (L - levels[k]) * t;
+      }
+      // Never steeper than about 1 in 7: from the gate down, then from the foot up.
+      constexpr float kSteepest = 0.15f;
+      for (size_t k = count - 1; k-- > 0;) levels[k] = std::clamp(levels[k], levels[k + 1] - kSteepest, levels[k + 1] + kSteepest);
+      for (size_t k = 1; k < count; ++k) levels[k] = std::clamp(levels[k], levels[k - 1] - kSteepest, levels[k - 1] + kSteepest);
+      carve_profile(m, way, levels, rules::kAbbeyWayHalf, seed);
     }
   }
   // The camp, the lookout, the chapel, the apiary: flat ground.
@@ -952,13 +1159,10 @@ void build_sites(World& w) {
     }
     add_if_free(make(ObjectKind::Woodpile, s.refectory + Vec2{-0.5f, -14.5f}, Angle16{16384}, v8()));
     add_if_free(make(ObjectKind::Haystack, c + Vec2{-hx + 5.0f, -hz + 5.0f}, 0, v8()));
-    // Outside: its teleporter, lanterns by the gate, a shrine at the way's turn, a signpost at its foot.
+    // Outside: its teleporter, lanterns by the gate, cairns along the way (its signpost: build_roads, at its foot).
     add(make(ObjectKind::Teleporter, s.abbey_teleporter, 0, static_cast<uint8_t>(TeleporterId::Abbey)));
     for (const float side : {-1.0f, 1.0f}) add_if_free(make(ObjectKind::Lamp, c + Vec2{side * 5.6f, hz + 2.4f}, 0));
     if (s.abbey_way.size() > 40) {
-      const Vec2 foot = s.abbey_way.front(), next = s.abbey_way[6];
-      const Vec2 dd = (next - foot) * (1.0f / std::max(distance(next, foot), 1e-3f));
-      add_if_free(make(ObjectKind::Sign, foot + dd * 3.0f + Vec2{-dd.z, dd.x} * 2.2f, yaw_facing(axis_of(dd * -1.0f))));
       for (size_t k = 30; k + 30 < s.abbey_way.size(); k += 40) {
         const Vec2 a = s.abbey_way[k], b = s.abbey_way[k + 2];
         const Vec2 t = (b - a) * (1.0f / std::max(distance(a, b), 1e-3f));

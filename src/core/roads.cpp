@@ -516,6 +516,14 @@ RoadsLayout make_roads(uint64_t seed, const Path& path, const VillageLayout& vil
   return r;
 }
 
+void set_lane(RoadsLayout& roads, LaneTo to, const std::vector<Vec2>& points) {
+  for (size_t k = 0; k < roads.lanes.size() && k < roads.lane_to.size(); ++k) {
+    if (roads.lane_to[k] != to) continue;
+    roads.lanes[k].points = points;
+    make_lane_chunks(roads.lanes[k]);
+  }
+}
+
 float distance_to_lanes(const RoadsLayout& r, float x, float z, float limit) {
   float best = limit;
   for (const Road& lane : r.lanes) best = std::min(best, lane_distance(lane, x, z, best));

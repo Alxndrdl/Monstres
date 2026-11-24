@@ -79,7 +79,8 @@ SitesLayout make_sites(uint64_t seed, const Path& path, const VillageLayout& vil
 // north's): the port's quay, the abbey's ground cut into the mountain and
 // its way up, the camp's, the quarry's pit, the chapel's, the apiary's, the
 // lookout's flat ground, the dolmen's mound. Sets the levels.
-void shape_sites(Heightmap& ground, SitesLayout& sites, uint64_t seed);
+// The abbey's way is found again there, over the ground as shaped (round the path and the north's places).
+void shape_sites(Heightmap& ground, SitesLayout& sites, uint64_t seed, const Path& path, const NorthLayout& north);
 
 // Whether (x, z) belongs to one of the sites (no trees nor rocks drawn at
 // random there), moved out by `margin`.

@@ -159,8 +159,17 @@ TEST_CASE("every house of the village has its furniture, and its door back out")
         }
       }
     }
-    // From its far side, the way out leads to the door.
-    w.player.pos = {w.interior.pieces[0].a.x, 0, w.interior.pieces[0].a.z - 1.5f};
+    // From its far side (a free spot there: the hearth, a bed may stand right behind its middle), the way out leads to the door.
+    bool free_spot = false;
+    for (const float dz : {-1.5f, -1.2f, -0.9f}) {
+      for (const float dx : {0.0f, 0.8f, -0.8f, 1.3f, -1.3f}) {
+        if (free_spot) break;
+        w.player.pos = {w.interior.pieces[0].a.x + dx, 0, w.interior.pieces[0].a.z + dz};
+        const BodyShape roomy{0.6f, rules::kPlayerHeight};  // (with room around it)
+        free_spot = wall_distance(w.interior, w.player.pos.x, w.player.pos.z) > 0.6f && !inside_any_object(w, w.player, roomy);
+      }
+    }
+    REQUIRE(free_spot);
     Vec2 way;
     REQUIRE(way_out(w, way));
     CHECK(way.z > 0.3f);  // towards the door, at z = 0

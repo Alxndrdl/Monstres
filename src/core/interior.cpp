@@ -630,13 +630,15 @@ void furnish_house(const Interior& in, const Object& door, Rng& rng, std::vector
   const float cz = room.a.z;
   const bool flip = rng.below(2) == 1;  // furniture on one side or the other
   const float side = flip ? -1.0f : 1.0f;
-  // The table and its chairs, in the middle.
-  const float tx = side * range(rng, 0.3f, 0.9f), tz = cz + range(rng, -0.2f, 0.4f);
-  const bool turned = rng.below(2) == 1;
+  // The table and its chairs, in the middle (a round hut: nearer it, along
+  // the way from the door, two chairs only: room to go round it).
+  const float tx = side * range(rng, 0.3f, 0.9f) * (round ? 0.35f : 1.0f), tz = cz + range(rng, -0.2f, 0.4f);
+  const bool turned = rng.below(2) == 1 && !round;
   out.push_back(thing(ObjectKind::Table, tx, 0, tz, turned ? kQuarter : 0, v()));
   const float ax = turned ? 0 : 1.05f, az = turned ? 1.05f : 0;  // along the long sides
   const float bx = turned ? 0.75f : 0, bz = turned ? 0 : 0.75f;
-  const uint32_t chairs = 2 + rng.below(3);
+  const uint32_t extra = rng.below(3);
+  const uint32_t chairs = round ? 2 : 2 + extra;
   const struct {
     float x, z;
     Angle16 yaw;
@@ -865,12 +867,17 @@ void furnish_mine(const Interior& in, Rng& rng, std::vector<Object>& out) {
   }
 }
 
+void keep_way_through(const Interior& in, std::vector<Object>& objects);
+
 std::vector<Object> interior_objects(uint64_t seed, const Interior& in, const Object& door) {
   std::vector<Object> out;
   Rng rng(place_seed(seed, in.kind, door), 17);
   switch (in.kind) {
     case PlaceKind::Cave: furnish_cave(in, rng, out); break;
-    case PlaceKind::House: furnish_house(in, door, rng, out); break;
+    case PlaceKind::House:
+      furnish_house(in, door, rng, out);
+      keep_way_through(in, out);
+      break;
     case PlaceKind::Tower:
     case PlaceKind::HollowTree:
     case PlaceKind::Lighthouse: furnish_tower(in, rng, out); break;
@@ -1243,15 +1250,12 @@ void climb(const World& w, Body& b, Vec3 dir, float speed) {
 
 // ---- The way out ------------------------------------------------------------------
 
-void map_way_out(Interior& in, const std::vector<Object>& objects) {
+// The floor's cells one can walk on (Interior::nav's grid): clear of the
+// walls, and of what stands on the floor (a stair's steps high up are not
+// in the way).
+std::vector<uint8_t> open_floor(const Interior& in, const std::vector<Object>& objects) {
   const float c = Interior::kNavCell;
-  in.nav_x = static_cast<int>((in.bounds.max.x - in.bounds.min.x) / c) + 1;
-  in.nav_z = static_cast<int>((in.bounds.max.z - in.bounds.min.z) / c) + 1;
-  in.nav.assign(static_cast<size_t>(in.nav_x) * static_cast<size_t>(in.nav_z), Interior::kNoWay);
-  if (in.exits.empty()) return;
-  // Walkable: clear of the walls, and of what stands on the floor (a stair's
-  // steps high up are not in the way).
-  std::vector<uint8_t> open(in.nav.size(), 0);
+  std::vector<uint8_t> open(static_cast<size_t>(in.nav_x) * static_cast<size_t>(in.nav_z), 0);
   for (int i = 0; i < in.nav_x; ++i) {
     for (int k = 0; k < in.nav_z; ++k) {
       const float x = in.bounds.min.x + c * (static_cast<float>(i) + 0.5f);
@@ -1272,6 +1276,16 @@ void map_way_out(Interior& in, const std::vector<Object>& objects) {
       for (int k = k0; k <= k1; ++k) open[static_cast<size_t>(i * in.nav_z + k)] = 0;
     }
   }
+  return open;
+}
+
+void map_way_out(Interior& in, const std::vector<Object>& objects) {
+  const float c = Interior::kNavCell;
+  in.nav_x = static_cast<int>((in.bounds.max.x - in.bounds.min.x) / c) + 1;
+  in.nav_z = static_cast<int>((in.bounds.max.z - in.bounds.min.z) / c) + 1;
+  in.nav.assign(static_cast<size_t>(in.nav_x) * static_cast<size_t>(in.nav_z), Interior::kNoWay);
+  if (in.exits.empty()) return;
+  const std::vector<uint8_t> open = open_floor(in, objects);
   // Steps from the door, one cell after the other (breadth first).
   const Vec3 door = in.exits[0].at;
   const int di = std::clamp(static_cast<int>((door.x - in.bounds.min.x) / c), 0, in.nav_x - 1);
@@ -1288,6 +1302,34 @@ void map_way_out(Interior& in, const std::vector<Object>& objects) {
       in.nav[n] = static_cast<uint16_t>(in.nav[static_cast<size_t>(cell)] + 1);
       queue.push_back(static_cast<int>(n));
     }
+  }
+}
+
+// A house's floor all reached from its door: if some of it is shut off (a
+// small round hut, its furniture in the way), the lesser things go, one
+// after the other (a shelf, a barrel, a crate, a chair past the second).
+void keep_way_through(const Interior& in, std::vector<Object>& objects) {
+  if (in.exits.empty()) return;
+  for (int round = 0; round < 6; ++round) {
+    Interior t = in;
+    map_way_out(t, objects);
+    const std::vector<uint8_t> open = open_floor(t, objects);
+    bool shut = false;
+    for (size_t n = 0; n < open.size() && !shut; ++n) shut = open[n] && t.nav[n] == Interior::kNoWay;
+    if (!shut) return;
+    int chairs = 0;
+    for (const Object& o : objects) chairs += o.kind == ObjectKind::Chair;
+    bool gone = false;
+    for (const ObjectKind k : {ObjectKind::Shelf, ObjectKind::Barrel, ObjectKind::Crate, ObjectKind::Chair}) {
+      if (k == ObjectKind::Chair && chairs <= 2) continue;
+      for (size_t i = objects.size(); i-- > 0 && !gone;) {
+        if (objects[i].kind != k) continue;
+        objects.erase(objects.begin() + static_cast<long>(i));
+        gone = true;
+      }
+      if (gone) break;
+    }
+    if (!gone) return;
   }
 }
 
