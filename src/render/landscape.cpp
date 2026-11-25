@@ -1,10 +1,13 @@
 #include "monstres/render/landscape.hpp"
 
+#include "monstres/core/rivers.hpp"
+
 #include "monstres/core/north.hpp"
 #include "monstres/core/roads.hpp"
 #include "monstres/core/sites.hpp"
 
 #include "monstres/core/interior.hpp"
+#include "monstres/core/outer.hpp"
 #include "monstres/core/west.hpp"
 
 #include "monstres/render/scene.hpp"
@@ -22,11 +25,9 @@ using scene_util::rand01;
 
 namespace {
 
-constexpr float kDecorationHalfSize = rules::kWorldHalfSize + 13;  // grass and flowers up to here (x, south)
-constexpr float kDecorationNorth = rules::kWorldNorth + 13;         // and north
-constexpr int kGrassCells = static_cast<int>(2 * kDecorationHalfSize);  // 1 m cells, from -kDecorationHalfSize
-// (Northwards the cells' j go below 0: the same cells as before the world grew north.)
-constexpr int kGrassNorthCell = static_cast<int>(kDecorationHalfSize - kDecorationNorth);
+// Grass and flowers: on cells of 1 m from x, z = -kDecorationHalfSize (as
+// when they grew on the playable ground only; on and on over the continent).
+constexpr float kDecorationHalfSize = rules::kWorldHalfSize + 13;
 
 // Mesh scale, matching the sizes of tools/make_models.py and the collision
 // boxes of world.cpp.
@@ -302,10 +303,29 @@ void grass_cell(const World& w, const Obstacles& obstacles, int i, int j, std::v
   }
   const float roll = rand01(w.seed, 3000 + ui, uj);
   const float keep = rand01(w.seed, 11000 + ui, uj);
-  // Sparse along the path edges, and thinner outside the playable area
-  // (seen from afar only: saves a lot of triangles on small devices).
+  // Sparse along the path edges.
   float edge_factor = on_path < 1.15f ? 0.35f : 1.0f;
-  if (rules::world_edge(x, z) > rules::kWorldHalfSize) edge_factor *= 0.45f;
+  // Beyond the relief, the continent's (outer.hpp): as its region has it,
+  // by patches; none in its ponds nor up in the snow.
+  if (rules::relief_inset(x, z) < 0.0f) {
+    const float g = w.ground.height(x, z);
+    if (w.ground.snow(x, z, g + 25.0f * value_noise(w.seed + 23, x, z, 30.0f)) > 0.3f) return;
+    for (const Pond& p : continent_ponds()) {
+      if (pond_shape(p, x, z) > -0.07f && g < p.level + 0.3f) return;
+    }
+    if (RiverSpot r; nearest_river(w.ground.rivers, x, z, 14.0f, r) && r.distance < r.width + 0.4f) return;  // (in its water)
+    float region = 1.0f;
+    switch (outer_region(w.seed, x, z)) {
+      case Region::Desert: region = 0.06f; break;
+      case Region::Volcano: region = 0.12f; break;
+      case Region::Mountains: region = 0.45f; break;
+      case Region::LoneMountain: region = 0.6f; break;
+      case Region::Forest: region = 0.7f; break;
+      default: break;
+    }
+    edge_factor *= region * (0.55f + 0.9f * value_noise(w.seed + 24, x, z, 22.0f));
+    if (edge_factor < 0.01f) return;
+  }
 
   Instance in;
   in.x = x;
@@ -378,6 +398,28 @@ bool valley_chunk(int cx, int cz) {
          chunk_start_z(cz) < hi;
 }
 
+// f(cx, cz) for each chunk within the square of half size r around (x, z),
+// then the valley's (those not among them).
+template <typename F>
+void for_chunks_around(float x, float z, float r, F f) {
+  const int lo_x = chunk_x(x - r), hi_x = chunk_x(x + r), lo_z = chunk_z(z - r), hi_z = chunk_z(z + r);
+  for (int cx = lo_x; cx <= hi_x; ++cx) {
+    for (int cz = lo_z; cz <= hi_z; ++cz) f(cx, cz);
+  }
+  const float v = rules::kValleyHalfSize;
+  for (int cx = chunk_x(-v); cx <= chunk_x(v); ++cx) {
+    for (int cz = chunk_z(-v); cz <= chunk_z(v); ++cz) {
+      if (cx < lo_x || cx > hi_x || cz < lo_z || cz > hi_z) f(cx, cz);
+    }
+  }
+}
+
+// Whether a chunk is beyond the objects' index (the continent's only).
+bool outer_chunk(int cx, int cz) {
+  const int ci0 = (cx - landscape::kOuterWest) * 4, cj0 = (cz - landscape::kOuterNorth) * 4;
+  return ci0 + 4 <= 0 || cj0 + 4 <= 0 || ci0 >= ObjectIndex::kCellsX || cj0 >= ObjectIndex::kCellsZ;
+}
+
 std::array<Aabb, kMeshCount> g_mesh_bounds;
 bool g_mesh_bounds_set = false;
 
@@ -437,6 +479,7 @@ bool landscape_can_wait(Vec2 player, Vec2 built) {
 
 void LandscapeCache::clear() {
   chunks_.clear();
+  filled_.clear();
   seed_ = ~0ULL;
   object_count_ = 0;
   objects_ = nullptr;
@@ -455,14 +498,24 @@ size_t LandscapeCache::chunks_with_grass() const {
   return static_cast<size_t>(std::count_if(chunks_.begin(), chunks_.end(), [](const Chunk& c) { return c.grass_done; }));
 }
 
+bool LandscapeCache::objects_ready(float x, float z) const {
+  if (chunks_.empty()) return false;
+  return chunks_[static_cast<size_t>(chunk_x(x) * landscape::kChunksZ + chunk_z(z))].objects_done;
+}
+
 const LandscapeCache::Chunk& LandscapeCache::chunk(const World& w, int cx, int cz, bool grass) {
   check_world(w);
   Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunksZ + cz)];
+  if (!c.listed) {
+    c.listed = true;
+    filled_.push_back(static_cast<uint32_t>(cx * landscape::kChunksZ + cz));
+  }
   if (!c.objects_done) {
     // Its objects: those whose position is in it (through the index, each once).
     const ObjectIndex& ix = objects_index(w);
-    for (int i = cx * 4; i < cx * 4 + 4; ++i) {
-      for (int j = cz * 4; j < cz * 4 + 4; ++j) {
+    const int ci0 = (cx - landscape::kOuterWest) * 4, cj0 = (cz - landscape::kOuterNorth) * 4;
+    for (int i = std::max(ci0, 0); i < std::min(ci0 + 4, ObjectIndex::kCellsX); ++i) {
+      for (int j = std::max(cj0, 0); j < std::min(cj0 + 4, ObjectIndex::kCellsZ); ++j) {
         const auto cell = static_cast<size_t>(i * ObjectIndex::kCellsZ + j);
         for (uint32_t k = ix.cell_start[cell]; k < ix.cell_start[cell + 1]; ++k) {
           const Object& o = w.objects[ix.items[k]];
@@ -471,6 +524,15 @@ const LandscapeCache::Chunk& LandscapeCache::chunk(const World& w, int cx, int c
           c.items.push_back(make_item(w, o));
         }
       }
+    }
+    // The continent's beyond the relief (outer.hpp): those whose position is in it.
+    const float x0 = chunk_start_x(cx), z0 = chunk_start_z(cz), x1 = x0 + landscape::kChunk, z1 = z0 + landscape::kChunk;
+    if (!w.ground.empty() && std::min({rules::world_inset(x0, z0), rules::world_inset(x1, z0), rules::world_inset(x0, z1),
+                                       rules::world_inset(x1, z1)}) < 3.0f) {
+      for_outer_objects_near(w, Box{{x0, -1e9f, z0}, {x1, 1e9f, z1}}, [&](const Object& o, const Box&) {
+        if (o.pos.x < x0 || o.pos.x >= x1 || o.pos.z < z0 || o.pos.z >= z1 || mesh_for(o) == MeshId::Count) return;
+        c.items.push_back(make_item(w, o));
+      });
     }
     c.objects_done = true;
   }
@@ -484,12 +546,9 @@ const LandscapeCache::Chunk& LandscapeCache::chunk(const World& w, int cx, int c
       // The fields: no grass among the crops (walked through: no box of their own).
       obstacles.add(o.kind == ObjectKind::Crops ? Box{o.pos - o.size, o.pos + o.size} : b);
     });
-    const auto first_x = [](float start) {
-      return std::clamp(static_cast<int>(std::ceil(start + kDecorationHalfSize)), 0, kGrassCells);
-    };
-    const auto first_z = [](float start) {
-      return std::clamp(static_cast<int>(std::ceil(start + kDecorationHalfSize)), kGrassNorthCell, kGrassCells);
-    };
+    // (The cells go on beyond the playable ground: the continent's grass.)
+    const auto first_x = [](float start) { return static_cast<int>(std::ceil(start + kDecorationHalfSize)); };
+    const auto first_z = first_x;
     const int i0 = first_x(x0), i1 = first_x(x0 + landscape::kChunk), j0 = first_z(z0), j1 = first_z(z0 + landscape::kChunk);
     for (int i = i0; i < i1; ++i) {
       for (int j = j0; j < j1; ++j) grass_cell(w, obstacles, i, j, c.grass);
@@ -503,15 +562,14 @@ bool LandscapeCache::ready(const World& w, Vec2 center) {
   check_world(w);
   const float reach2 = landscape::kObjectsRadius * landscape::kObjectsRadius;
   const float grass2 = landscape::kGrassRadius * landscape::kGrassRadius;
-  for (int cx = 0; cx < landscape::kChunksX; ++cx) {
-    for (int cz = 0; cz < landscape::kChunksZ; ++cz) {
-      const Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunksZ + cz)];
-      const float d2 = chunk_distance2(cx, cz, center.x, center.z);
-      if (!c.objects_done && (d2 <= reach2 || valley_chunk(cx, cz))) return false;
-      if (!c.grass_done && d2 <= grass2) return false;
-    }
-  }
-  return true;
+  bool all = true;
+  for_chunks_around(center.x, center.z, landscape::kObjectsRadius, [&](int cx, int cz) {
+    const Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunksZ + cz)];
+    const float d2 = chunk_distance2(cx, cz, center.x, center.z);
+    if (!c.objects_done && (d2 <= reach2 || valley_chunk(cx, cz))) all = false;
+    if (!c.grass_done && d2 <= grass2) all = false;
+  });
+  return all;
 }
 
 int LandscapeCache::prepare(const World& w, Vec2 at, double budget_ms) {
@@ -526,22 +584,35 @@ int LandscapeCache::prepare(const World& w, Vec2 at, double budget_ms) {
     bool grass;
   };
   std::vector<Missing> missing;
-  const int lo_x = chunk_x(at.x - reach), hi_x = chunk_x(at.x + reach);
-  const int lo_z = chunk_z(at.z - reach), hi_z = chunk_z(at.z + reach);
-  for (int cx = 0; cx < landscape::kChunksX; ++cx) {
-    for (int cz = 0; cz < landscape::kChunksZ; ++cz) {
-      Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunksZ + cz)];
-      const float d2 = chunk_distance2(cx, cz, at.x, at.z);
-      const bool near = cx >= lo_x && cx <= hi_x && cz >= lo_z && cz <= hi_z;
-      const bool want_objects = (near && d2 <= reach * reach) || valley_chunk(cx, cz);
-      const bool want_grass = near && d2 <= grass * grass;
-      if (c.grass_done && d2 > (grass + 64) * (grass + 64)) {  // far behind: its grass is not needed any more
-        c.grass_done = false;
-        std::vector<Grass>().swap(c.grass);
-      }
-      if ((want_objects && !c.objects_done) || (want_grass && !c.grass_done)) missing.push_back({d2, cx, cz, want_grass});
+  // Far behind: its grass is not needed any more, nor the continent's
+  // trees and rocks (computed again if the player comes back).
+  for (size_t i = 0; i < filled_.size();) {
+    Chunk& c = chunks_[filled_[i]];
+    const int cx = static_cast<int>(filled_[i]) / landscape::kChunksZ, cz = static_cast<int>(filled_[i]) % landscape::kChunksZ;
+    const float d2 = chunk_distance2(cx, cz, at.x, at.z);
+    if (c.grass_done && d2 > (grass + 64) * (grass + 64)) {
+      c.grass_done = false;
+      std::vector<Grass>().swap(c.grass);
+    }
+    if (c.objects_done && d2 > (reach + 160) * (reach + 160) && outer_chunk(cx, cz)) {
+      c.objects_done = false;
+      std::vector<Item>().swap(c.items);
+    }
+    if (!c.grass_done && !c.objects_done) {
+      c.listed = false;
+      filled_[i] = filled_.back();
+      filled_.pop_back();
+    } else {
+      ++i;
     }
   }
+  for_chunks_around(at.x, at.z, reach, [&](int cx, int cz) {
+    Chunk& c = chunks_[static_cast<size_t>(cx * landscape::kChunksZ + cz)];
+    const float d2 = chunk_distance2(cx, cz, at.x, at.z);
+    const bool want_objects = d2 <= reach * reach || valley_chunk(cx, cz);
+    const bool want_grass = d2 <= grass * grass;
+    if ((want_objects && !c.objects_done) || (want_grass && !c.grass_done)) missing.push_back({d2, cx, cz, want_grass});
+  });
   std::sort(missing.begin(), missing.end(), [](const Missing& a, const Missing& b) { return a.d2 < b.d2; });
   int done = 0;
   for (const Missing& m : missing) {
@@ -615,14 +686,9 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
   constexpr float full2 = landscape::kFullRadius * landscape::kFullRadius;
   constexpr float reach2 = landscape::kObjectsRadius * landscape::kObjectsRadius;
   constexpr float grass2 = landscape::kGrassRadius * landscape::kGrassRadius;
-  const float r = landscape::kObjectsRadius;
-  const int lo_x = chunk_x(center.x - r), hi_x = chunk_x(center.x + r);
-  const int lo_z = chunk_z(center.z - r), hi_z = chunk_z(center.z + r);
-  for (int cx = 0; cx < landscape::kChunksX; ++cx) {
-    for (int cz = 0; cz < landscape::kChunksZ; ++cz) {
-      const bool around = cx >= lo_x && cx <= hi_x && cz >= lo_z && cz <= hi_z &&
-                          chunk_distance2(cx, cz, center.x, center.z) <= reach2;
-      if (!around && !valley_chunk(cx, cz)) continue;
+  for_chunks_around(center.x, center.z, landscape::kObjectsRadius, [&](int cx, int cz) {
+      const bool around = chunk_distance2(cx, cz, center.x, center.z) <= reach2;
+      if (!around && !valley_chunk(cx, cz)) return;
       const bool grass = chunk_distance2(cx, cz, center.x, center.z) <= grass2;
       const LandscapeCache::Chunk& c = cache.chunk(w, cx, cz, grass);
       for (const LandscapeCache::Item& item : c.items) {
@@ -656,7 +722,7 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
           }
         }
       }
-      if (!grass) continue;
+      if (!grass) return;
       for (const LandscapeCache::Grass& g : c.grass) {
         const float dx = g.instance.x - center.x, dz = g.instance.z - center.z;
         const float d2 = dx * dx + dz * dz;
@@ -694,8 +760,7 @@ void build_landscape(const World& w, DrawList& list, Vec2 center, LandscapeCache
         in.sz *= widen;
         emit(mesh, in);
       }
-    }
-  }
+  });
 
   // Each batch: its bins one after the other, each one a part.
   for (size_t m = 0; m < kMeshCount; ++m) {

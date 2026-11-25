@@ -1,4 +1,5 @@
 #include "monstres/core/west.hpp"
+#include "monstres/core/rivers.hpp"
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/continent.hpp"
@@ -361,11 +362,6 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     const float x_cross = std::min(w.farm.x + rules::kFarmRadius + 30.0f, -154.0f);
     const Vec2 F = w.falls, out = w.falls_out, lat{-out.z, out.x};
     std::vector<Vec2> pins;  // where the river is held (no bends added there)
-    // Up on the terrace: its way in on the relief's edge, towards the Forêt Profonde.
-    Vec2 deep{850.0f, -470.0f};
-    for (const Landmark& l : continent_landmarks()) {
-      if (l.region == Region::Forest) deep = l.at;
-    }
     std::vector<Vec2> anchors;  // from upstream, down to the falls
     Vec2 up_cross{};
     const bool falls_west = F.x < path_x_at(path, F.z);
@@ -386,10 +382,9 @@ WestLayout make_west_layout(uint64_t seed, const Path& path, const VillageLayout
     const float back = std::clamp(distance_to_path(path, F.x, F.z, 60.0f) - 14.0f, 12.0f, 26.0f);
     anchors.push_back(F - out * back + lat * (0.15f * back));
     anchors.push_back(F - out * (0.42f * back));
-    const Vec2 to_deep = normalized(deep - anchors.front());
-    const float edge = rules::kReliefHalfSize + 6.0f;
-    Vec2 spring = anchors.front() + to_deep * ((edge - anchors.front().x) / std::max(to_deep.x, 0.2f));
-    spring.z = std::clamp(spring.z + (hash01(seed, 90) - 0.5f) * 60.0f, -rules::kReliefHalfSize + 60.0f, -200.0f);
+    // It comes from the continent: its river, down from the mountains, ends
+    // here (rivers.hpp), just beyond the relief's east edge.
+    const Vec2 spring = river_junction(seed);
     std::vector<Vec2> c{spring + east * 14.0f, spring};
     pins.push_back(spring);
     // Along the lowest ground of the terrace (away from its edge), a bit at random.
@@ -1205,8 +1200,8 @@ float river_surface(const WestLayout& west, float x, float z, float ground, floa
   const Stream& s = west.stream;
   const size_t n = s.points.size();
   if (n < 2 || s.level.size() != n || s.width.size() != n) return limit;
-  // Beyond the playable area it runs under the ground (it springs there).
-  if (rules::world_edge(x, z) > rules::kWorldHalfSize + 12.0f) return limit;
+  // Beyond the relief: the continent's river it comes from (rivers.hpp), drawn with the continent's ground.
+  if (rules::world_edge(x, z) > rules::kReliefHalfSize + 12.0f) return limit;
   size_t seg = 0;
   float t = 0;
   float d = polyline_distance(s.points, s.chunks, x, z, limit, &seg, &t);

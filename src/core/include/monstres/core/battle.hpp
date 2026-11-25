@@ -100,6 +100,8 @@ inline constexpr uint16_t kMercyCooldown = rules::kTicksPerSecond;
 inline constexpr uint16_t kDetectTicks = 60 * rules::kTicksPerSecond;
 inline constexpr uint16_t kWayOutTicks = 60 * rules::kTicksPerSecond;
 inline constexpr uint16_t kHomeCooldown = 5 * 60 * rules::kTicksPerSecond;  // the Home spell
+inline constexpr uint16_t kSwiftTicks = 20 * rules::kTicksPerSecond;      // the Swift spell
+inline constexpr float kSwiftSpeed = 10.0f;                               // times the walk
 inline constexpr uint16_t kWizardManaPerLevel = 5;  // see wizard_stats
 }  // namespace rules
 
@@ -118,6 +120,8 @@ inline constexpr uint16_t kWizardManaPerLevel = 5;  // see wizard_stats
 // way (round the walls, through the tunnels), not straight at it.
 // Home (adventure, free, once every 5 minutes): back to the farm, out of a
 // cave or a building too, the companion along (west.hpp, go_home).
+// Swift (adventure, free): for 20 seconds, the magician walks ten times
+// faster (to roam the continent); not in a battle.
 // The capture spells (while sealing, see seal_step; those marked "a rune"
 // cost their mana for each rune left to touch in the series):
 // Replay: the series lights up again, to be touched from its first rune (the

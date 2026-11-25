@@ -4,6 +4,7 @@
 #include "monstres/core/interior.hpp"
 #include "monstres/core/landfix.hpp"
 #include "monstres/core/north.hpp"
+#include "monstres/core/outer.hpp"
 #include "monstres/core/continent.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/roads.hpp"
@@ -359,6 +360,51 @@ void generate_objects(World& w, Rng& rng, bool forest_only = false) {
 
 }  // namespace
 
+namespace {
+
+// The relief's edge and the continent beyond (heightmap.hpp: fit_rim): the
+// ground there going on from the relief's (its seated buildings, its shaping
+// all done), and the world's nature as thick just beyond its edge as just
+// inside (counted along it: things per square of 5 m, the 40 m inside it).
+// The continent going on from the relief: its ground (the rim), its rivers, its snow.
+void fit_continent(World& w) {
+  fit_rim(w.ground);
+  fit_rivers(w.ground, w.west.valid() ? &w.west.stream : nullptr);
+  w.ground.north_floor = w.north.valid() ? w.north.floor_start : -1e9f;
+}
+
+void fit_edge(World& w) {
+  fit_continent(w);
+  Heightmap& g = w.ground;
+  g.rim_density.assign(g.rim.size(), 0.0f);
+  const float x0 = -rules::kReliefHalfSize, x1 = rules::kReliefHalfSize, z0 = -rules::kReliefNorth, z1 = rules::kReliefHalfSize;
+  const float perimeter = 2 * ((x1 - x0) + (z1 - z0));
+  constexpr float kBand = 45.0f, kAlong = 60.0f;
+  std::vector<float> count(g.rim.size(), 0.0f);
+  const auto n = static_cast<int>(g.rim.size());
+  for (const Object& o : std::span(w.objects).subspan(w.objects.size() - w.wild_objects)) {
+    if (o.kind > ObjectKind::Bush && o.kind != ObjectKind::Larch) continue;  // trees, rocks, logs, stumps, bushes
+    const float dw = o.pos.x - x0, de = x1 - o.pos.x, dn = o.pos.z - z0, ds = z1 - o.pos.z;
+    const float d = std::min({dw, de, dn, ds});
+    if (d < 0 || d > kBand) continue;
+    const float s = d == dn ? o.pos.x - x0 : d == de ? (x1 - x0) + (o.pos.z - z0)
+                  : d == ds ? (x1 - x0) + (z1 - z0) + (x1 - o.pos.x) : 2 * (x1 - x0) + (z1 - z0) + (z1 - o.pos.z);
+    const int k = static_cast<int>(std::lround(std::fmod(s + perimeter, perimeter) / Heightmap::kRimStep)) % n;
+    count[static_cast<size_t>(k)] += 1.0f;
+  }
+  // Smoothed along it, per square of 5 m.
+  const int half = static_cast<int>(kAlong / 2 / Heightmap::kRimStep);
+  for (int k = 0; k < n; ++k) {
+    float sum = 0;
+    for (int d = -half; d <= half; ++d) sum += count[static_cast<size_t>(((k + d) % n + n) % n)];
+    const float area = (2 * half + 1) * Heightmap::kRimStep * kBand;
+    g.rim_density[static_cast<size_t>(k)] = sum / area * 25.0f;
+  }
+  w.outer = OuterCache{};  // (made before: again)
+}
+
+}  // namespace
+
 void generate_wilds(World& w) {
   if (w.ground.empty() || w.wild_objects > 0) return;  // hand-made worlds; already there
   // The west's buildings first (the valley's trees and rocks in their way go), then the north's.
@@ -526,6 +572,7 @@ void generate_wilds(World& w) {
   }
   settle_objects(w, first);
   w.wild_objects = static_cast<uint32_t>(w.objects.size() - first);
+  fit_edge(w);
 }
 
 namespace {
@@ -543,7 +590,7 @@ struct Surroundings {
   // visited more than once; callers do not mind).
   template <typename F>
   void near(const Box& area, F f) const {
-    for_objects_near(world, area, [&](uint32_t, const Box& b) { f(b); });
+    for_solid_near(world, area, f);  // the continent's trees and rocks too
   }
 
   bool any_overlap(const Box& area) const {
@@ -614,7 +661,7 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
     const float hi = axis == 0 ? ob.max.x : ob.max.z;
     *coord = delta > 0 ? lo - h : hi + h;
   });
-  *coord = axis == 0 ? rules::clamp_world_x(*coord, h) : rules::clamp_world_z(*coord, h);
+  *coord = axis == 0 ? rules::clamp_reach_x(*coord, h) : rules::clamp_reach_z(*coord, h);
   // Walkers cannot go up a slope steeper than kMaxWalkSlope (but can jump
   // onto it: the ground then is below their feet).
   const bool too_steep = medium == Medium::Land &&
@@ -639,11 +686,12 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
   }
 }
 
-void move_vertical(const Surroundings& s, Body& b, const BodyShape& shape) {  // walkers only
+// (`part`: of a tick, when it is cut into steps.)
+void move_vertical(const Surroundings& s, Body& b, const BodyShape& shape, float part = 1.0f) {  // walkers only
   const float previous_y = b.pos.y;
   const bool was_on_ground = b.on_ground;
   const float ground = s.ground.height(b.pos.x, b.pos.z);
-  b.pos.y += b.velocity_y * rules::kDt;
+  b.pos.y += b.velocity_y * rules::kDt * part;
   b.on_ground = false;
   // On the ground, or walking down a slope (not jumping): follow the ground.
   if (b.pos.y <= ground || (was_on_ground && b.velocity_y <= 0 && b.pos.y - ground < kGroundSnap)) {
@@ -682,9 +730,15 @@ void move_body(const Surroundings& s, Body& b, const BodyShape& shape, float dir
   b.velocity_y = std::max(b.velocity_y - rules::kGravity * rules::kDt, -rules::kMaxFallSpeed);
 
   const float x0 = b.pos.x, z0 = b.pos.z;
-  move_axis(s, b, shape, 0, dir_x * speed * rules::kDt);
-  move_axis(s, b, shape, 2, dir_z * speed * rules::kDt);
-  move_vertical(s, b, shape);
+  // Fast (the Swift spell): in steps of at most 0.35 m, never through a thin fence.
+  const float step = std::sqrt(len2) * speed * rules::kDt;
+  const int steps = step > 0.35f ? static_cast<int>(std::ceil(step / 0.35f)) : 1;
+  for (int k = 0; k < steps; ++k) {
+    move_axis(s, b, shape, 0, dir_x * speed * rules::kDt / static_cast<float>(steps));
+    move_axis(s, b, shape, 2, dir_z * speed * rules::kDt / static_cast<float>(steps));
+    if (steps > 1 && k + 1 < steps) move_vertical(s, b, shape, 1.0f / static_cast<float>(steps));
+  }
+  move_vertical(s, b, shape, steps > 1 ? 1.0f / static_cast<float>(steps) : 1.0f);
   const float dx = b.pos.x - x0, dz = b.pos.z - z0;
   b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
 }
@@ -754,8 +808,8 @@ void fly_free(const Surroundings& s, Body& b, const Steer& st) {
     b.facing_z = st.dir_z / len;
   }
   const float x0 = b.pos.x, z0 = b.pos.z;
-  b.pos.x = rules::clamp_world_x(b.pos.x + st.dir_x * st.speed * rules::kDt, 1.0f);
-  b.pos.z = rules::clamp_world_z(b.pos.z + st.dir_z * st.speed * rules::kDt, 1.0f);
+  b.pos.x = rules::clamp_reach_x(b.pos.x + st.dir_x * st.speed * rules::kDt, 1.0f);
+  b.pos.z = rules::clamp_reach_z(b.pos.z + st.dir_z * st.speed * rules::kDt, 1.0f);
   const float floor = s.ground.height(b.pos.x, b.pos.z);
   const float climb = 4.0f * rules::kDt;
   b.pos.y += std::clamp(floor + st.lift - b.pos.y, -climb, climb);
@@ -766,7 +820,7 @@ void fly_free(const Surroundings& s, Body& b, const Steer& st) {
   b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
 }
 
-Vec2 clamp_to_world(Vec2 p, float margin) { return {rules::clamp_world_x(p.x, margin), rules::clamp_world_z(p.z, margin)}; }
+Vec2 clamp_to_world(Vec2 p, float margin) { return {rules::clamp_reach_x(p.x, margin), rules::clamp_reach_z(p.z, margin)}; }
 
 
 // Unit direction from (x, z) towards the target, and the distance to it.
@@ -1499,6 +1553,60 @@ void populate_cell(World& w, int index) {
 
 namespace {
 
+// Beyond the playable ground, the continent's tiles (outer.hpp), lived in as
+// the squares are: their monsters come when the player comes near (new ones
+// each visit), and go when it goes away (not one in a battle).
+void update_outer_population(World& w) {
+  constexpr float kTile = rules::kTileCells * Heightmap::kCellSize;
+  constexpr size_t kRemembered = 512;  // tiles whose visits are counted
+  auto& tiles = w.population.outer;
+  const float px = w.player.pos.x, pz = w.player.pos.z;
+  const auto rect = [&](int ti, int tj) {
+    const float x0 = Heightmap::kMinX + kTile * static_cast<float>(ti), z0 = Heightmap::kMinZ + kTile * static_cast<float>(tj);
+    return Box{{x0, 0, z0}, {x0 + kTile, 0, z0 + kTile}};
+  };
+  // Going away: emptied.
+  for (OuterVisit& t : tiles) {
+    if (!t.active) continue;
+    const Box r = rect(t.ti, t.tj);
+    if (distance_to_rect(r, px, pz) <= rules::kDespawnRadius) continue;
+    t.active = 0;
+    for (size_t i = w.creatures.size(); i-- > 1;) {
+      const Creature& c = w.creatures[i];
+      if (!monster_stats(c.species).is_monster || owned(w, c) || foe_slot(w, i) >= 0 || c.npc != 0 || c.tag != Tag::None) continue;
+      if (rules::in_world(c.home.x, c.home.z, -1.0f)) continue;  // a square's
+      if (c.home.x >= r.min.x && c.home.x < r.max.x && c.home.z >= r.min.z && c.home.z < r.max.z) remove_creature(w, i);
+    }
+  }
+  // Coming near: lived in (only those reaching beyond the playable ground).
+  int ci, cj;
+  outer_tile_of(px, pz, ci, cj);
+  for (int ti = ci - 1; ti <= ci + 1; ++ti) {
+    for (int tj = cj - 1; tj <= cj + 1; ++tj) {
+      const Box r = rect(ti, tj);
+      if (distance_to_rect(r, px, pz) >= rules::kSpawnRadius) continue;
+      if (rules::in_world(r.min.x, r.min.z, 3.0f) && rules::in_world(r.max.x, r.max.z, 3.0f)) continue;  // all the squares'
+      auto it = std::find_if(tiles.begin(), tiles.end(), [&](const OuterVisit& t) { return t.ti == ti && t.tj == tj; });
+      if (it == tiles.end()) {
+        if (tiles.size() >= kRemembered) {  // forget one no longer lived in
+          const auto old = std::find_if(tiles.begin(), tiles.end(), [](const OuterVisit& t) { return !t.active; });
+          if (old != tiles.end()) tiles.erase(old);
+        }
+        tiles.push_back({ti, tj, 0, 0});
+        it = tiles.end() - 1;
+      }
+      if (it->active) continue;
+      it->active = 1;
+      ++it->visits;
+      for (Creature& c : outer_creatures(w, ti, tj, it->visits)) {
+        if (near_player(w, c.body.pos.x, c.body.pos.z, rules::kMonsterSpawnMinDistance)) continue;
+        if (inside_any_object(w, c.body, species_info(c.species).shape)) continue;
+        add_creature(w, c);
+      }
+    }
+  }
+}
+
 // Mirabelle's lost Piou roams near the village until it is caught: it is
 // there whenever its square is lived in (a new one each time it was gone).
 void keep_lost_piou(World& w) {
@@ -1633,12 +1741,13 @@ void update_population(World& w) {
         const bool fighting = foe_slot(w, i) >= 0;
         const bool passing = npc::wanderer(c.npc) && w.battle.rival.npc != c.npc;  // a trainer passing by, and its monster
         if (((monster_stats(c.species).is_monster && !owned(w, c)) || passing) && !fighting &&
-            cell_index(c.home.x, c.home.z) == index) {
+            cell_index(c.home.x, c.home.z) == index && rules::in_world(c.home.x, c.home.z, -1.0f)) {
           remove_creature(w, i);
         }
       }
     }
   }
+  update_outer_population(w);
   keep_lost_piou(w);
   keep_giant(w);
   keep_rival(w, npc::kBastien);
@@ -2286,6 +2395,8 @@ Zone zone_at(const World& w, float x, float z) {
   if (in_woods(w.west, x, z)) return Zone::Woods;
   // Beyond the valley: the wilds.
   if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize + 10) return Zone::Meadow;
+  // Beyond the relief: the continent's regions (outer.hpp).
+  if (!w.ground.empty() && rules::relief_inset(x, z) < -2.0f) return outer_zone(outer_region(w.seed, x, z));
   // The north (north.hpp), its belts wavy (the continent's ground is low up
   // there, near the sea: the terrace lifts it; the shore only where it is low).
   const bool shore = w.ground.land_height(x, z) < rules::kSeaLevel + 1.0f;
@@ -2513,7 +2624,7 @@ const ObjectIndex& objects_index(const World& w) {
 bool inside_any_object(const World& w, const Body& b, const BodyShape& shape) {
   const Box body = body_box(b, shape);
   bool hit = false;
-  for_objects_near(w, body, [&](uint32_t, const Box& o) { hit = hit || overlaps(body, o); });
+  for_solid_near(w, body, [&](const Box& o) { hit = hit || overlaps(body, o); });
   return hit;
 }
 
@@ -2532,6 +2643,7 @@ void build_layouts(World& w) {
   shape_sites(w.ground, w.sites, w.seed, w.path, w.north);
   if (w.sites.abbey_way.size() >= 6) set_lane(w.roads, LaneTo::AbbeyWay, w.sites.abbey_way);  // (found again over the shaped ground)
   join_waters(w);  // no water shut in inland (landfix.hpp)
+  fit_continent(w);  // the continent going on from the relief (again with the wilds' buildings seated)
 }
 
 void regrow_forest(World& w) {
@@ -2750,7 +2862,8 @@ void step(World& w, const Input& in) {
   // During a battle the magician waits: the joystick moves the companion
   // (before a trainer's battle, the magician walks to its place).
   if (phase == BattlePhase::None) {
-    move_body(s, w.player, kPlayerShape, dir_x, dir_z, rules::kWalkSpeed, in.jump, rules::kJumpSpeed);
+    const float speed = rules::kWalkSpeed * (w.swift_ticks > 0 ? rules::kSwiftSpeed : 1.0f);  // the Swift spell
+    move_body(s, w.player, kPlayerShape, dir_x, dir_z, speed, in.jump, rules::kJumpSpeed);
   } else {
     const Steer st = battle_prepare(w, Stand::Magician);
     move_body(s, w.player, kPlayerShape, st.dir_x, st.dir_z, st.speed, false, 0);

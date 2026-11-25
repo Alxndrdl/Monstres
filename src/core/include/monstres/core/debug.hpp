@@ -62,7 +62,10 @@ std::string map_json(const World& world);
 // main.cpp), sea level, regions with their remarkable places, waters, the
 // active volcano's crater.
 struct Continent;
-std::string continent_json(const Continent& continent);
+// (With the world's rivers: rivers.hpp.)
+std::string continent_json(const Continent& continent, const std::vector<River>& rivers);
+// The things growing on a tile of the continent (outer.hpp: outer_objects), as map_json's objects.
+std::string map_detail_json(const World& world, int ti, int tj);
 
 // The player's team: per monster its level, experience, hit points,
 // characteristics at its level, family, elements, look, variants and its

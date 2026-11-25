@@ -158,7 +158,10 @@ void build_weather(const WeatherField& field, const View& view, float flash, flo
       c.sy = lerp(16.0f, 30.0f, r(6)) * size * (1 + 1.6f * w.storm);  // storm clouds tower up
       c.rotation = quat_yaw(r(8) * kTau);
       const float reach = std::max(c.sx, c.sz);
-      if (in_view(far_view, {x - reach, c.y, z - reach, x + reach, c.y + c.sy, z + reach})) {
+      // Up a mountain, the camera among the clouds: not those around it (it
+      // would be inside one, all grey); the others float at its level.
+      const bool around = d < reach + 40.0f && cy > c.y - 40.0f && cy < c.y + c.sy + 40.0f;
+      if (!around && in_view(far_view, {x - reach, c.y, z - reach, x + reach, c.y + c.sy, z + reach})) {
         const float k = day * (1 - 0.88f * w.dark);
         c.tint = {k + 0.8f * flash, k + 0.8f * flash + night_blue * 0.2f, k + 0.9f * flash + night_blue, 1};
         const auto variant = static_cast<size_t>(r(9) * kCloudVariants) % kCloudVariants;

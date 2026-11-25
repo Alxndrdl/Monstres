@@ -1164,7 +1164,7 @@ test.describe('the bigger world', () => {
     await expect(page.locator('#spell-detail h2')).toHaveText('Soin');
     // Emptied (the menu stops time: it happens at once).
     await page.locator('#spell-edit').click();
-    await expect(page.locator('.spell-choice')).toHaveCount(5);  // none, heal, detection, way out, home (the shield is for battles)
+    await expect(page.locator('.spell-choice')).toHaveCount(6);  // none, heal, detection, way out, home, swift (the shield is for battles)
     await page.locator('#spell-choice-none').click();
     await page.locator('#spell-confirm').click();
     await expect(page.locator('#spell-slot-2')).toHaveAttribute('data-spell', 'none');

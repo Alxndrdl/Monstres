@@ -73,11 +73,11 @@ TEST_CASE("the world grew north: up to the foot of the mountains") {
   const World& w = cached_game(3);
   // The relief goes on up there, the mountains rising.
   CHECK(w.ground.height(w.north.col.x + 150, -1215) > w.ground.height(w.north.col.x, -1215) + 10);
-  // The player stops at the north edge.
+  // The player no longer stops at the north edge: the continent goes on.
   World e = empty_world();
   e.player.pos = {0, 0, -1200};
   run(e, forward(), 10 * rules::kTicksPerSecond);
-  CHECK(e.player.pos.z == doctest::Approx(-(rules::kWorldNorth - rules::kPlayerHalfWidth)));
+  CHECK(e.player.pos.z < -rules::kWorldNorth - 20);
 }
 
 TEST_CASE("the north's places, in every world") {

@@ -41,10 +41,18 @@ inline constexpr float kGrassFullRadius = 22.0f;
 // The world by chunks of kChunk meters (lined up with the objects' index):
 // what the landscape is made of is computed chunk by chunk, when first
 // needed, and kept (LandscapeCache).
+// Beyond the objects' index (the relief and a little more), more on every
+// side, out to where one may go (rules::kReach*): the continent's nature
+// there (outer.hpp). Only those around the player are computed; the
+// continent's are forgotten again when it is far away.
 inline constexpr float kChunk = 32.0f;
-inline constexpr float kChunkOriginX = -ObjectIndex::kHalf, kChunkOriginZ = -ObjectIndex::kNorth;
-inline constexpr int kChunksX = ObjectIndex::kCellsX / 4, kChunksZ = ObjectIndex::kCellsZ / 4;
-static_assert(ObjectIndex::kCell * 4 == kChunk && kChunksX * 4 == ObjectIndex::kCellsX && kChunksZ * 4 == ObjectIndex::kCellsZ);
+inline constexpr int kOuterWest = static_cast<int>((-rules::kReachMinX - ObjectIndex::kHalf) / kChunk) + 8;
+inline constexpr int kOuterEast = static_cast<int>((rules::kReachMaxX - ObjectIndex::kHalf) / kChunk) + 8;
+inline constexpr int kOuterNorth = static_cast<int>((-rules::kReachMinZ - ObjectIndex::kNorth) / kChunk) + 8;
+inline constexpr int kOuterSouth = static_cast<int>((rules::kReachMaxZ - ObjectIndex::kHalf) / kChunk) + 8;
+inline constexpr float kChunkOriginX = -ObjectIndex::kHalf - kOuterWest * kChunk, kChunkOriginZ = -ObjectIndex::kNorth - kOuterNorth * kChunk;
+inline constexpr int kChunksX = ObjectIndex::kCellsX / 4 + kOuterWest + kOuterEast, kChunksZ = ObjectIndex::kCellsZ / 4 + kOuterNorth + kOuterSouth;
+static_assert(ObjectIndex::kCell * 4 == kChunk && (ObjectIndex::kCellsX / 4) * 4 == ObjectIndex::kCellsX && (ObjectIndex::kCellsZ / 4) * 4 == ObjectIndex::kCellsZ);
 
 // The built landscape is sorted for culling: by sectors around its center,
 // those within kInnerBand first (each sector a part of every batch).
@@ -97,6 +105,7 @@ public:
   };
   struct Chunk {
     bool objects_done = false, grass_done = false;
+    bool listed = false;  // in filled_
     std::vector<Item> items;
     std::vector<Grass> grass;
   };
@@ -109,6 +118,8 @@ public:
   bool ready(const World& world, Vec2 center);
   void clear();
   size_t chunks_with_grass() const;
+  // Whether the chunk with (x, z) has its objects computed (tests).
+  bool objects_ready(float x, float z) const;
 
   // The chunk (cx, cz), computed as far as asked.
   const Chunk& chunk(const World& world, int cx, int cz, bool grass);
@@ -120,6 +131,7 @@ private:
   size_t object_count_ = 0;
   const void* objects_ = nullptr;
   std::vector<Chunk> chunks_;  // kChunksX * kChunksZ (index cx * kChunksZ + cz), filled when needed
+  std::vector<uint32_t> filled_;  // the chunks with something computed (forgotten when far)
   // Scratch space for building (kept to reuse its memory).
   std::vector<std::vector<Instance>> bins_;
   std::vector<Aabb> bin_bounds_;

@@ -3,10 +3,12 @@
 // within a budget of triangles and time).
 
 #include "monstres/core/continent.hpp"
+#include "monstres/core/west.hpp"
 #include "monstres/render/far_terrain.hpp"
 #include "monstres/render/models.hpp"
 #include "test_helpers.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -32,7 +34,7 @@ TEST_CASE("the continent: the start in the west, mountains north, the volcano ea
   CHECK(continent_height(seed, 0, 0) == 0);  // the playable area has its own relief
   CHECK(continent_height(seed, 169, -100) == 0);
   // The ocean all around.
-  for (const Vec2 sea : {Vec2{-1100, 0}, Vec2{1150, -2400}, Vec2{1150, 2450}, Vec2{4200, 1500}}) {
+  for (const Vec2 sea : {Vec2{-1100, -2400}, Vec2{-1100, 2450}, Vec2{1150, -2420}, Vec2{1150, 2480}, Vec2{4250, -2400}, Vec2{4250, 2450}, Vec2{4200, 1500}}) {
     CHECK(continent_height(seed, sea.x, sea.z) < rules::kSeaLevel - 10);
   }
   // A coast west of the start, not far.
@@ -59,6 +61,50 @@ TEST_CASE("the continent: the start in the west, mountains north, the volcano ea
   CHECK(region_at(lake.center.x, lake.center.z) == Region::Lake);
   CHECK(region_at(1520, 140) == Region::Capital);
   CHECK(region_at(1300, -100) == Region::Plains);
+}
+
+TEST_CASE("the continent: an island all within its grid, its outline lobed, its regions' edges winding") {
+  for (uint64_t seed = 0; seed < 6; ++seed) {
+    CAPTURE(seed);
+    // The ocean all along the grid's edge (the continent not cut off by it).
+    float highest = -1e9f;
+    for (float x = Continent::kMinX; x <= Continent::kMaxX; x += 20) {
+      highest = std::max({highest, continent_height(seed, x, Continent::kMinZ + 100), continent_height(seed, x, Continent::kMaxZ - 100)});
+    }
+    for (float z = Continent::kMinZ; z <= Continent::kMaxZ; z += 20) {
+      highest = std::max({highest, continent_height(seed, Continent::kMinX + 100, z), continent_height(seed, Continent::kMaxX - 100, z)});
+    }
+    CHECK(highest < rules::kSeaLevel - 2);
+  }
+  // Never a box: going round the island from its middle, the coast's
+  // distance changes a lot (lobes, bays, the peninsula).
+  std::vector<float> reach;
+  for (int a = 0; a < 72; ++a) {
+    const float t = 6.2831853f * static_cast<float>(a) / 72.0f;
+    float r = 0;
+    for (float d = 200; d < 3200; d += 20) {
+      if (continent_height(3, 1300 + std::cos(t) * d, std::sin(t) * d) > rules::kSeaLevel) r = d;
+    }
+    reach.push_back(r);
+  }
+  CHECK(*std::max_element(reach.begin(), reach.end()) - *std::min_element(reach.begin(), reach.end()) > 900);
+  // The mountains' and the desert's edges wind: where they begin goes back and forth across the island.
+  const auto begins = [](auto share, float x, float from, float to, float step) {
+    for (float z = from; step > 0 ? z < to : z > to; z += step) {
+      if (share(x, z) > 0.5f) return z;
+    }
+    return to;
+  };
+  float mountains_lo = 1e9f, mountains_hi = -1e9f, desert_lo = 1e9f, desert_hi = -1e9f;
+  for (float x = 900; x < 2600; x += 50) {
+    const float m = begins(mountains_share, x, -600, -2000, -10), d = begins(desert_share, x, 600, 2000, 10);
+    mountains_lo = std::min(mountains_lo, m);
+    mountains_hi = std::max(mountains_hi, m);
+    desert_lo = std::min(desert_lo, d);
+    desert_hi = std::max(desert_hi, d);
+  }
+  CHECK(mountains_hi - mountains_lo > 250);
+  CHECK(desert_hi - desert_lo > 250);
 }
 
 TEST_CASE("the continent's grid: the heights computed at its points, 0 along the playable square") {
@@ -106,7 +152,8 @@ TEST_CASE("the far ground: rings without gaps between them, meeting the playable
     for (const float* v : {a, b, d}) {
       const float edge = std::max(std::fabs(v[0]), std::fabs(v[2]));
       inside += edge < rules::kReliefHalfSize - 1e-3f;
-      if (std::fabs(edge - rules::kReliefHalfSize) < 1e-3f) {
+      // (But where the stream comes in: its bed dug up to the edge, the continent's river going on into it.)
+      if (std::fabs(edge - rules::kReliefHalfSize) < 1e-3f && distance_to_stream(world.west.stream, v[0], v[2], 20.0f) > 14.0f) {
         seam = seam && std::fabs(v[1] - world.ground.height(v[0], v[2])) < 1e-3f;
       }
     }

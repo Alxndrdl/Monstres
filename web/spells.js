@@ -33,6 +33,9 @@
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>' +
       '<path d="M10 20v-5h4v5"/></svg>',
+    // Swift: two chevrons, speed lines behind.
+    swift: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true"><path d="M11 6l6 6-6 6M16 6l6 6-6 6"/><path d="M2 9h6M3 15h5"/></svg>',
     // The capture spells: the series again, a guard, a boost, another series, halfway, the next rune.
     replay: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
       'stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v5h5"/></svg>',
@@ -167,6 +170,7 @@
       : known.combat && known.adventure ? 'combat et aventure' : known.combat ? 'combat seulement' : 'aventure seulement';
     const wait = known.capture ? '' : id === 'mercy' ? ' · jusqu’à la fin du combat'
       : id === 'detect' || id === 'wayOut' ? ' · dure 1 min'
+        : id === 'swift' ? ' · dure 20 s'
         : known.cooldown >= 60 ? ` · recharge ${Math.round(known.cooldown / 60)} min` : ` · recharge ${known.cooldown} s`;
     return [
       el('p', { textContent: (LORE.spells[id] || {}).text || '' }),

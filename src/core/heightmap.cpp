@@ -6,7 +6,9 @@
 #include "monstres/core/world.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <unordered_map>
 
 namespace monstres {
 
@@ -302,7 +304,8 @@ void embank_bridges(Heightmap& m, const WestLayout& west) {
   }
 }
 
-constexpr float kSpringEdge = rules::kWorldHalfSize;  // beyond it, the river runs under the ground
+constexpr float kSpringEdge = rules::kWorldHalfSize;  // beyond it, its level as there (it comes from the continent's river: rivers.hpp)
+constexpr float kDugTo = rules::kReliefHalfSize + 4.0f;  // its bed dug up to the relief's edge (that river's water going on into it)
 
 // The river's water goes down from its spring (never up): its level at each
 // point is below the ground all along before it (over the terrace's edge it
@@ -413,10 +416,9 @@ void carve_stream(Heightmap& m, WestLayout& west, uint64_t seed) {
         }
       }
       if (target >= h) continue;
-      // Not beyond the playable area (where the relief goes down to the
-      // continent's ground): the river comes out of the ground there.
+      // Up to the relief's edge, where the continent's river comes in (rivers.hpp).
       const float edge = rules::world_edge(x, z);
-      const float k = 1 - smooth(kSpringEdge + 4.0f, kSpringEdge + 16.0f, edge);
+      const float k = 1 - smooth(kDugTo - 2.0f, kDugTo + 4.0f, edge);
       h += (std::min(h, target) - h) * k;
     }
   }
@@ -500,16 +502,276 @@ float floor_height(const std::vector<FloorPiece>& floor, float x, float z) {
   return weights > 0 ? sum / weights : 0.0f;
 }
 
+// ---- The ground beyond the relief: tiles ----
+
+struct GroundTile {
+  uint64_t used = 0;  // when last looked at (the longest unused goes first)
+  std::array<float, (rules::kTileCells + 1) * (rules::kTileCells + 1)> h{};
+};
+struct TileCache::Store {
+  std::unordered_map<int64_t, GroundTile> tiles;
+  uint64_t clock = 0;
+};
+TileCache::TileCache() = default;
+TileCache::TileCache(const TileCache&) {}
+TileCache& TileCache::operator=(const TileCache& other) {
+  if (this != &other) tiles_.reset();
+  return *this;
+}
+TileCache::TileCache(TileCache&&) noexcept = default;
+TileCache& TileCache::operator=(TileCache&&) noexcept = default;
+TileCache::~TileCache() = default;
+TileCache::Store& TileCache::store() const {
+  if (!tiles_) tiles_ = std::make_unique<Store>();
+  return *tiles_;
+}
+size_t TileCache::size() const { return tiles_ ? tiles_->tiles.size() : 0; }
+
+namespace {
+
+int floor_div(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+
+// The continent's ground on its 10 m lattice (multiples of 10 m), between
+// its points in a straight line: as the relief's land grid and the far
+// terrain have it.
+float land_lattice(uint64_t seed, float x, float z) {
+  constexpr float c = Heightmap::kLandCell;
+  const float fx = x / c, fz = z / c;
+  const float x0 = std::floor(fx), z0 = std::floor(fz);
+  const float tx = fx - x0, tz = fz - z0;
+  thread_local std::shared_ptr<const Continent> known;
+  if (!known || known->seed != seed) known = continent_of(seed);
+  const Continent* k = known.get();
+  const float a = k->at_point(x0 * c, z0 * c), b = k->at_point((x0 + 1) * c, z0 * c);
+  const float d = k->at_point(x0 * c, (z0 + 1) * c), e = k->at_point((x0 + 1) * c, (z0 + 1) * c);
+  const float top = a + (b - a) * tx;
+  return top + ((d + (e - d) * tx) - top) * tz;
+}
+
+}  // namespace
+
+float outer_ground(uint64_t seed, float x, float z, float base, float spacing) {
+  // Each octave as much as the spacing can show (none it would only alias).
+  const auto shown = [&](float cell) { return spacing <= 0 ? 1.0f : smooth(0.6f, 1.4f, cell / spacing); };
+  // Folds and ridges, never in rows: the field drawn through a warped one.
+  const float wx = x + 46.0f * (value_noise(seed + 2201, x, z, 150.0f) - 0.5f);
+  const float wz = z + 46.0f * (value_noise(seed + 2202, x, z, 150.0f) - 0.5f);
+  float folds = (value_noise(seed + 2210, wx, wz, 95.0f) - 0.5f) * shown(95.0f);
+  if (const float k = shown(38.0f); k > 0) folds += 0.5f * k * (value_noise(seed + 2211, wx, wz, 38.0f) - 0.5f);
+  if (const float k = shown(14.0f); k > 0) folds += 0.25f * k * (value_noise(seed + 2212, wx, wz, 14.0f) - 0.5f);
+  if (const float k = shown(5.0f); k > 0) folds += 0.05f * k * (value_noise(seed + 2213, x, z, 5.0f) - 0.5f);
+  // Rougher up high, by patches; gentle under the sea (no islets out of nowhere).
+  const float patches = 0.45f + 1.1f * value_noise(seed + 2220, x, z, 260.0f);
+  const float amplitude = std::min(14.0f, (3.0f + 0.06f * std::max(0.0f, base)) * patches);
+  const float land = smooth(rules::kSeaLevel - 4.0f, rules::kSeaLevel + 3.0f, base);
+  // By the relief (smooth at its edge: its hills fade out there), gentler, growing over a few hundred meters.
+  const float from_relief = std::max(0.0f, -rules::relief_inset(x, z) + 120.0f * (value_noise(seed + 2232, x, z, 200.0f) - 0.5f));
+  const float calm = 0.3f + 0.7f * smooth(40.0f, 520.0f, from_relief);
+  return base + 2.0f * folds * amplitude * calm * (0.15f + 0.85f * land);
+}
+
+namespace {
+
+constexpr float kRimX0 = -rules::kReliefHalfSize, kRimX1 = rules::kReliefHalfSize;
+constexpr float kRimZ0 = -rules::kReliefNorth, kRimZ1 = rules::kReliefHalfSize;
+constexpr float kRimW = kRimX1 - kRimX0, kRimD = kRimZ1 - kRimZ0;
+constexpr int kRimSamples = static_cast<int>(2 * (kRimW + kRimD) / Heightmap::kRimStep);
+
+// A point of the edge, `s` meters round it (from the north-west corner, eastwards).
+Vec2 rim_point(float s) {
+  if (s < kRimW) return {kRimX0 + s, kRimZ0};
+  s -= kRimW;
+  if (s < kRimD) return {kRimX1, kRimZ0 + s};
+  s -= kRimD;
+  if (s < kRimW) return {kRimX1 - s, kRimZ1};
+  s -= kRimW;
+  return {kRimX0, kRimZ1 - s};
+}
+
+// The edge's point nearest to (x, z) beyond the relief: how far round it, how far away.
+float rim_place(float x, float z, float& away) {
+  const float cx = std::clamp(x, kRimX0, kRimX1), cz = std::clamp(z, kRimZ0, kRimZ1);
+  away = std::hypot(x - cx, z - cz);
+  if (cz == kRimZ0) return cx - kRimX0;
+  if (cx == kRimX1) return kRimW + (cz - kRimZ0);
+  if (cz == kRimZ1) return kRimW + kRimD + (kRimX1 - cx);
+  return 2 * kRimW + kRimD + (kRimZ1 - cz);
+}
+
+float rim_value(const std::vector<float>& v, float s) {
+  const float f = s / Heightmap::kRimStep;
+  const int n = static_cast<int>(v.size());
+  const int a = static_cast<int>(std::floor(f));
+  const float t = f - static_cast<float>(a);
+  const auto at = [&](int k) { return v[static_cast<size_t>(((k % n) + n) % n)]; };
+  return at(a) + (at(a + 1) - at(a)) * t;
+}
+
+// How much of the rim is left at (x, z), `away` meters beyond the edge: all
+// of it at the edge, none a few hundred meters on (how far wanders, and the
+// distance itself is warped: never a band along a straight line).
+float rim_fade(uint64_t seed, float x, float z, float away, float scale) {
+  const float reach = (300.0f + 340.0f * value_noise(seed + 2230, x, z, 340.0f)) * scale;
+  const float warp = 110.0f * (value_noise(seed + 2231, x, z, 170.0f) - 0.5f) * std::min(1.0f, away / 80.0f);
+  return 1 - smooth(0.0f, reach, std::max(0.0f, away + warp * scale));
+}
+
+}  // namespace
+
+namespace {
+
+// Where along the edge (x, z) reads its rim: the nearest point, moved along
+// the edge the further away (the rim's ups and downs never carried out in
+// straight bands across it).
+float rim_read(uint64_t seed, float x, float z, float& away) {
+  const float s = rim_place(x, z, away);
+  const float drift = 260.0f * (value_noise(seed + 2233, x, z, 300.0f) - 0.5f) + 90.0f * (value_noise(seed + 2234, x, z, 110.0f) - 0.5f);
+  return s + drift * std::min(1.0f, away / 120.0f);
+}
+
+}  // namespace
+
+float Heightmap::rise(float x, float z) const {
+  if (rim.empty()) return 0.0f;
+  float away;
+  const float s = rim_read(seed, x, z, away);
+  if (away <= 0) return rim_value(rim, s);
+  const float r = rim_value(rim, s) * rim_fade(seed, x, z, away, 1.0f);
+  if (r >= 0) return r;
+  // Lowering the continent (the relief's edge lower than it, read a little
+  // aside), never into the sea where it is land: no sea shut in inland.
+  thread_local std::shared_ptr<const Continent> known;
+  if (!known || known->seed != seed) known = continent_of(seed);
+  const float c = known->height(x, z);
+  return c > rules::kSeaLevel ? std::max(r, std::min(0.0f, rules::kSeaLevel + 2.5f - c)) : r;
+}
+
+float Heightmap::edge_density(float x, float z) const {
+  if (rim_density.empty()) return -1.0f;
+  float away;
+  const float s = rim_read(seed + 9, x, z, away);
+  return rim_value(rim_density, s) * rim_fade(seed + 7, x, z, away, 0.55f);
+}
+
+void fit_rim(Heightmap& m) {
+  m.rim.clear();
+  m.tiles = TileCache{};
+  if (m.empty() || m.land.empty()) return;
+  std::vector<float> raw(kRimSamples);
+  for (int k = 0; k < kRimSamples; ++k) {
+    const Vec2 p = rim_point(Heightmap::kRimStep * static_cast<float>(k));
+    raw[static_cast<size_t>(k)] = m.height(p.x, p.z) - m.land_height(p.x, p.z);
+  }
+  // Smoothed along the edge (a bump of the relief right at it is not carried out).
+  constexpr int kHalf = 12;
+  m.rim.assign(kRimSamples, 0.0f);
+  for (int k = 0; k < kRimSamples; ++k) {
+    float sum = 0, weights = 0;
+    for (int d = -kHalf; d <= kHalf; ++d) {
+      const float wgt = static_cast<float>(kHalf + 1 - std::abs(d));
+      sum += wgt * raw[static_cast<size_t>(((k + d) % kRimSamples + kRimSamples) % kRimSamples)];
+      weights += wgt;
+    }
+    m.rim[static_cast<size_t>(k)] = sum / weights;
+  }
+  m.tiles = TileCache{};
+}
+
+float Heightmap::snow(float x, float z, float h) const {
+  const float line = snow_line(seed, x, z);
+  float s = smooth(line, line + 40.0f, h);
+  if (north_floor > -1e8f) {
+    // (As north_snow: further north and higher above the valley's floor,
+    // more; patches of old snow; fading out a few hundred meters beyond.)
+    constexpr float kFrostFrom = -1030.0f, kValleyRise = 0.15f;  // north.hpp
+    const float beyond = std::max(0.0f, -rules::relief_inset(x, z));
+    const float fade = 1 - smooth(80.0f, 520.0f, beyond + 120.0f * (value_noise(seed + 2240, x, z, 160.0f) - 0.5f));
+    if (fade > 0 && z < kFrostFrom + 120.0f) {
+      const float north = smooth(kFrostFrom + 120.0f, kFrostFrom - 120.0f, z);
+      const float above = h - (north_floor + kValleyRise * std::max(0.0f, kFrostFrom - z));
+      const float patches = value_noise(0x534E4F57ULL, x, z, 23.0f) * 0.6f + value_noise(0x534E4F58ULL, x, z, 7.0f) * 0.4f;
+      const float n = std::clamp(north * (0.85f * smooth(0.5f, 0.66f, patches) + smooth(3.0f, 22.0f, above) * 0.9f) - 0.2f * (1 - north), 0.0f, 1.0f);
+      s = std::max(s, n * fade);
+    }
+  }
+  return s;
+}
+
+float Heightmap::lattice_point(int gi, int gj) const {
+  if (gi >= 0 && gj >= 0 && gi <= kCellsX && gj <= kCellsZ) return at(gi, gj);  // (on the relief's grid)
+  const float x = x_of(gi), z = z_of(gj);
+  // The continent's 10 m points around, a smooth curve between them
+  // (Catmull-Rom: no facets on the big slopes).
+  thread_local std::shared_ptr<const Continent> known;  // (asked once per seed, not at every point)
+  if (!known || known->seed != seed) known = continent_of(seed);
+  const Continent* k = known.get();
+  const float fx = (x - Continent::kMinX) / kLandCell, fz = (z - Continent::kMinZ) / kLandCell;
+  const int a = static_cast<int>(std::floor(fx)), b = static_cast<int>(std::floor(fz));
+  const float u = fx - static_cast<float>(a), v = fz - static_cast<float>(b);
+  const auto curve = [](float p0, float p1, float p2, float p3, float t) {
+    const float t2 = t * t, t3 = t2 * t;
+    return 0.5f * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  };
+  const auto point = [&](int pi, int pj) {
+    return pi < 0 || pj < 0 || pi >= Continent::kPointsX || pj >= Continent::kPointsZ ? Continent::kDeep : k->at(pi, pj);
+  };
+  float rows[4];
+  for (int r = 0; r < 4; ++r) {
+    const int pj = b - 1 + r;
+    rows[r] = curve(point(a - 1, pj), point(a, pj), point(a + 1, pj), point(a + 2, pj), u);
+  }
+  const float base = curve(rows[0], rows[1], rows[2], rows[3], v);
+  // From the relief's edge (its nearest point) out to the continent's own
+  // ground, its folds; the rivers' beds dug into it.
+  const int ci = std::clamp(gi, 0, kCellsX), cj = std::clamp(gj, 0, kCellsZ);
+  const float edge = at(ci, cj);
+  const float out = std::hypot(static_cast<float>(gi - ci), static_cast<float>(gj - cj)) * kCellSize;
+  const float h = edge + (outer_ground(seed, x, z, base + rise(x, z), 0.0f) - edge) * smooth(0.0f, rules::kOuterBlend, out);
+  return dig_rivers(rivers, x, z, h);
+}
+
+float Heightmap::outer_at(int i, int j) const {
+  if (i >= 0 && j >= 0 && i <= kCellsX && j <= kCellsZ) return at(i, j);  // (on the relief's grid)
+  TileCache::Store& store = tiles.store();
+  const int ti = floor_div(i, rules::kTileCells), tj = floor_div(j, rules::kTileCells);
+  const int64_t key = (static_cast<int64_t>(ti) << 32) ^ static_cast<int64_t>(static_cast<uint32_t>(tj));
+  auto it = store.tiles.find(key);
+  if (it == store.tiles.end()) {
+    if (store.tiles.size() >= rules::kTilesKept) {  // the longest unused one goes
+      auto oldest = store.tiles.begin();
+      for (auto t = store.tiles.begin(); t != store.tiles.end(); ++t) oldest = t->second.used < oldest->second.used ? t : oldest;
+      store.tiles.erase(oldest);
+    }
+    GroundTile tile;
+    constexpr int n = rules::kTileCells + 1;
+    for (int a = 0; a < n; ++a) {
+      for (int b = 0; b < n; ++b) tile.h[static_cast<size_t>(a * n + b)] = lattice_point(ti * rules::kTileCells + a, tj * rules::kTileCells + b);
+    }
+    it = store.tiles.emplace(key, tile).first;
+  }
+  it->second.used = ++store.clock;
+  const int a = i - ti * rules::kTileCells, b = j - tj * rules::kTileCells;
+  return it->second.h[static_cast<size_t>(a * (rules::kTileCells + 1) + b)];
+}
+
 float Heightmap::height(float x, float z) const {
   if (heights.empty()) return floor.empty() ? 0.0f : floor_height(floor, x, z);
-  const float fx = std::clamp((x - kMinX) / kCellSize, 0.0f, static_cast<float>(kCellsX));
-  const float fz = std::clamp((z - kMinZ) / kCellSize, 0.0f, static_cast<float>(kCellsZ));
-  const int i = std::min(static_cast<int>(fx), kCellsX - 1);
-  const int j = std::min(static_cast<int>(fz), kCellsZ - 1);
-  const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
-  const float h00 = at(i, j), h10 = at(i + 1, j), h01 = at(i, j + 1), h11 = at(i + 1, j + 1);
-  if (tz >= tx) return h00 + (h11 - h01) * tx + (h01 - h00) * tz;  // triangle (x0,z0) (x0,z1) (x1,z1)
-  return h00 + (h10 - h00) * tx + (h11 - h10) * tz;                 // triangle (x0,z0) (x1,z1) (x1,z0)
+  const float fx = (x - kMinX) / kCellSize, fz = (z - kMinZ) / kCellSize;
+  if (fx >= 0 && fz >= 0 && fx <= static_cast<float>(kCellsX) && fz <= static_cast<float>(kCellsZ)) {
+    const int i = std::min(static_cast<int>(fx), kCellsX - 1);
+    const int j = std::min(static_cast<int>(fz), kCellsZ - 1);
+    const float tx = fx - static_cast<float>(i), tz = fz - static_cast<float>(j);
+    const float h00 = at(i, j), h10 = at(i + 1, j), h01 = at(i, j + 1), h11 = at(i + 1, j + 1);
+    if (tz >= tx) return h00 + (h11 - h01) * tx + (h01 - h00) * tz;  // triangle (x0,z0) (x0,z1) (x1,z1)
+    return h00 + (h10 - h00) * tx + (h11 - h10) * tz;                 // triangle (x0,z0) (x1,z1) (x1,z0)
+  }
+  // Beyond: the same triangles, on the tiles' points.
+  const float ffx = std::floor(fx), ffz = std::floor(fz);
+  const int i = static_cast<int>(ffx), j = static_cast<int>(ffz);
+  const float tx = fx - ffx, tz = fz - ffz;
+  const float h00 = outer_at(i, j), h10 = outer_at(i + 1, j), h01 = outer_at(i, j + 1), h11 = outer_at(i + 1, j + 1);
+  if (tz >= tx) return h00 + (h11 - h01) * tx + (h01 - h00) * tz;
+  return h00 + (h10 - h00) * tx + (h11 - h10) * tz;
 }
 
 Vec3 Heightmap::normal(float x, float z) const {
@@ -522,6 +784,9 @@ Vec3 Heightmap::normal(float x, float z) const {
 
 float Heightmap::land_height(float x, float z) const {
   if (land.empty()) return 0;
+  if (x < kMinX || z < kMinZ || x > kMinX + kLandCell * (kLandPointsX - 1) || z > kMinZ + kLandCell * (kLandPointsZ - 1)) {
+    return land_lattice(seed, x, z) + rise(x, z);  // beyond the relief: the continent's own grid, raised by the rim
+  }
   const float fx = std::clamp((x - kMinX) / kLandCell, 0.0f, static_cast<float>(kLandPointsX - 1));
   const float fz = std::clamp((z - kMinZ) / kLandCell, 0.0f, static_cast<float>(kLandPointsZ - 1));
   const int i = std::min(static_cast<int>(fx), kLandPointsX - 2), j = std::min(static_cast<int>(fz), kLandPointsZ - 2);
@@ -534,6 +799,7 @@ float Heightmap::land_height(float x, float z) const {
 
 Heightmap make_heightmap(uint64_t seed, const Path& path, const Places& places) {
   Heightmap m;
+  m.seed = seed;
   m.heights.resize(static_cast<size_t>(Heightmap::kPointsX * Heightmap::kPointsZ));
   const float knoll_top = hills(seed, places.ruins.center.x, places.ruins.center.z) + kKnollHeight;
   const float castle_top = hills(seed, places.castle.center.x, places.castle.center.z) + kCastleKnollHeight;

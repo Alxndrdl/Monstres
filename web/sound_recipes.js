@@ -214,6 +214,7 @@
     mercy: (ctx, out, t) => arpeggio(ctx, out, t, [67, 71, 74], 0.0, { type: 'sine', d: 1.0, peak: 0.1 }),
     detect: (ctx, out, t) => { for (let i = 0; i < 3; ++i) tone(ctx, out, t + i * 0.32, { f0: 1760, f1: 1700, d: 0.25, peak: 0.14 / (i + 1) }); return 1.0; },
     wayOut: (ctx, out, t) => tone(ctx, out, t, { type: 'triangle', f0: 400, f1: 1200, glide: 'lin', a: 0.05, d: 0.6, peak: 0.12 }),
+    swift: (ctx, out, t) => { hiss(ctx, out, t, { f0: 600, f1: 6000, q: 1.5, a: 0.02, d: 0.35, peak: 0.16 }); return arpeggio(ctx, out, t + 0.1, [72, 79, 86], 0.05, { d: 0.4 }); },
     home: (ctx, out, t) => { hiss(ctx, out, t, { f0: 300, f1: 4000, q: 2, a: 0.2, d: 0.6, peak: 0.2 }); return arpeggio(ctx, out, t + 0.3, [79, 84, 88, 91], 0.06, { d: 0.6 }); },
     replay: (ctx, out, t) => arpeggio(ctx, out, t, [76, 79, 76], 0.06),
     guard: (ctx, out, t) => bell(ctx, out, t, 660, 0.14, 0.6),

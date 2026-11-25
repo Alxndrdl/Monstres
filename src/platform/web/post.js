@@ -273,6 +273,18 @@ window.monstres = {
   },
   // The continent around the playable area, plus its heights as a
   // Float32Array (a copy, about 1 MB: ask once per world).
+  // Rows j0 to j1 of the continent's picture for the map (RGBA, mapWidth a row).
+  continentMap: (j0, j1, width) => {
+    const ptr = _monstres_continent_map(j0, j1);
+    return HEAPU8.slice(ptr, ptr + Math.max(0, j1 - j0) * width * 4);
+  },
+  // Zoomed in: a tile of the continent a meter a pixel (RGBA, `pixels` a
+  // side) and what grows on it (as map().objects).
+  mapDetail: (ti, tj, pixels) => {
+    const ptr = _monstres_map_detail(ti, tj);
+    const rgba = HEAPU8.slice(ptr, ptr + pixels * pixels * 4);
+    return { rgba, objects: JSON.parse(UTF8ToString(_monstres_map_detail_json(ti, tj))) };
+  },
   continent: () => {
     const data = JSON.parse(UTF8ToString(_monstres_continent_json()));
     const n = data.ready ? data.pointsX * data.pointsZ : 0;

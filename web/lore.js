@@ -352,6 +352,8 @@ window.MonstresLore = {
       'pas juste la direction de la sortie. Gratuit.' },
     home: { name: 'Retour', text: 'Ta magie te ramène aussitôt à l’exploitation de Capucine, ton monstre avec toi, ' +
       'même du fond d’une grotte ou d’un bâtiment. Gratuit, mais une fois toutes les 5 minutes.' },
+    swift: { name: 'Pas de géant', text: 'Pendant 20 secondes, tu avances dix fois plus vite : pour parcourir le ' +
+      'continent. Pas en combat. Gratuit.' },
     // The capture spells (during a capture: the circle of runes).
     replay: { name: 'Écho', text: 'Les runes de la série se rallument dans l’ordre : reprends-la depuis la première. ' +
       'Celles déjà validées ne font pas avancer la jauge une seconde fois.' },

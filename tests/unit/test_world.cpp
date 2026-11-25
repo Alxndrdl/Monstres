@@ -178,10 +178,16 @@ TEST_CASE("the player slides along an object when walking diagonally into it") {
   CHECK(w.player.pos.x > 2.0f);  // kept moving sideways
 }
 
-TEST_CASE("the world has edges") {
+TEST_CASE("the world has edges: the continent's, far beyond the playable ground") {
   World w = empty_world();
-  run(w, forward(), static_cast<int>(rules::kWorldNorth / rules::kWalkSpeed + 2) * rules::kTicksPerSecond);
-  CHECK(w.player.pos.z == Approx(-(rules::kWorldNorth - rules::kPlayerHalfWidth)));  // northwards: further
+  w.player.pos.z = rules::kReachMinZ + 20;
+  run(w, forward(), 6 * rules::kTicksPerSecond);
+  CHECK(w.player.pos.z == Approx(rules::kReachMinZ + rules::kPlayerHalfWidth));
+  // The playable ground's edge itself: walked through.
+  World v = empty_world();
+  v.player.pos.z = -rules::kWorldNorth + 10;
+  run(v, forward(), 6 * rules::kTicksPerSecond);
+  CHECK(v.player.pos.z < -rules::kWorldNorth - 15);
 }
 
 TEST_CASE("jumping goes up about 1.2 m and comes back down") {

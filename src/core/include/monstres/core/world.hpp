@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -37,13 +38,23 @@ inline float world_inset(float x, float z) {
 // square (compared with kWorldHalfSize - margin).
 inline float world_edge(float x, float z) { return kWorldHalfSize - world_inset(x, z); }
 inline bool in_world(float x, float z, float margin = 0) { return world_inset(x, z) >= margin; }
-// Kept `margin` inside the playable ground.
-inline float clamp_world_x(float x, float margin = 0) {
-  const float l = kWorldHalfSize - margin;
-  return x < -l ? -l : x > l ? l : x;
+// Where one may go: the whole continent (continent.hpp's grid, a little
+// inside). Its sea stops walkers long before: these bounds are only a
+// last wall. The world's places, its population by squares, its objects
+// are within the playable ground above; beyond, the continent's tiles
+// (heightmap.hpp, outer.hpp).
+inline constexpr float kReachMinX = -1120.0f, kReachMaxX = 4280.0f;
+inline constexpr float kReachMinZ = -2420.0f, kReachMaxZ = 2480.0f;
+inline bool in_reach(float x, float z, float margin = 0) {
+  return x >= kReachMinX + margin && x <= kReachMaxX - margin && z >= kReachMinZ + margin && z <= kReachMaxZ - margin;
 }
-inline float clamp_world_z(float z, float margin = 0) {
-  const float lo = -kWorldNorth + margin, hi = kWorldHalfSize - margin;
+// Kept `margin` inside where one may go.
+inline float clamp_reach_x(float x, float margin = 0) {
+  const float lo = kReachMinX + margin, hi = kReachMaxX - margin;
+  return x < lo ? lo : x > hi ? hi : x;
+}
+inline float clamp_reach_z(float z, float margin = 0) {
+  const float lo = kReachMinZ + margin, hi = kReachMaxZ - margin;
   return z < lo ? lo : z > hi ? hi : z;
 }
 // The starting valley: the whole world until it grew (its objects come
@@ -130,6 +141,7 @@ enum class SpellId : uint8_t {
   None, Heal, Shield, Mercy, Detect, WayOut,
   Replay, Guard, Boost, NewOrder, Steady, Hint,
   Home,  // an adventure spell (after the capture ones: the saves keep the numbers)
+  Swift, // an adventure spell: ten times faster for a while (to roam the continent)
   Count
 };
 inline constexpr size_t kSpellCount = static_cast<size_t>(SpellId::Count);
@@ -705,9 +717,19 @@ struct CrystalTrace {
 // how many times each was: its monsters differ every time.
 // Square (i, j) (x from the west, z from the north): index i * kPopulationCellsZ + j.
 inline constexpr size_t kPopulationCellCount = static_cast<size_t>(rules::kPopulationCellsX * rules::kPopulationCellsZ);
+// Beyond the playable ground, the continent's tiles (outer.hpp) are lived
+// in the same way: those the player came near, how often (not saved: their
+// monsters neither; drawn again).
+struct OuterVisit {
+  int32_t ti = 0, tj = 0;
+  uint16_t visits = 0;
+  uint8_t active = 0;
+  bool operator==(const OuterVisit&) const = default;
+};
 struct Population {
   std::array<uint8_t, kPopulationCellCount> active{};
   std::array<uint16_t, kPopulationCellCount> visits{};
+  std::vector<OuterVisit> outer;
   bool operator==(const Population&) const = default;
 };
 
@@ -901,6 +923,25 @@ struct Outdoors {
   bool operator==(const Outdoors&) const = default;
 };
 
+// The continent's nature beyond the relief, by tile (outer.hpp): made when
+// asked, kept a while. Not part of the state (not compared, not copied).
+class OuterCache {
+ public:
+  OuterCache();
+  OuterCache(const OuterCache&);
+  OuterCache& operator=(const OuterCache&);
+  OuterCache(OuterCache&&) noexcept;
+  OuterCache& operator=(OuterCache&&) noexcept;
+  ~OuterCache();
+  bool operator==(const OuterCache&) const { return true; }
+  struct Store;
+  Store& store() const;
+  size_t size() const;
+
+ private:
+  mutable std::unique_ptr<Store> store_;
+};
+
 struct World {
   uint64_t seed = 0;   // the world's layout: path, objects, decoration
   uint64_t tick = 0;
@@ -955,6 +996,7 @@ struct World {
   uint8_t tristan_wins = 0;    // battles won against Tristan, in the camp
   Tournament tournament;       // not saved: the one going on
   uint16_t detect_ticks = 0;   // the Detection spell: ticks left
+  uint16_t swift_ticks = 0;    // the Swift spell: ticks left (not saved)
   std::array<SpellId, kCombatSlots> combat_spells{SpellId::Heal, SpellId::Shield};  // chosen out of battles
   std::array<SpellId, kAdventureSlots> adventure_spells{SpellId::Heal, SpellId::None, SpellId::None, SpellId::None};
   std::array<SpellId, kCaptureSlots> capture_spells{SpellId::Replay, SpellId::Guard, SpellId::Boost, SpellId::Hint};
@@ -979,6 +1021,7 @@ struct World {
   // the page each frame (the weather itself is drawn from the seed and the
   // tick: weather_field). The villagers and the monsters live by them.
   Sky sky;
+  OuterCache outer;  // not saved: the continent's nature beyond the relief (outer.hpp)
   bool operator==(const World&) const = default;
 };
 

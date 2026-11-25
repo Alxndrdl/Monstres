@@ -1,6 +1,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/interior.hpp"
 #include "monstres/core/north.hpp"
+#include "monstres/core/outer.hpp"
 #include "monstres/core/sites.hpp"
 
 #include "monstres/core/quests.hpp"
@@ -642,7 +643,7 @@ Body beside_player(const World& w, Species species) {
   const Box box = body_box(b, species_info(species).shape);
   bool blocked = in_lake(w.village.lake, b.pos.x, b.pos.z) ||
                  (w.ground.sea(b.pos.x, b.pos.z) && w.ground.height(b.pos.x, b.pos.z) < rules::kSeaLevel);
-  for_objects_near(w, box, [&](uint32_t, const Box& o) { blocked = blocked || overlaps(box, o); });
+  for_solid_near(w, box, [&](const Box& o) { blocked = blocked || overlaps(box, o); });
   if (blocked) b.pos = p.pos;
   return b;
 }
@@ -666,7 +667,7 @@ void release(World& w, size_t slot) {
   const float len = std::sqrt(ax * ax + az * az);
   ax = len > 0.1f ? ax / len : -w.player.facing_x;
   az = len > 0.1f ? az / len : -w.player.facing_z;
-  c.home = {rules::clamp_world_x(c.body.pos.x + ax * 10, 2.0f), rules::clamp_world_z(c.body.pos.z + az * 10, 2.0f)};
+  c.home = {rules::clamp_reach_x(c.body.pos.x + ax * 10, 2.0f), rules::clamp_reach_z(c.body.pos.z + az * 10, 2.0f)};
   c.target = c.home;
   c.mind = flies(c.species) ? Mind::Fly : Mind::Flee;
   c.target_y = w.ground.height(c.home.x, c.home.z);
@@ -1069,6 +1070,7 @@ const SpellInfo& spell_info(SpellId spell) {
       {"steady", false, false, true, false, 0, 8},
       {"hint", false, false, true, false, 0, 2},
       {"home", false, true, false, false, rules::kHomeCooldown, 0},
+      {"swift", false, true, false, false, rules::kSwiftTicks, 0},
   };
   static_assert(std::size(kSpells) == kSpellCount);
   const auto i = static_cast<size_t>(spell);
@@ -1134,15 +1136,16 @@ const char* cannot_cast(const World& w, size_t slot) {
   if (sealing(w)) return cannot_seal_cast(w, s);
   if (w.battle.phase == BattlePhase::Flee) return "fleeing";
   if ((s == SpellId::Mercy && w.battle.mercy) || (s == SpellId::Detect && w.detect_ticks > 0) ||
-      (s == SpellId::WayOut && w.way_out_ticks > 0)) {
+      (s == SpellId::WayOut && w.way_out_ticks > 0) || (s == SpellId::Swift && w.swift_ticks > 0)) {
     return "active";
   }
   if (s == SpellId::WayOut && !inside(w)) return "outside";
   if (s == SpellId::Home && (w.battle.phase != BattlePhase::None || !w.west.valid())) return "notNow";
+  if (s == SpellId::Swift && w.battle.phase != BattlePhase::None) return "notNow";
   if (w.spell_cooldowns[static_cast<size_t>(s)] > 0) return "cooldown";
   if (s == SpellId::Mercy && training(w)) return "training";  // no one is hurt there
   const Monster* a = active_monster(w);
-  if (s != SpellId::Detect && s != SpellId::WayOut && s != SpellId::Home) {
+  if (s != SpellId::Detect && s != SpellId::WayOut && s != SpellId::Home && s != SpellId::Swift) {
     if (!a) return "noCompanion";
     if (s == SpellId::Heal && a->hp >= monster_fight_stats(*a).hp) return "full";
   }
@@ -1498,7 +1501,7 @@ void seal_escape(World& w, size_t k) {
   dz = l > 1e-3f ? dz / l : 1.0f;
   c.mind = Mind::Flee;
   c.timer = 5 * rules::kTicksPerSecond;
-  c.target = {rules::clamp_world_x(c.body.pos.x + dx * 18, 1.0f), rules::clamp_world_z(c.body.pos.z + dz * 18, 1.0f)};
+  c.target = {rules::clamp_reach_x(c.body.pos.x + dx * 18, 1.0f), rules::clamp_reach_z(c.body.pos.z + dz * 18, 1.0f)};
   drop_foe(w, k);
   if (b.foes.empty()) end_battle(w, BattleOutcome::Escaped, b.won_xp);
 }
@@ -1548,6 +1551,8 @@ void battle_command(World& w, const Input& in) {
         w.way_out_ticks = rules::kWayOutTicks;
       } else if (s == SpellId::Home) {
         go_home(w);
+      } else if (s == SpellId::Swift) {
+        w.swift_ticks = rules::kSwiftTicks;
       }
       w.wizard.mana = static_cast<uint16_t>(w.wizard.mana - spell_info(s).mana);
       w.spell_cooldowns[static_cast<size_t>(s)] = spell_info(s).cooldown;
@@ -2044,6 +2049,9 @@ void battle_resolve(World& w) {
       for_objects_near(w, box, [&](uint32_t k, const Box& o) {
         gone = gone || (std::find(perches.begin(), perches.end(), k) == perches.end() && overlaps(box, o));
       });
+      if (!gone && !w.ground.empty() && reaches_outer(box)) {  // the continent's trees and rocks
+        for_outer_objects_near(w, box, [&](const Object&, const Box& o) { gone = gone || overlaps(box, o); });
+      }
     }
     if (gone) {
       if (p.ticks > 0) b.impacts.push_back({p.pos, p.element, w.tick});  // stopped by something (not faded)
@@ -2162,6 +2170,8 @@ void battle_resolve(World& w) {
 void spells_step(World& w) {
   for (uint16_t& c : w.spell_cooldowns) c = c > 0 ? static_cast<uint16_t>(c - 1) : 0;
   if (w.detect_ticks > 0) --w.detect_ticks;
+  if (w.swift_ticks > 0 && w.battle.phase == BattlePhase::None) --w.swift_ticks;
+  if (w.battle.phase != BattlePhase::None) w.swift_ticks = 0;  // a battle ends it
   if (w.way_out_ticks > 0) --w.way_out_ticks;
 }
 

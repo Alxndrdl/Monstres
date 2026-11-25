@@ -5,6 +5,7 @@
 #include "monstres/core/battle.hpp"
 #include "monstres/core/continent.hpp"
 #include "monstres/core/interior.hpp"
+#include "monstres/core/outer.hpp"
 #include "monstres/core/quests.hpp"
 #include "monstres/core/roads.hpp"
 #include "monstres/core/routines.hpp"
@@ -392,6 +393,7 @@ std::string spells_json(const World& w) {
   s += ",\"mercyTick\":" + std::to_string(w.battle.mercy_tick);
   s += ",\"detect\":" + seconds(w.detect_ticks);
   s += ",\"wayOut\":" + seconds(w.way_out_ticks);
+  s += ",\"swift\":" + seconds(w.swift_ticks);
   const int found = detect_rare(w);
   if (found > 0) {
     const Creature& c = w.creatures[static_cast<size_t>(found)];
@@ -677,12 +679,14 @@ const char* region_name(Region r) {
   return i < std::size(kNames) ? kNames[i] : "?";
 }
 
-std::string continent_json(const Continent& c) {
+std::string continent_json(const Continent& c, const std::vector<River>& rivers) {
   std::string s = "{\"minX\":" + num(Continent::kMinX) + ",\"minZ\":" + num(Continent::kMinZ);
   s += ",\"cell\":" + num(Continent::kCell) + ",\"pointsX\":" + std::to_string(Continent::kPointsX);
   s += ",\"pointsZ\":" + std::to_string(Continent::kPointsZ) + ",\"seaLevel\":" + num(rules::kSeaLevel);
   s += ",\"snowLine\":" + num(rules::kSnowLine) + ",\"start\":" + num(rules::kReliefHalfSize) +
        ",\"startNorth\":" + num(rules::kReliefNorth);
+  s += ",\"mapCell\":" + num(continent_map::kCell) + ",\"mapWidth\":" + std::to_string(continent_map::kWidth) +
+       ",\"mapHeight\":" + std::to_string(continent_map::kHeight);
   s += ",\"ready\":" + std::string(c.empty() ? "false" : "true") + ",\"landmarks\":[";
   const auto& marks = continent_landmarks();
   for (size_t k = 0; k < marks.size(); ++k) {
@@ -697,9 +701,37 @@ std::string continent_json(const Continent& c) {
     s += std::string(k ? "," : "") + "{\"x\":" + num(p.center.x) + ",\"z\":" + num(p.center.z) + ",\"rx\":" +
          num(p.radius_x) + ",\"rz\":" + num(p.radius_z) + ",\"level\":" + num(p.level) + "}";
   }
+  // The rivers (rivers.hpp): a point every 8 m, x, z and its water's half width.
+  s += "],\"rivers\":[";
+  for (size_t k = 0; k < rivers.size(); ++k) {
+    const River& r = rivers[k];
+    s += k ? ",[" : "[";
+    for (size_t i = 0; i < r.points.size(); i += 4) {
+      if (i) s += ",";
+      s += num(r.points[i].x) + "," + num(r.points[i].z) + "," + num(r.width[i]);
+    }
+    s += "]";
+  }
+  s += "],\"detail\":" + num(continent_map::kDetailSize) + ",\"detailPixels\":" + std::to_string(continent_map::kDetail);
+  s += ",\"reliefMinX\":" + num(Heightmap::kMinX) + ",\"reliefMinZ\":" + num(Heightmap::kMinZ);
   const Crater cr = volcano_crater();
-  s += "],\"crater\":{\"x\":" + num(cr.center.x) + ",\"z\":" + num(cr.center.z) + ",\"r\":" + num(cr.radius) + "}}";
+  s += ",\"crater\":{\"x\":" + num(cr.center.x) + ",\"z\":" + num(cr.center.z) + ",\"r\":" + num(cr.radius) + "}}";
   return s;
+}
+
+std::string map_detail_json(const World& w, int ti, int tj) {
+  // What grows on a tile of the continent (outer.hpp), as map_json's objects.
+  std::string s = "[";
+  for (const Object& o : outer_objects(w, ti, tj)) {
+    const Box b = object_box(o);
+    const float crown = o.kind == ObjectKind::Tree ? 1.2f * o.size.x
+                        : o.kind == ObjectKind::Pine || o.kind == ObjectKind::Larch ? 1.0f * o.size.x : 0;
+    if (s.back() != '[') s += ',';
+    s += std::string("[\"") + object_kind_name(o.kind) + "\"," + num(o.pos.x) + "," + num(o.pos.z) + ",";
+    s += crown > 0 ? num(crown) + "," + num(crown) : num(0.5f * (b.max.x - b.min.x)) + "," + num(0.5f * (b.max.z - b.min.z));
+    s += "]";
+  }
+  return s + "]";
 }
 
 std::string map_json(const World& w) {

@@ -189,8 +189,8 @@ TEST_CASE("the grown world stays within its budget: building it, a tick, a save"
               w.objects.size(), w.wild_objects, build_ms, tick_ms, bytes.size(), load_ms);
   CHECK(bytes.size() < 200000);
   if (!kSanitized) {
-    CHECK(build_ms < 1500);
+    CHECK(build_ms < 1800);  // (the continent made first: its grid, its rivers)
     CHECK(tick_ms < 1.0);  // 60 per second, with room to spare (WebAssembly is slower)
-    CHECK(load_ms < 1500);
+    CHECK(load_ms < 1800);  // (the world made again from its seed, as built)
   }
 }

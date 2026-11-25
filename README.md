@@ -231,7 +231,7 @@ et 1 800 m du nord au sud : au sud il s'arrête à 580 m du départ, au nord il
 va jusqu'à 1 220 m (`rules::kWorldNorth`), au pied des Monts Givrés (voir Le
 Nord). Les limites et les grilles (relief, cases des monstres, index des
 objets, tuiles du sol, morceaux du paysage, carte) sont des rectangles :
-`rules::in_world`, `world_inset`, `world_edge`, `clamp_world_x/z`, et de même
+`rules::in_world`, `world_inset`, `world_edge`, et de même
 pour le relief (`relief_inset`, `relief_edge`, `Heightmap::kPointsX/Z`). Au milieu, le Val Verdoyant : l'ancien
 monde de 280 m, inchangé (même chemin, mêmes lieux, mêmes objets ; seule la
 crête qui fermait ses bords a disparu). Autour, les terres sauvages, avec
@@ -244,14 +244,77 @@ la plage, Piou et Champi sur les collines…), de plus en plus forts en
 s'éloignant (un niveau de plus tous les 110 m). Le chemin continue au nord et
 au sud.
 
-Tout cela est sur une île géante d'environ 4 km sur 4
-(`src/core/continent.hpp`). Au nord, les Monts Givrés et leurs pics enneigés ;
+Tout cela est sur une île géante d'environ 5 km sur 4
+(`src/core/continent.hpp`), au contour irrégulier (lobes, baies, caps). Au nord, les Monts Givrés et leurs pics enneigés ;
 à l'est, une presqu'île avec un volcan actif (lave dans le cratère, panache
 de fumée) ; au sud, un désert de dunes et de mesas ; au centre, les Grandes
 Plaines avec une forêt, un marais, un lac, le Mont Solitaire (un volcan
-éteint) et la Capitale. L'océan entoure l'île. Au-delà du monde jouable, ces
-régions sont vides et inaccessibles, mais on les voit de loin et sur la
-carte. Les noms (`regions` dans `web/lore.js`) sont provisoires.
+éteint) et la Capitale. L'océan entoure l'île. **On peut aller partout sur
+le continent** : les bords du monde jouable sont ouverts, et c'est la mer qui
+arrête le marcheur (un dernier mur, `rules::in_reach`, `clamp_reach_x/z`,
+suit le bord de la grille du continent, bien au-delà des côtes). Au-delà du
+monde jouable, les régions sont encore assez vides (sol, nature, monstres ;
+ni villages ni lieux), à remplir plus tard. Les noms (`regions` dans
+`web/lore.js`) sont provisoires.
+
+**Les étapes de la génération** (`continent.hpp`, `rivers.hpp`) : chaque
+étape part de la précédente, du plus grossier au plus fin.
+1. **Les formes, en gros** : le contour de l'île (une forme entre ellipse
+   et rectangle arrondi, déformée par un bruit large, gonflée et creusée
+   par quelques ondes autour de son centre ; peu vers le nord et le sud, où
+   la grille du continent s'arrête), ses régions et leurs lieux. Les limites
+   des montagnes, du désert et de la presqu'île volcanique serpentent sur
+   des centaines de mètres (`mountains_share`, `desert_share`,
+   `volcano_share`). Près du relief jouable (à moins de 150 m), tout reste
+   comme il a été fait pour lui : sa côte, ses montagnes.
+2. **Le terrain global** : la grille de 10 m de tout le continent
+   (`make_continent`, environ 140 ms, faite une fois par graine et gardée :
+   `continent_of`). Au large, le calcul s'arrête au fond de l'océan. À
+   l'intérieur, le sol ne descend jamais sous la mer (plus de « mer »
+   enfermée dans un creux de la plaine). Puis, une fois le relief jouable
+   fait et raccordé (`fit_rim`), **les grands traits vus d'en haut** : les
+   rivières (`fit_rivers`, quelques millisecondes).
+3. **Le raffinement local** : les tuiles de 2 m (`Heightmap::lattice_point`)
+   prennent la grille de 10 m autour de chaque point (une courbe lisse entre
+   ses points, donc les cellules voisines), y ajoutent les plis, puis creusent
+   le lit des rivières et leurs cascades. La nature y pousse par cases de 5 m,
+   chaque case tenant compte de ses voisines.
+4. **La carte**, dessinée depuis ce même sol fin (voir plus bas).
+
+**Les rivières** (`src/core/rivers.cpp`) :
+- leur tracé est le chemin le plus bas sur le sol du monde (la grille du
+  continent, relevée ou abaissée par le raccord du relief), de nœud en nœud
+  tous les 20 m. Monter y coûte cher (l'eau descend), et un bruit rend
+  chaque rivière différente. Puis le tracé est arrondi et serpente : des
+  méandres larges dans les plaines, presque aucun en montagne ;
+- **la première** naît dans les Monts Givrés et descend en cascades jusqu'au
+  bord est du relief, où elle devient le ruisseau de l'ouest : la source de
+  celui-ci est maintenant l'arrivée de la rivière (`river_junction`). Elle ne
+  passe jamais plus bas que le ruisseau, et finit à son niveau, quelques
+  mètres au-dessus de son lit : les deux eaux se rejoignent sans trou ;
+- **la seconde** naît plus à l'est dans les montagnes, traverse la Capitale
+  (posée au bord de l'eau, à 9 m), entre dans le Lac Miroir, et en ressort
+  jusqu'à la pleine mer. Avant le lac, elle ne descend jamais sous son
+  niveau ;
+- leur eau (par monde) suit le sol sans jamais remonter. Là où il est raide,
+  elle descend par marches : un bassin plat, puis une chute de 2,5 à 10 m
+  (ou plus d'un coup au pied d'une falaise) dans le bassin suivant, creusé
+  dans le sol (une petite gorge sous chaque chute). Cela fait des dizaines
+  de cascades par rivière. Elle reste plate en traversant le lac ;
+- leur lit est creusé dans les tuiles (`dig_rivers`) : plus profond au
+  milieu, des berges qui remontent vers le sol, et une petite levée juste
+  au-dessus de l'eau là où le sol est plus bas, pour que l'eau ne déborde
+  pas ;
+- en jeu : un ruban d'eau par tuile du sol proche (`build_outer_water`),
+  blanc là où l'eau tombe. Le sol proche du continent est maintenant au pas
+  de 2 m, comme celui où l'on marche. De loin, un ruban plus large sur le
+  terrain lointain. Rien ne pousse dans l'eau (ni herbe ni nature).
+
+**La neige** (`Heightmap::snow`) : celle des versants du nord jouable
+(`north_snow`, au-dessus du fond de la vallée) continue au-delà de son
+ancienne limite, puis se fond, sur quelques centaines de mètres, dans celle
+du continent (au-dessus de sa ligne des neiges). Le rendu, la carte, l'herbe
+et la nature suivent la même règle : plus de bloc blanc aux bords droits.
 
 Le relief :
 - le continent vient de la graine (bruit déterministe) sur une grille de
@@ -263,7 +326,188 @@ Le relief :
   (son premier anneau, de 10 m, entoure tout le relief : ±1 300 m) ;
 - la mer est là où le continent lui-même passe sous son niveau (−2 m).
   Un creux des collines plus bas que la mer reste de la terre sèche (le
-  départ de la graine 42 en est un).
+  départ de la graine 42 en est un) ;
+- **au-delà du relief, le sol du continent par tuiles** (première étape
+  vers un monde qui couvre tout le continent). La carte gros grain (la
+  grille de 10 m du continent, environ 50 ms) donne la forme du pays. Le sol
+  détaillé n'est fait que là où on le regarde : des tuiles de 128 m au pas
+  de 2 m (`rules::kTileCells`), calculées à la demande par
+  `Heightmap::height` (et donc `normal`) et gardées dans un cache
+  (`TileCache`, 320 tuiles au plus, environ 5 Mo). Les plus anciennes sont
+  oubliées, puis refaites à l'identique. Une tuile ne dépend que de la
+  graine, des positions et du bord du relief :
+  - le sol du continent (sa grille de 10 m, en ligne droite entre ses
+    points), avec un détail (`outer_natural`) : des plis tirés d'un champ
+    de bruit lui-même déformé (jamais en rangées), plus marqués en altitude,
+    par taches, presque nuls sous la mer (pas d'îlots surgis de nulle
+    part) ;
+  - à partir du bord du relief, ce détail arrive en 80 m
+    (`rules::kOuterBlend`) depuis la hauteur réelle du bord, façonnages
+    compris : le raccord est exact. Le rectangle du relief fait 10 × 15
+    tuiles, donc les tuiles tombent pile sur son bord ;
+  - deux tuiles voisines calculent les mêmes valeurs sur leur bord commun,
+    quel que soit l'ordre dans lequel on les fait : pas de couture à
+    recoudre.
+
+  Le relief du continent y est lissé entre ses points de 10 m (courbes de
+  Catmull-Rom) : pas de facettes sur les grandes pentes. Ses crêtes de
+  montagne et ses dunes sont lues dans un champ déformé, chaque octave
+  tournée à sa façon, le sommet des plis un peu arrondi : elles serpentent,
+  jamais le long des cases carrées du bruit, sans dents de scie (cela vaut
+  aussi pour le nord jouable et le terrain lointain).
+
+  **La nature et les monstres du continent** (`src/core/outer.cpp`), par
+  tuile, eux aussi à la demande, avec leur propre cache (`OuterCache`, dans
+  le monde, 160 tuiles au plus) :
+  - chaque case de 5 m du monde (pas de la tuile) tire, d'après sa seule
+    position, une chose ou rien, n'importe où dans la case : jamais en
+    rangées ;
+  - combien pousse : selon la région, lue à travers un champ déformé (les
+    frontières entre forêt, plaine, désert… serpentent), puis par grandes
+    taches (bois et clairières) et par bosquets ;
+  - ce qui pousse : la palette de la région (bois épais de feuillus dans la
+    forêt, quelques arbres et buissons dans la plaine, rochers et buissons
+    clairsemés dans le désert, sapins, mélèzes et rochers en montagne,
+    rochers seuls au-dessus de 120 m puis dans la neige, rochers et souches
+    sur le volcan, buissons au marais), en tailles variées ;
+  - rien dans l'eau, sur la plage, sur une pente trop raide, ni sur le
+    relief jouable ;
+  - deux choses qui se gênent : celle dont la case a la plus haute priorité
+    (hachage) reste. Ses voisines sont calculées de la même façon, donc le
+    résultat ne dépend pas de l'ordre, au bord des tuiles compris ;
+  - les monstres d'une tuile (`outer_creatures`, pour une visite donnée)
+    sont ceux de sa région (Piou, Laini, Gloubi, Zapou, Chipou dans la
+    plaine ; Champi, Taupi dans la forêt ; Ploufi au marais et au lac ;
+    Cabri, Caillou, Givri en montagne ; Caillou, Zapou sur le volcan et
+    dans le désert). Leur niveau monte d'environ un tous les 140 m au-delà
+    de la vallée.
+
+  Environ 1,8 ms par tuile de forêt, sol compris (49 tuiles, 6 800
+  choses, 87 ms). `test_outer.cpp` vérifie l'indépendance à l'ordre, qu'il
+  n'y a pas de chevauchement (bords de tuiles compris), rien dans l'eau ni
+  sur le relief jouable, les palettes par région, l'irrégularité (des
+  positions réparties dans les cases, des densités très variables), les
+  monstres (espèces, niveaux, tirages) et le temps.
+
+  **Ce qu'on en voit** :
+  - le terrain lointain (`build_far_ground_mesh`, avec le relief du monde)
+    a le même sol que les tuiles : le continent et ses plis, au même point
+    exactement là où ses sommets tombent (ses points sont ceux de la grille
+    de 10 m). Près du relief, il prend la hauteur réelle des tuiles. Chaque
+    anneau laisse de côté les plis trop fins pour ses points (sinon les
+    anneaux de 40 et 80 m seraient hérissés). Ses pentes sont calculées sur
+    sa grille, et il se construit en environ 80 ms en natif ;
+  - autour du joueur, au-delà du relief, le sol du continent en détail
+    (`OuterGround`, `src/render/outer_mesh.cpp`) : des tuiles de 64 m au
+    pas de 2 m (les rivières, leurs lits et leurs cascades), jusqu'à 260 m. Elles sont colorées comme le terrain
+    lointain (`far_color` : régions, roche, neige, sable), construites
+    quelques-unes par image et gardées un moment. Toutes celles qui sont
+    dessinées forment un seul maillage (`near_outer::kOuterMesh`), dessiné
+    par-dessus le terrain lointain, qui passe avant tout le reste. Le long
+    du bord du relief, une bande descend de 3 m : pas de jour entre leurs
+    grilles ;
+  - leur nature : la grille du paysage couvre tout le continent, et ses
+    morceaux hors de l'index des objets prennent les choses du continent
+    (`for_outer_objects_near`), dessinées comme les autres (modèles selon la
+    distance, ombres). Seuls ceux qui entourent le joueur sont calculés ;
+    ceux du continent loin derrière lui sont oubliés (refaits au retour) ;
+  - l'herbe et les fleurs poussent aussi sur le continent : drues dans la
+    plaine, par taches, plus rares en forêt et en montagne, presque nulles
+    au désert et sur le volcan, rien sous la neige ni dans les étangs ;
+  - **la carte du continent** (`continent_map_rows`,
+    `src/core/continent_map.cpp`) est calculée par le jeu depuis le sol tel
+    qu'on y marche : les points mêmes des tuiles de 2 m (un sur deux, à 4 m
+    par pixel, 1 375 × 1 250 pixels), avec leurs plis (ombrés comme le
+    reste), la mer, les étangs, les rivières, la neige, la roche, le sable et
+    les bois (plus sombres là où ils sont épais, semés de couronnes et de
+    rochers à proportion). Les rivières, plus étroites que ses pixels, y sont
+    tracées par-dessus à leur largeur. Ses couleurs sont celles de l'image du
+    relief jouable, dessinée par-dessus. Elle se calcule pendant le jeu, deux
+    rangées à la fois, et prend les teintes de la saison ;
+  - **zoomée** (à partir de 1,1 pixel par mètre), hors du relief, la carte
+    montre des tuiles de 128 m à 1 pixel par mètre (`map_detail`), peintes
+    par le même pinceau depuis le sol fin, avec par-dessus **les vrais
+    arbres, rochers et buissons** de la tuile (`outer_objects`), dessinés
+    comme ceux du relief. Elles sont faites à mesure qu'elles entrent dans
+    la vue (deux par image), et 48 au plus sont gardées. La carte locale
+    correspond ainsi exactement à ce qu'on voit en jeu ;
+  - **des formes naturelles** : la forêt, le lac, le marais, la capitale et le
+    pied des volcans ont un contour ondulé (quelques ondes de phases tirées
+    au hasard, `pond_outline`, `place_shape`), et non plus des ellipses ou
+    des cercles. Les bois et les clairières sont lus dans un champ déformé
+    et tourné (plus de taches alignées sur les cases du bruit). Le point du
+    bord du relief où l'on lit son raccord glisse le long de lui avec la
+    distance (pas de bandes droites perpendiculaires au bord) ;
+  - **la limite des neiges** (`snow_line`) descend vers le nord, jusqu'au pied
+    des Monts Givrés, et suit les méandres de la limite des montagnes. Près du
+    nord jouable, c'est sa neige qui continue (`Heightmap::snow`).
+
+  **Aller partout** (étape 4) :
+  - les arbres et les rochers du continent arrêtent le joueur et les
+    créatures comme les autres objets (`for_solid_near` : ceux du monde, et
+    ceux du continent au-delà du relief), et les projectiles des combats ;
+  - ses monstres vivent comme ceux des carrés : une tuile de 128 m se
+    peuple quand le joueur en approche (à moins de 50 m), avec d'autres
+    monstres à chaque visite, et se vide quand il s'en éloigne (au-delà de
+    80 m ; jamais un monstre en combat). Les visites sont comptées dans
+    `Population::outer`. Ces monstres ne sont pas sauvegardés : ils sont
+    tirés à nouveau. Au-delà du relief, la zone (variantes) est celle de
+    la région du continent ;
+  - on sauvegarde n'importe où sur le continent (`in_reach`), sans changer
+    le format ;
+  - le terrain lointain suit le joueur : quand il est à plus de 400 m du
+    centre des anneaux, ceux-ci sont reconstruits autour de lui (centre sur
+    une grille de 160 m, pour que les points restent ceux de la grille de
+    10 m ; le premier anneau ne fait alors que ±720 m). Ses mailles posées
+    entièrement sur le relief sont laissées de côté, celles qui le
+    chevauchent sont dessinées dessous ; autour du départ, rien ne change ;
+  - **le raccord du relief au continent** (`fit_rim`, `Heightmap::rise`) :
+    le relief jouable a ses propres formes (la terrasse, la vallée du nord
+    jusqu'au col), que le continent grossier ne connaît pas. Le long de son
+    bord (tous les 10 m, lissé sur 120 m), on mesure de combien il est plus
+    haut (ou plus bas) que le continent. Au-delà, le sol du continent est
+    relevé (ou abaissé) d'autant, puis l'écart s'efface sur 300 à 640 m,
+    selon une distance déformée (jamais une bande droite). Là où cela
+    abaisserait une terre sous la mer, il s'arrête juste au-dessus (pas de
+    mer enfermée dans les terres). Le col mène ainsi
+    sur une terre qui descend vers une côte irrégulière, au lieu de tomber
+    dans la mer le long d'une ligne droite. La mer (`land_height`, `sea`),
+    la carte (`monstres_continent_heights`), le terrain lointain et son eau
+    suivent ce même sol. Les plis du continent sont plus doux près du relief
+    (dont les collines s'effacent au bord) et grandissent sur environ 500 m ;
+  - la nature du continent est aussi dense, juste au-delà du bord, que celle
+    du monde juste en deçà (`rim_density`, comptée le long du bord), puis
+    s'éclaircit jusqu'à celle de sa région ;
+  - la carte détaillée couvre tout le relief (et non plus seulement le monde
+    jouable) : au nord du col, la position correspond au dessin.
+
+  `test_roam.cpp` vérifie qu'on passe le bord du monde jouable, que les
+  arbres du continent arrêtent le joueur, que ses monstres vont et
+  viennent, la sauvegarde loin du départ, le terrain lointain recentré (même
+  sol, temps), le paysage qui suit et oublie, l'herbe selon la région, le
+  sort Pas de géant, et, sur plusieurs mondes, qu'au-delà du bord la terre
+  continue (pas de côte droite, pas de falaise plus raide que les pentes
+  alentour).
+
+  `test_rivers.cpp` vérifie, sur plusieurs mondes, les deux rivières : nées
+  en montagne, jamais dans le relief, leur eau qui ne remonte jamais, leurs
+  cascades, la première qui finit dans le ruisseau à son niveau, la seconde
+  par la capitale et le lac jusqu'à la pleine mer, leur eau dans son lit
+  et tenue par ses berges, rien qui pousse dedans, et leur eau sur les
+  images de la carte (vue d'ensemble et tuiles zoomées). `test_continent.cpp`
+  vérifie que l'île tient dans sa grille, que son contour varie beaucoup
+  autour d'elle et que les limites des montagnes et du désert serpentent.
+
+  `test_outer_render.cpp` vérifie que les tuiles suivent le sol et se
+  raccordent, qu'aucune n'est sur le relief, que la bande n'est que contre
+  le relief, que le terrain lointain a les mêmes hauteurs et son temps.
+
+  Les caches ne font pas partie de l'état : ils ne sont ni comparés ni
+  copiés (une copie repart sans tuiles), et rien n'est sauvegardé. `land_height` (et
+  donc `sea`) suit la grille du continent au-delà du relief. Une tuile prend
+  environ 0,7 ms à faire (49 tuiles, un carré de 900 m, en 33 ms natif) ;
+  `test_tiles.cpp` vérifie les raccords, l'indépendance à l'ordre, la
+  fidélité à la carte, le cache et ce temps.
 
 Les terres sauvages ont environ 12 000 à 17 000 objets au sud du nord, et
 autant encore au nord (`generate_wilds` : la bande ajoutée au nord a son
@@ -316,8 +560,8 @@ Ce qui tient le passage à l'échelle :
   les parties hors du champ de la caméra sont laissées de côté (les voisines
   visibles sont dessinées d'un seul appel). Les créatures hors champ ne sont
   pas dessinées non plus ;
-- **la carte** met ses données en cache, dessine le monde à 1 pixel par
-  mètre et le continent à 1 pixel pour 10 m. Ces images (plus d'un million
+- **la carte** met ses données en cache, dessine le relief jouable à 1 pixel
+  par mètre et le continent à 1 pixel pour 4 m (calculé par le jeu). Ces images (plus d'un million
   de pixels) se dessinent d'avance, quelques rangées à la fois pendant le
   jeu (6 ms toutes les 30 ms, à partir de 2 s après le chargement) ; ce qui
   reste est fini à l'ouverture. La hauteur du sol est lue une fois par pixel
@@ -332,8 +576,8 @@ Rendu lointain (`src/render/far_terrain.hpp`) :
   plage de profondeur (8 m à 9,5 km). La profondeur est ensuite effacée, et la
   scène proche (0,1 m à 2 km : tout le relief jouable, même depuis un coin)
   est dessinée par-dessus. Chaque passe garde ainsi une profondeur précise.
-  C'est correct parce que tout ce qui est lointain est hors du carré du relief
-  et la caméra dedans ;
+  Hors du relief, le sol proche du joueur est celui des tuiles détaillées,
+  dessiné dans la scène proche ;
 - le brouillard est exponentiel (à moitié à 1,8 km, complet à 9 km).
 
 Mesures :
@@ -358,9 +602,9 @@ Des tests vérifient le budget :
   l'index trouve ce que trouverait un parcours complet ;
 - `test_continent.cpp` : triangles et temps.
 
-Il reste à faire, quand le monde grandira encore ou s'ouvrira au continent :
-- un relief et des objets de la simulation par tronçons (le monde est encore
-  construit en entier au chargement, environ 120 ms) ;
+Il reste à faire, quand le monde s'ouvrira au continent :
+- les objets de la simulation par tuiles (le relief au-delà l'est déjà ; le
+  monde jouable est encore construit en entier au chargement) ;
 - d'autres maillages indexés (les modèles, l'eau, le chemin).
 
 ## Un monde vivant autour du joueur
@@ -1453,6 +1697,10 @@ de 5 par niveau du magicien (un nouveau niveau ajoute ces 5 points).
   de Capucine (là où le ramène un combat perdu), même du fond d'une grotte ou
   d'un bâtiment (il en sort d'abord) ; le compagnon sorti vient avec lui, à
   ses côtés. Recharge 5 minutes (`go_home`).
+- Pas de géant (aventure, gratuit) : pendant 20 secondes, le magicien avance
+  dix fois plus vite, pour parcourir le continent (sert aussi au débogage).
+  Pas en combat ; un combat y met fin. Les pas trop grands sont découpés
+  (35 cm au plus) : jamais à travers une barrière fine. Non sauvegardé.
 
 Les sorts choisis, le mana et la Détection en cours sont sauvegardés
 (sauvegarde v18).

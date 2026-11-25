@@ -104,7 +104,8 @@ std::optional<World> fail(LoadError* error, LoadError e) {
 
 bool inside_world(Vec3 p) {
   // Heights: valleys and the lake bed are below 0, but never this deep.
-  return rules::in_world(p.x, p.z) && p.y >= -50 && p.y < 1000;
+  // Anywhere on the continent (rules::in_reach), not only the playable ground.
+  return rules::in_reach(p.x, p.z) && p.y >= -80 && p.y < 1000;
 }
 
 }  // namespace
@@ -211,8 +212,12 @@ void write_world(Writer& out, const World& w) {
   // The farm's grazing monsters are drawn again from World::farm, the
   // trainers passing by come no more (not saved).
   // Nor the arena's contender and its monster (a tournament is not saved).
+  // Nor the continent's wild monsters (beyond the playable ground: drawn
+  // again by tile when the player comes, see update_population).
   const auto kept = [](const Creature& c) {
-    return c.tag != Tag::Boarder && !npc::wanderer(c.npc) && c.npc != npc::kContender;
+    const bool outer_wild = c.npc == 0 && c.tag == Tag::None && monster_stats(c.species).is_monster && !c.released &&
+                            !rules::in_world(c.home.x, c.home.z, -1.0f);
+    return c.tag != Tag::Boarder && !npc::wanderer(c.npc) && c.npc != npc::kContender && !outer_wild;
   };
   out.u32(static_cast<uint32_t>(std::count_if(w.creatures.begin(), w.creatures.end(), kept)));
   for (const Creature& c : w.creatures) {

@@ -124,7 +124,7 @@ inline void check_invariants(const World& w) {
   CHECK(std::isfinite(p.pos.y));
   CHECK(std::isfinite(p.pos.z));
   CHECK(p.pos.y >= w.ground.height(p.pos.x, p.pos.z));  // never inside the ground
-  CHECK(rules::in_world(p.pos.x, p.pos.z, rules::kPlayerHalfWidth - 1e-4f));
+  CHECK(rules::in_reach(p.pos.x, p.pos.z, rules::kPlayerHalfWidth - 1e-4f));
   CHECK(std::fabs(p.facing_x * p.facing_x + p.facing_z * p.facing_z - 1.0f) < 1e-4f);
   // Plain loops, and an assertion only on failure: these run very often.
   // Objects are at most a few meters wide: farther ones are skipped at once.
@@ -139,7 +139,7 @@ inline void check_invariants(const World& w) {
   for (const Creature& c : w.creatures) {
     const BodyShape& shape = species_info(c.species).shape;
     CHECK(c.species < Species::Count);
-    CHECK(rules::in_world(c.body.pos.x, c.body.pos.z, shape.half_width - 1e-4f));
+    CHECK(rules::in_reach(c.body.pos.x, c.body.pos.z, shape.half_width - 1e-4f));
     if (c.species == Species::Fish) {  // in the lake, at the surface or jumping
       CHECK(c.body.pos.y >= rules::kSwimLevel);
       CHECK(in_lake(w.village.lake, c.body.pos.x, c.body.pos.z));

@@ -1,10 +1,12 @@
 #pragma once
 
 #include "monstres/core/math.hpp"
+#include "monstres/core/rivers.hpp"
 #include "monstres/core/terrain.hpp"
 #include "monstres/core/village.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace monstres {
@@ -43,6 +45,43 @@ struct FloorPiece {
 };
 float floor_height(const std::vector<FloorPiece>& floor, float x, float z);
 
+// The continent's ground beyond the relief, before it blends into the
+// relief's edge: over a given ground `base` (the continent's, raised by the
+// rim: Heightmap::rise), its detail, rougher up high, by patches, gentle
+// under the sea; as seen with points
+// `spacing` apart (the far terrain's rings: the folds too fine for them
+// left out; 0: all of them, as the tiles have it).
+float outer_ground(uint64_t seed, float x, float z, float base, float spacing);
+
+// The ground beyond the relief's rectangle (the rest of the continent), made
+// in tiles around where it is looked at, kept a while, then forgotten. A tile
+// depends only on the seed, the positions in it and the relief's edge: the
+// same whatever was asked before, tiles meeting exactly. Not part of the
+// state (not compared, not copied: a copy starts with none).
+struct GroundTile;
+class TileCache {
+ public:
+  TileCache();
+  TileCache(const TileCache&);
+  TileCache& operator=(const TileCache&);
+  TileCache(TileCache&&) noexcept;
+  TileCache& operator=(TileCache&&) noexcept;
+  ~TileCache();
+  bool operator==(const TileCache&) const { return true; }
+  struct Store;
+  Store& store() const;
+  size_t size() const;  // tiles made and kept now
+
+ private:
+  mutable std::unique_ptr<Store> tiles_;
+};
+
+namespace rules {
+inline constexpr int kTileCells = 64;            // a tile of the ground beyond the relief: 64 cells of 2 m (128 m)
+inline constexpr size_t kTilesKept = 320;        // kept at most (about 5 MB), the longest unused forgotten
+inline constexpr float kOuterBlend = 80.0f;      // the continent's own detail comes in over this much past the relief's edge
+}  // namespace rules
+
 // The relief of the ground: heights on a 2 m grid. Between grid points the
 // ground is made of two triangles per cell, split along the diagonal from
 // (x0, z0) to (x1, z1): exactly the triangles the renderer draws, so what
@@ -72,17 +111,53 @@ struct Heightmap {
   std::vector<FloorPiece> floor;
   // The buildings of the wilds seated on it (landfix.hpp: seat_buildings, once).
   bool seated = false;
+  uint64_t seed = 0;     // (the ground beyond the relief: its tiles)
+  TileCache tiles;
+  // Along the relief's edge, every kRimStep meters round it (from its
+  // north-west corner, eastwards; fit_rim): how much higher the relief's
+  // edge is than the continent there (smoothed along it), and how thick the
+  // world's nature is just inside it (things per square of 5 m; empty: the
+  // continent's own). Beyond the relief, the continent's ground is raised (or
+  // lowered) by the first, fading out over a few hundred meters (rise): the
+  // relief's shapes (the north's valley up to the col, the terrace) go on
+  // into the continent instead of stopping at a straight line; the map, the
+  // sea and the far terrain have it too.
+  static constexpr float kRimStep = 10.0f;
+  std::vector<float> rim, rim_density;
+  // The continent's rivers, their levels fitted over this ground (rivers.hpp:
+  // fit_rivers): their beds dug into the tiles.
+  std::vector<River> rivers;
+  // The playable north's valley floor where it starts (north.hpp: its snow
+  // lies above it; none: no north), for the snow beyond the relief.
+  float north_floor = -1e9f;
+  // How much snow lies, all year long, on ground at height h at (x, z)
+  // beyond the relief (0..1, before steep faces shed it): the playable
+  // north's snowy slopes going on (as north_snow), fading out into the
+  // continent's own, above its snow line (continent.hpp: snow_line).
+  float snow(float x, float z, float h) const;
+  float rise(float x, float z) const;
+  // How thick the world's nature is near (x, z) beyond the relief, as it
+  // fades out (-1: no rim, the continent's own).
+  float edge_density(float x, float z) const;
 
   bool empty() const { return heights.empty(); }
   float at(int i, int j) const { return heights[index(i, j)]; }
 
-  // Height of the ground at (x, z), anywhere (0 outside the relief).
+  // Height of the ground at (x, z), anywhere: on the relief's grid inside
+  // its rectangle, on the tiles of the continent beyond (made when asked).
   float height(float x, float z) const;
+  // Beyond the relief: the height at a grid point of the same 2 m lattice
+  // (i, j counted from kMinX, kMinZ, any sign), from its tile.
+  float outer_at(int i, int j) const;
+  // The same, worked out (no tile made or kept: what the tiles hold there;
+  // the map's picture reads it).
+  float lattice_point(int i, int j) const;
 
   // Unit normal of the ground around (x, z), smoothed over about one cell.
   Vec3 normal(float x, float z) const;
 
-  // The continent's ground at (x, z), without the hills (0 in the valley).
+  // The continent's ground at (x, z), without the hills (0 in the valley):
+  // on its 10 m grid (the relief's, then the continent's beyond).
   float land_height(float x, float z) const;
   // Whether (x, z) is in the sea: the continent's ground there is below it.
   // (A hollow of the hills going below the sea's level is not the sea.)
@@ -97,6 +172,10 @@ struct Heightmap {
     return t > v ? t - 1 : t;
   }
 };
+
+// Sets Heightmap::rim from the relief as it is (after all its shaping), and
+// forgets the tiles made before.
+void fit_rim(Heightmap& ground);
 
 // The places of the world, which shape the relief.
 struct Places {

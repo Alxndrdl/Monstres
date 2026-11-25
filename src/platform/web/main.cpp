@@ -19,6 +19,8 @@
 #include "monstres/render/models.hpp"
 #include "monstres/render/terrain_mesh.hpp"
 #include "monstres/render/far_terrain.hpp"
+#include "monstres/core/outer.hpp"
+#include "monstres/render/outer_mesh.hpp"
 #include "monstres/render/scene.hpp"
 #include "monstres/render/weather_view.hpp"
 #include "monstres/render/intro.hpp"
@@ -85,6 +87,8 @@ struct App {
   Continent continent;  // the land beyond the playable area (built once per seed)
   GroundColors ground_colors;    // the ground's colors, kept as the tiles are built
   GroundTiles ground_tiles;      // the detailed tiles drawn, built ahead of time
+  OuterGround outer_ground;      // and the continent's ground near the player, beyond the relief
+  Vec2 far_center{0, 0};         // the far ground's rings are around it (far_center_for)
   std::vector<Part> path_parts, water_parts;  // for culling the terrain list
   LandscapeCache landscape_cache;  // the landscape by chunks, computed ahead of time
   // Resolution: device pixels per CSS pixel, at most kPixelBudget pixels,
@@ -325,13 +329,34 @@ bool update_landscape(App& app, bool all_now = false) {
   if (rebuilt) app.redraw = true;
   if (app.profile.on) app.profile.chunks_prepared += prepared;
   const double left = std::max(0.2, budget - (emscripten_get_now() - start));
-  if (app.ground_tiles.update(w, app.ground_colors, {w.player.pos.x, w.player.pos.z}, left)) {
+  const Vec2 player{w.player.pos.x, w.player.pos.z};
+  const bool tiles = app.ground_tiles.update(w, app.ground_colors, player, left);
+  if (tiles) {
     // The drawn tiles in one mesh, the coarse ground's other tiles in order (GroundTiles).
     app.renderer->set_mesh(terrain::kDetailMesh, app.ground_tiles.detail());
     app.renderer->set_mesh_indices(static_cast<size_t>(MeshId::Ground), app.ground_tiles.coarse_indices());
-    app.ground_tiles.fill_list(app.terrain, app.path_parts, app.water_parts);
-    app.redraw = true;
     if (app.profile.on) ++app.profile.tile_swaps;
+  }
+  // The far ground following the player over the continent (now and then: built again around it).
+  if (const Vec2 c = far_center_for(player, app.far_center); c.x != app.far_center.x || c.z != app.far_center.z) {
+    app.far_center = c;
+    const MeshData far_ground = build_far_ground_mesh(app.continent, &w.ground, c);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarGround), far_ground);
+    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarGround)] = far_ground.parts;
+    ++app.far_landscape.version;
+    app.redraw = true;
+  }
+  // The continent's ground near the player, beyond the relief (in what time is left).
+  const double rest = all_now ? 1e9 : std::max(0.2, budget - (emscripten_get_now() - start));
+  const bool outer = app.outer_ground.update(w, app.continent, player, rest);
+  if (outer) {
+    app.renderer->set_mesh(near_outer::kOuterMesh, app.outer_ground.mesh());
+    app.renderer->set_mesh(near_outer::kOuterWaterMesh, app.outer_ground.water());
+  }
+  if (tiles || outer) {
+    app.ground_tiles.fill_list(app.terrain, app.path_parts, app.water_parts);
+    app.outer_ground.add(app.terrain);
+    app.redraw = true;
   }
   return rebuilt;
 }
@@ -365,10 +390,28 @@ void world_changed(App& app) {
   app.landscape_center = {1e9f, 1e9f};
   app.ground_colors = {};  // another world: other colors
   app.landscape_cache.clear();
+  app.outer_ground.reset();
   // The ground outside (loaded inside: the world outside, as left).
   std::optional<World> outside;
   if (inside(app.world)) outside = outside_world(app.world);
   const World& out = outside ? *outside : app.world;
+  // The continent depends on the seed only: built again for another world (before
+  // the landscape: the continent's ground near the player is colored as it is).
+  if (app.continent.empty() || app.continent.seed != app.world.seed) {
+    const double start = emscripten_get_now();
+    app.continent = *continent_of(app.world.seed);
+    app.far_center = far_center_for({out.player.pos.x, out.player.pos.z}, {0, 0});
+    const MeshData far_ground = build_far_ground_mesh(app.continent, &out.ground, app.far_center);
+    const MeshData far_water = build_far_water_mesh(app.continent, &out.ground);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarGround), far_ground);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarWater), far_water);
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::Lava), build_lava_mesh(app.continent));
+    build_far_landscape(app.far_landscape);
+    app.far_landscape.mesh_parts.assign(kMeshCount, {});
+    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarGround)] = far_ground.parts;
+    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarWater)] = far_water.parts;
+    app.continent_ms = emscripten_get_now() - start;
+  }
   const MeshData coarse = build_coarse_ground(out, app.ground_colors);
   app.ground_tiles.reset(coarse);
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Ground), coarse);
@@ -380,21 +423,6 @@ void world_changed(App& app) {
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), water);
   if (!inside(app.world)) update_landscape(app, true);
   place_changed(app, false);
-  // The continent depends on the seed only: built again for another world.
-  if (app.continent.empty() || app.continent.seed != app.world.seed) {
-    const double start = emscripten_get_now();
-    app.continent = make_continent(app.world.seed);
-    const MeshData far_ground = build_far_ground_mesh(app.continent);
-    const MeshData far_water = build_far_water_mesh(app.continent);
-    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarGround), far_ground);
-    app.renderer->set_mesh(static_cast<size_t>(MeshId::FarWater), far_water);
-    app.renderer->set_mesh(static_cast<size_t>(MeshId::Lava), build_lava_mesh(app.continent));
-    build_far_landscape(app.far_landscape);
-    app.far_landscape.mesh_parts.assign(kMeshCount, {});
-    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarGround)] = far_ground.parts;
-    app.far_landscape.mesh_parts[static_cast<size_t>(MeshId::FarWater)] = far_water.parts;
-    app.continent_ms = emscripten_get_now() - start;
-  }
 }
 
 bool valid_slot(int slot) { return slot >= 0 && slot < kSaveSlots; }
@@ -737,6 +765,15 @@ uint64_t seed_from_text(const std::string& text) {
 // ---- C API used by JavaScript ----------------------------------------------
 
 // A function returning JSON for the page: the text is valid until the next one.
+// The world outside (inside: as left, made once), for the map.
+const World& map_world() {
+  static std::optional<World> outside;
+  const World& w = g_app->world;
+  if (!inside(w)) return w;
+  if (!outside || outside->seed != w.seed) outside = outside_world(w);
+  return *outside;
+}
+
 #define JSON_EXPORT(name, expression)              \
   EMSCRIPTEN_KEEPALIVE const char* name() {        \
     g_app->json = (expression);                    \
@@ -903,8 +940,8 @@ EMSCRIPTEN_KEEPALIVE void monstres_save_now() { write_save(*g_app); }
 EMSCRIPTEN_KEEPALIVE void monstres_debug_teleport(float x, float z) {
   if (!std::isfinite(x) || !std::isfinite(z)) return;
   World& w = g_app->world;
-  x = rules::clamp_world_x(x, 1);
-  z = rules::clamp_world_z(z, 1);
+  x = rules::clamp_reach_x(x, 1);
+  z = rules::clamp_reach_z(z, 1);
   w.player.pos = {x, w.ground.height(x, z), z};
   if (inside(w)) {  // on top of what stands there (the tower's stair, its landing)
     for_objects_near(w, {{x - 0.1f, -1, z - 0.1f}, {x + 0.1f, 50, z + 0.1f}}, [&](uint32_t, const Box& b) {
@@ -1130,10 +1167,48 @@ JSON_EXPORT(monstres_bestiary_json, bestiary_json(g_app->world))
 // The map: of the world outside (inside: as it was left).
 JSON_EXPORT(monstres_map_json, map_json(inside(g_app->world) ? outside_world(g_app->world) : g_app->world))
 
-JSON_EXPORT(monstres_continent_json, continent_json(g_app->continent))
+JSON_EXPORT(monstres_continent_json, continent_json(g_app->continent, map_world().ground.rivers))
 
-// Heights of the continent, Continent::kPointsX * kPointsZ floats (see continent_json).
-EMSCRIPTEN_KEEPALIVE const float* monstres_continent_heights() { return g_app->continent.heights.data(); }
+// Heights of the continent, Continent::kPointsX * kPointsZ floats (see
+// continent_json): beyond the relief, raised by its rim (Heightmap::rise),
+// as the ground and the sea there have it.
+EMSCRIPTEN_KEEPALIVE const float* monstres_continent_heights() {
+  static std::vector<float> land;
+  const Continent& k = g_app->continent;
+  const World& w = g_app->world;
+  const Heightmap& g = inside(w) ? w.outdoors.ground : w.ground;
+  land = k.heights;
+  if (g.empty() || land.empty()) return land.data();
+  for (int i = 0; i < Continent::kPointsX; ++i) {
+    const float x = Continent::kMinX + Continent::kCell * static_cast<float>(i);
+    for (int j = 0; j < Continent::kPointsZ; ++j) {
+      const float z = Continent::kMinZ + Continent::kCell * static_cast<float>(j);
+      // (Its edge too, and just inside: under the relief's own picture, but blurred into the band beyond.)
+      if (rules::relief_inset(x, z) < 30) land[static_cast<size_t>(i * Continent::kPointsZ + j)] += g.rise(x, z);
+    }
+  }
+  return land.data();
+}
+
+// The continent's picture for the map, rows j0 to j1 (outer.hpp:
+// continent_map_rows): continent_map::kWidth RGBA pixels a row.
+EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_continent_map(int j0, int j1) {
+  static std::vector<uint8_t> rows;
+  continent_map_rows(map_world(), g_app->continent, j0, j1, rows);
+  return rows.data();
+}
+
+// Zoomed in on the map: a tile of the continent a meter a pixel (outer.hpp:
+// map_detail; RGBA, continent_map::kDetail a side), and what grows on it.
+EMSCRIPTEN_KEEPALIVE const uint8_t* monstres_map_detail(int ti, int tj) {
+  static std::vector<uint8_t> pixels;
+  map_detail(map_world(), ti, tj, pixels);
+  return pixels.data();
+}
+EMSCRIPTEN_KEEPALIVE const char* monstres_map_detail_json(int ti, int tj) {
+  g_app->json = map_detail_json(map_world(), ti, tj);
+  return g_app->json.c_str();
+}
 
 // Heights of the ground, Heightmap::kPointsX * kPointsZ floats (see map_json).
 EMSCRIPTEN_KEEPALIVE const float* monstres_heights() {
