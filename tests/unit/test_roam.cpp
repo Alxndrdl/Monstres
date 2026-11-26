@@ -280,11 +280,7 @@ TEST_CASE("the map's picture of the continent: the ground as walked on, no gap b
       const float x = Continent::kMinX + kCell * (static_cast<float>(i) + 0.5f);
       const uint8_t kind = rows[static_cast<size_t>(i) * 4 + 3];
       const float inset = rules::relief_inset(x, z);
-      if (inset > 3 * kCell + 1) {
-        CHECK(kind == 0);  // the relief's own picture there
-        continue;
-      }
-      CHECK(kind != 0);  // drawn all round it: no gap
+      CHECK(kind != 0);  // drawn all over, the relief as the rest: no gap
       if (inset > -100) continue;
       const bool is_sea = w.ground.sea(x, z) && w.ground.height(x, z) < rules::kSeaLevel;
       (is_sea ? sea : land) += 1;

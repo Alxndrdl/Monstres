@@ -1,7 +1,9 @@
 #include "monstres/render/water_mesh.hpp"
 
 #include "monstres/core/heightmap.hpp"
+#include "monstres/core/rivers.hpp"
 #include "monstres/core/water.hpp"
+#include "monstres/core/west.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -45,6 +47,7 @@ MeshData build_water_tile(const World& w, int i, int j, float cell) {
   const int s = n + 3;  // a point more on each side (the shore's points take their neighbours' level)
   const float x0 = tile_x0(i) - cell, z0 = tile_z0(j) - cell;
   std::vector<float> level(static_cast<size_t>(s * s), kDry), ground(static_cast<size_t>(s * s), 0.0f);
+  std::vector<WaterKind> kind(static_cast<size_t>(s * s), WaterKind::None);
   const auto at = [&](int a, int b) { return static_cast<size_t>(a * s + b); };
   bool any = false;
   for (int a = 0; a < s; ++a) {
@@ -54,6 +57,7 @@ MeshData build_water_tile(const World& w, int i, int j, float cell) {
       if (water_at(w, x, z, ws)) {
         level[at(a, b)] = ws.level;
         ground[at(a, b)] = ws.ground;
+        kind[at(a, b)] = ws.kind;
         any = true;
       } else {
         ground[at(a, b)] = w.ground.height(x, z);
@@ -64,16 +68,38 @@ MeshData build_water_tile(const World& w, int i, int j, float cell) {
   // A dry point by the water: at the highest level around it (drawn past
   // the shore, where the ground rises over it and hides it).
   std::vector<float> drawn = level;
+  std::vector<WaterKind> drawn_kind = kind;
   for (int a = 1; a + 1 < s; ++a) {
     for (int b = 1; b + 1 < s; ++b) {
       if (level[at(a, b)] != kDry) continue;
       float best = kDry;
       for (int da = -1; da <= 1; ++da) {
-        for (int db = -1; db <= 1; ++db) best = std::max(best, level[at(a + da, b + db)]);
+        for (int db = -1; db <= 1; ++db) {
+          if (level[at(a + da, b + db)] > best) {
+            best = level[at(a + da, b + db)];
+            drawn_kind[at(a, b)] = kind[at(a + da, b + db)];
+          }
+        }
       }
       drawn[at(a, b)] = best;
     }
   }
+  // A river's water ends along its smooth course (fading over its last
+  // meter), not along the ground's grid where its banks rise (in steps
+  // across it, going aslant): the stream's and the continent's rivers'.
+  const auto river_edge = [&](float x, float z, float g) {
+    float best = 1e9f, half = 0;
+    if (w.west.valid()) {
+      float lv = 0, width = 0;
+      const float d = river_surface(w.west, x, z, g, 16.0f, lv, width);
+      if (d - width < best - half) best = d, half = width;
+    }
+    if (RiverSpot r; !w.ground.rivers.empty() && nearest_river(w.ground.rivers, x, z, 14.0f, r) && r.distance - r.width < best - half) {
+      best = r.distance;
+      half = r.width;
+    }
+    return best > 1e8f ? 1.0f : smooth(half + 0.9f, half - 0.6f, best);
+  };
   // The tile's own points (1..n+1), their colors: by the depth, white where it falls.
   const Color foam{0.86f, 0.92f, 0.96f, 0.9f};
   std::vector<uint32_t> index(static_cast<size_t>(s * s), UINT32_MAX);
@@ -95,6 +121,7 @@ MeshData build_water_tile(const World& w, int i, int j, float cell) {
     }
     const float white = smooth(0.5f * cell, 1.0f * cell, drop);
     c = {c.r + (foam.r - c.r) * white, c.g + (foam.g - c.g) * white, c.b + (foam.b - c.b) * white, c.a + (foam.a - c.a) * white};
+    if (drawn_kind[at(a, b)] == WaterKind::River) c.a *= river_edge(x, z, ground[at(a, b)]);
     id = static_cast<uint32_t>(m.vertex_count());
     m.vertices.insert(m.vertices.end(), {x, y, z, 0.0f, 1.0f, 0.0f, c.r, c.g, c.b, c.a});
     box.add(x, y, z);

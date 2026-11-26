@@ -2,7 +2,10 @@
 #include "monstres/core/water.hpp"
 
 #include "monstres/core/heightmap.hpp"
+#include "monstres/core/north.hpp"
 #include "monstres/core/roads.hpp"
+#include "monstres/core/sites.hpp"
+#include "monstres/core/village.hpp"
 #include "monstres/core/west.hpp"
 #include "monstres/core/rng.hpp"
 #include "monstres/core/variants.hpp"
@@ -73,7 +76,8 @@ float density_of(Region r) {
     case Region::Marsh: return 0.14f;
     case Region::Lake: return 0.10f;
     case Region::LoneMountain: return 0.14f;
-    default: return 0.0f;  // the open sea, the capital (empty for now), the valley's
+    case Region::Start: return 0.08f;  // (around the valley: as the plains)
+    default: return 0.0f;  // the open sea, the capital (empty for now)
   }
 }
 
@@ -102,6 +106,7 @@ ObjectKind palette(Region r, float height, float roll) {
     case Region::Volcano: picks = kVolcano; break;
     case Region::Marsh: picks = kMarsh; break;
     case Region::Lake: picks = kLake; break;
+    case Region::Start: picks = kPlains; break;
     default: picks = kLone; break;
   }
   float total = 0;
@@ -115,9 +120,8 @@ ObjectKind palette(Region r, float height, float roll) {
 }
 
 // How likely a cell of 5 m at (x, z) is to have something: its region's,
-// by big patches (woods and clearings), then by clumps; near the relief, as
-// thick as the world's nature just inside it, thinning out (heightmap.hpp:
-// edge_density).
+// by big patches (woods and clearings), then by clumps (the same within the
+// playable world as beyond it).
 float nature_density(const World& w, Region region, float x, float z) {
   // (Read through a warped field, turned: never the noise's square cells.)
   const float wx = x + 90.0f * (value_noise(w.seed + 3003, x, z, 210.0f) - 0.5f) + 30.0f * (value_noise(w.seed + 3005, x, z, 70.0f) - 0.5f);
@@ -127,8 +131,45 @@ float nature_density(const World& w, Region region, float x, float z) {
   const float patch = 0.6f * value_noise(w.seed + 3001, ax, az, 150.0f) + 0.4f * value_noise(w.seed + 3007, bx, bz, 65.0f);
   const float patches = 0.15f + 1.6f * smooth(0.3f, 0.7f, patch);
   const float clumps = 0.4f + 1.2f * value_noise(w.seed + 3002, bx, bz, 26.0f);
-  const float edge = std::max(0.0f, w.ground.edge_density(x, z)) * clumps;
-  return std::min(0.95f, std::max(density_of(region) * patches * clumps, edge));
+  return std::min(0.95f, density_of(region) * patches * clumps);
+}
+
+// Within the playable world: whether its nature may grow at (x, z) (not
+// its valley, its places, its forest or woods: their own).
+bool free_for_nature(const World& w, float x, float z) {
+  if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize - 2.0f) return false;
+  if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z) || in_roadside_place(w.roads, x, z, 1.5f) ||
+      in_site(w.sites, x, z, 1.5f) || in_forest(w.forest, x, z)) {
+    return false;
+  }
+  return !(w.north.valid() && in_north_place(w.north, x, z, 1.5f));
+}
+
+// Something built there in its way (the world's objects but its nature: the
+// valley's, the forest's and the woods' trees and rocks do not move it).
+bool in_the_way(const World& w, const Object& o) {
+  const Box b = object_box(o);
+  const float r = std::max(0.6f, 0.5f * std::max(b.max.x - b.min.x, b.max.z - b.min.z)) + rules::kObjectGap;
+  const Box area{{o.pos.x - r, -1e4f, o.pos.z - r}, {o.pos.x + r, 1e4f, o.pos.z + r}};
+  bool hit = false;
+  for_objects_near(w, area, [&](uint32_t i, const Box& ob) {
+    const ObjectKind k = w.objects[i].kind;
+    const bool nature = k == ObjectKind::Tree || k == ObjectKind::Pine || k == ObjectKind::Larch || k == ObjectKind::Bush ||
+                        k == ObjectKind::Rock || k == ObjectKind::Stump || k == ObjectKind::Log || k == ObjectKind::Seaweed;
+    hit = hit || (!nature && ob.max.x > area.min.x && ob.min.x < area.max.x && ob.max.z > area.min.z && ob.min.z < area.max.z);
+  });
+  return hit;
+}
+
+// Not on a slope too steep for its size: its foot's lowest corner not too
+// far under its middle (it would float on one side).
+bool on_its_ground(const World& w, const Object& o, float ground) {
+  const Box e = object_box(o);  // (no logs here)
+  float lowest = ground;
+  for (const float cx : {e.min.x, e.max.x}) {
+    for (const float cz : {e.min.z, e.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+  }
+  return ground - lowest <= 0.6f * (e.max.y - e.min.y) + 0.1f;
 }
 
 // What a cell of 5 m would have (before its neighbours have their say).
@@ -151,10 +192,11 @@ Candidate candidate(const World& w, int ci, int cj) {
   const auto variant = static_cast<uint8_t>(rng.below(256));
   c.priority = static_cast<uint32_t>(h >> 32);
   const float x = (static_cast<float>(ci) + u) * rules::kOuterCell, z = (static_cast<float>(cj) + v) * rules::kOuterCell;
-  // The world's own (and right by its edge). Beyond it, between it and the
-  // relief's edge too: the continent's nature, as anywhere (but on the
-  // world's ways and in its stream, going on to the relief's edge).
-  if (rules::world_inset(x, z) > -3.0f) return c;
+  // Within the playable world too, as anywhere (world_nature), but not in its
+  // valley, its places, its forest and woods (their own), on its ways and in
+  // its stream, nor in the way of what is built there.
+  const bool in_world = rules::world_inset(x, z) > -12.0f;
+  if (in_world && !free_for_nature(w, x, z)) return c;
   const Region region = outer_region(w.seed, x, z);
   const Heightmap& g = w.ground;
   // The bottom of the water (water.hpp): seaweed in clumps, rocks here and there.
@@ -164,7 +206,7 @@ Candidate candidate(const World& w, int ci, int cj) {
     Object o;
     o.yaw = yaw;
     o.variant = variant;
-    if (roll < 0.05f) {
+    if (roll < 0.05f && !in_lake(w.village.lake, x, z, 2.0f)) {  // (the village's lake: its seaweed only)
       o.kind = ObjectKind::Rock;
       o.size = {0.4f + 0.9f * s1, 0.3f + 0.7f * s2, 0.4f + 0.9f * s3};
       o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
@@ -175,22 +217,32 @@ Candidate candidate(const World& w, int ci, int cj) {
       c.reach = 0.3f;
     }
     o.pos = {x, ws.ground - 0.05f, z};
+    if (o.kind == ObjectKind::Rock && (steep_ground(w, x, z) || !on_its_ground(w, o, ws.ground))) return c;
+    if (in_world && in_the_way(w, o)) return c;
     c.any = true;
     c.object = o;
     return c;
   }
-  if (roll >= nature_density(w, region, x, z)) return c;
+  Object o;
+  const float high = g.height(x, z);
+  o.kind = palette(region, high, pick);
+  // Up the hills (anywhere: within the world as beyond it), pines rather than leafy trees.
+  if (o.kind == ObjectKind::Tree && high > 22.0f + 10.0f * value_noise(w.seed + 3020, x, z, 90.0f)) o.kind = ObjectKind::Pine;
+  // The north's: its pastures, its larch woods, its rocky slopes (north.hpp).
+  float chance = nature_density(w, region, x, z);
+  if (w.north.valid() && z < rules::kNorthFrom + 40.0f) {
+    chance = north_wilds(w, o, x, z, chance);
+  }
+  if (roll >= chance) return c;
   const float ground = g.height(x, z);
   if (ground < rules::kSeaLevel + 0.6f || (g.sea(x, z) && ground < rules::kSeaLevel + 1.0f)) return c;  // the water, the beach
   for (const Pond& p : continent_ponds()) {  // the lake's and the marsh's water
     if (pond_shape(p, x, z) > -0.05f && ground < p.level + 0.6f) return c;
   }
   if (RiverSpot r; nearest_river(g.rivers, x, z, 20.0f, r) && r.distance < r.width + 1.5f) return c;  // a river's water, its edge
-  Object o;
-  o.kind = palette(region, ground, pick);
   if (g.snow(x, z, ground) > 0.5f && o.kind != ObjectKind::Rock) return c;  // up in the snow, bare rock
   const float steep = g.normal(x, z).y;
-  if (steep < (o.kind == ObjectKind::Rock ? 0.68f : 0.82f)) return c;
+  if (steep < (o.kind == ObjectKind::Rock ? 0.68f : 0.82f) || steep_ground(w, x, z)) return c;
   if (rules::relief_inset(x, z) > -12.0f) {  // (between the world's edge and the relief's: its ways, its stream)
     if (distance_to_path(w.path, x, z, 8.0f) < 6.0f || distance_to_lanes(w.roads, x, z, 8.0f) < 5.0f) return c;
     if (w.west.valid() && (distance_to_road(w.west.road, x, z, 8.0f) < 5.0f || distance_to_stream(w.west.stream, x, z, 12.0f) < 7.0f)) return c;
@@ -198,6 +250,7 @@ Candidate candidate(const World& w, int ci, int cj) {
   o.pos = {x, ground, z};
   o.yaw = yaw;
   o.variant = variant;
+  if (in_world && in_the_way(w, o)) return c;
   switch (o.kind) {
     case ObjectKind::Tree:
     case ObjectKind::Pine:
@@ -234,6 +287,7 @@ Candidate candidate(const World& w, int ci, int cj) {
       o.pos.y = ground - 0.05f;
       break;
   }
+  if (!on_its_ground(w, o, ground)) return c;  // a slope too steep for its size
   c.any = true;
   c.object = o;
   return c;
@@ -268,13 +322,55 @@ std::vector<Object> make_tile(const World& w, int ti, int tj) {
       const float cz = static_cast<float>(cj) * rules::kOuterCell;
       if (cz < z0 || cz >= z0 + kTile) continue;
       const Candidate c = candidate(w, ci, cj);
-      if (c.any && kept(w, ci, cj, c)) out.push_back(c.object);
+      // (Within the world: its own, World::objects, drawn alike: world_nature.)
+      if (c.any && rules::world_inset(c.object.pos.x, c.object.pos.z) <= -3.0f && kept(w, ci, cj, c)) out.push_back(c.object);
     }
   }
   return out;
 }
 
 }  // namespace
+
+std::vector<Object> world_nature(const World& w) {
+  std::vector<Object> out;
+  if (w.ground.empty()) return out;
+  // The cells over the world (and two more around: their neighbours'
+  // candidates, looked up once each).
+  const float c = rules::kOuterCell;
+  const int c0 = floor_int((-rules::kWorldHalfSize - 3.0f) / c) - 2, c1 = floor_int((rules::kWorldHalfSize + 3.0f) / c) + 2;
+  const int d0 = floor_int((-rules::kWorldNorth - 3.0f) / c) - 2, d1 = floor_int((rules::kWorldHalfSize + 3.0f) / c) + 2;
+  const int nx = c1 - c0 + 1, nz = d1 - d0 + 1;
+  std::vector<Candidate> grid(static_cast<size_t>(nx * nz));
+  for (int i = 0; i < nx; ++i) {
+    for (int j = 0; j < nz; ++j) grid[static_cast<size_t>(i * nz + j)] = candidate(w, c0 + i, d0 + j);
+  }
+  const auto at = [&](int ci, int cj) -> Candidate {
+    const int i = ci - c0, j = cj - d0;
+    return i >= 0 && j >= 0 && i < nx && j < nz ? grid[static_cast<size_t>(i * nz + j)] : candidate(w, ci, cj);
+  };
+  for (int i = 2; i + 2 < nx; ++i) {
+    for (int j = 2; j + 2 < nz; ++j) {
+      const Candidate& k = grid[static_cast<size_t>(i * nz + j)];
+      if (!k.any || rules::world_inset(k.object.pos.x, k.object.pos.z) <= -3.0f) continue;
+      // Kept: no neighbour drawn before it in its way (as kept()).
+      const int ci = c0 + i, cj = d0 + j;
+      const int reach = k.reach > 1.6f ? 2 : 1;
+      bool keep = true;
+      for (int a = -reach; a <= reach && keep; ++a) {
+        for (int b = -reach; b <= reach && keep; ++b) {
+          if (!a && !b) continue;
+          const Candidate n = at(ci + a, cj + b);
+          if (!n.any) continue;
+          const float d = std::hypot(n.object.pos.x - k.object.pos.x, n.object.pos.z - k.object.pos.z);
+          if (d >= n.reach + k.reach + 0.4f) continue;
+          if (n.priority > k.priority || (n.priority == k.priority && (a < 0 || (a == 0 && b < 0)))) keep = false;
+        }
+      }
+      if (keep) out.push_back(k.object);
+    }
+  }
+  return out;
+}
 
 float outer_nature(const World& w, float x, float z) {
   if (w.ground.empty()) return 0.0f;

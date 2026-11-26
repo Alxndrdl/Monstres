@@ -351,11 +351,10 @@ void generate_objects(World& w, Rng& rng, bool forest_only = false) {
 
 namespace {
 
-// The relief's edge and the continent beyond (heightmap.hpp: fit_rim): the
-// ground there going on from the relief's (its seated buildings, its shaping
-// all done), and the world's nature as thick just beyond its edge as just
-// inside (counted along it: things per square of 5 m, the 40 m inside it).
-// The continent going on from the relief: its ground (the rim), its rivers, its snow.
+// The continent going on from the relief (heightmap.hpp: fit_rim): its
+// ground going on from the relief's (its seated buildings, its shaping all
+// done), its rivers, its snow. (Its nature is drawn the same way on both
+// sides of the world's edge: outer.hpp, world_nature.)
 void fit_continent(World& w) {
   fit_rim(w.ground);
   fit_rivers(w.ground, w.west.valid() ? &w.west.stream : nullptr);
@@ -364,31 +363,6 @@ void fit_continent(World& w) {
 
 void fit_edge(World& w) {
   fit_continent(w);
-  Heightmap& g = w.ground;
-  g.rim_density.assign(g.rim.size(), 0.0f);
-  const float x0 = -rules::kReliefHalfSize, x1 = rules::kReliefHalfSize, z0 = -rules::kReliefNorth, z1 = rules::kReliefHalfSize;
-  const float perimeter = 2 * ((x1 - x0) + (z1 - z0));
-  constexpr float kBand = 45.0f, kAlong = 60.0f;
-  std::vector<float> count(g.rim.size(), 0.0f);
-  const auto n = static_cast<int>(g.rim.size());
-  for (const Object& o : std::span(w.objects).subspan(w.objects.size() - w.wild_objects)) {
-    if (o.kind > ObjectKind::Bush && o.kind != ObjectKind::Larch) continue;  // trees, rocks, logs, stumps, bushes
-    const float dw = o.pos.x - x0, de = x1 - o.pos.x, dn = o.pos.z - z0, ds = z1 - o.pos.z;
-    const float d = std::min({dw, de, dn, ds});
-    if (d < 0 || d > kBand) continue;
-    const float s = d == dn ? o.pos.x - x0 : d == de ? (x1 - x0) + (o.pos.z - z0)
-                  : d == ds ? (x1 - x0) + (z1 - z0) + (x1 - o.pos.x) : 2 * (x1 - x0) + (z1 - z0) + (z1 - o.pos.z);
-    const int k = static_cast<int>(std::lround(std::fmod(s + perimeter, perimeter) / Heightmap::kRimStep)) % n;
-    count[static_cast<size_t>(k)] += 1.0f;
-  }
-  // Smoothed along it, per square of 5 m.
-  const int half = static_cast<int>(kAlong / 2 / Heightmap::kRimStep);
-  for (int k = 0; k < n; ++k) {
-    float sum = 0;
-    for (int d = -half; d <= half; ++d) sum += count[static_cast<size_t>(((k + d) % n + n) % n)];
-    const float area = (2 * half + 1) * Heightmap::kRimStep * kBand;
-    g.rim_density[static_cast<size_t>(k)] = sum / area * 25.0f;
-  }
   w.outer = OuterCache{};  // (made before: again)
 }
 
@@ -412,84 +386,20 @@ void generate_wilds(World& w) {
     build_roads(w);
     build_sites(w);
   }
-  Rng rng(w.seed ^ 0x57494C44535F3031ULL, 3);  // "WILDS_01": its own stream
   PlacementGrid grid(w.objects);
   const float gap = rules::kObjectGap;
-  constexpr float kStep = 5.0f;  // one try per square of 5 m (jittered)
-  const float limit = rules::kReliefHalfSize - 20.0f;
-  const int n = static_cast<int>(2 * limit / kStep);
-  // What grows at (x, z), drawn there (if anything stays).
-  const auto grow = [&](float x, float z, uint32_t roll, Object o) {
-    if (std::max(std::fabs(x), std::fabs(z)) < rules::kValleyHalfSize - 2.0f) return;  // the valley's own
-    // The west's places stay clear; its woods have their own trees (below).
-    if (in_west_place(w.west, x, z, 1.5f) || in_woods(w.west, x, z) || in_roadside_place(w.roads, x, z, 1.5f) ||
-        in_site(w.sites, x, z, 1.5f)) return;
-    if (steep_here(w, x, z) || wet_here(w, x, z)) return;  // not on the cliffs, not in the water
-    const float h = w.ground.height(x, z);
-    // How likely an object is here: woods in patches, the continent's forest
-    // dense, the hills rocky with pines, the beach almost bare, none at sea;
-    // the north's pastures, larch woods and rocky slopes (north_wilds).
-    const float patches = value_noise(w.seed + 700, x, z, 90.0f);
-    float chance = 0.3f + 0.55f * std::clamp((patches - 0.55f) / 0.15f, 0.0f, 1.0f);
-    const Zone zone = zone_at(w, x, z);
-    if (region_at(x, z) == Region::Forest) chance = 0.75f;
-    if (zone == Zone::Hills) chance = std::max(chance, 0.3f);
-    if (w.ground.land_height(x, z) < rules::kSeaLevel + 1.0f && h < rules::kSeaLevel + 1.5f) chance = 0;
-    else if (zone == Zone::Coast) chance = 0.04f;
-    if (o.kind == ObjectKind::Crate) return;  // not in the wild
-    if (zone == Zone::Hills && o.kind == ObjectKind::Tree) o.kind = ObjectKind::Pine;
-    if (chance > 0 && zone != Zone::Coast) chance = north_wilds(w, o, x, z, chance);
-    if (static_cast<float>(roll) >= chance * 1000.0f) return;
-    if (!forest_ways(w, o, false)) return;
-    if (zone == Zone::Coast && (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine)) {
-      o.kind = ObjectKind::Rock;  // its size will do; turned by quarters, as rocks are
-      o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
-    }
-    // Not on a slope too steep for its size, not across the path, not on
-    // another one (tried at the height of the ground, as those around it).
-    o.pos.y = h;
-    const Box box = object_extent(o);
-    float lowest = h;
-    for (float cx : {box.min.x, box.max.x}) {
-      for (float cz : {box.min.z, box.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
-    }
-    if (h - lowest > 0.6f * (box.max.y - box.min.y) + 0.1f) return;
+  // The world's nature beyond the valley (trees, rocks, bushes; seaweed and
+  // rocks on the bottom of the water): drawn as the continent's, cell by
+  // cell (outer.hpp: world_nature), the same on both sides of the world's
+  // edge. Not on what is already there (the valley's own).
+  for (const Object& o : world_nature(w)) {
     const Box b = footprint(o);
-    const float reach = std::max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5f;
-    const float keep_off = rules::kPathHalfWidth + reach + 0.3f;
-    if (distance_to_path(w.path, x, z, keep_off + 1) < keep_off) return;
-    const float lane_off = rules::kLaneHalfWidth + reach + 0.3f;
-    if (distance_to_lanes(w.roads, x, z, lane_off + 1) < lane_off) return;
     Box wide = b;
     wide.min = wide.min - Vec3{gap, 0, gap};
     wide.max = wide.max + Vec3{gap, 0, gap};
-    if (grid.overlaps_any(wide)) return;
+    if (o.kind != ObjectKind::Seaweed && grid.overlaps_any(wide)) continue;
     w.objects.push_back(o);
     grid.add(o);
-    add_log_pieces(w.objects, o);
-  };
-  for (int i = 0; i < n; ++i) {
-    for (int j = 0; j < n; ++j) {
-      // Every draw first (the same number whatever happens): stable layouts.
-      const float x = -limit + kStep * (static_cast<float>(i) + random_range(rng, 0.1f, 0.9f));
-      const float z = -limit + kStep * (static_cast<float>(j) + random_range(rng, 0.1f, 0.9f));
-      const uint32_t roll = rng.below(1000);
-      grow(x, z, roll, random_object(rng, x, z, false));
-    }
-  }
-  // Further north (the world grew north): its own stream, the same tries per square meter.
-  {
-    Rng north(w.seed ^ 0x57494C44534E4F52ULL, 4);  // "WILDSNOR"
-    const float north_limit = rules::kReliefNorth - 20.0f;
-    const int rows = static_cast<int>((north_limit - limit) / kStep);
-    for (int i = 0; i < n; ++i) {
-      for (int j = 0; j < rows; ++j) {
-        const float x = -limit + kStep * (static_cast<float>(i) + random_range(north, 0.1f, 0.9f));
-        const float z = -limit - kStep * (static_cast<float>(j + 1) - random_range(north, 0.1f, 0.9f));
-        const uint32_t roll = north.below(1000);
-        grow(x, z, roll, random_object(north, x, z, false));
-      }
-    }
   }
   // The valley's forest past the valley's edge: as dense as inside it (the
   // same tries per square meter as generate_objects' forest pass).
@@ -557,54 +467,6 @@ void generate_wilds(World& w) {
       w.objects.push_back(o);
       grid.add(o);
       add_log_pieces(w.objects, o);
-    }
-  }
-  // The bottom of the water (water.hpp: the sea, the lakes, the deep
-  // rivers): seaweed in clumps, rocks here and there (beyond the world's
-  // edge, the continent's: outer.hpp).
-  {
-    Rng bed(w.seed ^ 0x5345414245443031ULL, 7);  // "SEABED01": its own stream
-    constexpr float kBed = 4.0f;
-    const float half = rules::kReliefHalfSize - 2.0f, north = rules::kReliefNorth - 2.0f;
-    const int nx = static_cast<int>(2 * half / kBed), nz = static_cast<int>((half + north) / kBed);
-    for (int i = 0; i < nx; ++i) {
-      for (int j = 0; j < nz; ++j) {
-        const float x = -half + kBed * (static_cast<float>(i) + random_range(bed, 0.1f, 0.9f));
-        const float z = -north + kBed * (static_cast<float>(j) + random_range(bed, 0.1f, 0.9f));
-        const float roll = random_range(bed, 0.0f, 1.0f), s1 = random_range(bed, 0.0f, 1.0f), s2 = random_range(bed, 0.0f, 1.0f);
-        const auto yaw = static_cast<Angle16>(bed.below(65536));
-        const auto variant = static_cast<uint8_t>(bed.below(256));
-        if (rules::world_inset(x, z) <= -3.0f || in_west_place(w.west, x, z, 1.0f) || in_site(w.sites, x, z, 1.0f)) continue;
-        WaterSpot ws;
-        if (!water_at(w, x, z, ws) || ws.depth() < 1.2f) continue;
-        const float patches = value_noise(w.seed + 4700, x, z, 30.0f);
-        const float weed = 0.08f + 0.55f * std::clamp((patches - 0.45f) / 0.2f, 0.0f, 1.0f);
-        if (roll >= weed + 0.05f) continue;
-        Object o;
-        o.yaw = yaw;
-        o.variant = variant;
-        if (roll < 0.05f && !in_lake(w.village.lake, x, z, 2.0f)) {  // (the village's lake: its seaweed only)
-          o.kind = ObjectKind::Rock;
-          o.size = {0.4f + 0.9f * s1, 0.3f + 0.7f * s2, 0.4f + 0.9f * s2};
-          o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
-        } else {
-          o.kind = ObjectKind::Seaweed;
-          o.size = {0.7f + 0.8f * s1, std::min(ws.depth() - 0.3f, 0.8f + 1.6f * s2), 0};
-        }
-        o.pos = {x, ws.ground - 0.05f, z};
-        if (o.kind == ObjectKind::Rock) {  // not on a slope too steep for it
-          const Box e = object_extent(o);
-          float lowest = ws.ground;
-          for (float cx : {e.min.x, e.max.x}) {
-            for (float cz : {e.min.z, e.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
-          }
-          if (ws.ground - lowest > 0.6f * (e.max.y - e.min.y) + 0.1f || steep_here(w, x, z)) continue;
-        }
-        const Box b = o.kind == ObjectKind::Rock ? footprint(o) : Box{{x - 0.3f, 0, z - 0.3f}, {x + 0.3f, 0, z + 0.3f}};
-        if (grid.overlaps_any(b)) continue;
-        w.objects.push_back(o);
-        grid.add(o);
-      }
     }
   }
   settle_objects(w, first);

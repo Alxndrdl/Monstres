@@ -647,13 +647,6 @@ float Heightmap::rise(float x, float z) const {
   return c > rules::kSeaLevel ? std::max(r, std::min(0.0f, rules::kSeaLevel + 2.5f - c)) : r;
 }
 
-float Heightmap::edge_density(float x, float z) const {
-  if (rim_density.empty()) return -1.0f;
-  float away;
-  const float s = rim_read(seed + 9, x, z, away);
-  return rim_value(rim_density, s) * rim_fade(seed + 7, x, z, away, 0.55f);
-}
-
 void fit_rim(Heightmap& m) {
   m.rim.clear();
   m.tiles = TileCache{};

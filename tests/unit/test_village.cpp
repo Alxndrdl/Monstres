@@ -6,6 +6,7 @@
 #include "monstres/render/water_mesh.hpp"
 #include "monstres/core/west.hpp"
 #include "monstres/core/rivers.hpp"
+#include "monstres/core/debug.hpp"
 #include "test_helpers.hpp"
 
 #include <cmath>
@@ -97,7 +98,9 @@ TEST_CASE("village objects do not overlap") {
   const World& w = cached_game(4);
   std::vector<Box> boxes;
   for (const Object& o : w.objects) boxes.push_back(object_box(o));
-  CHECK(overlapping_pairs(boxes).empty());
+  for (const auto& [a, b] : overlapping_pairs(boxes)) {
+    FAIL_CHECK(std::string(object_kind_name(w.objects[a].kind)) << " " << a << " at " << w.objects[a].pos << " over " << std::string(object_kind_name(w.objects[b].kind)) << " " << b << " at " << w.objects[b].pos);
+  }
 }
 
 TEST_CASE("the player walks into the lake, and goes under (water.hpp)") {

@@ -416,23 +416,26 @@ Le relief :
   - l'herbe et les fleurs poussent aussi sur le continent : drues dans la
     plaine, par taches, plus rares en forêt et en montagne, presque nulles
     au désert et sur le volcan, rien sous la neige ni dans les étangs ;
-  - **la carte du continent** (`continent_map_rows`,
-    `src/core/continent_map.cpp`) est calculée par le jeu depuis le sol tel
-    qu'on y marche : les points mêmes des tuiles de 2 m (un sur deux, à 4 m
-    par pixel, 1 375 × 1 250 pixels), avec leurs plis (ombrés comme le
-    reste), la mer, les étangs, les rivières, la neige, la roche, le sable et
-    les bois (plus sombres là où ils sont épais, semés de couronnes et de
-    rochers à proportion). Les rivières, plus étroites que ses pixels, y sont
-    tracées par-dessus à leur largeur. Ses couleurs sont celles de l'image du
-    relief jouable, dessinée par-dessus. Elle se calcule pendant le jeu, deux
-    rangées à la fois, et prend les teintes de la saison ;
-  - **zoomée** (à partir de 1,1 pixel par mètre), hors du relief, la carte
-    montre des tuiles de 128 m à 1 pixel par mètre (`map_detail`), peintes
-    par le même pinceau depuis le sol fin, avec par-dessus **les vrais
-    arbres, rochers et buissons** de la tuile (`outer_objects`), dessinés
-    comme ceux du relief. Elles sont faites à mesure qu'elles entrent dans
-    la vue (deux par image), et 48 au plus sont gardées. La carte locale
-    correspond ainsi exactement à ce qu'on voit en jeu ;
+  - **la carte** (`continent_map_rows`, `src/core/continent_map.cpp`) est
+    peinte par le jeu, d'un seul pinceau pour tout le continent, le monde
+    jouable comme le reste, depuis le sol tel qu'on y marche : les points
+    mêmes des tuiles de 2 m (un sur deux, à 4 m par pixel), avec leurs plis
+    (ombrés), la mer, les lacs (`water_at`), la neige, la roche, le sable,
+    les chemins, la route et les sentiers, les places, et les bois (plus
+    sombres là où ils sont épais, semés de couronnes et de rochers : dans le
+    monde, ses vrais arbres ; au-delà, à proportion de la nature). Les
+    rivières et le ruisseau y sont peints le long de leur cours lisse, à
+    leur largeur (jamais moins d'un tiers de pixel), avec un bord adouci :
+    pas de marches le long des pixels, et rien par-dessus le lac ou la mer
+    où elles entrent. Elle se calcule pendant le jeu, deux rangées à la
+    fois, et prend les teintes de la saison ;
+  - **zoomée** (à partir de 1,1 pixel par mètre), partout, la carte montre
+    des tuiles de 128 m à 1 pixel par mètre (`map_detail`), peintes par le
+    même pinceau, avec par-dessus **les vrais objets** de la tuile (ceux du
+    monde et ceux du continent). Elles sont faites à mesure qu'elles entrent
+    dans la vue (deux par image), et 48 au plus sont gardées. La carte
+    correspond ainsi exactement à ce qu'on voit en jeu, et change de la même
+    façon partout en zoomant ;
   - **des formes naturelles** : la forêt, le lac, le marais, la capitale et le
     pied des volcans ont un contour ondulé (quelques ondes de phases tirées
     au hasard, `pond_outline`, `place_shape`), et non plus des ellipses ou
@@ -477,9 +480,13 @@ Le relief :
     la carte (`monstres_continent_heights`), le terrain lointain et son eau
     suivent ce même sol. Les plis du continent sont plus doux près du relief
     (dont les collines s'effacent au bord) et grandissent sur environ 500 m ;
-  - la nature du continent est aussi dense, juste au-delà du bord, que celle
-    du monde juste en deçà (`rim_density`, comptée le long du bord), puis
-    s'éclaircit jusqu'à celle de sa région ;
+  - la nature (arbres, rochers, buissons, algues au fond de l'eau) est tirée
+    de la même façon des deux côtés du bord du monde jouable : par cellules
+    de 5 m, selon la région, en plaques et en bouquets (`world_nature` dans
+    le monde, `outer_objects` au-delà, la même fonction). Le monde jouable ne
+    garde à part que sa vallée, ses lieux, sa forêt et ses bois, ses chemins
+    et ce qui y est bâti. Plus de rectangle visible à l'ancienne limite. Sur
+    les collines (au-dessus de 22 à 32 m), des pins plutôt que des feuillus ;
   - la carte détaillée couvre tout le relief (et non plus seulement le monde
     jouable) : au nord du col, la position correspond au dessin.
 
@@ -562,10 +569,10 @@ Ce qui tient le passage à l'échelle :
   les parties hors du champ de la caméra sont laissées de côté (les voisines
   visibles sont dessinées d'un seul appel). Les créatures hors champ ne sont
   pas dessinées non plus ;
-- **la carte** met ses données en cache, dessine le relief jouable à 1 pixel
-  par mètre et le continent à 1 pixel pour 4 m (calculé par le jeu). Ces images (plus d'un million
-  de pixels) se dessinent d'avance, quelques rangées à la fois pendant le
-  jeu (6 ms toutes les 30 ms, à partir de 2 s après le chargement) ; ce qui
+- **la carte** met ses données en cache et dessine tout le continent à 1
+  pixel pour 4 m (calculé par le jeu). Cette image (plus d'un million de
+  pixels) se dessine d'avance, quelques rangées à la fois pendant le jeu
+  (6 ms toutes les 30 ms, à partir de 2 s après le chargement) ; ce qui
   reste est fini à l'ouverture. La hauteur du sol est lue une fois par pixel
   (pentes et ombrage lisent les voisines).
 
@@ -663,7 +670,10 @@ là où il monte). Une rivière qui entre dans la mer ou dans un lac rejoint don
 leur surface au même niveau, sans ruban posé par-dessus. L'eau est claire là
 où elle est peu profonde, d'un bleu profond plus loin, blanche là où elle
 tombe (les cascades), et dessinée des deux côtés pour être vue d'en dessous.
-Autour du joueur (270 m), les tuiles sont fines (2 m, la grille du sol) ;
+Le bord d'une rivière suit son cours lisse (l'eau s'efface sur son dernier
+mètre), et non la grille du sol où ses berges montent, en marches quand
+elle passe en biais. Autour du joueur (270 m), les tuiles sont fines (2 m,
+la grille du sol) ;
 plus loin sur le relief, grossières (8 m). Elles sont construites au fil des
 pas, quelques-unes par image, et dessinées en un seul maillage, avec une
 partie par tuile pour l'élimination hors champ. Le continent lointain garde

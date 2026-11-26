@@ -27,13 +27,13 @@ float chebyshev(float x, float z) { return std::max(std::fabs(x), std::fabs(z));
 
 }  // namespace
 
-TEST_CASE("the wilds: many objects around the valley, the valley's own unchanged, nothing at sea") {
+TEST_CASE("the wilds: many objects around the valley, the valley's own unchanged, nothing at sea (but on its bottom)") {
   const World& w = cached_game(3);
   const std::span<const Object> valley = valley_objects(w);
   CHECK(w.wild_objects > 10000);
   CHECK(valley.size() + w.wild_objects == w.objects.size());
   for (const Object& o : valley) CHECK(chebyshev(o.pos.x, o.pos.z) < rules::kValleyHalfSize);
-  size_t trees = 0, rocks = 0, north_pines = 0, north = 0;
+  size_t trees = 0, rocks = 0, leafy_high = 0;
   for (size_t k = valley.size(); k < w.objects.size(); ++k) {
     const Object& o = w.objects[k];
     // Nature (and the pieces of logs), and the west's buildings (west.hpp, drawn again at each load too).
@@ -50,14 +50,15 @@ TEST_CASE("the wilds: many objects around the valley, the valley's own unchanged
     CHECK_FALSE((w.ground.sea(o.pos.x, o.pos.z) && w.ground.height(o.pos.x, o.pos.z) < rules::kSeaLevel + 1.0f));
     trees += o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine;
     rocks += o.kind == ObjectKind::Rock;
-    if (o.pos.z < -300 && zone_at(w, o.pos.x, o.pos.z) == Zone::Hills) {
-      ++north;
-      north_pines += o.kind == ObjectKind::Pine;
+    if (o.pos.z > rules::kNorthFrom + 40.0f && w.ground.height(o.pos.x, o.pos.z) > 33.0f &&
+        (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine)) {
+      leafy_high += o.kind == ObjectKind::Tree;
     }
   }
-  CHECK(trees > 3000);
+  // (As thick as the continent's nature: outer.hpp, world_nature.)
+  CHECK(trees > 1500);
   CHECK(rocks > 1000);
-  CHECK(north_pines > north / 3);  // pines and rocks on the hills, no leafy trees there
+  CHECK(leafy_high == 0);  // up the hills (some, at least), pines rather than leafy trees
   // The same for the same seed; drawn again identically.
   World again = w;
   again.objects.resize(valley.size());

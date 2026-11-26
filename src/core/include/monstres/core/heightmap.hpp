@@ -123,7 +123,7 @@ struct Heightmap {
   // into the continent instead of stopping at a straight line; the map, the
   // sea and the far terrain have it too.
   static constexpr float kRimStep = 10.0f;
-  std::vector<float> rim, rim_density;
+  std::vector<float> rim;
   // The continent's rivers, their levels fitted over this ground (rivers.hpp:
   // fit_rivers): their beds dug into the tiles.
   std::vector<River> rivers;
@@ -136,9 +136,6 @@ struct Heightmap {
   // continent's own, above its snow line (continent.hpp: snow_line).
   float snow(float x, float z, float h) const;
   float rise(float x, float z) const;
-  // How thick the world's nature is near (x, z) beyond the relief, as it
-  // fades out (-1: no rim, the continent's own).
-  float edge_density(float x, float z) const;
 
   bool empty() const { return heights.empty(); }
   float at(int i, int j) const { return heights[index(i, j)]; }

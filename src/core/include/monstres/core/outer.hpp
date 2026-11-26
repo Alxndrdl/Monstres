@@ -19,8 +19,10 @@ namespace monstres {
 // then by clumps. What grows: the region's palette (pines and rocks up the
 // mountains, few up high or on the volcano, sparse rocks and bushes in the
 // desert, woods thick in the forest, bushes by the marsh), in sizes that
-// vary. Nothing in the water, on slopes too steep for it, nor on the relief
-// (the playable world's own). Two things in each other's way: the one drawn
+// vary. Nothing in the water (but seaweed and rocks on its bottom), nor on
+// slopes too steep for it. The same within the playable world (world_nature:
+// drawn once, World::objects) as beyond it, but in its valley, its places,
+// its forest and woods, on its ways. Two things in each other's way: the one drawn
 // first by their cells' hash stays (its neighbours worked out the same way:
 // no order).
 //
@@ -42,13 +44,13 @@ Region outer_region(uint64_t seed, float x, float z);
 // map draws the continent's woods with it).
 float outer_nature(const World& world, float x, float z);
 
-// The continent's picture for the map (continent_map.cpp): kMapCell meters a
-// pixel over the continent's grid, drawn from the ground as the player walks
-// on it (its folds, the sea, the ponds, its nature: woods, rocks, snow) in
-// the colors of the playable area's own picture, so that both meet unseen.
-// RGBA, rows j0 to j1; alpha: 0 well within the relief (its own picture
-// there), 1 the sea, 2 a pond, else 3 + 252 times how green it is (the
-// seasons' tints, the map's).
+// The map's picture (continent_map.cpp), one painter for all of it, the
+// playable world as the rest of the continent: kCell meters a pixel over the
+// continent's grid, drawn from the ground as the player walks on it (its
+// folds, the sea, the lakes, the rivers along their smooth course, the ways,
+// its nature: woods, rocks, snow). RGBA, rows j0 to j1; alpha: 1 the sea
+// (and the ice, the lava: no season's tint), 2 a lake or a river, else 3 +
+// 252 times how green it is (the seasons' tints, the map's).
 namespace continent_map {
 inline constexpr float kCell = 4.0f;
 inline constexpr float kDetailSize = rules::kTileCells * 2.0f;  // a tile of the ground (128 m)...
@@ -57,10 +59,15 @@ inline constexpr int kWidth = static_cast<int>((Continent::kMaxX - Continent::kM
 inline constexpr int kHeight = static_cast<int>((Continent::kMaxZ - Continent::kMinZ) / kCell);
 }  // namespace continent_map
 void continent_map_rows(const World& world, const Continent& continent, int j0, int j1, std::vector<uint8_t>& rgba);
-// Zoomed in: a tile of the ground (ti, tj: as outer_tile_of; beyond the
-// relief) a meter a pixel, in the same colors (its things: outer_objects,
-// drawn over it). kDetail x kDetail pixels, rows from the north.
+// Zoomed in: a tile of the ground (ti, tj: as outer_tile_of; anywhere) a
+// meter a pixel, in the same colors (its things: the world's objects and
+// outer_objects, drawn over it). kDetail x kDetail pixels, rows from the north.
 void map_detail(const World& world, int ti, int tj, std::vector<uint8_t>& rgba);
+
+// The playable world's own nature (beyond its valley, its places, its
+// forest and woods: World::objects, generate_wilds), drawn as the
+// continent's, cell by cell, the same way on both sides of its edge.
+std::vector<Object> world_nature(const World& world);
 
 // The tile (heightmap.hpp's lattice) that (x, z) is in.
 void outer_tile_of(float x, float z, int& ti, int& tj);

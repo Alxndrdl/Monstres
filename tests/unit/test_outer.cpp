@@ -199,3 +199,33 @@ TEST_CASE("the continent's nature is quick to make, and kept a while only") {
   for (const auto& [ti, tj] : tiles_around(landmark(Region::Desert), 15)) outer_objects(w, ti, tj);
   CHECK(w.outer.size() <= rules::kOuterTilesKept);
 }
+
+TEST_CASE("no edge to see where the playable world was: its nature drawn as the continent's, as thick on both sides") {
+  const World& w = cached_game(3);
+  // Along its east and south edges, bands of 60 m on each side of it.
+  int inside = 0, outside = 0;
+  for (const Object& o : w.objects) {
+    const float d = rules::world_inset(o.pos.x, o.pos.z);
+    if (d > 0 && d < 60 && (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine || o.kind == ObjectKind::Bush || o.kind == ObjectKind::Rock)) ++inside;
+  }
+  std::vector<std::pair<int, int>> tiles;
+  for (float t = -560; t < 560; t += 64) {
+    for (const auto& [x, z] : {std::pair{rules::kWorldHalfSize + 30, t}, std::pair{t, rules::kWorldHalfSize + 30}}) {
+      int ti = 0, tj = 0;
+      outer_tile_of(x, z, ti, tj);
+      if (std::find(tiles.begin(), tiles.end(), std::pair{ti, tj}) == tiles.end()) tiles.push_back({ti, tj});
+    }
+  }
+  for (const auto& [ti, tj] : tiles) {
+    for (const Object& o : outer_objects(w, ti, tj)) {
+      const float d = -rules::world_inset(o.pos.x, o.pos.z);
+      if (d > 3 && d < 60 && (o.kind == ObjectKind::Tree || o.kind == ObjectKind::Pine || o.kind == ObjectKind::Bush || o.kind == ObjectKind::Rock)) ++outside;
+    }
+  }
+  CAPTURE(inside);
+  CAPTURE(outside);
+  REQUIRE(inside > 100);
+  // (Counted all round the world inside, along two of its sides outside: about half.)
+  CHECK(outside > inside / 4);
+  CHECK(outside < inside);
+}

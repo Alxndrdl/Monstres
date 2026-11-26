@@ -721,18 +721,57 @@ std::string continent_json(const Continent& c, const std::vector<River>& rivers)
   return s;
 }
 
-std::string map_detail_json(const World& w, int ti, int tj) {
-  // What grows on a tile of the continent (outer.hpp), as map_json's objects.
-  std::string s = "[";
-  for (const Object& o : outer_objects(w, ti, tj)) {
-    const Box b = object_box(o);
-    const float crown = o.kind == ObjectKind::Tree ? 1.2f * o.size.x
-                        : o.kind == ObjectKind::Pine || o.kind == ObjectKind::Larch ? 1.0f * o.size.x : 0;
-    if (s.back() != '[') s += ',';
-    s += std::string("[\"") + object_kind_name(o.kind) + "\"," + num(o.pos.x) + "," + num(o.pos.z) + ",";
-    s += crown > 0 ? num(crown) + "," + num(crown) : num(0.5f * (b.max.x - b.min.x)) + "," + num(0.5f * (b.max.z - b.min.z));
-    s += "]";
+namespace {
+
+// One thing on the map: [kind, x, z, half x, half z] (trees: their crown;
+// nothing for what is not seen from above).
+std::string map_object_json(const Object& o) {
+  if (o.kind == ObjectKind::Collider || o.kind == ObjectKind::Seaweed) return "";
+  Box b = object_box(o);
+  if (o.kind == ObjectKind::CastleGate) b = {o.pos - Vec3{4, 0, 4}, o.pos + Vec3{4, 0, 4}};  // its colliders
+  if (o.kind == ObjectKind::Arena) {
+    const float ar = rules::kArenaRadius;
+    b = {o.pos - Vec3{ar, 0, ar}, o.pos + Vec3{ar, 0, ar}};
   }
+  if (o.kind == ObjectKind::AbbeyGate) b = {o.pos - Vec3{4, 0, 4}, o.pos + Vec3{4, 0, 4}};
+  if (o.kind == ObjectKind::Aqueduct) {
+    const bool along_x = ((o.yaw >> 14) & 1) == 0;
+    const Vec3 h{along_x ? 4.0f : 1.0f, 0, along_x ? 1.0f : 4.0f};
+    b = {o.pos - h, o.pos + h};
+  }
+  if (o.kind == ObjectKind::Crops) b = {o.pos - o.size, o.pos + o.size};  // walked through, but drawn
+  // Trees: the crown, not the trunk.
+  const float crown = o.kind == ObjectKind::Tree ? 1.2f * o.size.x
+                      : o.kind == ObjectKind::Pine || o.kind == ObjectKind::Larch ? 1.0f * o.size.x : 0;
+  std::string s = std::string("[\"") + object_kind_name(o.kind) + "\"," + num(o.pos.x) + "," + num(o.pos.z) + ",";
+  s += crown > 0 ? num(crown) + "," + num(crown) : num(0.5f * (b.max.x - b.min.x)) + "," + num(0.5f * (b.max.z - b.min.z));
+  return s + "]";
+}
+
+}  // namespace
+
+std::string map_detail_json(const World& w, int ti, int tj) {
+  // What is on a tile of the ground (outer.hpp's tiles, anywhere: the
+  // world's own objects and the continent's), as map_json's objects.
+  const float x0 = Heightmap::kMinX + continent_map::kDetailSize * static_cast<float>(ti);
+  const float z0 = Heightmap::kMinZ + continent_map::kDetailSize * static_cast<float>(tj);
+  const float x1 = x0 + continent_map::kDetailSize, z1 = z0 + continent_map::kDetailSize;
+  std::string s = "[";
+  const auto add = [&](const Object& o) {
+    if (o.pos.x < x0 || o.pos.x >= x1 || o.pos.z < z0 || o.pos.z >= z1) return;
+    const std::string one = map_object_json(o);
+    if (one.empty()) return;
+    if (s.back() != '[') s += ',';
+    s += one;
+  };
+  if (!inside(w)) {
+    std::vector<uint32_t> found;  // (an object may be met more than once)
+    for_objects_near(w, {{x0, -1e4f, z0}, {x1, 1e4f, z1}}, [&](uint32_t i, const Box&) { found.push_back(i); });
+    std::sort(found.begin(), found.end());
+    found.erase(std::unique(found.begin(), found.end()), found.end());
+    for (const uint32_t i : found) add(w.objects[i]);
+  }
+  for (const Object& o : outer_objects(w, ti, tj)) add(o);
   return s + "]";
 }
 
@@ -869,30 +908,11 @@ std::string map_json(const World& w) {
     s += ",\"sites\":null";
   }
   s += ",\"objects\":[";
-  for (size_t i = 0; i < w.objects.size(); ++i) {
-    const Object& o = w.objects[i];
-    Box b = object_box(o);
-    if (o.kind == ObjectKind::CastleGate) b = {o.pos - Vec3{4, 0, 4}, o.pos + Vec3{4, 0, 4}};  // its colliders
-    if (o.kind == ObjectKind::Arena) {
-      const float ar = rules::kArenaRadius;
-      b = {o.pos - Vec3{ar, 0, ar}, o.pos + Vec3{ar, 0, ar}};
-    }
-    if (o.kind == ObjectKind::AbbeyGate) b = {o.pos - Vec3{4, 0, 4}, o.pos + Vec3{4, 0, 4}};
-    if (o.kind == ObjectKind::Aqueduct) {
-      const bool along_x = ((o.yaw >> 14) & 1) == 0;
-      const Vec3 h{along_x ? 4.0f : 1.0f, 0, along_x ? 1.0f : 4.0f};
-      b = {o.pos - h, o.pos + h};
-    }
-    if (o.kind == ObjectKind::Collider) continue;
-    if (o.kind == ObjectKind::Crops) b = {o.pos - o.size, o.pos + o.size};  // walked through, but drawn
+  for (const Object& o : w.objects) {
+    const std::string one = map_object_json(o);
+    if (one.empty()) continue;
     if (s.back() != '[') s += ',';
-    // Trees: the crown, not the trunk.
-    const float crown = o.kind == ObjectKind::Tree ? 1.2f * o.size.x
-                        : o.kind == ObjectKind::Pine || o.kind == ObjectKind::Larch ? 1.0f * o.size.x : 0;
-    s += std::string("[\"") + object_kind_name(o.kind) + "\"," + num(o.pos.x) + "," + num(o.pos.z) + ",";
-    s += crown > 0 ? num(crown) + "," + num(crown)
-                   : num(0.5f * (b.max.x - b.min.x)) + "," + num(0.5f * (b.max.z - b.min.z));
-    s += "]";
+    s += one;
   }
   return s + "]}";
 }

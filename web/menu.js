@@ -873,7 +873,6 @@
   // continent (wheel, pinch, + and − buttons; drag to move it). Only the
   // land and the places: no creatures. ----
   const canvas = $('map-canvas');
-  const PX_PER_M = 1;           // resolution of the drawn playable area
   const MAX_SCALE = 8;          // CSS pixels per meter, zoomed in
   const LOCAL_SCALE = 5;        // when the map opens
   let base = null;              // the playable area: { key, image, R }
@@ -1009,28 +1008,10 @@
     }
   }
 
-  function heightAt(data, x, z) {
-    const nx = data.pointsX, nz = data.pointsZ;
-    if (!nx || !nz) return 0;
-    const cell = data.cell || 1;
-    const fx = Math.min(Math.max((x - data.minX) / cell, 0), nx - 1.001);
-    const fz = Math.min(Math.max((z - data.minZ) / cell, 0), nz - 1.001);
-    const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
-    const h = (a, b) => data.heights[a * nz + b];
-    const top = h(i, j) + (h(i + 1, j) - h(i, j)) * tx;
-    const bottom = h(i, j + 1) + (h(i + 1, j + 1) - h(i, j + 1)) * tx;
-    return top + (bottom - top) * tz;
-  }
-
-  const smooth = (e0, e1, v) => {
-    const t = Math.min(Math.max((v - e0) / (e1 - e0), 0), 1);
-    return t * t * (3 - 2 * t);
-  };
-
   // The continent, drawn once per world (continent_map_rows in the game: the
   // ground as walked on, its folds, its waters, its woods and rocks, in the
-  // colors of the playable area's picture), a few rows at a time; the
-  // season's tints here. The playable area's relief: its own picture, over it.
+  // colors of the playable area's picture: the playable world as the rest),
+  // a few rows at a time; the season's tints here.
   function* buildLand(d) {
     const w = d.mapWidth, h = d.mapHeight;
     const image = el('canvas', { width: w, height: h });
@@ -1041,7 +1022,6 @@
       const rows = game.continentMap(j, Math.min(h, j + 2), w);
       for (let k = 0; k < rows.length; k += 4) {
         const o = j * w * 4 + k, kind = rows[k + 3];
-        if (kind === 0) continue;  // the relief's
         px.r = rows[k]; px.g = rows[k + 1]; px.b = rows[k + 2];
         if (kind === 1 || kind === 2) inSeason(px, kind, 0);
         else inSeason(px, 0, (kind - 3) / 252);
@@ -1051,29 +1031,6 @@
     }
     ctx.putImageData(pixels, 0, 0);
     return image;
-  }
-
-  // The continent's own ground at (x, z) (no hills): where the sea is.
-  function landAt(c, x, z) {
-    if (!c) return 0;
-    const fx = Math.min(Math.max((x - c.minX) / c.cell, 0), c.pointsX - 1.001);
-    const fz = Math.min(Math.max((z - c.minZ) / c.cell, 0), c.pointsZ - 1.001);
-    const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
-    const h = (a, b) => c.heights[a * c.pointsZ + b];
-    const top = h(i, j) + (h(i + 1, j) - h(i, j)) * tx, bottom = h(i, j + 1) + (h(i + 1, j + 1) - h(i, j + 1)) * tx;
-    return top + (bottom - top) * tz;
-  }
-
-  // Distance to a place's center in its radii, stretched by its outline
-  // (village.hpp, outline_distance): 1 on its edge.
-  function outlineDistance(data, center, rx, rz, phases, x, z) {
-    const dx = (x - center.x) / rx, dz = (z - center.z) / rz;
-    const r = Math.hypot(dx, dz);
-    if (r < 1e-6) return 0;
-    const a = Math.atan2(dz, dx);
-    let inward = 0;
-    for (let k = 0; k < 4; ++k) inward += data.outlineDepths[k] * 0.5 * (1 + Math.sin(data.outlineWaves[k] * a + phases[k]));
-    return r / (1 - inward);
   }
 
   // Things on the map: trees as round crowns, the rest as their outline
@@ -1126,17 +1083,11 @@
     const z0 = view.cz - cssH / 2 / k, z1 = view.cz + cssH / 2 / k;
     const ti0 = Math.floor((x0 - d.reliefMinX) / size), ti1 = Math.floor((x1 - d.reliefMinX) / size);
     const tj0 = Math.floor((z0 - d.reliefMinZ) / size), tj1 = Math.floor((z1 - d.reliefMinZ) / size);
-    // (The relief's own: its picture, drawn over; along its edge, what grows
-    // between it and the world's edge, the continent's, over it too.)
-    const tilesX = Math.round(2 * d.start / size), tilesZ = Math.round((d.start + d.startNorth) / size);
-    const inRelief = (ti, tj) => ti >= 0 && tj >= 0 && ti < tilesX && tj < tilesZ;
-    const onEdge = (ti, tj) => ti === 0 || tj === 0 || ti === tilesX - 1 || tj === tilesZ - 1;
     let made = 0, missing = false;
     const now = performance.now();
     const shown = [];
     for (let ti = ti0; ti <= ti1; ++ti) {
       for (let tj = tj0; tj <= tj1; ++tj) {
-        if (inRelief(ti, tj) && !onEdge(ti, tj)) continue;
         const id = `${ti},${tj}`;
         let t = details.get(id);
         if (!t) {
@@ -1155,7 +1106,7 @@
             pixels.data[o] = c.r; pixels.data[o + 1] = c.g; pixels.data[o + 2] = c.b; pixels.data[o + 3] = 255;
           }
           g.putImageData(pixels, 0, 0);
-          t = { image: inRelief(ti, tj) ? null : image, objects };
+          t = { image, objects };
           details.set(id, t);
           if (details.size > DETAIL_KEPT) {  // the longest unused one goes
             let oldest = null;
@@ -1168,128 +1119,10 @@
       }
     }
     for (const { ti, tj, t } of shown) {
-      if (t.image) ctx.drawImage(t.image, X(d.reliefMinX + ti * size), Y(d.reliefMinZ + tj * size), size * k, size * k);
+      ctx.drawImage(t.image, X(d.reliefMinX + ti * size), Y(d.reliefMinZ + tj * size), size * k, size * k);
     }
     if (missing && !detailTimer) detailTimer = setTimeout(() => { detailTimer = 0; if (isOpen() && current === 'map') renderMap(); }, 16);
     return shown.flatMap(({ t }) => t.objects);
-  }
-
-  // The playable area and its relief, drawn once per world: terrain, path and
-  // objects (a rectangle: further north than wide). Beyond, the continent's image.
-  function* buildBase(data, continent) {
-    const x0 = -data.relief, z0 = -data.reliefNorth;
-    const sizeX = Math.round(2 * data.relief * PX_PER_M), sizeZ = Math.round((data.relief + data.reliefNorth) * PX_PER_M);
-    const image = el('canvas', { width: sizeX, height: sizeZ });
-    const ctx = image.getContext('2d');
-    const pixels = ctx.createImageData(sizeX, sizeZ);
-    const lake = data.lake, village = data.village, ruins = data.ruins;
-    const forest = data.forest, cave = data.cave, castle = data.castle, north = data.north;
-    // The ground's height at every pixel, looked up once (the slopes and the
-    // shading below read their neighbors here: 1 px per meter).
-    const heights = new Float32Array(sizeX * sizeZ);
-    for (let py = 0; py < sizeZ; ++py) {
-      for (let px = 0; px < sizeX; ++px) heights[py * sizeX + px] = heightAt(data, x0 + (px + 0.5) / PX_PER_M, z0 + (py + 0.5) / PX_PER_M);
-      if (py % 64 === 63) yield;
-    }
-    const H = (px, py) => heights[Math.min(sizeZ - 1, Math.max(0, py)) * sizeX + Math.min(sizeX - 1, Math.max(0, px))];
-    const near = (c, rx, rz, x, z) => c && Math.abs(x - c.x) < rx && Math.abs(z - c.z) < rz;  // its outline's box
-    const step = Math.max(1, Math.round(PX_PER_M)), far = Math.max(1, Math.round(3 * PX_PER_M));
-    for (let py = 0; py < sizeZ; ++py) {
-      for (let px = 0; px < sizeX; ++px) {
-        const x = x0 + (px + 0.5) / PX_PER_M, z = z0 + (py + 0.5) / PX_PER_M;
-        const h = heights[py * sizeX + px];
-        const t = Math.min(Math.max((h + 4) / 12, 0), 1);
-        let r = 78 + 70 * t, g = 128 + 46 * t, b = 62 + 30 * t;
-        let water = 0;
-        if (near(forest, forest && forest.rx, forest && forest.rz, x, z) &&
-            outlineDistance(data, forest, forest.rx, forest.rz, forest.outline, x, z) < 1 &&
-            outlineDistance(data, forest, forest.clearing, forest.clearing, forest.clearingOutline, x, z) >= 1) {
-          r *= 0.8; g *= 0.88; b *= 0.8;  // darker under the trees (not in the clearing)
-        }
-        // Cliffs (the terrace's edge, the cave's spur): grey rock where the ground is steep.
-        const steep = Math.hypot(H(px + step, py) - H(px - step, py), H(px, py + step) - H(px, py - step)) * PX_PER_M / (2 * step);
-        const rock = Math.min(1, Math.max(0, (steep - 0.7) / 0.6));
-        if (steep > 0.7) { const k = rock; r += (140 - r) * k; g += (136 - g) * k; b += (132 - b) * k; }
-        if (village && Math.hypot(x - village.x, z - village.z) < 7) { r = 168; g = 142; b = 104; }
-        if (ruins && Math.max(Math.abs(x - ruins.x), Math.abs(z - ruins.z)) < 8.5) { r = 150; g = 146; b = 136; }
-        if (castle && Math.max(Math.abs(x - castle.x), Math.abs(z - castle.z)) < castle.r) { r = 156; g = 150; b = 140; }
-        // The sea where it comes in, and its beaches (not the hollows of the hills).
-        const around = Math.abs(x) > 150 || Math.abs(z) > 150 ? landAt(continent, x, z) : 0;
-        if (h < data.seaLevel + 2.5 && around < data.seaLevel + 1) { r = 214; g = 196; b = 140; }
-        const shore = h < data.seaLevel + 2.5 && around < data.seaLevel + 1;
-        if (h < data.seaLevel && around < data.seaLevel) { const k = Math.min(1, (data.seaLevel - h) / 12); r = 70 - 40 * k; g = 150 - 60 * k; b = 190 - 40 * k; water = 1; }
-        if (near(lake, lake && lake.rx * 1.05, lake && lake.rz * 1.05, x, z)) {
-          const d = outlineDistance(data, lake, lake.rx, lake.rz, lake.outline, x, z);
-          if (d < 1.04 && h > data.waterLevel - 0.05) { r = 214; g = 196; b = 140; }  // sandy shore
-          if (d < 1 && h < data.waterLevel) { const k = Math.min(1, (data.waterLevel - h) / 1.2); r = 80 - 30 * k; g = 150 - 40 * k; b = 196 - 20 * k; water = 2; }
-        }
-        // The north: snow on the mountains' slopes all year long, the frozen lake's ice.
-        if (north && z < north.frost + 120) {
-          const above = h - north.floor - north.rise * Math.max(0, north.frost - z);
-          const snow = smooth(north.frost + 120, north.frost - 120, z) * smooth(4, 30, above) * (1 - 0.6 * rock);
-          r += (236 - r) * snow; g += (240 - g) * snow; b += (248 - b) * snow;
-          if (near(north.lake ? { x: north.lake[0], z: north.lake[1] } : null, north.lakeRx * 1.05, north.lakeRz * 1.05, x, z) &&
-              outlineDistance(data, { x: north.lake[0], z: north.lake[1] }, north.lakeRx, north.lakeRz, north.lakeOutline, x, z) < 1) {
-            r = ICE[0]; g = ICE[1]; b = ICE[2];
-          }
-        }
-        if (season !== 1) {
-          const px = { r, g, b };
-          inSeason(px, water, (1 - rock) * (shore ? 0.35 : 1));
-          ({ r, g, b } = px);
-        }
-        // Light from the north-west, shading the slopes: soft (over 6 m, the
-        // little bumps smoothed away), the relief still readable.
-        const shade = 1 + 0.07 * ((H(px - far, py) - H(px + far, py)) + (H(px, py - far) - H(px, py + far)));
-        const k = Math.min(Math.max(shade, 0.78), 1.18);
-        const o = (py * sizeX + px) * 4;
-        pixels.data[o] = r * k; pixels.data[o + 1] = g * k; pixels.data[o + 2] = b * k; pixels.data[o + 3] = 255;
-      }
-      if (py % 16 === 15) yield;
-    }
-    ctx.putImageData(pixels, 0, 0);
-    const toX = (v) => (v - x0) * PX_PER_M, toZ = (v) => (v - z0) * PX_PER_M;
-
-    // The west's stream, and its road (west.hpp).
-    const line = (pts, color, width) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width * PX_PER_M;
-      ctx.lineCap = ctx.lineJoin = 'round';
-      ctx.beginPath();
-      for (let i = 0; i < pts.length; i += 2) {
-        if (i === 0) ctx.moveTo(toX(pts[i]), toZ(pts[i + 1])); else ctx.lineTo(toX(pts[i]), toZ(pts[i + 1]));
-      }
-      ctx.stroke();
-    };
-    if (data.west) {
-      // The river, as wide as it is at each place.
-      const st = data.west.stream, sw = data.west.streamW || [];
-      ctx.strokeStyle = season === 3 ? `rgba(${ICE.join(', ')}, 0.95)` : 'rgba(70, 150, 200, 0.95)';  // frozen in winter
-      ctx.lineCap = 'round';
-      for (let i = 0; i + 3 < st.length; i += 2) {
-        ctx.lineWidth = 2 * (sw[i / 2] || 2) * PX_PER_M;
-        ctx.beginPath();
-        ctx.moveTo(toX(st[i]), toZ(st[i + 1]));
-        ctx.lineTo(toX(st[i + 2]), toZ(st[i + 3]));
-        ctx.stroke();
-      }
-      line(data.west.road, 'rgba(176, 140, 96, 0.95)', 2.6);
-    }
-    // The side roads (roads.hpp), narrower.
-    if (data.roads) for (const lane of data.roads.lanes) line(lane, 'rgba(176, 140, 96, 0.9)', 1.9);
-    // The path.
-    ctx.strokeStyle = 'rgba(176, 140, 96, 0.95)';
-    ctx.lineWidth = 2.2 * PX_PER_M;
-    ctx.lineCap = ctx.lineJoin = 'round';
-    ctx.beginPath();
-    for (let i = 0; i < data.path.length; i += 2) {
-      const X = toX(data.path[i]), Y = toZ(data.path[i + 1]);
-      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
-    }
-    ctx.stroke();
-
-    drawThings(ctx, data.objects, toX, toZ, PX_PER_M);
-    return { image, x0, z0, w: sizeX / PX_PER_M, h: sizeZ / PX_PER_M };
   }
 
   let teleportTargets = [];  // where to click on the map, in teleport mode
@@ -1324,8 +1157,7 @@
   function* drawPictures(data, key) {
     const c = game.continent();
     const landImage = c.ready ? yield* buildLand(c) : null;
-    const picture = yield* buildBase(data, c.ready ? c : null);
-    return { land: c.ready ? { data: c, image: landImage } : null, base: { key, ...picture } };
+    return { land: c.ready ? { data: c, image: landImage } : null, base: { key } };
   }
   function startWarm(data) {
     const key = baseKey(data);
@@ -1396,25 +1228,11 @@
     if (land) {
       const d = land.data;
       ctx.drawImage(land.image, X(d.minX), Y(d.minZ), d.mapWidth * d.mapCell * k, d.mapHeight * d.mapCell * k);
-      // Its rivers, zoomed out (narrower than its pixels): as wide as they are, or a little more.
-      if (k < DETAIL_SCALE && d.rivers) {
-        ctx.strokeStyle = season === 3 ? `rgba(${ICE.join(', ')}, 0.95)` : 'rgba(70, 150, 200, 0.95)';
-        ctx.lineCap = ctx.lineJoin = 'round';
-        for (const r of d.rivers) {
-          for (let i = 0; i + 5 < r.length; i += 3) {
-            ctx.lineWidth = Math.max(1.2, 2 * r[i + 2] * k);
-            ctx.beginPath();
-            ctx.moveTo(X(r[i]), Y(r[i + 1]));
-            ctx.lineTo(X(r[i + 3]), Y(r[i + 4]));
-            ctx.stroke();
-          }
-        }
-      }
-      // Zoomed in: the continent's tiles in view a meter a pixel, and what grows on them.
+      // Zoomed in: the tiles in view a meter a pixel, and what is on them
+      // (anywhere: the playable world as the rest of the continent).
       if (k >= DETAIL_SCALE) things = drawDetail(ctx, d, view, cssW, cssH, X, Y, k);
     }
-    ctx.drawImage(base.image, X(base.x0), Y(base.z0), base.w * k, base.h * k);
-    if (things) drawThings(ctx, things, X, Y, k);  // (over it too: between the world's edge and the relief's)
+    if (things) drawThings(ctx, things, X, Y, k);
 
     // Where a species lives: its zones, all alike (the opacity makes them blink).
     if (options.habitat && data.zones) {
