@@ -80,6 +80,7 @@ monstres_add_tests(monstres_unit_tests unit
   unit/test_outer_render.cpp
   unit/test_roam.cpp
   unit/test_rivers.cpp
+  unit/test_water.cpp
   unit/test_coherence.cpp
   unit/test_seasons.cpp
   unit/test_sounds.cpp

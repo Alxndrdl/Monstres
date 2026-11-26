@@ -123,7 +123,7 @@ TEST_CASE("only the shadow, smoke, ripples, sparks, gusts, the rune circle, wate
     if (!model_name(mesh)) continue;
     CAPTURE(model_name(mesh));
     const bool expected = mesh == MeshId::Shadow || mesh == MeshId::Smoke || mesh == MeshId::Ripple ||
-                          mesh == MeshId::Sparkle || mesh == MeshId::RuneCircle || mesh == MeshId::RainShaft ||
+                          mesh == MeshId::Sparkle || mesh == MeshId::Bubble || mesh == MeshId::RuneCircle || mesh == MeshId::RainShaft ||
                           mesh == MeshId::Bolt || mesh == MeshId::Rain || mesh == MeshId::Snow || mesh == MeshId::DoorGlow ||
                           mesh == MeshId::Gust || mesh == MeshId::FallsBand;
     CHECK(models()[id].transparent == expected);

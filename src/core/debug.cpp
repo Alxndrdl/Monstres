@@ -1,6 +1,7 @@
 #include "monstres/core/debug.hpp"
 
 #include "monstres/core/north.hpp"
+#include "monstres/core/water.hpp"
 
 #include "monstres/core/battle.hpp"
 #include "monstres/core/continent.hpp"
@@ -110,7 +111,8 @@ std::string to_json(const World& w) {
        ",\"ground\":" + num(w.ground.height(p.pos.x, p.pos.z)) +  // height of the ground under it
        ",\"zone\":\"" + zone_name(zone_at(w, p.pos.x, p.pos.z)) + "\"" +
        ",\"onGround\":" + (p.on_ground ? "true" : "false") +
-       ",\"facingX\":" + num(p.facing_x) + ",\"facingZ\":" + num(p.facing_z);
+       ",\"facingX\":" + num(p.facing_x) + ",\"facingZ\":" + num(p.facing_z) +
+       ",\"swimming\":" + (swimming(w) ? "true" : "false") + ",\"diving\":" + (diving(w) ? "true" : "false");
   // Inside (interior.hpp): where it is, and on the map where it went in.
   static const char* kPlaces[] = {"outside", "cave", "house", "tower", "burrow", "hollowTree", "lighthouse", "mine", "temple"};
   static_assert(std::size(kPlaces) == static_cast<size_t>(PlaceKind::Count));
@@ -298,7 +300,7 @@ const char* object_kind_name(ObjectKind kind) {
                                  "chalet", "mineEntrance", "minecart", "larch", "stoneWall", "cairn", "hotSpring", "mineProp",
                                  "arena", "grotto", "shrine", "bench", "stall",
                                  "pier", "boat", "fishRack", "abbeyWall", "abbeyGate", "temple", "belfry", "dorter",
-                                 "gravestone", "chapel", "crane", "block", "beehive", "dolmen", "wreck", "aqueduct"};
+                                 "gravestone", "chapel", "crane", "block", "beehive", "dolmen", "wreck", "aqueduct", "seaweed"};
   static_assert(std::size(kNames) == static_cast<size_t>(ObjectKind::Count));
   const auto i = static_cast<size_t>(kind);
   return i < std::size(kNames) ? kNames[i] : "?";
@@ -969,6 +971,9 @@ std::string team_json(const World& w) {
     if (i) s += ',';
     s += "{\"slot\":" + std::to_string(i) + ",\"species\":\"" + species_name(m.species) + "\"";
     s += std::string(",\"active\":") + (static_cast<int>(i) == w.active ? "true" : "false");
+    // Under water (water.hpp): only an aquatic one comes out.
+    s += std::string(",\"aquatic\":") + (aquatic(m.species) ? "true" : "false");
+    s += std::string(",\"comesOut\":") + (may_come_out(w, i) ? "true" : "false");
     s += ",\"level\":" + std::to_string(m.level) + ",\"xp\":" + std::to_string(m.xp);
     s += ",\"xpToNext\":" + std::to_string(monster_xp_to_next(m.level));
     s += ",\"hp\":" + std::to_string(m.hp) + ",\"maxHp\":" + std::to_string(st.hp);

@@ -229,6 +229,7 @@ enum class EngageCheck : uint8_t {
   KnockedOut,   // already beaten, it lies there
   Owned,        // someone's (Mirabelle's Piou, back with her; a trainer's)
   CompanionDown,  // the monster out is knocked out
+  Underwater,     // under water (water.hpp): only an aquatic monster fights there
 };
 EngageCheck can_engage(const World& world, size_t index);
 const char* engage_check_name(EngageCheck check);
@@ -313,7 +314,8 @@ struct Steer {
 
 // Fish do not move during a battle (in the lake): they bite only what comes
 // close, and throw.
-bool holds_its_place(Species species);
+// A fish at the surface keeps its place (not one deep under water: it swims after its foe).
+bool holds_its_place(const World& world, const Creature& creature);
 
 // Summon team[slot] out of the staff's crystal, where the companion was (it
 // goes back in), or next to the player. If it is the one out: recalled

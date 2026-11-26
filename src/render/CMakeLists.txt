@@ -1,7 +1,7 @@
 # monstres_render: turns the world into lists of things to draw, loads the
 # model files, builds the terrain meshes. No OpenGL here, so it is testable
 # natively.
-add_library(monstres_render STATIC draw_plan.cpp scene.cpp models.cpp terrain_mesh.cpp far_terrain.cpp characters.cpp cull.cpp landscape.cpp weather_view.cpp intro.cpp interior_mesh.cpp outer_mesh.cpp)
+add_library(monstres_render STATIC draw_plan.cpp scene.cpp models.cpp terrain_mesh.cpp far_terrain.cpp characters.cpp cull.cpp landscape.cpp weather_view.cpp intro.cpp interior_mesh.cpp outer_mesh.cpp water_mesh.cpp)
 target_include_directories(monstres_render PUBLIC include)
 target_include_directories(monstres_render SYSTEM PRIVATE "${cgltf_SOURCE_DIR}")
 target_link_libraries(monstres_render PUBLIC monstres_core)

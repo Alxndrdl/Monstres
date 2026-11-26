@@ -7,6 +7,7 @@
 #include "monstres/core/quests.hpp"
 #include "monstres/core/north.hpp"
 #include "monstres/core/west.hpp"
+#include "monstres/core/water.hpp"
 
 #include "monstres/render/characters.hpp"
 #include "monstres/render/terrain_mesh.hpp"
@@ -189,6 +190,7 @@ MeshId mesh_for(const Object& o) {
     case ObjectKind::Dolmen: return MeshId::Dolmen;
     case ObjectKind::Wreck: return MeshId::Wreck;
     case ObjectKind::Aqueduct: return MeshId::Aqueduct;
+    case ObjectKind::Seaweed: return MeshId::Seaweed;
     default:                return MeshId::Crate;
   }
 }
@@ -525,6 +527,32 @@ void add_shield(const World& w, float time, DrawList& list) {
     ring_at.species = Species::Villager;
     ring_at.body = p;
     add_ring(list, w, ring_at, 0.9f + 0.7f * (1 - flash), {1.4f, 1.8f, 2.2f, flash});
+  }
+}
+
+// Under water (water.hpp): the magician's pocket of air, a bubble around it,
+// shimmering; little bubbles rising from it to the surface.
+void add_air_pocket(const World& w, float time, DrawList& list) {
+  const Body& p = w.player;
+  const float mid = p.pos.y + rules::kPlayerHeight * 0.55f;
+  Instance pocket;  // round, breathing a little
+  pocket.x = p.pos.x;
+  pocket.y = mid;
+  pocket.z = p.pos.z;
+  pocket.sx = pocket.sz = 0.95f + 0.03f * std::sin(time * 2.3f);
+  pocket.sy = 1.0f + 0.03f * std::sin(time * 2.3f + 1.2f);
+  pocket.rotation = quat_yaw(time * 0.3f);
+  pocket.tint = {0.8f, 1.1f, 1.25f, 0.22f};
+  add(list, MeshId::Bubble, pocket);
+  WaterSpot ws;
+  if (!water_at(w, p.pos.x, p.pos.z, ws)) return;
+  const float rise = std::max(0.5f, ws.level - mid);
+  for (int k = 0; k < 7; ++k) {
+    const float u = std::fmod(time * 0.35f + static_cast<float>(k) * 0.37f, 1.0f);
+    const float a = kTau * rand01(w.seed, 21, static_cast<uint64_t>(k)) + time * 1.5f;
+    const float r = 0.3f + 0.4f * rand01(w.seed, 22, static_cast<uint64_t>(k));
+    add_spark(list, p.pos.x + std::cos(a) * r, mid + 0.6f + rise * u, p.pos.z + std::sin(a) * r, 0.05f + 0.03f * u,
+              {1.4f, 1.8f, 2.0f, 1}, 0.55f * (1 - u * u), a);
   }
 }
 
@@ -1042,6 +1070,7 @@ void add_battle_effects(const World& w, float time, DrawList& list) {
   add_victory_effects(w, time, list);
   add_spell_effects(w, time, list);
   if (b.phase == BattlePhase::Training && !w.creatures.empty()) add_shield(w, time, list);
+  if (diving(w)) add_air_pocket(w, time, list);
   const bool training = b.phase == BattlePhase::Training;
   if ((b.phase != BattlePhase::Fight && b.phase != BattlePhase::Prepare && !training) || w.creatures.empty()) return;
   const Creature& ally = w.creatures[0];
@@ -2109,6 +2138,28 @@ View build_view_from(const World& w, Vec3 eye, Vec3 target, float aspect, float 
   v.fade_tree_end = landscape::kTreeFadeEnd;
   if (inside(w)) interior_light(w, time, v);
   return v;
+}
+
+bool under_water_view(const World& w, View& v) {
+  WaterSpot ws;
+  if (inside(w) || !water_at(w, v.camera_x, v.camera_z, ws) || frozen(w, ws) || v.camera_y > ws.level - 0.05f) return false;
+  // Darker the deeper, and at night.
+  const float day = 1 - 0.8f * v.night;
+  const float deep = std::clamp((ws.level - v.camera_y) / 25.0f, 0.0f, 1.0f);
+  const float k = day * (1 - 0.55f * deep);
+  const Color water{0.07f * k, 0.30f * k, 0.36f * k, 1};
+  v.fog = water;
+  v.fog_start = 0.5f;
+  v.fog_half = 7.0f;
+  v.fog_end = 48.0f;
+  v.sky = false;
+  v.fill = true;
+  v.background = water;
+  v.cloud_cover = 0;
+  v.ambient_sky = {0.30f * k, 0.52f * k, 0.58f * k, 1};
+  v.ambient_ground = {0.16f * k, 0.30f * k, 0.30f * k, 1};
+  v.light_color = {v.light_color.r * 0.55f, v.light_color.g * 0.8f, v.light_color.b * 0.85f, 1};
+  return true;
 }
 
 }  // namespace monstres

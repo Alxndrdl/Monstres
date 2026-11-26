@@ -11,6 +11,7 @@
 #include "monstres/core/routines.hpp"
 #include "monstres/core/sites.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/water.hpp"
 #include "monstres/core/west.hpp"
 
 #include <algorithm>
@@ -176,20 +177,8 @@ bool steep_here(const World& w, float x, float z) {
 }  // namespace
 
 bool under_water(const World& w, float x, float z, float margin) {
-  if (w.ground.empty()) return false;
-  const float g = w.ground.height(x, z);
-  float level = 0, width = 0;
-  if (w.west.valid() && river_surface(w.west, x, z, g, 16.0f, level, width) < width + 2.0f && g < level + margin) return true;
-  if (in_lake(w.village.lake, x, z, margin)) return true;
-  // The sea, drawn over squares where some of the relief is the sea
-  // (build_water_mesh): around there, the ground below its level is under it.
-  if (g >= rules::kSeaLevel + margin) return false;
-  for (float dx = -8; dx <= 8; dx += 8) {
-    for (float dz = -8; dz <= 8; dz += 8) {
-      if (w.ground.sea(x + dx, z + dz)) return true;
-    }
-  }
-  return false;
+  WaterSpot spot;
+  return water_at(w, x, z, spot, margin);  // (water.hpp: all the waters alike)
 }
 
 namespace {
@@ -570,6 +559,54 @@ void generate_wilds(World& w) {
       add_log_pieces(w.objects, o);
     }
   }
+  // The bottom of the water (water.hpp: the sea, the lakes, the deep
+  // rivers): seaweed in clumps, rocks here and there (beyond the world's
+  // edge, the continent's: outer.hpp).
+  {
+    Rng bed(w.seed ^ 0x5345414245443031ULL, 7);  // "SEABED01": its own stream
+    constexpr float kBed = 4.0f;
+    const float half = rules::kReliefHalfSize - 2.0f, north = rules::kReliefNorth - 2.0f;
+    const int nx = static_cast<int>(2 * half / kBed), nz = static_cast<int>((half + north) / kBed);
+    for (int i = 0; i < nx; ++i) {
+      for (int j = 0; j < nz; ++j) {
+        const float x = -half + kBed * (static_cast<float>(i) + random_range(bed, 0.1f, 0.9f));
+        const float z = -north + kBed * (static_cast<float>(j) + random_range(bed, 0.1f, 0.9f));
+        const float roll = random_range(bed, 0.0f, 1.0f), s1 = random_range(bed, 0.0f, 1.0f), s2 = random_range(bed, 0.0f, 1.0f);
+        const auto yaw = static_cast<Angle16>(bed.below(65536));
+        const auto variant = static_cast<uint8_t>(bed.below(256));
+        if (rules::world_inset(x, z) <= -3.0f || in_west_place(w.west, x, z, 1.0f) || in_site(w.sites, x, z, 1.0f)) continue;
+        WaterSpot ws;
+        if (!water_at(w, x, z, ws) || ws.depth() < 1.2f) continue;
+        const float patches = value_noise(w.seed + 4700, x, z, 30.0f);
+        const float weed = 0.08f + 0.55f * std::clamp((patches - 0.45f) / 0.2f, 0.0f, 1.0f);
+        if (roll >= weed + 0.05f) continue;
+        Object o;
+        o.yaw = yaw;
+        o.variant = variant;
+        if (roll < 0.05f && !in_lake(w.village.lake, x, z, 2.0f)) {  // (the village's lake: its seaweed only)
+          o.kind = ObjectKind::Rock;
+          o.size = {0.4f + 0.9f * s1, 0.3f + 0.7f * s2, 0.4f + 0.9f * s2};
+          o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
+        } else {
+          o.kind = ObjectKind::Seaweed;
+          o.size = {0.7f + 0.8f * s1, std::min(ws.depth() - 0.3f, 0.8f + 1.6f * s2), 0};
+        }
+        o.pos = {x, ws.ground - 0.05f, z};
+        if (o.kind == ObjectKind::Rock) {  // not on a slope too steep for it
+          const Box e = object_extent(o);
+          float lowest = ws.ground;
+          for (float cx : {e.min.x, e.max.x}) {
+            for (float cz : {e.min.z, e.max.z}) lowest = std::min(lowest, w.ground.height(cx, cz));
+          }
+          if (ws.ground - lowest > 0.6f * (e.max.y - e.min.y) + 0.1f || steep_here(w, x, z)) continue;
+        }
+        const Box b = o.kind == ObjectKind::Rock ? footprint(o) : Box{{x - 0.3f, 0, z - 0.3f}, {x + 0.3f, 0, z + 0.3f}};
+        if (grid.overlaps_any(b)) continue;
+        w.objects.push_back(o);
+        grid.add(o);
+      }
+    }
+  }
   settle_objects(w, first);
   w.wild_objects = static_cast<uint32_t>(w.objects.size() - first);
   fit_edge(w);
@@ -598,16 +635,29 @@ struct Surroundings {
     near(area, [&](const Box& b) { hit = hit || overlaps(area, b); });
     return hit;
   }
+
+  // The ground, or the ice over the water (water.hpp: frozen, walked on).
+  float floor(float x, float z) const { return interior ? ground.height(x, z) : floor_height(world, x, z); }
 };
 
-enum class Medium { Land, Water, Air };  // Air: a flyer, over the lake too
+// Land: walkers (the water stops them, but a few steps into it); Water: a
+// fish on the lake's surface; Air: a flyer, over the water too; Diver: the
+// magician on foot (into the water as it likes); Swim: swimming, getting
+// out onto a low bank; Aquatic: a wild swimmer (it stays in the water).
+enum class Medium { Land, Water, Air, Diver, Swim, Aquatic };
 
 bool wrong_medium(const Surroundings& s, const Body& b, const BodyShape& shape, Medium medium) {
-  if (medium == Medium::Air) return false;
+  if (medium == Medium::Air || medium == Medium::Diver || medium == Medium::Swim) return false;
   if (medium == Medium::Water) return !in_lake(s.lake, b.pos.x, b.pos.z, -(shape.half_width + 0.6f));
-  // The lake, and the sea (the ground below its level: a few steps into the waves, no more).
-  if (in_lake(s.lake, b.pos.x, b.pos.z, shape.half_width * 0.5f)) return true;
-  if (!(s.ground.height(b.pos.x, b.pos.z) < rules::kSeaLevel - 0.3f && s.ground.sea(b.pos.x, b.pos.z))) return false;
+  if (s.interior) return false;
+  // (A world made by hand, no ground: its lake is all there is.)
+  if (s.world.ground.empty()) return medium == Medium::Land && in_lake(s.lake, b.pos.x, b.pos.z, shape.half_width * 0.5f);
+  WaterSpot ws;
+  const bool wet = water_at(s.world, b.pos.x, b.pos.z, ws) && !frozen(s.world, ws);
+  if (medium == Medium::Aquatic) return !wet || ws.depth() < shape.height + 0.3f;
+  // The lakes and the sea (a few steps into them, no more), a river too deep to wade.
+  if (!wet || ws.depth() < (ws.kind == WaterKind::River ? 1.0f : 0.3f)) return false;
+  if (ws.kind != WaterKind::Sea) return true;
   // Over the sea: only on a deck (a pier's), standing on it.
   if (b.pos.y < rules::kSeaLevel + 0.2f) return true;
   const float hw = shape.half_width;
@@ -637,7 +687,7 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
   // if there is room on top.
   const float y0 = b.pos.y;
   bool stepped = false;
-  if (medium == Medium::Land && b.on_ground) {
+  if ((medium == Medium::Land || medium == Medium::Diver) && b.on_ground) {
     float top = b.pos.y;
     bool low = false, high = false;
     s.near(area, [&](const Box& ob) {
@@ -664,9 +714,10 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
   *coord = axis == 0 ? rules::clamp_reach_x(*coord, h) : rules::clamp_reach_z(*coord, h);
   // Walkers cannot go up a slope steeper than kMaxWalkSlope (but can jump
   // onto it: the ground then is below their feet).
-  const bool too_steep = medium == Medium::Land &&
-                         s.ground.height(b.pos.x, b.pos.z) - b.pos.y >
-                             std::fabs(*coord - start) * rules::kMaxWalkSlope + kStepUp;
+  const float rise = s.floor(b.pos.x, b.pos.z) - b.pos.y;
+  const bool too_steep = ((medium == Medium::Land || medium == Medium::Diver) &&
+                          rise > std::fabs(*coord - start) * rules::kMaxWalkSlope + kStepUp) ||
+                         ((medium == Medium::Swim || medium == Medium::Aquatic) && rise > rules::kSwimClimb);
   // Inside: the walls (a body against one may still move away from it). The
   // floor curves up into them: walkers keep a little away.
   bool walled = false;
@@ -690,7 +741,7 @@ void move_axis(const Surroundings& s, Body& b, const BodyShape& shape, int axis,
 void move_vertical(const Surroundings& s, Body& b, const BodyShape& shape, float part = 1.0f) {  // walkers only
   const float previous_y = b.pos.y;
   const bool was_on_ground = b.on_ground;
-  const float ground = s.ground.height(b.pos.x, b.pos.z);
+  const float ground = s.floor(b.pos.x, b.pos.z);
   b.pos.y += b.velocity_y * rules::kDt * part;
   b.on_ground = false;
   // On the ground, or walking down a slope (not jumping): follow the ground.
@@ -719,7 +770,7 @@ void move_vertical(const Surroundings& s, Body& b, const BodyShape& shape, float
 
 // One tick of walking and jumping. (dir_x, dir_z) has a length of at most 1.
 void move_body(const Surroundings& s, Body& b, const BodyShape& shape, float dir_x, float dir_z,
-               float speed, bool jump, float jump_speed) {
+               float speed, bool jump, float jump_speed, Medium medium = Medium::Land) {
   const float len2 = dir_x * dir_x + dir_z * dir_z;
   if (len2 > 0.0f) {
     const float len = std::sqrt(len2);
@@ -734,13 +785,68 @@ void move_body(const Surroundings& s, Body& b, const BodyShape& shape, float dir
   const float step = std::sqrt(len2) * speed * rules::kDt;
   const int steps = step > 0.35f ? static_cast<int>(std::ceil(step / 0.35f)) : 1;
   for (int k = 0; k < steps; ++k) {
-    move_axis(s, b, shape, 0, dir_x * speed * rules::kDt / static_cast<float>(steps));
-    move_axis(s, b, shape, 2, dir_z * speed * rules::kDt / static_cast<float>(steps));
+    move_axis(s, b, shape, 0, dir_x * speed * rules::kDt / static_cast<float>(steps), medium);
+    move_axis(s, b, shape, 2, dir_z * speed * rules::kDt / static_cast<float>(steps), medium);
     if (steps > 1 && k + 1 < steps) move_vertical(s, b, shape, 1.0f / static_cast<float>(steps));
   }
   move_vertical(s, b, shape, steps > 1 ? 1.0f / static_cast<float>(steps) : 1.0f);
   const float dx = b.pos.x - x0, dz = b.pos.z - z0;
   b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
+}
+
+// One tick swimming (water.hpp): across as walking (objects stop it; out
+// onto a bank no higher than rules::kSwimClimb), up or down at `rise` m/s
+// (reached smoothly), never above `top` (up at the surface) unless leaping
+// out (`leap`: the jump, up at the surface), never into the ground.
+void swim(const Surroundings& s, Body& b, const BodyShape& shape, float dir_x, float dir_z, float speed, float rise,
+          float top, bool leap, Medium medium) {
+  const float len2 = dir_x * dir_x + dir_z * dir_z;
+  if (len2 > 0.0f) {
+    const float len = std::sqrt(len2);
+    b.facing_x = dir_x / len;
+    b.facing_z = dir_z / len;
+  }
+  const float x0 = b.pos.x, z0 = b.pos.z;
+  const float step = std::sqrt(len2) * speed * rules::kDt;
+  const int steps = step > 0.35f ? static_cast<int>(std::ceil(step / 0.35f)) : 1;
+  for (int k = 0; k < steps; ++k) {
+    move_axis(s, b, shape, 0, dir_x * speed * rules::kDt / static_cast<float>(steps), medium);
+    move_axis(s, b, shape, 2, dir_z * speed * rules::kDt / static_cast<float>(steps), medium);
+  }
+  const float accel = rules::kSwimAccel * rules::kDt;
+  const bool leaping = leap && b.pos.y >= top - 0.05f;
+  if (leaping) {
+    b.velocity_y = rules::kJumpSpeed * 0.8f;  // out of the water: onto a pier, a bank
+  } else {
+    b.velocity_y += std::clamp(rise - b.velocity_y, -accel * 2.0f, accel);
+  }
+  move_vertical(s, b, shape);
+  if (!leaping && b.pos.y > top) {
+    b.pos.y = std::max(top, s.floor(b.pos.x, b.pos.z));
+    b.velocity_y = std::min(b.velocity_y, 0.0f);
+  }
+  const float dx = b.pos.x - x0, dz = b.pos.z - z0;
+  b.speed = std::sqrt(dx * dx + dz * dz) / rules::kDt;
+}
+
+// The vertical speed a swimmer takes to reach `target_y` (from `y`).
+float rise_towards(float y, float target_y) {
+  return std::clamp((target_y - y) * 2.0f, -rules::kSwimSink * 1.5f, rules::kSwimRise);
+}
+
+// The magician: walking, wading (slower), or swimming (water.hpp): sinking,
+// rising while the jump is held (`rise`), up at the surface its head out.
+void move_player(const Surroundings& s, Body& b, float dir_x, float dir_z, float speed, bool jump, bool rise) {
+  WaterSpot ws;
+  const bool wet = !s.interior && water_at(s.world, b.pos.x, b.pos.z, ws) && !frozen(s.world, ws);
+  const float over = wet ? ws.level - b.pos.y : 0.0f;
+  if (!wet || over < rules::kSwimFrom || ws.depth() < rules::kSwimFrom) {
+    const float slow = wet && over > 0.15f ? rules::kWadeSlow : 1.0f;
+    move_body(s, b, kPlayerShape, dir_x, dir_z, speed * slow, jump, rules::kJumpSpeed, Medium::Diver);
+    return;
+  }
+  swim(s, b, kPlayerShape, dir_x, dir_z, speed * rules::kSwimSpeed / rules::kWalkSpeed,
+       rise ? rules::kSwimRise : -rules::kSwimSink, ws.level - rules::kFloatDepth, jump, Medium::Swim);
 }
 
 // ---- Creatures ---------------------------------------------------------------
@@ -771,7 +877,7 @@ constexpr SpeciesInfo kSpecies[] = {
 // stops a fish swimming in the air, not a crow (`over_water`): it flies above
 // the water.
 void move_flyer(const Surroundings& s, Body& b, const BodyShape& shape, float dir_x, float dir_z, float speed,
-                float hover, bool over_water) {
+                float hover, bool over_water, Medium walk = Medium::Land) {
   const float len2 = dir_x * dir_x + dir_z * dir_z;
   if (len2 > 0.0f) {
     const float len = std::sqrt(len2);
@@ -779,7 +885,7 @@ void move_flyer(const Surroundings& s, Body& b, const BodyShape& shape, float di
     b.facing_z = dir_z / len;
   }
   const float x0 = b.pos.x, z0 = b.pos.z;
-  const Medium medium = over_water ? Medium::Air : Medium::Land;
+  const Medium medium = over_water ? Medium::Air : walk;
   move_axis(s, b, shape, 0, dir_x * speed * rules::kDt, medium);
   move_axis(s, b, shape, 2, dir_z * speed * rules::kDt, medium);
   // Over the lake: above the water, not its bed.
@@ -890,16 +996,45 @@ void step_companion(World& w, const Surroundings& boxes, Creature& c) {
   const float own_up = b.pos.y - w.ground.height(b.pos.x, b.pos.z);
   bool jump = b.on_ground && (c.timer >= 8 || (player_up > own_up + 0.4f && player_distance < 2.5f));
   if (jump) c.timer = 0;
+  // An aquatic one in the water: it swims after the magician, at its depth (water.hpp).
+  if (WaterSpot ws; aquatic(c.species) && submerged(w, b, info.shape, &ws)) {
+    const float target_y = std::max(p.pos.y + 0.3f, w.ground.height(b.pos.x, b.pos.z));
+    swim(boxes, b, info.shape, dir_x, dir_z, speed, rise_towards(b.pos.y, target_y), ws.level - 0.6f * info.shape.height,
+         false, Medium::Swim);
+    c.timer = 0;
+    return;
+  }
+  const Medium walk = aquatic(c.species) ? Medium::Diver : Medium::Land;  // into the water, as the magician
   if (const float hover = companion_hover(c.species); hover > 0) {
-    move_flyer(boxes, b, info.shape, dir_x, dir_z, speed, hover, flies(c.species));
+    move_flyer(boxes, b, info.shape, dir_x, dir_z, speed, hover, flies(c.species), walk);
     return;
   }
   if (c.species == Species::Slime && speed > 0) {  // a slime follows by hopping
     jump = jump || b.on_ground;
     if (b.on_ground) speed = 0;
   }
-  move_body(boxes, b, info.shape, dir_x, dir_z, speed, jump, info.jump_speed);
+  move_body(boxes, b, info.shape, dir_x, dir_z, speed, jump, info.jump_speed, walk);
   c.timer = (speed > 0 && b.on_ground && b.speed < 0.3f * speed) ? static_cast<uint16_t>(c.timer + 1) : 0;
+}
+
+// The magician going under water: a monster out that is not aquatic goes
+// back into the crystal; it comes out again once the magician has been
+// back on dry land a moment (water.hpp).
+void shore_companion(World& w) {
+  const bool wet = swimming(w);
+  w.ashore.dry_ticks = wet ? 0 : static_cast<uint16_t>(std::min<int>(w.ashore.dry_ticks + 1, 60000));
+  if (wet && w.active >= 0 && !w.creatures.empty() && !aquatic(w.team[static_cast<size_t>(w.active)].species)) {
+    const Monster& out = w.team[static_cast<size_t>(w.active)];
+    w.went_in = {w.tick, false, out.species, out.genes, w.creatures[0].body};
+    w.ashore.slot = w.active;
+    w.active = -1;
+    w.creatures[0].mind = Mind::Idle;
+  }
+  if (!wet && w.ashore.slot >= 0 && w.ashore.dry_ticks >= rules::kAshoreTicks) {
+    const auto slot = static_cast<size_t>(w.ashore.slot);
+    w.ashore.slot = -1;
+    if (w.active < 0 && slot < w.team.size()) summon(w, slot);
+  }
 }
 
 void step_wild(World& w, const Surroundings& boxes, Creature& c) {
@@ -1184,6 +1319,46 @@ void step_fish(World& w, const Surroundings& s, Creature& c) {
       b.on_ground = true;  // back in the water
     }
   }
+}
+
+// A wild monster under water (water.hpp): it swims from place to place
+// around its home, at any depth, keeping away from the bottom and the
+// surface; now and then it rests.
+void step_swimmer(World& w, const Surroundings& s, Creature& c) {
+  const SpeciesInfo& info = species_info(c.species);
+  Body& b = c.body;
+  WaterSpot here;
+  submerged(w, b, info.shape, &here);
+  float dir_x = 0, dir_z = 0, speed = 0;
+  if (c.mind == Mind::Wander) {
+    const float d = direction_to(b.pos.x, b.pos.z, c.target, dir_x, dir_z);
+    if ((d < 0.5f && std::fabs(b.pos.y - c.target_y) < 0.6f) || c.timer == 0) {
+      c.mind = Mind::Idle;
+      c.timer = static_cast<uint16_t>(rules::kTicksPerSecond + w.rng.below(4 * rules::kTicksPerSecond));
+    } else {
+      --c.timer;
+      speed = std::max(info.walk_speed, 1.2f);
+    }
+  } else if (c.timer > 0) {
+    --c.timer;
+  } else {
+    // Somewhere else in the water, not far from home.
+    for (int attempt = 0; attempt < 6; ++attempt) {
+      const float x = c.home.x + random_range(w.rng, -12.0f, 12.0f), z = c.home.z + random_range(w.rng, -12.0f, 12.0f);
+      WaterSpot ws;
+      if (!water_at(w, x, z, ws) || frozen(w, ws) || ws.depth() < info.shape.height + 1.0f) continue;
+      c.target = {x, z};
+      const float low = ws.ground + 0.4f, high = ws.level - info.shape.height - 0.4f;
+      c.target_y = low + (high - low) * random_range(w.rng, 0.0f, 1.0f);
+      c.mind = Mind::Wander;
+      c.timer = static_cast<uint16_t>(8 * rules::kTicksPerSecond);
+      break;
+    }
+  }
+  const float target_y = c.mind == Mind::Wander ? c.target_y : b.pos.y;
+  swim(s, b, info.shape, dir_x, dir_z, speed, rise_towards(b.pos.y, target_y), here.level - info.shape.height - 0.2f,
+       false, Medium::Aquatic);
+  if (speed > 0 && b.speed < 0.2f * speed) c.timer = 0;  // in the way of something: elsewhere
 }
 
 }  // namespace
@@ -1510,6 +1685,32 @@ void populate_cell(World& w, int index) {
     c.timer = timer;
     finish(c, Zone::Lake);
     ++fish;
+  }
+
+  // Under water (water.hpp: the sea, the lakes, a deep river): Bloup and
+  // Ploufi among the seaweed, at any depth (their own draws: the others stay the same).
+  {
+    Rng deep(w.seed ^ 0x554E444552534541ULL, cell_stream(index) * 65536u + w.population.visits[k]);  // "UNDERSEA"
+    for (int attempt = 0, swimmers = 0; attempt < 8 && swimmers < 4; ++attempt) {
+      float x = 0, z = 0;
+      x = random_range(deep, x0, x0 + rules::kPopulationCell);
+      z = random_range(deep, z0, z0 + rules::kPopulationCell);
+      const uint32_t roll = deep.below(100), which = deep.below(100);
+      const float height = random_range(deep, 0.0f, 1.0f);
+      const uint16_t timer = static_cast<uint16_t>(deep.below(3 * rules::kTicksPerSecond));
+      WaterSpot ws;
+      if (roll >= 45 || !rules::in_world(x, z, 3.0f) || near_player(w, x, z, rules::kMonsterSpawnMinDistance)) continue;
+      if (!water_at(w, x, z, ws) || frozen(w, ws) || ws.depth() < 2.5f || in_lake(w.village.lake, x, z, 1.0f)) continue;
+      Creature c;
+      c.species = which < 65 ? Species::Fish : Species::Axolotl;
+      const BodyShape& shape = species_info(c.species).shape;
+      c.body.pos = {x, ws.ground + 0.4f + (ws.depth() - shape.height - 0.8f) * height, z};
+      c.body.on_ground = false;
+      c.timer = timer;
+      if (inside_any_object(w, c.body, shape)) continue;
+      finish(c, ws.kind == WaterKind::Sea ? Zone::Coast : ws.kind == WaterKind::River ? Zone::River : Zone::Lake);
+      ++swimmers;
+    }
   }
 
   // Crows, on the roofs and towers of the square.
@@ -2471,7 +2672,7 @@ std::vector<Vec3> crow_perches(const World& w) {
 }
 
 bool is_round(ObjectKind kind) {
-  return kind == ObjectKind::Tree || kind == ObjectKind::Pine || kind == ObjectKind::Stump ||
+  return kind == ObjectKind::Tree || kind == ObjectKind::Pine || kind == ObjectKind::Stump || kind == ObjectKind::Seaweed ||
          kind == ObjectKind::Bush || kind == ObjectKind::HouseHut || kind == ObjectKind::Well ||
          kind == ObjectKind::Barrel || kind == ObjectKind::Lamp || kind == ObjectKind::Tower ||
          kind == ObjectKind::Pillar || kind == ObjectKind::Rubble || kind == ObjectKind::CastleTower ||
@@ -2579,6 +2780,7 @@ Box object_box(const Object& o) {
     case ObjectKind::Dolmen:       half = {2.0f, 1.0f, 1.2f}; break;
     case ObjectKind::Wreck:        half = {6.0f, 1.6f, 2.0f}; break;
     case ObjectKind::Aqueduct:     half = {0, 0, 0}; break;  // walked under (its piers: Colliders)
+    case ObjectKind::Seaweed:      half = {0, 0, 0}; break;  // swum through
     default:                half = s; break;  // Crate, Collider, Step
   }
   if (o.mount != 0) half = {0, 0, 0};  // on a wall or the ceiling: out of the way
@@ -2863,10 +3065,11 @@ void step(World& w, const Input& in) {
   // (before a trainer's battle, the magician walks to its place).
   if (phase == BattlePhase::None) {
     const float speed = rules::kWalkSpeed * (w.swift_ticks > 0 ? rules::kSwiftSpeed : 1.0f);  // the Swift spell
-    move_body(s, w.player, kPlayerShape, dir_x, dir_z, speed, in.jump, rules::kJumpSpeed);
+    move_player(s, w.player, dir_x, dir_z, speed, in.jump, in.jump || in.jump_held);
+    if (!inside(w)) shore_companion(w);
   } else {
     const Steer st = battle_prepare(w, Stand::Magician);
-    move_body(s, w.player, kPlayerShape, st.dir_x, st.dir_z, st.speed, false, 0);
+    move_player(s, w.player, st.dir_x, st.dir_z, st.speed, false, false);
   }
   std::vector<Vec3> perches, owls;
   for (size_t i = 0; i < w.creatures.size(); ++i) {
@@ -2910,16 +3113,26 @@ void step(World& w, const Input& in) {
                        : i == 0  ? battle_ally(w, in, dir_x, dir_z)
                                  : battle_foe(w, static_cast<size_t>(foe));
       const SpeciesInfo& info = species_info(c.species);
-      if (i != 0 && holds_its_place(c.species)) continue;  // in the lake
-      if (i != 0 && st.fly) {
+      if (i != 0 && holds_its_place(w, c)) continue;  // in the lake
+      WaterSpot ws;
+      const Medium walk = aquatic(c.species) ? Medium::Diver : Medium::Land;
+      if (aquatic(c.species) && submerged(w, c.body, info.shape, &ws)) {
+        // Under water (water.hpp): the companion rises while the jump is held
+        // and sinks otherwise; a foe keeps level with it, now a little above, now below.
+        const float wave = 0.6f * std::sin(static_cast<float>(w.tick % 100000) * 0.02f + static_cast<float>(i));
+        const float rise = i == 0 ? (in.jump_held ? rules::kSwimRise : -rules::kSwimSink)
+                                  : rise_towards(c.body.pos.y, (w.active >= 0 ? w.creatures[0].body.pos.y : c.body.pos.y) + wave);
+        swim(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, rise, ws.level - 0.6f * info.shape.height, false,
+             i == 0 ? Medium::Swim : Medium::Aquatic);
+      } else if (i != 0 && st.fly) {
         fly_free(s, c.body, st);
       } else if (const float hover = i == 0 ? companion_hover(c.species) : 0.0f; hover > 0) {
         move_flyer(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, hover + (steered ? w.battle.ally.lift : 0.0f),
-                   flies(c.species));
+                   flies(c.species), walk);
       } else if (c.species == Species::Slime && st.speed > 0) {  // a slime goes by hopping, steered too
         move_body(s, c.body, info.shape, st.dir_x, st.dir_z, c.body.on_ground ? 0.0f : st.speed, true, info.jump_speed);
       } else {
-        move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed);
+        move_body(s, c.body, info.shape, st.dir_x, st.dir_z, st.speed, st.jump, info.jump_speed, walk);
       }
       continue;
     }
@@ -2965,6 +3178,10 @@ void step(World& w, const Input& in) {
       // The trainer goes to its place, and watches.
       const Steer st = battle_prepare(w, Stand::Trainer);
       move_body(s, c.body, species_info(c.species).shape, st.dir_x, st.dir_z, st.speed, false, 0);
+      continue;
+    }
+    if (aquatic(c.species) && !holds_its_place(w, c) && submerged(w, c.body, species_info(c.species).shape)) {
+      step_swimmer(w, s, c);  // under water (water.hpp)
       continue;
     }
     switch (c.species) {

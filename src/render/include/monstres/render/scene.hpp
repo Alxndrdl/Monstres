@@ -118,6 +118,9 @@ float night_amount(const World& world);
 View build_view(const World& world, const Camera& camera, float aspect, float time);
 // The same from any place, looking at `target` (the arrival's flight, intro.hpp).
 View build_view_from(const World& world, Vec3 eye, Vec3 target, float aspect, float time, Vec3 up = {0, 1, 0});
+// The camera under water (water.hpp): everything seen through it, blue-green
+// and close, no sky (after the weather: it has no say down there). True if so.
+bool under_water_view(const World& world, View& view);
 
 // A portrait for the menus: one figure (see add_portrait_figure), framed
 // from a little above, lit from the front, without sky (draw it with

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monstres/core/battle.hpp"
+#include "monstres/core/water.hpp"
 #include "monstres/core/world.hpp"
 
 #include <doctest.h>
@@ -61,6 +62,13 @@ inline std::vector<std::pair<size_t, size_t>> overlapping_pairs(const std::vecto
 }
 
 // A world with no objects, for tests that place things by hand.
+// On the bottom of the water by design (water.hpp): seaweed, a rock under it.
+inline bool on_the_bottom(const World& w, const Object& o) {
+  WaterSpot ws;
+  if (o.kind != ObjectKind::Seaweed && o.kind != ObjectKind::Rock) return false;
+  return water_at(w, o.pos.x, o.pos.z, ws) && ws.depth() >= 1.0f;
+}
+
 inline World empty_world() {
   World w;
   w.rng = Rng(1);
@@ -140,6 +148,10 @@ inline void check_invariants(const World& w) {
     const BodyShape& shape = species_info(c.species).shape;
     CHECK(c.species < Species::Count);
     CHECK(rules::in_reach(c.body.pos.x, c.body.pos.z, shape.half_width - 1e-4f));
+    if (aquatic(c.species) && submerged(w, c.body, shape)) {  // under water (water.hpp), above its bottom
+      CHECK(c.body.pos.y >= w.ground.height(c.body.pos.x, c.body.pos.z) - 1e-3f);
+      continue;
+    }
     if (c.species == Species::Fish) {  // in the lake, at the surface or jumping
       CHECK(c.body.pos.y >= rules::kSwimLevel);
       CHECK(in_lake(w.village.lake, c.body.pos.x, c.body.pos.z));
@@ -147,7 +159,13 @@ inline void check_invariants(const World& w) {
     }
     CHECK(c.body.pos.y >= w.ground.height(c.body.pos.x, c.body.pos.z));
     if (c.species == Species::Crow) continue;  // flies over everything
-    CHECK_FALSE(in_lake(w.village.lake, c.body.pos.x, c.body.pos.z));
+    // Walkers: a few steps into the water at most (water.hpp).
+    // (Not the companion's place while it waits in the crystal: at the magician's side.)
+    const bool in_crystal = &c == &w.creatures.front() && w.active < 0;
+    if (WaterSpot ws; !in_crystal && c.species != Species::Axolotl && water_at(w, c.body.pos.x, c.body.pos.z, ws) && !frozen(w, ws)) {
+      CHECK(ws.depth() < 1.1f);
+    }
+    if (w.ground.empty()) CHECK_FALSE(in_lake(w.village.lake, c.body.pos.x, c.body.pos.z));
     for (const Object& o : w.objects) {
       if (far(o, c.body.pos)) continue;
       if (overlaps(body_box(c.body, shape), object_box(o))) FAIL_CHECK("creature inside the object at " << o.pos);

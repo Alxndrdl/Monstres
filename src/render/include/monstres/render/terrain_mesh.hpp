@@ -121,9 +121,7 @@ private:
 // Height of the ground: World::ground (the lake bed dips under the water).
 float ground_height(const World& world, float x, float z);
 
-// The lake surface, transparent, slightly darker towards the middle; and
-// the sea where it comes into the relief (beyond, the continent's water).
-MeshData build_water_mesh(const World& world);
+// (The water: water_mesh.hpp.)
 
 // The dirt path as a ribbon slightly above the ground, with soft
 // transparent edges and faded ends.

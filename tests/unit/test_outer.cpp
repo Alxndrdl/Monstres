@@ -81,6 +81,7 @@ TEST_CASE("nothing in the water, on a cliff, nor in the playable world (up to th
     for (const Object& o : gather(w, tiles_around(landmark(r), 3))) {
       ++seen;
       CAPTURE(o.pos);
+      if (on_the_bottom(w, o)) continue;  // seaweed, rocks (water.hpp)
       CHECK(w.ground.height(o.pos.x, o.pos.z) > rules::kSeaLevel + 0.5f);
       CHECK(rules::world_inset(o.pos.x, o.pos.z) < -2.9f);
       CHECK(w.ground.normal(o.pos.x, o.pos.z).y > 0.67f);
@@ -99,7 +100,7 @@ TEST_CASE("nothing in the water, on a cliff, nor in the playable world (up to th
         CAPTURE(o.pos);
         CHECK(rules::world_inset(o.pos.x, o.pos.z) < -2.9f);
         CHECK(distance_to_path(w.path, o.pos.x, o.pos.z) > 5.0f);
-        CHECK(distance_to_stream(w.west.stream, o.pos.x, o.pos.z) > 6.0f);
+        if (!on_the_bottom(w, o)) CHECK(distance_to_stream(w.west.stream, o.pos.x, o.pos.z) > 6.0f);
         band += rules::relief_inset(o.pos.x, o.pos.z) > 0;
       }
     }
@@ -161,6 +162,7 @@ TEST_CASE("the continent's monsters: of their region, stronger far away, the sam
       const auto a = outer_creatures(w, ti, tj, 1), b = outer_creatures(w, ti, tj, 1);
       CHECK(a == b);
       for (const Creature& c : a) {
+        if (aquatic(c.species) && submerged(w, c.body, species_info(c.species).shape)) continue;  // under water (water.hpp)
         const Region here = outer_region(w.seed, c.body.pos.x, c.body.pos.z);
         const auto kinds = outer_species(here);
         CHECK(std::find(kinds.begin(), kinds.end(), c.species) != kinds.end());

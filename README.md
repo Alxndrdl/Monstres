@@ -304,11 +304,13 @@ ni villages ni lieux), à remplir plus tard. Les noms (`regions` dans
 - leur lit est creusé dans les tuiles (`dig_rivers`) : plus profond au
   milieu, des berges qui remontent vers le sol, et une petite levée juste
   au-dessus de l'eau là où le sol est plus bas, pour que l'eau ne déborde
-  pas ;
-- en jeu : un ruban d'eau par tuile du sol proche (`build_outer_water`),
-  blanc là où l'eau tombe. Le sol proche du continent est maintenant au pas
-  de 2 m, comme celui où l'on marche. De loin, un ruban plus large sur le
-  terrain lointain. Rien ne pousse dans l'eau (ni herbe ni nature).
+  pas (sauf là où elle entre dans le lac ou la mer à leur niveau : pas de
+  digue en travers de leur eau) ;
+- en jeu : la même surface d'eau que la mer et les lacs (voir L'eau et le
+  monde sous-marin), blanche là où l'eau tombe. Le sol proche du continent
+  est au pas de 2 m, comme celui où l'on marche. De loin, un ruban plus
+  large sur le terrain lointain. Rien ne pousse dans l'eau (ni herbe ni
+  nature des berges : des algues et des rochers au fond).
 
 **La neige** (`Heightmap::snow`) : celle des versants du nord jouable
 (`north_snow`, au-dessus du fond de la vallée) continue au-delà de son
@@ -605,7 +607,86 @@ Des tests vérifient le budget :
 Il reste à faire, quand le monde s'ouvrira au continent :
 - les objets de la simulation par tuiles (le relief au-delà l'est déjà ; le
   monde jouable est encore construit en entier au chargement) ;
-- d'autres maillages indexés (les modèles, l'eau, le chemin).
+- d'autres maillages indexés (les modèles, le chemin).
+
+## L'eau et le monde sous-marin
+
+Toutes les eaux sont traitées de la même manière (`water.hpp`,
+`src/core/water.cpp`) : la mer, le lac du village, le Lac Miroir et l'eau du
+marais, le ruisseau de l'Ouest et les rivières du continent. Une seule
+fonction, `water_at`, dit si l'eau couvre un point, à quel niveau et sur quel
+fond. Là où deux eaux se rejoignent (une rivière qui entre dans le lac ou la
+mer), c'est la plus haute, et au point de rencontre leurs niveaux sont les
+mêmes. Elle sert partout : marcher et nager, ce qui pousse, les monstres, la
+carte, le dessin.
+
+**Sous l'eau** (la mer, les lacs, une rivière assez profonde), le magicien
+avance dans une poche d'air, une bulle autour de lui :
+
+- avec plus de 0,75 m d'eau sur les pieds, il nage (3,2 m/s au lieu de 5) ;
+  dans moins d'eau, il marche plus lentement (il patauge) ;
+- il coule doucement (1,4 m/s) et marche sur le fond ; le saut maintenu le
+  fait remonter (2,6 m/s), comme un monstre volant qui grimpe ;
+- à la surface, il flotte la tête hors de l'eau ; un saut l'en fait bondir
+  (sur un ponton, sur une berge). En nageant, il remonte sur une berge haute
+  de 1,3 m au plus ;
+- seuls les monstres aquatiques (Bloup, Ploufi) viennent avec lui. Un autre
+  monstre sorti retourne dans le cristal quand il entre dans l'eau, et en
+  ressort tout seul quand le magicien est de retour sur la terre ferme
+  depuis 2/3 s (`World::ashore`). Sous l'eau, les autres ne peuvent pas être
+  invoqués (icônes grisées dans la barre d'équipe) ;
+- un Bloup ou un Ploufi sorti le suit en nageant, à sa profondeur ;
+- en hiver, les lacs et les rivières gèlent : on marche sur la glace, on ne
+  plonge pas. La mer ne gèle jamais.
+
+**Au fond** : des touffes d'algues (`ObjectKind::Seaweed`, qui ondulent, on
+nage au travers) par plaques, et des rochers çà et là, partout où l'eau a
+plus de 1,2 m de profondeur. Dans le monde jouable, ils sont tirés avec la
+nature (`generate_wilds`, leur propre suite de tirages) ; au-delà, avec celle
+du continent, par tuile (`outer_objects`). Des Bloup et des Ploufi y vivent, à
+toute profondeur, là où l'eau a plus de 2,5 m (dans les carrés du monde comme
+dans les tuiles du continent, leurs propres tirages) : ils vont d'un endroit à
+l'autre autour de leur foyer, loin du fond et de la surface, et se reposent
+de temps en temps. Les poissons du lac du village restent à sa surface et en
+sautent, comme avant (le lac est maintenant creux de 3,2 m en son milieu).
+
+**Les combats sous l'eau** : seul un monstre aquatique peut s'y battre (sinon
+`EngageCheck::Underwater`, et la page explique pourquoi). Le monstre nage : le
+saut maintenu le fait monter, sinon il coule (comme le vol) ; un saut en
+bougeant reste une esquive. Les adversaires nagent à sa hauteur, tantôt un peu
+au-dessus, tantôt un peu au-dessous. Le magicien attend au fond.
+
+**Le dessin** (`water_mesh.hpp`) : une seule surface pour toutes les eaux, par
+tuiles carrées de 64 m. À chaque point de leur grille, le niveau de l'eau là
+où elle couvre le sol, et une maille plus loin que la rive (le sol la cache
+là où il monte). Une rivière qui entre dans la mer ou dans un lac rejoint donc
+leur surface au même niveau, sans ruban posé par-dessus. L'eau est claire là
+où elle est peu profonde, d'un bleu profond plus loin, blanche là où elle
+tombe (les cascades), et dessinée des deux côtés pour être vue d'en dessous.
+Autour du joueur (270 m), les tuiles sont fines (2 m, la grille du sol) ;
+plus loin sur le relief, grossières (8 m). Elles sont construites au fil des
+pas, quelques-unes par image, et dessinées en un seul maillage, avec une
+partie par tuile pour l'élimination hors champ. Le continent lointain garde
+sa mer et ses lacs dans la passe lointaine.
+
+**La vue sous l'eau** (`under_water_view`) : quand la caméra passe sous la
+surface, plus de ciel ni de météo, un brouillard bleu-vert très proche (la
+moitié à 7 m, complet à 48 m), plus sombre en profondeur et la nuit, et rien
+de lointain n'est dessiné. Autour du magicien, sa bulle d'air scintille et de
+petites bulles montent vers la surface.
+
+`test_water.cpp` vérifie :
+- que toutes les eaux sont trouvées de la même façon, et qu'une rivière
+  descend sans jamais remonter jusqu'au niveau de la mer ;
+- la plongée : couler, marcher au fond, remonter en tenant le saut, flotter
+  la tête hors de l'eau, nager plus lentement, et revenir à la rive ;
+- que seuls les monstres aquatiques suivent, et que les autres ressortent
+  sur la terre ferme ;
+- les algues et les rochers (dans le monde et au-delà), les monstres qui
+  vivent et restent sous l'eau ;
+- un combat sous l'eau (refusé sans monstre aquatique ; monter et couler) ;
+- le gel en hiver (sauf la mer) ;
+- la surface unique à l'embouchure, et la vue sous l'eau.
 
 ## Un monde vivant autour du joueur
 
@@ -616,7 +697,8 @@ joueur s'en approche (à moins de 50 m) et disparaissent quand il s'en éloigne
 d'autres monstres sont là (tirés de la graine, du carré et du nombre de
 visites). Espèces et niveaux dépendent des lieux : 1 à 3 dans la prairie, 2 à
 4 en forêt, 3 à 5 aux ruines, 4 à 6 à la grotte, 5 à 7 au château ; corbeaux
-sur les toits et les tours, poissons dans le lac. Les villageois restent au
+sur les toits et les tours, poissons dans le lac, Bloup et Ploufi sous l'eau
+(voir L'eau et le monde sous-marin). Les villageois restent au
 village (immobiles quand le joueur est loin). Un monstre en combat ne
 disparaît jamais. Chaque créature a un identifiant (`Creature::id`) pour la
 suivre pendant que d'autres vont et viennent.

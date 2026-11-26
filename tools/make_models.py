@@ -2061,6 +2061,14 @@ def sparkle():
     return m
 
 
+def bubble():
+    """The magician's pocket of air under water (radius 1), transparent and
+    smooth; brighter towards its top; tinted and faded by the game."""
+    m = Mesh(transparent=True)
+    blob(m, (0, 0, 0), (1, 1, 1), 0.0, 975, lambda n, face: (0.80 + 0.2 * max(n[1], 0), 0.92 + 0.08 * max(n[1], 0), 1.0, 0.45 + 0.3 * max(n[1], 0)), detail=2)
+    return m
+
+
 def smoke():
     """One puff (radius 1), drawn transparent: the game fades it out."""
     m = Mesh(transparent=True)
@@ -4015,6 +4023,39 @@ def wreck():
     return m
 
 
+def seaweed():
+    """A clump of seaweed on the bottom of the water, fitting about
+    [-0.5, 0.5] x [0, 1.2] x [-0.5, 0.5] (scaled by the game): long fronds
+    waving up from the bottom, both faces drawn; swum through."""
+    m = Mesh()
+    greens = [(0.18, 0.42, 0.20, 1), (0.30, 0.48, 0.18, 1), (0.40, 0.36, 0.14, 1), (0.14, 0.38, 0.30, 1)]
+    for k in range(8):
+        a = TAU * hash01(4600, k)
+        r = 0.28 * hash01(4601, k)
+        bx, bz = r * math.cos(a), r * math.sin(a)
+        h = 0.65 + 0.55 * hash01(4602, k)
+        lean = TAU * hash01(4603, k)
+        lx, lz = math.cos(lean), math.sin(lean)
+        ax, az = -lz, lx  # across the frond
+        col = greens[k % 4]
+        seg = 6
+        pts = []
+        for i in range(seg + 1):
+            t = i / seg
+            sway = 0.13 * math.sin(t * 3.2 + k) * t
+            pts.append((bx + 0.18 * t * t * lx + sway * ax, h * t, bz + 0.18 * t * t * lz + sway * az))
+        for i in range(seg):
+            w0 = 0.075 * (1 - 0.65 * i / seg)
+            w1 = 0.075 * (1 - 0.65 * (i + 1) / seg)
+            p0, p1 = pts[i], pts[i + 1]
+            q = [(p0[0] - ax * w0, p0[1], p0[2] - az * w0), (p0[0] + ax * w0, p0[1], p0[2] + az * w0),
+                 (p1[0] + ax * w1, p1[1], p1[2] + az * w1), (p1[0] - ax * w1, p1[1], p1[2] - az * w1)]
+            c = shade(col, 0.75 + 0.45 * i / seg)
+            m.quad_facing(q[0], q[1], q[2], q[3], c, (lx, 0.3, lz))
+            m.quad_facing(q[0], q[1], q[2], q[3], c, (-lx, 0.3, -lz))
+    return m
+
+
 def aqueduct():
     """One arch of the old aqueduct, 8 m along X, 7 m high (scaled to its
     height): piers at each end, a round arch, the channel on top. Walked
@@ -4330,6 +4371,7 @@ def all_models():
         "tree_mid": tree_mid(),
         "bush_far": bush_far(),
         "sparkle": sparkle(),
+        "bubble": bubble(),
         "rune_circle": rune_circle(),
         "cristi_body": cristi_body(),
         "cristi_ear": cristi_ear(),
@@ -4435,6 +4477,7 @@ def all_models():
         "dolmen": dolmen(),
         "wreck": wreck(),
         "aqueduct": aqueduct(),
+        "seaweed": seaweed(),
         "golem_body": golem_body(),
         "golem_head": golem_head(),
         "golem_ear": golem_ear(),

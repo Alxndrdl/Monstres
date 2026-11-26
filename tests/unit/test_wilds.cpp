@@ -43,6 +43,7 @@ TEST_CASE("the wilds: many objects around the valley, the valley's own unchanged
         in_site(w.sites, o.pos.x, o.pos.z, 4.0f)) {
       continue;
     }
+    if (on_the_bottom(w, o)) continue;  // seaweed, rocks under the water (water.hpp)
     CHECK((o.kind <= ObjectKind::Bush || o.kind == ObjectKind::Collider));
     if (o.kind == ObjectKind::Collider) continue;  // a piece of a log, along it
     CHECK(chebyshev(o.pos.x, o.pos.z) >= rules::kValleyHalfSize - 2.0f);
@@ -65,7 +66,7 @@ TEST_CASE("the wilds: many objects around the valley, the valley's own unchanged
   CHECK(again.objects == w.objects);
 }
 
-TEST_CASE("the sea comes into the playable area on the west: a beach, and walkers stop at the water") {
+TEST_CASE("the sea comes into the playable area on the west: a beach, the magician wading then swimming out into it") {
   const World& w = cached_game(3);
   // Somewhere west of the valley, the ground goes below the sea.
   float coast = 0;
@@ -78,7 +79,7 @@ TEST_CASE("the sea comes into the playable area on the west: a beach, and walker
   REQUIRE(coast < 0);
   CHECK(coast > -rules::kWorldHalfSize + 20);
   CHECK(zone_at(w, coast + 4, 0) == Zone::Coast);
-  // Walking west from the shore: stopped at the water's edge.
+  // Walking west from the shore: into the waves, then swimming (water.hpp).
   World walk = w;
   walk.player.pos = {coast + 25, w.ground.height(coast + 25, 0), 0};
   walk.creatures.resize(1);
@@ -86,8 +87,8 @@ TEST_CASE("the sea comes into the playable area on the west: a beach, and walker
   Input west;
   west.move_x = -127;
   run(walk, west, 15 * rules::kTicksPerSecond);
-  CHECK(walk.ground.height(walk.player.pos.x, walk.player.pos.z) >= rules::kSeaLevel - 0.3f);
-  CHECK(walk.player.pos.x > coast - 6);
+  CHECK(walk.player.pos.x < coast);
+  CHECK(swimming(walk));
 }
 
 TEST_CASE("the valley has no sea: its hollows may go below the sea's level, they are dry land") {

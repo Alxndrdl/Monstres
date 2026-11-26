@@ -3,7 +3,9 @@
 #include "monstres/core/world.hpp"
 #include "monstres/render/scene.hpp"
 #include "monstres/render/terrain_mesh.hpp"
+#include "monstres/render/water_mesh.hpp"
 #include "monstres/core/west.hpp"
+#include "monstres/core/rivers.hpp"
 #include "test_helpers.hpp"
 
 #include <cmath>
@@ -84,6 +86,7 @@ TEST_CASE("no tree or rock grows in the village or in the lake") {
   for (uint64_t seed = 0; seed < 10; ++seed) {
     const World& w = cached_game(seed);
     for (const Object& o : w.objects) {
+      if (o.kind == ObjectKind::Seaweed) continue;  // on its bottom (water.hpp)
       CHECK_FALSE(in_lake(w.village.lake, o.pos.x, o.pos.z, 0.5f));
       if (o.kind <= ObjectKind::Crate) CHECK_FALSE(in_village(w.village, o.pos.x, o.pos.z));
     }
@@ -97,16 +100,15 @@ TEST_CASE("village objects do not overlap") {
   CHECK(overlapping_pairs(boxes).empty());
 }
 
-TEST_CASE("the player cannot walk into the lake") {
+TEST_CASE("the player walks into the lake, and goes under (water.hpp)") {
   World w = cached_game(8);
   const Lake& lake = w.village.lake;
   w.player.pos = {lake.center.x, 0, lake.center.z + lake.radius_z + 3};  // south of the lake
-  w.creatures.clear();
-  run(w, forward(), 3 * rules::kTicksPerSecond);  // walk north, towards the water
-  CHECK_FALSE(in_lake(lake, w.player.pos.x, w.player.pos.z, 0));
-  // The shore on that side (its outline: not an ellipse).
-  const float shore = lake.center.z + lake.radius_z * outline_scale(lake.center, kLakeOutline, static_cast<float>(kPi / 2));
-  CHECK(w.player.pos.z > shore - 0.5f);
+  w.creatures.resize(1);
+  // Walk north, into the water, slower as it gets deeper.
+  for (int t = 0; t < 6 * rules::kTicksPerSecond && !swimming(w); ++t) step(w, forward());
+  CHECK(in_lake(lake, w.player.pos.x, w.player.pos.z, 0));
+  CHECK(swimming(w));
 }
 
 TEST_CASE("fish stay in the lake and jump out of it now and then") {
@@ -176,20 +178,20 @@ TEST_CASE("the lake has water above a sunken bed, chimneys smoke") {
   const Lake& lake = w.village.lake;
   CHECK(ground_height(w, lake.center.x, lake.center.z) < rules::kWaterLevel - 0.5f);
   CHECK(ground_height(w, w.village.center.x, w.village.center.z) == 0.0f);  // the village is flat
-  const MeshData water = build_water_mesh(w);
+  const MeshData water = build_water_mesh(w);  // (water_mesh.hpp: all the waters alike)
   CHECK(water.transparent);
   REQUIRE(water.vertex_count() > 0);
   size_t in_lake_vertices = 0;
   for (size_t i = 0; i < water.vertices.size(); i += MeshData::kFloatsPerVertex) {
-    const float x = water.vertices[i], z = water.vertices[i + 2];
-    if (!in_lake(lake, x, z, 1.0f)) {  // the sea, far to the west; the west's stream, at its own level
-      // The river at its own level, its cove, its waterfall.
-      if (distance_to_stream(w.west.stream, x, z, 30.0f) < 30.0f && water.vertices[i + 1] > rules::kSeaLevel + 0.01f) continue;
-      CHECK(water.vertices[i + 1] == Approx(rules::kSeaLevel));
+    const float x = water.vertices[i], y = water.vertices[i + 1], z = water.vertices[i + 2];
+    if (in_lake(lake, x, z, 9.0f) && y == Approx(rules::kWaterLevel)) {  // (a cell past its shore too)
+      in_lake_vertices += in_lake(lake, x, z) ? 1 : 0;
       continue;
     }
-    CHECK(water.vertices[i + 1] == Approx(rules::kWaterLevel));
-    ++in_lake_vertices;
+    // The river at its own level, its cove, its waterfall; else the sea.
+    if (distance_to_stream(w.west.stream, x, z, 30.0f) < 30.0f && y > rules::kSeaLevel + 0.01f) continue;
+    if (RiverSpot r; nearest_river(w.ground.rivers, x, z, 30.0f, r) && y > rules::kSeaLevel + 0.01f) continue;  // the continent's, by the edge
+    CHECK(y == Approx(rules::kSeaLevel));
   }
   CHECK(in_lake_vertices > 0);
 

@@ -261,6 +261,7 @@ enum class ObjectKind : uint8_t {
   Dolmen,        // a stone table on standing stones, along X
   Wreck,         // an old ship's hull on the beach, along X (walked around)
   Aqueduct,      // one arch of the old aqueduct, 8 m along X: size.y = its height (its piers: Colliders; walked under)
+  Seaweed,       // a clump of seaweed on the bottom of the water (water.hpp): size.x = its width, size.y = its height (swum through)
   Count
 };
 
@@ -970,6 +971,15 @@ struct World {
   int8_t active = 0;   // team member out of the crystal (creatures[0]), -1: none
   CrystalTrace went_in;        // not saved
   uint64_t came_out_tick = 0;  // not saved: when creatures[0] was summoned
+  // Gone back into the crystal as the magician went under water (not
+  // aquatic: water.hpp): team slot, -1 none; comes out again once ashore.
+  // Not saved (nor compared: a loaded world goes on alike).
+  struct Shore {
+    int8_t slot = -1;
+    uint16_t dry_ticks = 0;  // how long the magician has been out of the water
+    bool operator==(const Shore&) const { return true; }
+  };
+  Shore ashore;
   uint32_t released_id = 0;    // not saved: the monster last let go back to the wild (Creature::id)
   uint64_t released_tick = 0;  // and when it came out of the crystal (0: it was already out)
   Battle battle;       // not saved

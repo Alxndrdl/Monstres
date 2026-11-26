@@ -21,6 +21,7 @@
 #include "monstres/render/far_terrain.hpp"
 #include "monstres/core/outer.hpp"
 #include "monstres/render/outer_mesh.hpp"
+#include "monstres/render/water_mesh.hpp"
 #include "monstres/render/scene.hpp"
 #include "monstres/render/weather_view.hpp"
 #include "monstres/render/intro.hpp"
@@ -88,6 +89,7 @@ struct App {
   GroundColors ground_colors;    // the ground's colors, kept as the tiles are built
   GroundTiles ground_tiles;      // the detailed tiles drawn, built ahead of time
   OuterGround outer_ground;      // and the continent's ground near the player, beyond the relief
+  WaterTiles water_tiles;        // all the waters near the player, one surface (water_mesh.hpp)
   Vec2 far_center{0, 0};         // the far ground's rings are around it (far_center_for)
   std::vector<Part> path_parts, water_parts;  // for culling the terrain list
   LandscapeCache landscape_cache;  // the landscape by chunks, computed ahead of time
@@ -349,11 +351,15 @@ bool update_landscape(App& app, bool all_now = false) {
   // The continent's ground near the player, beyond the relief (in what time is left).
   const double rest = all_now ? 1e9 : std::max(0.2, budget - (emscripten_get_now() - start));
   const bool outer = app.outer_ground.update(w, app.continent, player, rest);
-  if (outer) {
-    app.renderer->set_mesh(near_outer::kOuterMesh, app.outer_ground.mesh());
-    app.renderer->set_mesh(near_outer::kOuterWaterMesh, app.outer_ground.water());
+  if (outer) app.renderer->set_mesh(near_outer::kOuterMesh, app.outer_ground.mesh());
+  // The waters (all alike: water_mesh.hpp), in what time is left.
+  const double rest_water = all_now ? 1e9 : std::max(0.2, budget - (emscripten_get_now() - start));
+  const bool water = app.water_tiles.update(w, player, rest_water);
+  if (water) {
+    app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), app.water_tiles.mesh());
+    app.water_parts = app.water_tiles.mesh().parts;
   }
-  if (tiles || outer) {
+  if (tiles || outer || water) {
     app.ground_tiles.fill_list(app.terrain, app.path_parts, app.water_parts);
     app.outer_ground.add(app.terrain);
     app.redraw = true;
@@ -391,6 +397,7 @@ void world_changed(App& app) {
   app.ground_colors = {};  // another world: other colors
   app.landscape_cache.clear();
   app.outer_ground.reset();
+  app.water_tiles.reset();
   // The ground outside (loaded inside: the world outside, as left).
   std::optional<World> outside;
   if (inside(app.world)) outside = outside_world(app.world);
@@ -418,9 +425,8 @@ void world_changed(App& app) {
   MeshData path = build_path_mesh(out);
   app.path_parts = path.parts;
   app.renderer->set_mesh(static_cast<size_t>(MeshId::Path), path);
-  MeshData water = build_water_mesh(out);
-  app.water_parts = water.parts;
-  app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), water);
+  app.water_parts.clear();
+  app.renderer->set_mesh(static_cast<size_t>(MeshId::Water), MeshData{});
   if (!inside(app.world)) update_landscape(app, true);
   place_changed(app, false);
 }
@@ -682,6 +688,7 @@ void frame(void* user) {
   const WeatherField weather = weather_field(app);
   // Inside: no weather, no landscape, nothing far away; the interior.
   const float flash = in ? 0.0f : apply_weather(view, weather);
+  const bool under = !in && under_water_view(app.world, view);  // (water.hpp: diving)
   follow_season(app, dt, weather, view.wind);
   if (!in) {
     view.season = app.season_look;
@@ -698,14 +705,17 @@ void frame(void* user) {
   build_dynamic(app.world, time, app.dynamic, app.selected, &in_front, &view);
   if (!in) {
     build_far_dynamic(app.world, time, app.far_dynamic);
-    build_weather(weather, view, flash, time, app.far_dynamic, app.dynamic);
+    if (!under) build_weather(weather, view, flash, time, app.far_dynamic, app.dynamic);
   }
   measure(kScene);
   const DrawList* outdoors[] = {&app.far_landscape, &app.far_dynamic, &app.terrain, &app.landscape, &app.dynamic};
   const DrawList* indoors[] = {&app.interior, &app.dynamic};
+  const DrawList* below[] = {&app.terrain, &app.landscape, &app.dynamic};  // under water: nothing far is seen
   app.renderer->begin_frame({pw, ph});
   if (in) {
     app.renderer->draw(view, indoors);
+  } else if (under) {
+    app.renderer->draw(view, below);
   } else {
     app.renderer->draw(view, outdoors);
   }

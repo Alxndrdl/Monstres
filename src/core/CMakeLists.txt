@@ -22,6 +22,7 @@ add_library(monstres_core STATIC
   rivers.cpp
   routines.cpp
   sites.cpp
+  water.cpp
 )
 target_include_directories(monstres_core PUBLIC include)
 monstres_set_options(monstres_core)

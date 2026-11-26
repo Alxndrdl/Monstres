@@ -6,6 +6,7 @@
 
 #include "monstres/core/quests.hpp"
 #include "monstres/core/variants.hpp"
+#include "monstres/core/water.hpp"
 #include "monstres/core/west.hpp"
 
 #include <algorithm>
@@ -705,6 +706,8 @@ void summon(World& w, size_t slot) {
   const bool fighting = w.battle.phase == BattlePhase::Fight || w.battle.phase == BattlePhase::Prepare;
   const bool trains = training(w);
   if ((fighting || trains) && w.team[slot].hp == 0) return;  // knocked out: not in a battle
+  if (static_cast<int>(slot) != w.active && !may_come_out(w, slot)) return;  // under water: only an aquatic one
+  if (static_cast<int>(slot) != w.active) w.ashore.slot = -1;  // another one chosen: the one left ashore stays in
   if (w.active >= 0) {  // the one out goes back into the crystal
     const Monster& out = w.team[static_cast<size_t>(w.active)];
     if (static_cast<int>(slot) == w.active) {  // just recalled (not in the middle of a fight)
@@ -732,7 +735,13 @@ void summon(World& w, size_t slot) {
   if (fighting || trains) w.battle.ally = {};  // a fresh fighter
 }
 
-bool holds_its_place(Species species) { return species == Species::Fish; }
+bool holds_its_place(const World& w, const Creature& c) {
+  if (c.species != Species::Fish) return false;
+  // (Not one deep under the surface: water.hpp.)
+  const BodyShape& shape = species_info(c.species).shape;
+  WaterSpot ws;
+  return !(submerged(w, c.body, shape, &ws) && c.body.pos.y < ws.level - shape.height - 0.1f);
+}
 
 const Moves& species_moves(Species species) {
   const auto i = static_cast<size_t>(species);
@@ -833,14 +842,19 @@ EngageCheck can_engage(const World& w, size_t index) {
   if (active_monster(w)->hp == 0) return EngageCheck::CompanionDown;
   if (c.mind == Mind::KnockedOut) return EngageCheck::KnockedOut;
   if (owned(w, c)) return EngageCheck::Owned;
+  // Under water (water.hpp): only an aquatic monster fights there.
+  if (!aquatic(w.team[static_cast<size_t>(w.active)].species) &&
+      (swimming(w) || submerged(w, c.body, species_info(c.species).shape))) {
+    return EngageCheck::Underwater;
+  }
   const float dx = c.body.pos.x - w.player.pos.x, dz = c.body.pos.z - w.player.pos.z;
   if (dx * dx + dz * dz > rules::kEngageDistance * rules::kEngageDistance) return EngageCheck::TooFar;
   return EngageCheck::Ok;
 }
 
 const char* engage_check_name(EngageCheck check) {
-  static const char* kNames[] = {"ok",         "notMonster", "tooFar", "inBattle", "noCompanion",
-                                 "knockedOut", "owned",      "companionDown"};
+  static const char* kNames[] = {"ok",         "notMonster", "tooFar",        "inBattle", "noCompanion",
+                                 "knockedOut", "owned",      "companionDown", "underwater"};
   const auto i = static_cast<size_t>(check);
   return i < std::size(kNames) ? kNames[i] : "?";
 }
@@ -1755,7 +1769,10 @@ Steer battle_ally(World& w, const Input& in, float dir_x, float dir_z) {
     f.lift = in.jump_held ? std::min(f.lift + 3.0f * rules::kDt, rules::kFlyLiftMax)
                           : std::max(f.lift - 2.0f * rules::kDt, 0.0f);
   }
-  const bool flies = companion_hover(companion(w).species) > 0;
+  // (Swimming too: the jump held makes it rise, water.hpp.)
+  const Creature& swimmer = companion(w);
+  const bool flies = companion_hover(swimmer.species) > 0 ||
+                     (aquatic(swimmer.species) && submerged(w, swimmer.body, species_info(swimmer.species).shape));
   const bool moving = dir_x * dir_x + dir_z * dir_z > 0.01f;
   bool jump = false;
   if (in.jump && f.dodge_cooldown == 0 && f.state != FighterState::Dodge && f.state != FighterState::Stunned &&
@@ -1830,7 +1847,7 @@ Steer battle_foe(World& w, size_t k) {
   const SpeciesInfo& info = species_info(e.species);
   const Moves& moves = species_moves(e.species);
   const Temper& temper = species_temper(e.species);
-  const bool stays = holds_its_place(e.species);  // a fish in the lake
+  const bool stays = holds_its_place(w, e);  // a fish in the lake
   Steer s;
   s.fly = flies(e.species);
   s.lift = temper.lift;

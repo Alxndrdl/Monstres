@@ -236,7 +236,12 @@ TEST_CASE("the villagers at home are saved") {
   REQUIRE(villager(w, npc::kOdette).act == Activity::Home);
   const auto loaded = deserialize(serialize(w));
   REQUIRE(loaded.has_value());
-  CHECK(loaded->creatures == w.creatures);
+  // (The continent's wild monsters are not saved: drawn again by tile, outer.hpp.)
+  std::vector<Creature> kept;
+  for (const Creature& c : w.creatures) {
+    if (c.npc != 0 || !monster_stats(c.species).is_monster || rules::in_world(c.home.x, c.home.z, -1.0f)) kept.push_back(c);
+  }
+  CHECK(loaded->creatures == kept);
 }
 
 TEST_CASE("the wild monsters sleep at night, and wake when the player comes") {

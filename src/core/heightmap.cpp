@@ -248,7 +248,8 @@ float relief(uint64_t seed, const Path& path, const Places& places, float knoll_
     const float lake_depth = 1 - lake_distance(lake, x, z);  // 0 at the shore, 1 in the middle
     h *= std::min(smooth(rules::kVillageRadius + 3, rules::kVillageRadius + 15, to_village),
                   smooth(0.1f, 1.3f, -lake_depth));
-    if (lake_depth > 0) h = -kLakeDepth * std::min(1.0f, lake_depth * 2.5f);
+    // (Its middle deeper: dived into, its fish under the magician.)
+    if (lake_depth > 0) h = -kLakeDepth * std::min(1.0f, lake_depth * 2.5f) - 1.8f * smooth(0.25f, 0.8f, lake_depth);
   }
   // The path and the road stay out of the sea: by the coast, where the
   // ground dips a little below it, they run on a strip of land just above it.

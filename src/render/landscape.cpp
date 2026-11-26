@@ -61,6 +61,7 @@ void scale_for(const Object& o, Instance& in) {
     case ObjectKind::HiddenCave: in.sx = in.sy = in.sz = rules::kHiddenCaveScale; break;           // the cave's mouth, smaller
     case ObjectKind::Block: in.sx = s.x; in.sy = s.y; in.sz = s.z; break;  // its base on the ground
     case ObjectKind::Aqueduct: in.sx = in.sz = 1; in.sy = s.y / 7.0f; break;  // 7 m high: to its height
+    case ObjectKind::Seaweed: in.sx = in.sz = s.x; in.sy = s.y; break;
     default:                in.sx = in.sy = in.sz = 1; break;  // village: real-size models
   }
 }
@@ -72,6 +73,7 @@ float wind_for(ObjectKind kind) {
     case ObjectKind::Pine:
     case ObjectKind::Larch: return 0.15f;
     case ObjectKind::Bush: return 0.35f;
+    case ObjectKind::Seaweed: return 0.6f;  // waving in the water
     default:               return 0;
   }
 }
@@ -101,7 +103,8 @@ Detail detail_of(const Object& o) {
     case ObjectKind::Gravestone:
     case ObjectKind::Beehive:
     case ObjectKind::FishRack:
-    case ObjectKind::Minecart: return Detail::Small;
+    case ObjectKind::Minecart:
+    case ObjectKind::Seaweed: return Detail::Small;
     case ObjectKind::Block: return o.size.x >= 1.0f ? Detail::Landmark : Detail::Small;
     default: return Detail::Landmark;
   }

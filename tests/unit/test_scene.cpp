@@ -1,6 +1,8 @@
 #include "monstres/render/scene.hpp"
 #include "monstres/core/continent.hpp"
 #include "monstres/render/terrain_mesh.hpp"
+#include "monstres/render/water_mesh.hpp"
+#include "monstres/core/water.hpp"
 #include "monstres/render/far_terrain.hpp"
 #include "test_helpers.hpp"
 
@@ -340,31 +342,40 @@ TEST_CASE("every teleporter can be tapped, the west's too (the farm's, the stand
   }
 }
 
-TEST_CASE("the sea's water covers all the ground below it, up to the shore") {
+TEST_CASE("the water covers all the ground under it, up to the shore, one surface") {
+  // (water_mesh.hpp: the tiles' points where water.hpp finds water, at its level.)
   for (uint32_t seed : {3u, 42u}) {
+    CAPTURE(seed);
     const World& w = cached_game(seed);
-    const MeshData m = build_water_mesh(w);
-    // The sea's squares (their vertices at the sea's level), on a 16 m grid.
-    constexpr float kCell = 16.0f, d = terrain::kDetailHalfSize;
-    const int n = static_cast<int>(2 * d / kCell);
-    std::vector<char> covered(static_cast<size_t>(n * n), 0);
-    for (size_t v = 0; v + 2 < m.vertex_count(); v += 3) {
-      const auto at = [&](size_t k, int c) { return m.vertices[(v + k) * MeshData::kFloatsPerVertex + c]; };
-      if (std::fabs(at(0, 1) - rules::kSeaLevel) > 1e-4f) continue;
-      const float cx = (at(0, 0) + at(1, 0) + at(2, 0)) / 3, cz = (at(0, 2) + at(1, 2) + at(2, 2)) / 3;
-      const int i = static_cast<int>(std::floor((cx + d) / kCell)), j = static_cast<int>(std::floor((cz + d) / kCell));
-      if (i >= 0 && j >= 0 && i < n && j < n) covered[static_cast<size_t>(i * n + j)] = 1;
-    }
-    int bare = 0;
-    for (float x = -d + 1; x < d; x += 2) {
-      for (float z = -d + 1; z < d; z += 2) {
-        if (w.ground.height(x, z) > rules::kSeaLevel - 0.3f || !w.ground.sea(x, z)) continue;
-        const int i = static_cast<int>(std::floor((x + d) / kCell)), j = static_cast<int>(std::floor((z + d) / kCell));
-        if (!covered[static_cast<size_t>(i * n + j)]) ++bare;
+    int wet = 0, missing = 0;
+    // A band of tiles across the relief, west to east (the sea, the stream, the lake, the land).
+    const int j = static_cast<int>((w.village.lake.center.z - Heightmap::kMinZ) / water_tiles::kTile);
+    for (int i = 0; i < static_cast<int>(2 * rules::kReliefHalfSize / water_tiles::kTile); ++i) {
+      const MeshData m = build_water_tile(w, i, j, water_tiles::kFine);
+      if (!m.indices.empty()) {
+        CHECK(m.transparent);
+        CHECK(m.double_sided);  // seen from under it
+      }
+      std::vector<char> drawn(m.vertex_count(), 0);
+      for (const uint32_t v : m.indices) drawn[v] = 1;
+      const float x0 = Heightmap::kMinX + water_tiles::kTile * static_cast<float>(i);
+      const float z0 = Heightmap::kMinZ + water_tiles::kTile * static_cast<float>(j);
+      for (float x = x0 + 2; x < x0 + water_tiles::kTile; x += 2) {
+        for (float z = z0 + 2; z < z0 + water_tiles::kTile; z += 2) {
+          WaterSpot ws;
+          if (!water_at(w, x, z, ws)) continue;
+          ++wet;
+          bool found = false;
+          for (size_t v = 0; v < m.vertex_count() && !found; ++v) {
+            const float* p = &m.vertices[v * MeshData::kFloatsPerVertex];
+            found = drawn[v] && std::fabs(p[0] - x) < 1e-3f && std::fabs(p[2] - z) < 1e-3f && std::fabs(p[1] - ws.level) < 1e-3f;
+          }
+          missing += found ? 0 : 1;
+        }
       }
     }
-    INFO("seed " << seed);
-    CHECK(bare == 0);
+    CHECK(wet > 100);
+    CHECK(missing == 0);
   }
 }
 

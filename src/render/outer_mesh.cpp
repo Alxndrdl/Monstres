@@ -27,10 +27,6 @@ void vertex(MeshData& m, float x, float y, float z, Vec3 n, Color c) {
   m.vertices.insert(m.vertices.end(), {x, y, z, n.x, n.y, n.z, c.r, c.g, c.b, c.a});
 }
 
-Color lerp(Color a, Color b, float t) {
-  return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t};
-}
-
 double now_ms() {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -85,68 +81,6 @@ MeshData build_outer_tile(const World& w, const Continent& k, int i, int j) {
   return m;
 }
 
-MeshData build_outer_water(const World& w, int i, int j) {
-  MeshData m;
-  m.transparent = true;
-  const Heightmap& g = w.ground;
-  if (g.empty() || in_relief(i, j)) return m;
-  const float x0 = tile_x0(i), z0 = tile_z0(j), x1 = x0 + kTile, z1 = z0 + kTile;
-  Aabb box = empty_aabb();
-  const Color clear{0.18f, 0.44f, 0.56f, 0.72f}, foam{0.86f, 0.92f, 0.96f, 0.88f};
-  for (const River& r : g.rivers) {
-    const size_t n = r.points.size();
-    if (n < 2 || r.level.size() != n) continue;
-    const auto across = [&](size_t k) {
-      const Vec2 a = r.points[k > 0 ? k - 1 : 0], b = r.points[std::min(k + 1, n - 1)];
-      const float dx = b.x - a.x, dz = b.z - a.z, len = std::max(1e-4f, std::sqrt(dx * dx + dz * dz));
-      return Vec2{-dz / len, dx / len};
-    };
-    // How white the water is at a point: by its waterfalls, falling, and churned just below.
-    std::vector<float> white(n, 0.0f);
-    for (size_t k = 0; k + 1 < n; ++k) {
-      if (r.level[k] - r.level[k + 1] < 0.8f) continue;  // (falling there)
-      for (size_t q = k; q < std::min(n, k + 5); ++q) white[q] = std::max(white[q], q <= k + 1 ? 1.0f : 0.6f - 0.15f * static_cast<float>(q - k - 2));
-    }
-    for (size_t c = 0; c < r.boxes.size(); ++c) {
-      const auto& b = r.boxes[c];
-      if (b[2] < x0 - 12 || b[0] > x1 + 12 || b[3] < z0 - 12 || b[1] > z1 + 12) continue;
-      const size_t first = c * rules::kRiverChunk, last = std::min(first + rules::kRiverChunk, n - 1);
-      for (size_t k = first; k < last; ++k) {
-        const Vec2 p = r.points[k];
-        // (Each segment in one tile: where it starts; over the relief's edge, the last one's beyond it.)
-        Vec2 owner = p;
-        for (size_t q = k; q > 0 && rules::relief_inset(owner.x, owner.z) > 0; --q) owner = r.points[q - 1];
-        if (owner.x < x0 || owner.x >= x1 || owner.z < z0 || owner.z >= z1) continue;
-        const Vec2 q = r.points[k + 1];
-        const Vec2 na = across(k), nb = across(k + 1);
-        const float wa = r.width[k] + 0.8f, wb = r.width[k + 1] + 0.8f;
-        const float ya = r.level[k] + 0.02f, yb = r.level[k + 1] + 0.02f;
-        // (Falling: the sheet faces out along the river.)
-        const float drop = ya - yb;
-        Vec3 up{0, 1, 0};
-        if (drop > 0.3f) {
-          const float dx = q.x - p.x, dz = q.z - p.z, run = std::max(1e-3f, std::sqrt(dx * dx + dz * dz));
-          const float l = std::sqrt(drop * drop + run * run);
-          up = {dx / run * drop / l, run / l, dz / run * drop / l};
-        }
-        const auto color = [&](size_t at) { return lerp(clear, foam, white[at]); };
-        const auto base = static_cast<uint32_t>(m.vertex_count());
-        vertex(m, p.x - na.x * wa, ya, p.z - na.z * wa, up, color(k));
-        vertex(m, p.x + na.x * wa, ya, p.z + na.z * wa, up, color(k));
-        vertex(m, q.x + nb.x * wb, yb, q.z + nb.z * wb, up, color(k + 1));
-        vertex(m, q.x - nb.x * wb, yb, q.z - nb.z * wb, up, color(k + 1));
-        // Both faces (whichever way the segment turns).
-        m.indices.insert(m.indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2});
-        box.add(p.x - wa, ya, p.z - wa);
-        box.add(p.x + wa, ya, p.z + wa);
-        box.add(q.x, yb, q.z);
-      }
-    }
-  }
-  if (!m.indices.empty()) m.parts.push_back({{0, static_cast<uint32_t>(m.indices.size())}, box});
-  return m;
-}
-
 std::vector<std::pair<int, int>> outer_tiles_around(float x, float z) {
   std::vector<std::pair<int, int>> out;
   const int ci = static_cast<int>(std::floor((x - Heightmap::kMinX) / kTile)), cj = static_cast<int>(std::floor((z - Heightmap::kMinZ) / kTile));
@@ -172,7 +106,6 @@ void OuterGround::reset() {
   cache_.clear();
   drawn_.clear();
   mesh_ = {};
-  water_ = {};
 }
 
 bool OuterGround::update(const World& w, const Continent& k, Vec2 player, double budget_ms) {
@@ -194,7 +127,7 @@ bool OuterGround::update(const World& w, const Continent& k, Vec2 player, double
       auto oldest = std::min_element(cache_.begin(), cache_.end(), [](const Built& a, const Built& b) { return a.used < b.used; });
       cache_.erase(oldest);
     }
-    cache_.push_back({i, j, build_outer_tile(w, k, i, j), build_outer_water(w, i, j), frame_});
+    cache_.push_back({i, j, build_outer_tile(w, k, i, j), frame_});
   }
   // Drawn once all are there (meanwhile the ones before stay), or when none were.
   if (missing && !drawn_.empty()) return false;
@@ -205,17 +138,8 @@ bool OuterGround::update(const World& w, const Continent& k, Vec2 player, double
   if (now == drawn_) return false;
   drawn_ = now;
   mesh_ = {};
-  water_ = {};
-  water_.transparent = true;
   for (const auto& [i, j] : drawn_) {
     const auto it = std::find_if(cache_.begin(), cache_.end(), [&](const Built& b) { return b.i == i && b.j == j; });
-    if (const MeshData& wt = it->water; !wt.indices.empty()) {
-      const auto wbase = static_cast<uint32_t>(water_.vertex_count());
-      const auto wfirst = static_cast<uint32_t>(water_.indices.size());
-      water_.vertices.insert(water_.vertices.end(), wt.vertices.begin(), wt.vertices.end());
-      for (const uint32_t v : wt.indices) water_.indices.push_back(wbase + v);
-      water_.parts.push_back({{wfirst, static_cast<uint32_t>(wt.indices.size())}, wt.parts.front().bounds});
-    }
     const MeshData& t = it->mesh;
     if (t.indices.empty()) continue;
     const auto base = static_cast<uint32_t>(mesh_.vertex_count());
@@ -228,28 +152,20 @@ bool OuterGround::update(const World& w, const Continent& k, Vec2 player, double
 }
 
 void OuterGround::add(DrawList& list) const {
-  const size_t slot = near_outer::kOuterMesh, water = near_outer::kOuterWaterMesh;
-  if (list.batches.size() <= water) {
-    list.batches.resize(water + 1);
-    list.parts.resize(water + 1);
-    list.mesh_parts.resize(water + 1);
+  const size_t slot = near_outer::kOuterMesh;
+  if (list.batches.size() <= slot) {
+    list.batches.resize(slot + 1);
+    list.parts.resize(slot + 1);
+    list.mesh_parts.resize(slot + 1);
   }
   list.batches[slot].clear();
   list.mesh_parts[slot].clear();
-  list.batches[water].clear();
-  list.mesh_parts[water].clear();
   ++list.version;
   if (!mesh_.parts.empty()) {
     Instance solid;
     solid.material = kSolid;
     list.batches[slot].push_back(solid);
     list.mesh_parts[slot] = mesh_.parts;
-  }
-  if (!water_.parts.empty()) {
-    Instance river;
-    river.material = kWater;  // the shader adds waves and reflections
-    list.batches[water].push_back(river);
-    list.mesh_parts[water] = water_.parts;
   }
 }
 

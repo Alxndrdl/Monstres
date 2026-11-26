@@ -7,6 +7,7 @@
 #include "monstres/core/continent.hpp"
 #include "monstres/core/heightmap.hpp"
 #include "monstres/core/outer.hpp"
+#include "monstres/core/water.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -64,10 +65,13 @@ uint32_t pixel_hash(uint64_t seed, float x, float z) {
 void paint(const World& w, float x, float z, float h, float hw, float he, float hn, float hs, float apart, bool dots, uint8_t* o) {
   constexpr float kSea = rules::kSeaLevel;
   const float land = w.ground.land_height(x, z);  // where the sea is (Heightmap::sea)
+  // The waters, all alike (water.hpp): the sea; the lakes and rivers below.
+  WaterSpot water;
+  const bool wet = water_at_ground(w, x, z, h, water);
   Rgb c;
   uint8_t kind = 3;
   float green = 1;
-  if (h < kSea && land < kSea) {  // the sea, lighter in the shallows
+  if (wet && water.kind == WaterKind::Sea) {  // the sea, lighter in the shallows
     const float d = std::min(1.0f, (kSea - h) / 12.0f);
     c = {70 - 40 * d, 150 - 60 * d, 190 - 40 * d};
     kind = 1;
@@ -110,17 +114,9 @@ void paint(const World& w, float x, float z, float h, float hw, float he, float 
       }
     }
   }
-  // The lake and the marsh's water.
-  for (const Pond& p : continent_ponds()) {
-    if (pond_shape(p, x, z) > -0.02f && h < p.level) {
-      const float d = std::min(1.0f, (p.level - h) / 1.2f);
-      c = {80 - 30 * d, 150 - 40 * d, 196 - 20 * d};
-      kind = 2;
-    }
-  }
-  // The rivers.
-  if (float level = 0; in_river(w.ground.rivers, x, z, h, level)) {
-    const float d = std::min(1.0f, (level - h) / 1.2f);
+  // The lakes, the marsh's water, the stream and the rivers.
+  if (wet && water.kind != WaterKind::Sea) {
+    const float d = std::min(1.0f, (water.level - h) / 1.2f);
     c = {80 - 30 * d, 150 - 40 * d, 196 - 20 * d};
     kind = 2;
   }

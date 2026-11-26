@@ -1,4 +1,5 @@
 #include "monstres/core/outer.hpp"
+#include "monstres/core/water.hpp"
 
 #include "monstres/core/heightmap.hpp"
 #include "monstres/core/roads.hpp"
@@ -155,8 +156,30 @@ Candidate candidate(const World& w, int ci, int cj) {
   // world's ways and in its stream, going on to the relief's edge).
   if (rules::world_inset(x, z) > -3.0f) return c;
   const Region region = outer_region(w.seed, x, z);
-  if (roll >= nature_density(w, region, x, z)) return c;
   const Heightmap& g = w.ground;
+  // The bottom of the water (water.hpp): seaweed in clumps, rocks here and there.
+  if (WaterSpot ws; water_at(w, x, z, ws)) {
+    const float weed = 0.08f + 0.55f * smooth(0.45f, 0.65f, value_noise(w.seed + 4700, x, z, 30.0f));
+    if (ws.depth() < 1.2f || roll >= weed + 0.05f) return c;
+    Object o;
+    o.yaw = yaw;
+    o.variant = variant;
+    if (roll < 0.05f) {
+      o.kind = ObjectKind::Rock;
+      o.size = {0.4f + 0.9f * s1, 0.3f + 0.7f * s2, 0.4f + 0.9f * s3};
+      o.yaw = static_cast<Angle16>(o.yaw & 0xC000);
+      c.reach = std::max(o.size.x, o.size.z);
+    } else {
+      o.kind = ObjectKind::Seaweed;
+      o.size = {0.7f + 0.8f * s1, std::min(ws.depth() - 0.3f, 0.8f + 1.6f * s2), 0};
+      c.reach = 0.3f;
+    }
+    o.pos = {x, ws.ground - 0.05f, z};
+    c.any = true;
+    c.object = o;
+    return c;
+  }
+  if (roll >= nature_density(w, region, x, z)) return c;
   const float ground = g.height(x, z);
   if (ground < rules::kSeaLevel + 0.6f || (g.sea(x, z) && ground < rules::kSeaLevel + 1.0f)) return c;  // the water, the beach
   for (const Pond& p : continent_ponds()) {  // the lake's and the marsh's water
@@ -344,6 +367,25 @@ std::vector<Creature> outer_creatures(const World& w, int ti, int tj, uint32_t v
     Rng genes(h ^ (k * 0x9E3779B97F4A7C15ULL), 31);
     if (rules::in_world(x, z, -3.0f)) continue;  // the playable ground's squares have their own
     const Region region = outer_region(w.seed, x, z);
+    // Under water (water.hpp): Bloup and Ploufi, at any depth.
+    if (WaterSpot ws; water_at(w, x, z, ws)) {
+      if (here >= 40 || frozen(w, ws) || ws.depth() < 2.5f) continue;
+      Creature c;
+      c.species = which % 100 < 65 ? Species::Fish : Species::Axolotl;
+      const BodyShape& shape = species_info(c.species).shape;
+      c.body.pos = {x, ws.ground + 0.4f + (ws.depth() - shape.height - 0.8f) * static_cast<float>(variant) / 255.0f, z};
+      c.body.on_ground = false;
+      const SinCos sc = sincos16(facing);
+      c.body.facing_x = sc.sin;
+      c.body.facing_z = sc.cos;
+      c.home = {x, z};
+      c.variant = variant;
+      c.level = static_cast<uint8_t>(outer_level(x, z) + extra);
+      const Zone zone = ws.kind == WaterKind::Sea ? Zone::Coast : ws.kind == WaterKind::River ? Zone::River : Zone::Lake;
+      c.genes = genetics(c.species).gene_count > 0 ? roll_genes(c.species, zone, genes) : Genes{};
+      out.push_back(c);
+      continue;
+    }
     const std::vector<Species> kinds = outer_species(region);
     if (kinds.empty() || here >= 55) continue;
     const float ground = w.ground.height(x, z);

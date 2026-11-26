@@ -76,6 +76,7 @@ enum class MeshId : size_t {
   // The sites (sites.hpp).
   Pier, Boat0, Boat1, Boat2, Boat3, FishRack, NetRack, AbbeyWall, AbbeyGate, Temple, Belfry, Dorter, Refectory,
   Gravestone0, Gravestone1, Cross, Chapel, Crane, Block, Beehive, Dolmen, Wreck, Aqueduct,
+  Seaweed,  // on the bottom of the water (water.hpp)
   // Seen from afar (simplified), and at a middle distance.
   TreeFar, PineFar, TreeMid, BushFar, LarchFar,
   GrassShortFar, GrassTallFar, FlowerFar,
@@ -95,6 +96,7 @@ enum class MeshId : size_t {
   Ripple,
   Smoke,
   Sparkle,
+  Bubble,      // the magician's pocket of air under water (water.hpp)
   Gust,        // an air monster's throw: swirling wind
   DoorGlow,    // the light in a door's opening, when the player comes near
   RuneCircle,  // the capture seal
@@ -121,7 +123,7 @@ inline MeshGroup mesh_group(MeshId id) {
     case MeshId::Cloud0: case MeshId::Cloud1: case MeshId::Cloud2: case MeshId::Mountain0: case MeshId::Mountain1:
     case MeshId::CloudLow0: case MeshId::CloudLow1: case MeshId::CloudLow2: case MeshId::RainShaft: case MeshId::Bolt:
       return MeshGroup::Sky;
-    case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::RuneCircle:
+    case MeshId::Shadow: case MeshId::Ripple: case MeshId::Smoke: case MeshId::Sparkle: case MeshId::Bubble: case MeshId::RuneCircle:
     case MeshId::DoorGlow: case MeshId::Gust: case MeshId::FallsBand:
     case MeshId::Rain: case MeshId::Snow: case MeshId::Leaves:
       return MeshGroup::Effects;

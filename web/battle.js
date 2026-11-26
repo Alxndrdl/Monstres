@@ -164,6 +164,7 @@
     knockedOut: 'K.O. : il se repose. Laisse-le tranquille un moment.',
     owned: 'Il appartient à quelqu’un.',
     companionDown: 'Ton monstre est K.O. : soigne-le (sort de soin) ou va voir Odette au village.',
+    underwater: 'Sous l’eau, seul un monstre aquatique (Bloup, Ploufi) peut combattre.',
   };
   // Under the capture button: why it cannot be used yet.
   const CAPTURE_NOTES = {

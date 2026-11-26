@@ -423,7 +423,13 @@ float dig_rivers(const std::vector<River>& rivers, float x, float z, float h) {
   // is high: the gorges), at least a little above the water near it.
   const float bank = L + 0.3f + 0.75f * (d - w) + 0.02f * (d - w) * (d - w);
   float out = std::min(h, bank);
-  const float hold = 1 - smooth(w + 3.0f, w + 8.0f, d);
+  float hold = 1 - smooth(w + 3.0f, w + 8.0f, d);
+  // (Not where it comes into the lake or the sea at their level: their water
+  // is its own there, no bank across it.)
+  if (hold > 0 && L < rules::kSeaLevel + 0.6f) hold = 0;
+  for (const Pond& p : continent_ponds()) {
+    if (hold > 0 && L < p.level + 0.6f && pond_shape(p, x, z) > -0.15f) hold = 0;
+  }
   if (hold > 0 && out < L + 0.4f) out += (L + 0.4f - out) * hold;
   return out;
 }

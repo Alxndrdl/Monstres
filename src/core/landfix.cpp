@@ -56,7 +56,7 @@ void each_point(Heightmap& m, float x0, float z0, float x1, float z1, F f) {
 
 // ---- The water left inland ----
 
-// The sea as it is drawn (build_water_mesh): squares of 16 m from the
+// The sea, by squares of 16 m (where water is drawn: water_mesh.hpp) from the
 // relief's corner, wet where some of their ground is under the sea.
 constexpr float kSquare = 16.0f;
 constexpr int kSquaresX = static_cast<int>(2 * rules::kReliefHalfSize / kSquare);

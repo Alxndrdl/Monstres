@@ -106,6 +106,7 @@ TEST_CASE("a river's water in its bed: deeper than the ground in its middle, hel
       int ti, tj;
       outer_tile_of(r.points[i].x, r.points[i].z, ti, tj);
       for (const Object& o : outer_objects(w, ti, tj)) {
+        if (on_the_bottom(w, o)) continue;  // seaweed, rocks (water.hpp)
         RiverSpot s;
         if (nearest_river(g.rivers, o.pos.x, o.pos.z, 20.0f, s)) CHECK(s.distance > s.width + 1.0f);
       }

@@ -35,7 +35,9 @@
       button.style.setProperty('--element', element.color);
       button.setAttribute('aria-pressed', String(m.active));
       button.disabled = m.active && fighting;  // not recalled in the middle of a fight
-      const action = m.active ? (fighting ? 'au combat' : 'rappeler dans le cristal') : 'invoquer';
+      // Under water: only an aquatic monster comes along (the others wait in the crystal).
+      const action = m.active ? (fighting ? 'au combat' : 'rappeler dans le cristal')
+        : m.comesOut === false ? 'ne peut pas venir sous l’eau' : 'invoquer';
       button.title = `${name} · niv. ${m.level} — ${action}`;
       button.setAttribute('aria-label', button.title);
       const img = document.createElement('img');
@@ -63,7 +65,7 @@
     const team = game.team();
     const phase = game.battle().phase;
     const fighting = phase === 'fight' || phase === 'prepare';
-    const key = team.map((m) => `${m.species}/${m.look}/${m.active}`).join() + fighting;
+    const key = team.map((m) => `${m.species}/${m.look}/${m.active}/${m.comesOut}`).join() + fighting;
     if (key !== shape) {
       shape = key;
       build(team, fighting);
@@ -80,7 +82,8 @@
       // Knocked out: it cannot come out in a battle (out of one, it lies there until healed).
       const ko = m.hp === 0;
       icon.classList.toggle('ko', ko);
-      if (!m.active) icon.disabled = ko && (fighting || phase === 'training');
+      if (!m.active) icon.disabled = (ko && (fighting || phase === 'training')) || m.comesOut === false;
+      icon.classList.toggle('dry', m.comesOut === false);
     });
   }
 
